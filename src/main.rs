@@ -42,6 +42,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
+use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::{Channel, Server};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
@@ -156,15 +157,10 @@ fn init_log(log: &LogConfig) -> WorkerGuard {
         .with_line_number(true)
         .with_writer(non_blocking);
 
-    let console_layer = console_subscriber::Builder::default()
-        .server_addr((Ipv4Addr::new(0, 0, 0, 0), 21002))
-        .spawn();
-
     Registry::default()
         .with(env_filter)
         .with(formatting_layer)
         .with(file_layer)
-        .with(console_layer)
         .init();
 
     // Note: _guard is a WorkerGuard which is returned by tracing_appender::non_blocking to
@@ -278,8 +274,7 @@ async fn grpc_serve(
     sock.bind(&addr.into()).unwrap();
     sock.listen(8192).unwrap();
 
-    let incoming =
-        tokio_stream::wrappers::TcpListenerStream::new(TcpListener::from_std(sock.into()).unwrap());
+    let incoming = TcpListenerStream::new(TcpListener::from_std(sock.into()).unwrap());
 
     Server::builder()
         .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
