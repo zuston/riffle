@@ -33,6 +33,7 @@ pub struct RuntimeManager {
     // the default runtime for not important tasks.
     // like the data purging/ heartbeat / metric push
     pub default_runtime: RuntimeRef,
+    pub dispatch_runtime: RuntimeRef,
 }
 
 impl Default for RuntimeManager {
@@ -60,6 +61,7 @@ impl RuntimeManager {
             grpc_runtime: create_runtime(config.grpc_thread_num, "grpc_thread_pool"),
             http_runtime: create_runtime(config.http_thread_num, "http_thread_pool"),
             default_runtime: create_runtime(config.default_thread_num, "default_thread_pool"),
+            dispatch_runtime: create_runtime(config.dispatch_thread_num, "dispatch_thread_pool"),
         }
     }
 

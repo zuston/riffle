@@ -353,12 +353,8 @@ impl Store for HybridStore {
         let store = self.clone();
         let concurrency_limiter =
             Arc::new(Semaphore::new(store.memory_spill_max_concurrency as usize));
-        self.runtime_manager.write_runtime.spawn(async move {
+        self.runtime_manager.dispatch_runtime.spawn(async move {
             while let Ok(mut message) = store.memory_spill_recv.recv().await {
-                let await_root = await_tree_registry
-                    .register(format!("hot->warm flush. uid: {:#?}", &message.ctx.uid))
-                    .await;
-
                 // using acquire_owned(), refer to https://github.com/tokio-rs/tokio/issues/1998
                 let concurrency_guarder = concurrency_limiter
                     .clone()
@@ -366,6 +362,10 @@ impl Store for HybridStore {
                     .instrument_await("waiting for the spill concurrent lock.")
                     .await
                     .unwrap();
+
+                let await_root = await_tree_registry
+                    .register(format!("hot->warm flush. uid: {:#?}", &message.ctx.uid))
+                    .await;
 
                 TOTAL_MEMORY_SPILL_OPERATION.inc();
                 GAUGE_MEMORY_SPILL_OPERATION.inc();

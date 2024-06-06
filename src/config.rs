@@ -81,16 +81,18 @@ pub struct RuntimeConfig {
     pub grpc_thread_num: usize,
     pub http_thread_num: usize,
     pub default_thread_num: usize,
+    pub dispatch_thread_num: usize,
 }
 
 impl Default for RuntimeConfig {
     fn default() -> Self {
         RuntimeConfig {
             read_thread_num: 10,
-            write_thread_num: 40,
+            write_thread_num: 400,
             grpc_thread_num: 100,
             http_thread_num: 5,
             default_thread_num: 5,
+            dispatch_thread_num: 500,
         }
     }
 }
