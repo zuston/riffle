@@ -227,7 +227,7 @@ fn main() -> Result<()> {
     info!("Starting GRpc server with port:[{}] ......", rpc_port);
 
     let available_cores = std::thread::available_parallelism()?;
-    debug!("GRpc service with parallelism: [{}]", &available_cores);
+    info!("GRpc service with parallelism: [{}]", &available_cores);
 
     for _ in 0..available_cores.into() {
         let shuffle_server = DefaultShuffleServer::from(app_manager_ref.clone());
