@@ -440,7 +440,7 @@ impl Store for HybridStore {
                     .get_or_create_underlying_staging_buffer(uid.clone());
                 let mut buffer_inner = buffer.lock();
                 if size.as_bytes() < buffer_inner.get_staging_size()? as u64 {
-                    let (in_flight_uid, blocks) = buffer_inner.migrate_staging_to_in_flight()?;
+                    let (_, in_flight_uid, blocks) = buffer_inner.migrate_staging_to_in_flight()?;
                     self.make_memory_buffer_flush(in_flight_uid, blocks, uid.clone())
                         .await?;
                 }
@@ -565,24 +565,28 @@ pub async fn watermark_flush(store: Arc<HybridStore>) -> Result<()> {
         .get_required_spill_buffer(target_size)
         .instrument_await(format!("getting spill buffers."))
         .await;
-    info!("[Spill] Getting all required spill blocks. it costs {}(ms)", timer.elapsed().as_millis());
+    info!(
+        "[Spill] Getting all required spill blocks. it costs {}(ms)",
+        timer.elapsed().as_millis()
+    );
 
     let timer = Instant::now();
     let mut flushed_size = 0u64;
+    let mut lockTime = 0;
     for (partition_id, buffer) in buffers {
+        let timer = Instant::now();
         let mut buffer_inner = buffer.lock();
-        let (in_flight_uid, blocks) = buffer_inner.migrate_staging_to_in_flight()?;
+        let (flushed, in_flight_uid, blocks) = buffer_inner.migrate_staging_to_in_flight()?;
         drop(buffer_inner);
-        for block in &blocks {
-            flushed_size += block.length as u64;
-        }
+        flushed_size += flushed as u64;
+        lockTime += timer.elapsed().as_millis();
         store
             .make_memory_buffer_flush(in_flight_uid, blocks, partition_id)
             .await?;
     }
     info!(
-        "[Spill] All required spill blocks notify to flusher. It costs {}(ms)",
-        timer.elapsed().as_millis()
+        "[Spill] All required spill blocks notify to flusher. It costs {}(ms). lock costs {}(ms)",
+        timer.elapsed().as_millis(), lockTime
     );
     store.hot_store.add_to_in_flight_buffer_size(flushed_size);
     debug!("Trigger spilling in background....");

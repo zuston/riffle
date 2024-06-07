@@ -161,11 +161,13 @@ impl MemoryStore {
 
         let buffers = self.state.clone().into_read_only();
         for buffer in buffers.iter() {
-            let staging_size = buffer.1.lock().staging_size;
+            let key = buffer.0;
+            let buffer = buffer.1.lock();
+            let staging_size = buffer.staging_size;
+            drop(buffer);
             let valset = sorted_tree_map
                 .entry(staging_size)
                 .or_insert_with(|| vec![]);
-            let key = buffer.0;
             valset.push(key);
         }
 
@@ -506,7 +508,10 @@ impl StagingBuffer {
     }
 
     /// make the blocks sent to persistent storage
-    pub fn migrate_staging_to_in_flight(&mut self) -> Result<(i64, Vec<PartitionedDataBlock>)> {
+    pub fn migrate_staging_to_in_flight(
+        &mut self,
+    ) -> Result<(i64, i64, Vec<PartitionedDataBlock>)> {
+        let flushed = self.staging_size;
         self.in_flight_size += self.staging_size;
         self.staging_size = 0;
 
@@ -517,7 +522,7 @@ impl StagingBuffer {
         self.id_generator += 1;
         self.in_flight.insert(id.clone(), blocks.clone());
 
-        Ok((id, blocks))
+        Ok((flushed, id, blocks))
     }
 
     /// clear the blocks which are flushed to persistent storage
