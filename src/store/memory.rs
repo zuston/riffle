@@ -176,10 +176,10 @@ impl MemoryStore {
         let iter = sorted_tree_map.iter().rev();
         'outer: for (size, vals) in iter {
             for pid in vals {
-                if current_removed >= removed_size || size.to_be() == 0 {
+                if current_removed >= removed_size {
                     break 'outer;
                 }
-                current_removed += size.to_be() as i64;
+                current_removed += *size;
                 let partition_uid = (*pid).clone();
 
                 let buffer = self.get_underlying_partition_buffer(&partition_uid);
@@ -187,6 +187,10 @@ impl MemoryStore {
             }
         }
 
+        info!(
+            "[Spill] expected removed size: {}, real: {}",
+            &removed_size, &current_removed
+        );
         required_spill_buffers
     }
 

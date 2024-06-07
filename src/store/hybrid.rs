@@ -54,6 +54,7 @@ use std::sync::Arc;
 
 use crate::runtime::manager::RuntimeManager;
 use tokio::sync::Semaphore;
+use tokio::time::Instant;
 
 trait PersistentStore: Store + Persistent + Send + Sync {}
 impl PersistentStore for LocalFileStore {}
@@ -340,7 +341,7 @@ impl Store for HybridStore {
 
         // the handler to accept watermark flush trigger
         let hybrid_store = self.clone();
-        self.runtime_manager.default_runtime.spawn(async move {
+        self.runtime_manager.dispatch_runtime.spawn(async move {
             let store = hybrid_store.clone();
             while let Ok(_) = &store.memory_watermark_flush_trigger_recv.recv().await {
                 if let Err(e) = watermark_flush(store.clone()).await {
@@ -556,6 +557,7 @@ pub async fn watermark_flush(store: Arc<HybridStore>) -> Result<()> {
     if used_ratio <= store.config.memory_spill_high_watermark {
         return Ok(());
     }
+    let timer = Instant::now();
     let target_size =
         (store.hot_store.get_capacity()? as f32 * store.config.memory_spill_low_watermark) as i64;
     let buffers = store
@@ -563,7 +565,9 @@ pub async fn watermark_flush(store: Arc<HybridStore>) -> Result<()> {
         .get_required_spill_buffer(target_size)
         .instrument_await(format!("getting spill buffers."))
         .await;
+    info!("[Spill] Getting all required spill blocks. it costs {}(ms)", timer.elapsed().as_millis());
 
+    let timer = Instant::now();
     let mut flushed_size = 0u64;
     for (partition_id, buffer) in buffers {
         let mut buffer_inner = buffer.lock();
@@ -576,6 +580,10 @@ pub async fn watermark_flush(store: Arc<HybridStore>) -> Result<()> {
             .make_memory_buffer_flush(in_flight_uid, blocks, partition_id)
             .await?;
     }
+    info!(
+        "[Spill] All required spill blocks notify to flusher. It costs {}(ms)",
+        timer.elapsed().as_millis()
+    );
     store.hot_store.add_to_in_flight_buffer_size(flushed_size);
     debug!("Trigger spilling in background....");
     Ok(())
