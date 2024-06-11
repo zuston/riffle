@@ -519,7 +519,8 @@ impl StagingBuffer {
 
         let clear_timer = Instant::now();
         let blocks = self.staging.to_owned();
-        self.staging.clear();
+        unsafe { self.staging.set_len(0); }
+        // self.staging.clear();
         let clear_cost = clear_timer.elapsed().as_millis();
 
         let id = self.id_generator;
