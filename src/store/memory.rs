@@ -517,12 +517,12 @@ impl StagingBuffer {
         self.in_flight_size += self.staging_size;
         self.staging_size = 0;
 
-        let clear_timer = Instant::now();
+        let owned_timer = Instant::now();
         let blocks = self.staging.to_owned();
-        self.staging = Vec::new();
+        let clear_cost = owned_timer.elapsed().as_millis();
+        // self.staging = Vec::new();
         // unsafe { self.staging.set_len(0); }
-        // self.staging.clear();
-        let clear_cost = clear_timer.elapsed().as_millis();
+        self.staging.clear();
 
         let id = self.id_generator;
         self.id_generator += 1;
