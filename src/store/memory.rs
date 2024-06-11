@@ -518,16 +518,14 @@ impl StagingBuffer {
         self.staging_size = 0;
 
         let owned_timer = Instant::now();
-        let blocks = self.staging.to_owned();
+        let mut staging_blocks = Vec::with_capacity(self.staging.len());
+        staging_blocks.append(&mut self.staging);
         let clear_cost = owned_timer.elapsed().as_millis();
-        // self.staging = Vec::new();
-        // unsafe { self.staging.set_len(0); }
-        self.staging.clear();
 
         let id = self.id_generator;
         self.id_generator += 1;
         let timer_insert = Instant::now();
-        self.in_flight.insert(id.clone(), blocks.clone());
+        self.in_flight.insert(id.clone(), staging_blocks.clone());
 
         Ok((
             clear_cost,
@@ -535,7 +533,7 @@ impl StagingBuffer {
             timer.elapsed().as_millis(),
             flushed,
             id,
-            blocks,
+            staging_blocks,
         ))
     }
 
