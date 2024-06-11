@@ -44,6 +44,7 @@ use croaring::Treemap;
 use spin::mutex::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 pub struct MemoryStore {
     // todo: change to RW lock
@@ -510,7 +511,8 @@ impl StagingBuffer {
     /// make the blocks sent to persistent storage
     pub fn migrate_staging_to_in_flight(
         &mut self,
-    ) -> Result<(i64, i64, Vec<PartitionedDataBlock>)> {
+    ) -> Result<(u128, i64, i64, Vec<PartitionedDataBlock>)> {
+        let timer = Instant::now();
         let flushed = self.staging_size;
         self.in_flight_size += self.staging_size;
         self.staging_size = 0;
@@ -522,7 +524,7 @@ impl StagingBuffer {
         self.id_generator += 1;
         self.in_flight.insert(id.clone(), blocks.clone());
 
-        Ok((flushed, id, blocks))
+        Ok((timer.elapsed().as_millis(), flushed, id, blocks))
     }
 
     /// clear the blocks which are flushed to persistent storage

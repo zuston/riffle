@@ -440,7 +440,8 @@ impl Store for HybridStore {
                     .get_or_create_underlying_staging_buffer(uid.clone());
                 let mut buffer_inner = buffer.lock();
                 if size.as_bytes() < buffer_inner.get_staging_size()? as u64 {
-                    let (_, in_flight_uid, blocks) = buffer_inner.migrate_staging_to_in_flight()?;
+                    let (_, _, in_flight_uid, blocks) =
+                        buffer_inner.migrate_staging_to_in_flight()?;
                     self.make_memory_buffer_flush(in_flight_uid, blocks, uid.clone())
                         .await?;
                 }
@@ -572,21 +573,24 @@ pub async fn watermark_flush(store: Arc<HybridStore>) -> Result<()> {
 
     let timer = Instant::now();
     let mut flushed_size = 0u64;
-    let mut lockTime = 0;
+    let mut lock_time = 0;
+    let mut staging_migration_time = 0;
     for (partition_id, buffer) in buffers {
         let timer = Instant::now();
         let mut buffer_inner = buffer.lock();
-        let (flushed, in_flight_uid, blocks) = buffer_inner.migrate_staging_to_in_flight()?;
+        let (cost_time_ms, flushed, in_flight_uid, blocks) =
+            buffer_inner.migrate_staging_to_in_flight()?;
         drop(buffer_inner);
+        staging_migration_time += cost_time_ms;
         flushed_size += flushed as u64;
-        lockTime += timer.elapsed().as_millis();
+        lock_time += timer.elapsed().as_millis();
         store
             .make_memory_buffer_flush(in_flight_uid, blocks, partition_id)
             .await?;
     }
     info!(
-        "[Spill] All required spill blocks notify to flusher. It costs {}(ms). lock costs {}(ms)",
-        timer.elapsed().as_millis(), lockTime
+        "[Spill] All required spill blocks notify to flusher. It costs {}(ms). lock costs {}(ms). migration costs {}(ms)",
+        timer.elapsed().as_millis(), lock_time, staging_migration_time
     );
     store.hot_store.add_to_in_flight_buffer_size(flushed_size);
     debug!("Trigger spilling in background....");
