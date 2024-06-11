@@ -440,7 +440,7 @@ impl Store for HybridStore {
                     .get_or_create_underlying_staging_buffer(uid.clone());
                 let mut buffer_inner = buffer.lock();
                 if size.as_bytes() < buffer_inner.get_staging_size()? as u64 {
-                    let (_, _, _, in_flight_uid, blocks) =
+                    let (_, _, _, _, in_flight_uid, blocks) =
                         buffer_inner.migrate_staging_to_in_flight()?;
                     self.make_memory_buffer_flush(in_flight_uid, blocks, uid.clone())
                         .await?;
@@ -576,17 +576,22 @@ pub async fn watermark_flush(store: Arc<HybridStore>) -> Result<()> {
     let mut lock_time = 0;
     let mut staging_migration_time = 0;
     let mut staging_migration_insert_time = 0;
+    let mut staging_migration_clear_time = 0;
     for (partition_id, buffer) in buffers {
         let timer = Instant::now();
         let mut buffer_inner = buffer.lock();
-        let (insert_cost_ms, cost_time_ms, flushed, in_flight_uid, blocks) =
+        let (clear_cost_ms, insert_cost_ms, cost_time_ms, flushed, in_flight_uid, blocks) =
             buffer_inner.migrate_staging_to_in_flight()?;
         drop(buffer_inner);
         if lock_time == 0 {
-            info!("The first migration time is {}(ms)", cost_time_ms)
+            info!(
+                "The first migration time is {}(ms), insert: {}(ms), clean: {}(ms)",
+                cost_time_ms, insert_cost_ms, clear_cost_ms
+            )
         }
         staging_migration_time += cost_time_ms;
         staging_migration_insert_time += insert_cost_ms;
+        staging_migration_clear_time += clear_cost_ms;
         flushed_size += flushed as u64;
         lock_time += timer.elapsed().as_millis();
         store
@@ -594,8 +599,8 @@ pub async fn watermark_flush(store: Arc<HybridStore>) -> Result<()> {
             .await?;
     }
     info!(
-        "[Spill] All required spill blocks notify to flusher. It costs {}(ms). lock costs {}(ms). migration costs {}(ms), its insert costs {}(ms)",
-        timer.elapsed().as_millis(), lock_time, staging_migration_time, staging_migration_insert_time
+        "[Spill] All required spill blocks notify to flusher. It costs {}(ms). lock costs {}(ms). migration costs {}(ms), its insert costs {}(ms), its clear costs {}(ms)",
+        timer.elapsed().as_millis(), lock_time, staging_migration_time, staging_migration_insert_time, staging_migration_clear_time
     );
     store.hot_store.add_to_in_flight_buffer_size(flushed_size);
     debug!("Trigger spilling in background....");

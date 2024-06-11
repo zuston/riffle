@@ -511,14 +511,16 @@ impl StagingBuffer {
     /// make the blocks sent to persistent storage
     pub fn migrate_staging_to_in_flight(
         &mut self,
-    ) -> Result<(u128, u128, i64, i64, Vec<PartitionedDataBlock>)> {
+    ) -> Result<(u128, u128, u128, i64, i64, Vec<PartitionedDataBlock>)> {
         let timer = Instant::now();
         let flushed = self.staging_size;
         self.in_flight_size += self.staging_size;
         self.staging_size = 0;
 
+        let clear_timer = Instant::now();
         let blocks = self.staging.to_owned();
         self.staging.clear();
+        let clear_cost = clear_timer.elapsed().as_millis();
 
         let id = self.id_generator;
         self.id_generator += 1;
@@ -526,6 +528,7 @@ impl StagingBuffer {
         self.in_flight.insert(id.clone(), blocks.clone());
 
         Ok((
+            clear_cost,
             timer_insert.elapsed().as_millis(),
             timer.elapsed().as_millis(),
             flushed,
