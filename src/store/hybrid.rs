@@ -581,6 +581,9 @@ pub async fn watermark_flush(store: Arc<HybridStore>) -> Result<()> {
         let (cost_time_ms, flushed, in_flight_uid, blocks) =
             buffer_inner.migrate_staging_to_in_flight()?;
         drop(buffer_inner);
+        if lock_time == 0 {
+            info!("The first migration time is {}(ms)", cost_time_ms)
+        }
         staging_migration_time += cost_time_ms;
         flushed_size += flushed as u64;
         lock_time += timer.elapsed().as_millis();
