@@ -24,10 +24,7 @@ use crate::config::{LocalfileStoreConfig, StorageType};
 use crate::error::WorkerError;
 use crate::metric::TOTAL_LOCALFILE_USED;
 use crate::store::ResponseDataIndex::Local;
-use crate::store::{
-    LocalDataIndex, PartitionedLocalData, Persistent, RequireBufferResponse, ResponseData,
-    ResponseDataIndex, Store,
-};
+use crate::store::{LocalDataIndex, PartitionedDataBlock, PartitionedLocalData, Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex, SpillWritingViewContext, Store};
 use std::ops::Deref;
 use std::path::Path;
 
@@ -43,6 +40,7 @@ use crate::runtime::manager::RuntimeManager;
 use dashmap::mapref::entry::Entry;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use tokio::net::unix::uid_t;
 
 use crate::store::local::disk::{LocalDisk, LocalDiskConfig};
 
@@ -170,20 +168,8 @@ impl LocalFileStore {
             Err(WorkerError::INTERNAL_ERROR)
         }
     }
-}
 
-#[async_trait]
-impl Store for LocalFileStore {
-    fn start(self: Arc<Self>) {
-        todo!()
-    }
-
-    async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
-        if ctx.data_blocks.len() <= 0 {
-            return Ok(());
-        }
-
-        let uid = ctx.uid;
+    async fn data_insert(&self, uid: PartitionedUId, blocks: Vec<&PartitionedDataBlock>) -> Result<(), WorkerError> {
         let (data_file_path, index_file_path) =
             LocalFileStore::gen_relative_path_for_partition(&uid);
 
@@ -224,7 +210,7 @@ impl Store for LocalFileStore {
         let mut data_bytes_holder = BytesMut::new();
 
         let mut total_size = 0;
-        for block in ctx.data_blocks {
+        for block in blocks {
             let block_id = block.block_id;
             let length = block.length;
             let uncompress_len = block.uncompress_length;
@@ -240,7 +226,7 @@ impl Store for LocalFileStore {
             index_bytes_holder.put_i64(block_id);
             index_bytes_holder.put_i64(task_attempt_id);
 
-            let data = block.data;
+            let data = &block.data;
 
             data_bytes_holder.extend_from_slice(&data);
             next_offset += length as i64;
@@ -266,6 +252,23 @@ impl Store for LocalFileStore {
             .store(next_offset, Ordering::SeqCst);
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl Store for LocalFileStore {
+    fn start(self: Arc<Self>) {
+        todo!()
+    }
+
+    async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
+        if ctx.data_blocks.len() <= 0 {
+            return Ok(());
+        }
+
+        let uid = ctx.uid;
+        let blocks: Vec<&PartitionedDataBlock> = ctx.data_blocks.iter().collect();
+        self.data_insert(uid, blocks).await
     }
 
     async fn get(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
@@ -421,6 +424,12 @@ impl Store for LocalFileStore {
 
     async fn name(&self) -> StorageType {
         StorageType::LOCALFILE
+    }
+
+    async fn spill_insert(&self, ctx: SpillWritingViewContext) -> Result<(), WorkerError> {
+        let uid = ctx.uid;
+        let blocks: Vec<&PartitionedDataBlock> = ctx.data_blocks.iter().map(|x| (*x).deref()).collect();
+        self.data_insert(uid, blocks).await
     }
 }
 

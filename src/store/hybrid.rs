@@ -35,9 +35,7 @@ use crate::store::hdfs::HdfsStore;
 use crate::store::localfile::LocalFileStore;
 use crate::store::memory::{MemorySnapshot, MemoryStore};
 
-use crate::store::{
-    PartitionedDataBlock, Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex, Store,
-};
+use crate::store::{ExecutionTime, PartitionedDataBlock, Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex, SpillWritingViewContext, Store};
 use anyhow::{anyhow, Result};
 
 use async_trait::async_trait;
@@ -46,6 +44,7 @@ use prometheus::core::{Atomic, AtomicU64};
 use std::any::Any;
 
 use std::collections::VecDeque;
+use std::ops::Deref;
 
 use await_tree::InstrumentAwait;
 use spin::mutex::Mutex;
@@ -89,8 +88,8 @@ pub struct HybridStore {
 
 #[derive(Clone)]
 struct SpillMessage {
-    ctx: WritingViewContext,
-    id: i64,
+    ctx: SpillWritingViewContext,
+    size: i64,
     retry_cnt: i32,
     previous_spilled_storage: Option<Arc<Box<dyn PersistentStore>>>,
 }
@@ -177,7 +176,7 @@ impl HybridStore {
         &self,
         spill_message: SpillMessage,
     ) -> Result<String, WorkerError> {
-        let mut ctx: WritingViewContext = spill_message.ctx;
+        let mut ctx: SpillWritingViewContext = spill_message.ctx;
         let retry_cnt = spill_message.retry_cnt;
 
         if retry_cnt > 3 {
@@ -185,11 +184,7 @@ impl HybridStore {
             return Err(WorkerError::SPILL_EVENT_EXCEED_RETRY_MAX_LIMIT(app_id));
         }
 
-        let blocks = &ctx.data_blocks;
-        let mut spill_size = 0i64;
-        for block in blocks {
-            spill_size += block.length as i64;
-        }
+        let spill_size = spill_message.size;
 
         let warm = self
             .warm_store
@@ -205,7 +200,8 @@ impl HybridStore {
         // normal assignment
         let mut candidate_store = if warm.is_healthy().await? {
             let cold_spilled_size = self.memory_spill_to_cold_threshold_size.unwrap_or(u64::MAX);
-            if cold_spilled_size < spill_size as u64 || ctx.owned_by_huge_partition {
+            // if cold_spilled_size < spill_size as u64 || ctx.owned_by_huge_partition {
+            if cold_spilled_size < spill_size as u64 {
                 cold
             } else {
                 warm
@@ -233,7 +229,7 @@ impl HybridStore {
 
         let message = format!(
             "partition uid: {:?}, memory spilled size: {}",
-            &ctx.uid, spill_size
+            &ctx.uid, &spill_size
         );
 
         // Resort the blocks by task_attempt_id to support LOCAL ORDER by default.
@@ -242,7 +238,7 @@ impl HybridStore {
 
         // when throwing the data lost error, it should fast fail for this partition data.
         let inserted = candidate_store
-            .insert(ctx)
+            .spill_insert(ctx)
             .instrument_await("inserting into the persistent store, invoking [write]")
             .await;
         if let Err(err) = inserted {
@@ -292,17 +288,17 @@ impl HybridStore {
 
     async fn make_memory_buffer_flush(
         &self,
-        in_flight_uid: i64,
-        blocks: Vec<PartitionedDataBlock>,
+        spill_size: i64,
+        blocks: Vec<Arc<PartitionedDataBlock>>,
         uid: PartitionedUId,
     ) -> Result<()> {
-        let writing_ctx = WritingViewContext::from(uid, blocks);
+        let writing_ctx = SpillWritingViewContext::new(uid, blocks);
 
         if self
             .memory_spill_send
             .send(SpillMessage {
                 ctx: writing_ctx,
-                id: in_flight_uid,
+                size: spill_size,
                 retry_cnt: 0,
                 previous_spilled_storage: None,
             })
@@ -319,9 +315,14 @@ impl HybridStore {
 
     async fn release_data_in_memory(&self, data_size: u64, message: &SpillMessage) -> Result<()> {
         let uid = &message.ctx.uid;
-        let in_flight_id = message.id;
+        let block_ids: Vec<i64> = message
+            .ctx
+            .data_blocks
+            .iter()
+            .map(|x| x.deref().block_id)
+            .collect();
         self.hot_store
-            .release_in_flight_blocks_in_underlying_staging_buffer(uid.clone(), in_flight_id)
+            .clear_flight_blocks(uid.clone(), block_ids)
             .await?;
         self.hot_store.free_used(data_size as i64).await?;
         self.hot_store.desc_to_in_flight_buffer_size(data_size);
@@ -402,8 +403,7 @@ impl Store for HybridStore {
                             Err(error) => {
                                 TOTAL_MEMORY_SPILL_OPERATION_FAILED.inc();
                                 error!(
-                                "Errors on spill memory data to persistent storage for event_id:{:?}. The error: {:#?}",
-                                    message.id,
+                                "Errors on spill memory data to persistent storage. The error: {:#?}",
                                     error);
 
                                 message.retry_cnt = message.retry_cnt + 1;
@@ -438,11 +438,9 @@ impl Store for HybridStore {
                 let buffer = self
                     .hot_store
                     .get_or_create_underlying_staging_buffer(uid.clone());
-                let mut buffer_inner = buffer.lock();
-                if size.as_bytes() < buffer_inner.get_staging_size()? as u64 {
-                    let (_, _, _, _, in_flight_uid, blocks) =
-                        buffer_inner.migrate_staging_to_in_flight()?;
-                    self.make_memory_buffer_flush(in_flight_uid, blocks, uid.clone())
+                if size.as_bytes() < buffer.get_staging_size()? as u64 {
+                    let (_, spill_size, blocks) = buffer.create_flight()?;
+                    self.make_memory_buffer_flush(spill_size, blocks, uid.clone())
                         .await?;
                 }
             }
@@ -551,6 +549,10 @@ impl Store for HybridStore {
     async fn name(&self) -> StorageType {
         unimplemented!()
     }
+
+    async fn spill_insert(&self, _ctx: SpillWritingViewContext) -> Result<(), WorkerError> {
+        todo!()
+    }
 }
 
 pub async fn watermark_flush(store: Arc<HybridStore>) -> Result<()> {
@@ -566,44 +568,38 @@ pub async fn watermark_flush(store: Arc<HybridStore>) -> Result<()> {
         .get_required_spill_buffer(target_size)
         .instrument_await(format!("getting spill buffers."))
         .await;
+
     info!(
-        "[Spill] Getting all required spill blocks. it costs {}(ms)",
+        "[Spill] Getting all required spill blocks due to used_ratio:{}, target_size:{}. it costs {}(ms)",
+        used_ratio,
+        target_size,
         timer.elapsed().as_millis()
     );
 
     let timer = Instant::now();
     let mut flushed_size = 0u64;
     let mut lock_time = 0;
-    let mut staging_migration_time = 0;
-    let mut staging_migration_insert_time = 0;
-    let mut staging_migration_clear_time = 0;
+    let mut exec_time = 0;
+    let mut search_time = 0;
     for (partition_id, buffer) in buffers {
-        let timer = Instant::now();
-        let mut buffer_inner = buffer.lock();
-        let (clear_cost_ms, insert_cost_ms, cost_time_ms, flushed, in_flight_uid, blocks) =
-            buffer_inner.migrate_staging_to_in_flight()?;
-        drop(buffer_inner);
-        if lock_time == 0 {
-            info!(
-                "The first migration time is {}(ms), insert: {}(ms), clean: {}(ms)",
-                cost_time_ms, insert_cost_ms, clear_cost_ms
-            )
-        }
-        staging_migration_time += cost_time_ms;
-        staging_migration_insert_time += insert_cost_ms;
-        staging_migration_clear_time += clear_cost_ms;
-        flushed_size += flushed as u64;
-        lock_time += timer.elapsed().as_millis();
+        let (exec_time_snapshot, spill_size, blocks) = buffer.create_flight()?;
+        let (lock_time_ms, search_time_ms, execution_time_ms) = match exec_time_snapshot {
+            ExecutionTime::BUFFER_CREATE_FLIGHT(a, b, c) => (a, b, c),
+            _ => (0, 0, 0)
+        };
+        lock_time += lock_time_ms;
+        exec_time += execution_time_ms;
+        search_time += search_time_ms;
+        flushed_size += spill_size as u64;
         store
-            .make_memory_buffer_flush(in_flight_uid, blocks, partition_id)
+            .make_memory_buffer_flush(spill_size, blocks, partition_id)
             .await?;
     }
     info!(
-        "[Spill] All required spill blocks notify to flusher. It costs {}(ms). lock costs {}(ms). migration costs {}(ms), its insert costs {}(ms), its clear costs {}(ms)",
-        timer.elapsed().as_millis(), lock_time, staging_migration_time, staging_migration_insert_time, staging_migration_clear_time
+        "[Spill] All required spill blocks notify to flusher with {}(bytes) that costs {}(ms). lock costs {}(ms). execution costs {}(ms). search costs {}(ms)",
+        flushed_size, timer.elapsed().as_millis(), lock_time, exec_time, search_time
     );
     store.hot_store.add_to_in_flight_buffer_size(flushed_size);
-    debug!("Trigger spilling in background....");
     Ok(())
 }
 

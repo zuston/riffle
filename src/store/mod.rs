@@ -23,9 +23,10 @@ pub mod localfile;
 pub mod mem;
 pub mod memory;
 
+use std::fmt::{Display, Formatter};
 use crate::app::{
-    PurgeDataContext, ReadingIndexViewContext, ReadingViewContext, RegisterAppContext,
-    ReleaseBufferContext, RequireBufferContext, WritingViewContext,
+    PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingViewContext,
+    RegisterAppContext, ReleaseBufferContext, RequireBufferContext, WritingViewContext,
 };
 use crate::config::{Config, StorageType};
 use crate::error::WorkerError;
@@ -39,6 +40,7 @@ use bytes::Bytes;
 
 use crate::runtime::manager::RuntimeManager;
 use std::sync::Arc;
+use env_logger::fmt::Color::Magenta;
 
 #[derive(Debug)]
 pub struct PartitionedData {
@@ -179,6 +181,8 @@ pub trait Store {
     async fn register_app(&self, ctx: RegisterAppContext) -> Result<()>;
 
     async fn name(&self) -> StorageType;
+
+    async fn spill_insert(&self, ctx: SpillWritingViewContext) -> Result<(), WorkerError>;
 }
 
 pub trait Persistent {}
@@ -188,5 +192,36 @@ pub struct StoreProvider {}
 impl StoreProvider {
     pub fn get(runtime_manager: RuntimeManager, config: Config) -> HybridStore {
         HybridStore::from(config, runtime_manager)
+    }
+}
+
+// ====================
+
+#[derive(Debug, Clone)]
+pub struct SpillWritingViewContext {
+    pub uid: PartitionedUId,
+    pub data_blocks: Vec<Arc<PartitionedDataBlock>>,
+}
+
+impl SpillWritingViewContext {
+    pub fn new(uid: PartitionedUId, blocks: Vec<Arc<PartitionedDataBlock>>) -> Self {
+        Self {
+            uid,
+            data_blocks: blocks,
+        }
+    }
+}
+
+// ==================
+pub enum ExecutionTime {
+    BUFFER_CREATE_FLIGHT(u128, u128, u128)
+}
+
+impl Display for ExecutionTime {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExecutionTime::BUFFER_CREATE_FLIGHT(x, y, z) => write!(f, "execution time shown:"),
+            _ => write!(f, "Nothing display")
+        }
     }
 }

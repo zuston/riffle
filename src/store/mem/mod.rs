@@ -15,6 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+pub mod budget;
+pub mod buffer;
+pub mod capacity;
 pub mod ticket;
 
 pub use await_tree::InstrumentAwait;

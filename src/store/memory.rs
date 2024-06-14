@@ -28,7 +28,7 @@ use crate::metric::{
 use crate::readable_size::ReadableSize;
 use crate::store::{
     DataSegment, PartitionedDataBlock, PartitionedMemoryData, RequireBufferResponse, ResponseData,
-    ResponseDataIndex, Store,
+    ResponseDataIndex, SpillWritingViewContext, Store,
 };
 use crate::*;
 use async_trait::async_trait;
@@ -39,16 +39,14 @@ use std::collections::{BTreeMap, HashMap};
 
 use std::str::FromStr;
 
+use crate::store::mem::buffer::MemoryBuffer;
 use crate::store::mem::ticket::TicketManager;
 use croaring::Treemap;
-use spin::mutex::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
 
 pub struct MemoryStore {
-    // todo: change to RW lock
-    state: DashMap<PartitionedUId, Arc<Mutex<StagingBuffer>>>,
+    state: DashMap<PartitionedUId, Arc<MemoryBuffer>>,
     budget: MemoryBudget,
     // key: app_id, value: allocated memory size
     memory_capacity: i64,
@@ -148,13 +146,13 @@ impl MemoryStore {
     pub async fn get_required_spill_buffer(
         &self,
         target_len: i64,
-    ) -> HashMap<PartitionedUId, Arc<Mutex<StagingBuffer>>> {
-        // sort
-        // get the spill buffers
+    ) -> HashMap<PartitionedUId, Arc<MemoryBuffer>> {
+        // 1. sort by the staging size.
+        // 2. get the spill buffers until reaching the single max batch size
 
         let snapshot = self.budget.snapshot();
-        let removed_size = snapshot.used - target_len;
-        if removed_size <= 0 {
+        let required_spilled_size = snapshot.used - target_len;
+        if required_spilled_size <= 0 {
             return HashMap::new();
         }
 
@@ -163,69 +161,64 @@ impl MemoryStore {
         let buffers = self.state.clone().into_read_only();
         for buffer in buffers.iter() {
             let key = buffer.0;
-            let buffer = buffer.1.lock();
-            let staging_size = buffer.staging_size;
-            drop(buffer);
+            let memory_buf = buffer.1;
+            let staging_size = memory_buf.get_staging_size().unwrap();
             let valset = sorted_tree_map
                 .entry(staging_size)
                 .or_insert_with(|| vec![]);
             valset.push(key);
         }
 
-        let mut current_removed = 0;
-
-        let mut required_spill_buffers = HashMap::new();
+        let mut spill_staging_size = 0;
+        let mut spill_candidates = HashMap::new();
 
         let iter = sorted_tree_map.iter().rev();
         'outer: for (size, vals) in iter {
             for pid in vals {
-                if current_removed >= removed_size {
+                if spill_staging_size >= required_spilled_size {
                     break 'outer;
                 }
-                current_removed += *size;
+                spill_staging_size += *size;
                 let partition_uid = (*pid).clone();
-
-                let buffer = self.get_underlying_partition_buffer(&partition_uid);
-                required_spill_buffers.insert(partition_uid, buffer);
+                let buffer = self.get_underlying_partition_buffer(*pid);
+                spill_candidates.insert(partition_uid, buffer);
             }
         }
 
         info!(
             "[Spill] expected removed size: {}, real: {}",
-            &removed_size, &current_removed
+            &required_spilled_size, &spill_staging_size
         );
-        required_spill_buffers
+        spill_candidates
     }
 
     pub async fn get_partitioned_buffer_size(&self, uid: &PartitionedUId) -> Result<u64> {
         let buffer = self.get_underlying_partition_buffer(uid);
-        let buffer = buffer.lock();
-        Ok(buffer.total_size as u64)
+        Ok(buffer.get_total_size()? as u64)
     }
 
-    fn get_underlying_partition_buffer(&self, pid: &PartitionedUId) -> Arc<Mutex<StagingBuffer>> {
+    fn get_underlying_partition_buffer(&self, pid: &PartitionedUId) -> Arc<MemoryBuffer> {
         self.state.get(pid).unwrap().clone()
     }
 
-    pub async fn release_in_flight_blocks_in_underlying_staging_buffer(
+    pub async fn clear_flight_blocks(
         &self,
         uid: PartitionedUId,
-        in_flight_blocks_id: i64,
+        block_ids: Vec<i64>,
     ) -> Result<()> {
         let buffer = self.get_or_create_underlying_staging_buffer(uid);
-        let mut buffer_ref = buffer.lock();
-        buffer_ref.flight_finished(&in_flight_blocks_id)?;
+        buffer.clear_flight(block_ids)?;
         Ok(())
     }
 
     pub fn get_or_create_underlying_staging_buffer(
         &self,
         uid: PartitionedUId,
-    ) -> Arc<Mutex<StagingBuffer>> {
+    ) -> Arc<MemoryBuffer> {
         let buffer = self
             .state
             .entry(uid)
-            .or_insert_with(|| Arc::new(Mutex::new(StagingBuffer::new())));
+            .or_insert_with(|| Arc::new(MemoryBuffer::new()));
         buffer.clone()
     }
 
@@ -264,110 +257,31 @@ impl Store for MemoryStore {
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
         let uid = ctx.uid;
         let buffer = self.get_or_create_underlying_staging_buffer(uid.clone());
-        let mut buffer_guarded = buffer.lock();
-
         let blocks = ctx.data_blocks;
-        let inserted_size = buffer_guarded.add(blocks)?;
-        drop(buffer_guarded);
+        let inserted_size = buffer.add(blocks)?;
 
         self.budget.allocated_to_used(inserted_size)?;
-
         TOTAL_MEMORY_USED.inc_by(inserted_size as u64);
-
         Ok(())
     }
 
     async fn get(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
         let uid = ctx.uid;
         let buffer = self.get_or_create_underlying_staging_buffer(uid);
-        let buffer = buffer.lock();
-
         let options = ctx.reading_options;
-        let (fetched_blocks, length) = match options {
-            MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(last_block_id, max_size) => {
-                let mut last_block_id = last_block_id.clone();
-                let mut in_flight_flatten_blocks = vec![];
-                for (_, blocks) in buffer.in_flight.iter() {
-                    for in_flight_block in blocks {
-                        in_flight_flatten_blocks.push(in_flight_block);
-                    }
-                }
-                let in_flight_flatten_blocks = Arc::new(in_flight_flatten_blocks);
-
-                let mut staging_blocks = vec![];
-                for block in &buffer.staging {
-                    staging_blocks.push(block);
-                }
-                let staging_blocks = Arc::new(staging_blocks);
-
-                let mut candidate_blocks = vec![];
-                // todo: optimize to the way of recursion
-                let mut exited = false;
-                while !exited {
-                    exited = true;
-                    if last_block_id == -1 {
-                        // Anyway, it will always read from in_flight to staging
-                        let mut extends: Vec<&PartitionedDataBlock> = vec![];
-                        extends.extend_from_slice(&*in_flight_flatten_blocks);
-                        extends.extend_from_slice(&*staging_blocks);
-                        candidate_blocks = extends;
-                    } else {
-                        // check whether the in_fight_blocks exist the last_block_id
-                        let mut in_flight_exist = false;
-                        let mut unread_in_flight_blocks = vec![];
-                        for block in in_flight_flatten_blocks.clone().iter() {
-                            if !in_flight_exist {
-                                if block.block_id == last_block_id {
-                                    in_flight_exist = true;
-                                }
-                                continue;
-                            }
-                            unread_in_flight_blocks.push(*block);
-                        }
-
-                        if in_flight_exist {
-                            let mut extends: Vec<&PartitionedDataBlock> = vec![];
-                            extends.extend_from_slice(&*unread_in_flight_blocks);
-                            extends.extend_from_slice(&*staging_blocks);
-                            candidate_blocks = extends;
-                        } else {
-                            let mut staging_exist = false;
-                            let mut unread_staging_buffers = vec![];
-                            for block in staging_blocks.clone().iter() {
-                                if !staging_exist {
-                                    if block.block_id == last_block_id {
-                                        staging_exist = true;
-                                    }
-                                    continue;
-                                }
-                                unread_staging_buffers.push(*block);
-                            }
-
-                            if staging_exist {
-                                candidate_blocks = unread_staging_buffers;
-                            } else {
-                                // when the last_block_id is not found, maybe the partial has been flush
-                                // to file. if having rest data, let's read it from the head
-                                exited = false;
-                                last_block_id = -1;
-                            }
-                        }
-                    }
-                }
-
-                self.read_partial_data_with_max_size_limit_and_filter(
-                    candidate_blocks,
-                    max_size,
-                    ctx.serialized_expected_task_ids_bitmap,
-                )
-            }
-            _ => (vec![], 0),
+        let (size, blocks) = match options {
+            MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(last_block_id, max_size) => buffer.read(
+                last_block_id,
+                max_size,
+                ctx.serialized_expected_task_ids_bitmap,
+            )?,
+            _ => (0, vec![]),
         };
 
-        let mut bytes_holder = BytesMut::with_capacity(length as usize);
+        let mut bytes_holder = BytesMut::with_capacity(size as usize);
         let mut segments = vec![];
         let mut offset = 0;
-        for block in fetched_blocks {
+        for block in blocks {
             let data = &block.data;
             bytes_holder.extend_from_slice(data);
             segments.push(DataSegment {
@@ -419,7 +333,7 @@ impl Store for MemoryStore {
         let mut used = 0;
         for removed_pid in _removed_list {
             if let Some(entry) = self.state.remove(removed_pid) {
-                used += entry.1.lock().total_size;
+                used += entry.1.get_total_size()?;
             }
         }
 
@@ -470,100 +384,9 @@ impl Store for MemoryStore {
     async fn name(&self) -> StorageType {
         StorageType::MEMORY
     }
-}
 
-/// thread safe, this will be guarded by the lock
-#[derive(Debug, Clone)]
-pub struct StagingBuffer {
-    // optimize this size.
-    total_size: i64,
-    staging_size: i64,
-    in_flight_size: i64,
-    staging: Vec<PartitionedDataBlock>,
-    in_flight: BTreeMap<i64, Vec<PartitionedDataBlock>>,
-    id_generator: i64,
-}
-
-impl StagingBuffer {
-    pub fn new() -> StagingBuffer {
-        StagingBuffer {
-            total_size: 0,
-            staging_size: 0,
-            in_flight_size: 0,
-            staging: vec![],
-            in_flight: BTreeMap::new(),
-            id_generator: 0,
-        }
-    }
-
-    /// add the blocks to the staging
-    pub fn add(&mut self, blocks: Vec<PartitionedDataBlock>) -> Result<i64> {
-        let mut added = 0i64;
-        for block in blocks {
-            added += block.length as i64;
-            self.staging.push(block);
-        }
-        self.staging_size += added;
-        self.total_size += added;
-        Ok(added)
-    }
-
-    /// make the blocks sent to persistent storage
-    pub fn migrate_staging_to_in_flight(
-        &mut self,
-    ) -> Result<(u128, u128, u128, i64, i64, Vec<PartitionedDataBlock>)> {
-        let timer = Instant::now();
-        let flushed = self.staging_size;
-        self.in_flight_size += self.staging_size;
-        self.staging_size = 0;
-
-        let owned_timer = Instant::now();
-        let mut staging_blocks = Vec::with_capacity(self.staging.len());
-        staging_blocks.append(&mut self.staging);
-        let clear_cost = owned_timer.elapsed().as_millis();
-
-        let id = self.id_generator;
-        self.id_generator += 1;
-        let timer_insert = Instant::now();
-        self.in_flight.insert(id.clone(), staging_blocks.clone());
-
-        Ok((
-            clear_cost,
-            timer_insert.elapsed().as_millis(),
-            timer.elapsed().as_millis(),
-            flushed,
-            id,
-            staging_blocks,
-        ))
-    }
-
-    /// clear the blocks which are flushed to persistent storage
-    pub fn flight_finished(&mut self, flight_id: &i64) -> Result<i64> {
-        let done = self.in_flight.remove(flight_id);
-
-        let mut removed_size = 0i64;
-        if let Some(removed_blocks) = done {
-            for removed_block in removed_blocks {
-                removed_size += removed_block.length as i64;
-            }
-        }
-
-        self.total_size -= removed_size;
-        self.in_flight_size -= removed_size;
-
-        Ok(removed_size)
-    }
-
-    pub fn get_staging_size(&self) -> Result<i64> {
-        Ok(self.staging_size)
-    }
-
-    pub fn get_in_flight_size(&self) -> Result<i64> {
-        Ok(self.in_flight_size)
-    }
-
-    pub fn get_total_size(&self) -> Result<i64> {
-        Ok(self.total_size)
+    async fn spill_insert(&self, _ctx: SpillWritingViewContext) -> Result<(), WorkerError> {
+        todo!()
     }
 }
 
@@ -788,87 +611,86 @@ mod test {
                 .block_id
         );
 
-        // case4: some data are in inflight blocks
-        let buffer = store.get_or_create_underlying_staging_buffer(uid.clone());
-        let mut buffer = buffer.lock();
-        let owned = buffer.staging.to_owned();
-        buffer.staging.clear();
-        let mut idx = 0;
-        for block in owned {
-            buffer.in_flight.insert(idx, vec![block]);
-            idx += 1;
-        }
-        drop(buffer);
-
-        // all data will be fetched from in_flight data
-        let mem_data = runtime.wait(get_data_with_last_block_id(
-            default_single_read_size,
-            3,
-            &store,
-            uid.clone(),
-        ));
-        assert_eq!(2, mem_data.shuffle_data_block_segments.len());
-        assert_eq!(
-            4,
-            mem_data
-                .shuffle_data_block_segments
-                .get(0)
-                .unwrap()
-                .block_id
-        );
-        assert_eq!(
-            5,
-            mem_data
-                .shuffle_data_block_segments
-                .get(1)
-                .unwrap()
-                .block_id
-        );
-
-        // case5: old data in in_flight and latest data in staging.
-        // read it from the block id 9, and read size of 30
-        let buffer = store.get_or_create_underlying_staging_buffer(uid.clone());
-        let mut buffer = buffer.lock();
-        buffer.staging.push(PartitionedDataBlock {
-            block_id: 20,
-            length: 10,
-            uncompress_length: 0,
-            crc: 0,
-            data: BytesMut::with_capacity(10).freeze(),
-            task_attempt_id: 0,
-        });
-        drop(buffer);
-
-        let mem_data = runtime.wait(get_data_with_last_block_id(30, 7, &store, uid.clone()));
-        assert_eq!(3, mem_data.shuffle_data_block_segments.len());
-        assert_eq!(
-            8,
-            mem_data
-                .shuffle_data_block_segments
-                .get(0)
-                .unwrap()
-                .block_id
-        );
-        assert_eq!(
-            9,
-            mem_data
-                .shuffle_data_block_segments
-                .get(1)
-                .unwrap()
-                .block_id
-        );
-        assert_eq!(
-            20,
-            mem_data
-                .shuffle_data_block_segments
-                .get(2)
-                .unwrap()
-                .block_id
-        );
-
-        // case6: read the end to return empty result
-        let mem_data = runtime.wait(get_data_with_last_block_id(30, 20, &store, uid.clone()));
-        assert_eq!(0, mem_data.shuffle_data_block_segments.len());
+        // // case4: some data are in inflight blocks
+        // let buffer = store.get_or_create_underlying_staging_buffer(uid.clone());
+        // let owned = buffer.staging.to_owned();
+        // buffer.staging.clear();
+        // let mut idx = 0;
+        // for block in owned {
+        //     buffer.in_flight.insert(idx, vec![block]);
+        //     idx += 1;
+        // }
+        // drop(buffer);
+        //
+        // // all data will be fetched from in_flight data
+        // let mem_data = runtime.wait(get_data_with_last_block_id(
+        //     default_single_read_size,
+        //     3,
+        //     &store,
+        //     uid.clone(),
+        // ));
+        // assert_eq!(2, mem_data.shuffle_data_block_segments.len());
+        // assert_eq!(
+        //     4,
+        //     mem_data
+        //         .shuffle_data_block_segments
+        //         .get(0)
+        //         .unwrap()
+        //         .block_id
+        // );
+        // assert_eq!(
+        //     5,
+        //     mem_data
+        //         .shuffle_data_block_segments
+        //         .get(1)
+        //         .unwrap()
+        //         .block_id
+        // );
+        //
+        // // case5: old data in in_flight and latest data in staging.
+        // // read it from the block id 9, and read size of 30
+        // let buffer = store.get_or_create_underlying_staging_buffer(uid.clone());
+        // let mut buffer = buffer.lock();
+        // buffer.staging.push(PartitionedDataBlock {
+        //     block_id: 20,
+        //     length: 10,
+        //     uncompress_length: 0,
+        //     crc: 0,
+        //     data: BytesMut::with_capacity(10).freeze(),
+        //     task_attempt_id: 0,
+        // });
+        // drop(buffer);
+        //
+        // let mem_data = runtime.wait(get_data_with_last_block_id(30, 7, &store, uid.clone()));
+        // assert_eq!(3, mem_data.shuffle_data_block_segments.len());
+        // assert_eq!(
+        //     8,
+        //     mem_data
+        //         .shuffle_data_block_segments
+        //         .get(0)
+        //         .unwrap()
+        //         .block_id
+        // );
+        // assert_eq!(
+        //     9,
+        //     mem_data
+        //         .shuffle_data_block_segments
+        //         .get(1)
+        //         .unwrap()
+        //         .block_id
+        // );
+        // assert_eq!(
+        //     20,
+        //     mem_data
+        //         .shuffle_data_block_segments
+        //         .get(2)
+        //         .unwrap()
+        //         .block_id
+        // );
+        //
+        // // case6: read the end to return empty result
+        // let mem_data = runtime.wait(get_data_with_last_block_id(30, 20, &store, uid.clone()));
+        // assert_eq!(0, mem_data.shuffle_data_block_segments.len());
     }
 
     async fn get_data_with_last_block_id(

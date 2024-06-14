@@ -24,7 +24,10 @@ use crate::error::WorkerError;
 use std::collections::HashMap;
 
 use crate::metric::TOTAL_HDFS_USED;
-use crate::store::{Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex, Store};
+use crate::store::{
+    Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex, SpillWritingViewContext,
+    Store,
+};
 use anyhow::{anyhow, Result};
 
 use async_trait::async_trait;
@@ -303,6 +306,10 @@ impl Store for HdfsStore {
 
     async fn name(&self) -> StorageType {
         StorageType::HDFS
+    }
+
+    async fn spill_insert(&self, _ctx: SpillWritingViewContext) -> Result<(), WorkerError> {
+        todo!()
     }
 }
 
