@@ -38,6 +38,7 @@ use anyhow::Result;
 use clap::{App, Arg};
 use log::{debug, error, info};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::num::NonZeroUsize;
 use std::str::FromStr;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -227,9 +228,14 @@ fn main() -> Result<()> {
     info!("Starting GRpc server with port:[{}] ......", rpc_port);
 
     let available_cores = std::thread::available_parallelism()?;
-    info!("GRpc service with parallelism: [{}]", &available_cores);
 
-    for _ in 0..available_cores.into() {
+    let parallelism = std::env::var("GRPC_PARALLELISM").map_or(available_cores, |v| {
+        let parallelism: NonZeroUsize = v.as_str().parse().unwrap();
+        parallelism
+    });
+    info!("GRpc service with parallelism: [{}]", &parallelism);
+
+    for _ in 0..parallelism.into() {
         let shuffle_server = DefaultShuffleServer::from(app_manager_ref.clone());
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), rpc_port as u16);
         let service = ShuffleServerServer::new(shuffle_server)
