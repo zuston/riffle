@@ -134,13 +134,13 @@ impl MemoryBuffer {
         let mut search_time = 0;
         let mut pick_time = 0;
         for (k, v) in blocks_map.iter() {
+            let pick_timer = Instant::now();
             if started_tag || last_boundary_block_id == -1 {
-                let pick_timer = Instant::now();
                 flight_len += v.length;
                 flight_blocks_ref.push((*v).clone());
                 block_cnt += 1;
-                pick_time = pick_timer.elapsed().as_millis();
             }
+            pick_time += pick_timer.elapsed().as_millis();
 
             let search_timer = Instant::now();
             if !started_tag && *k == last_boundary_block_id {
@@ -353,5 +353,11 @@ mod test {
         } else {
             println!("No value found at that index");
         }
+    }
+
+    use test::Bencher;
+    #[bench]
+    fn bench_add_two(b: &mut Bencher) {
+        b.iter(|| add_two(2));
     }
 }
