@@ -211,6 +211,16 @@ impl MemoryStore {
         Ok(())
     }
 
+    pub async fn clear_flight_blocks_v2(
+        &self,
+        uid: PartitionedUId,
+        flight_id: u64
+    ) -> Result<()> {
+        let buffer = self.get_or_create_underlying_staging_buffer(uid);
+        buffer.clear_flight_v2(flight_id);
+        Ok(())
+    }
+
     pub fn get_or_create_underlying_staging_buffer(
         &self,
         uid: PartitionedUId,

@@ -23,6 +23,7 @@ pub mod localfile;
 pub mod mem;
 pub mod memory;
 
+use std::collections::LinkedList;
 use std::fmt::{Display, Formatter};
 use crate::app::{
     PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingViewContext,
@@ -200,11 +201,11 @@ impl StoreProvider {
 #[derive(Debug, Clone)]
 pub struct SpillWritingViewContext {
     pub uid: PartitionedUId,
-    pub data_blocks: Vec<Arc<PartitionedDataBlock>>,
+    pub data_blocks: Arc<LinkedList<Vec<PartitionedDataBlock>>>,
 }
 
 impl SpillWritingViewContext {
-    pub fn new(uid: PartitionedUId, blocks: Vec<Arc<PartitionedDataBlock>>) -> Self {
+    pub fn new(uid: PartitionedUId, blocks: Arc<LinkedList<Vec<PartitionedDataBlock>>>) -> Self {
         Self {
             uid,
             data_blocks: blocks,

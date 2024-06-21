@@ -1,3 +1,4 @@
+use std::collections::{HashMap, LinkedList};
 use crate::store::{ExecutionTime, PartitionedDataBlock};
 use anyhow::Result;
 use croaring::Treemap;
@@ -11,7 +12,7 @@ pub struct MemoryBuffer {
     buffer: RwLock<BufferInternal>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BufferInternal {
     total_size: i64,
     staging_size: i64,
@@ -23,10 +24,17 @@ pub struct BufferInternal {
     blocks: LinkedHashMap<i64, Arc<PartitionedDataBlock>>,
     // the boundary blockId to distinguish the staging and flush blocks
     boundary_block_id: i64,
+
+    staging: Wrapper<LinkedList<Vec<PartitionedDataBlock>>>,
+    flight: HashMap<u64, Arc<LinkedList<Vec<PartitionedDataBlock>>>>,
+    flight_inc: u64,
 }
 
 impl MemoryBuffer {
     pub fn new() -> MemoryBuffer {
+        let mut staging_wrapper = Wrapper::new();
+        staging_wrapper.wrap(LinkedList::new());
+
         MemoryBuffer {
             buffer: RwLock::new(BufferInternal {
                 total_size: 0,
@@ -36,6 +44,9 @@ impl MemoryBuffer {
                 flight_block_num: 0,
                 blocks: Default::default(),
                 boundary_block_id: -1,
+                staging: staging_wrapper,
+                flight: Default::default(),
+                flight_inc: 0,
             }),
         }
     }
@@ -115,6 +126,34 @@ impl MemoryBuffer {
         Ok(removed as i64)
     }
 
+    pub fn clear_flight_v2(&self, flight_id: u64) {
+        let buffer = &mut self.buffer.write();
+        let flight = &mut buffer.flight;
+        flight.remove(&flight_id);
+    }
+
+    pub fn create_flight_v2(&self) -> Result<(ExecutionTime, i64, Arc<LinkedList<Vec<PartitionedDataBlock>>>, u64)> {
+        let buffer = &mut self.buffer.write();
+        let timer = Instant::now();
+        let list = buffer.staging.unwrap();
+        buffer.staging.wrap(LinkedList::new());
+
+        let size = buffer.staging_size;
+        buffer.staging_size = 0;
+        buffer.flight_size += size;
+        let flight_id = buffer.flight_inc;
+        buffer.flight_inc += 1;
+
+        let arc_staging = Arc::new(list);
+        let flight = &mut buffer.flight;
+        flight.insert(flight_id, arc_staging.clone());
+
+        Ok(
+            (ExecutionTime::BUFFER_CREATE_FLIGHT(0, 0, timer.elapsed().as_millis()), size, arc_staging.clone(), flight_id)
+        )
+    }
+
+
     pub fn create_flight(&self) -> Result<(ExecutionTime, i64, Vec<Arc<PartitionedDataBlock>>)> {
         let timer = Instant::now();
         let buffer = &mut self.buffer.write();
@@ -165,17 +204,17 @@ impl MemoryBuffer {
 
     pub fn add(&self, blocks: Vec<PartitionedDataBlock>) -> Result<i64> {
         let mut buffer = self.buffer.write();
-        let mut blocks_map = &mut buffer.blocks;
+        let staging = &mut buffer.staging;
 
         let mut block_cnt = 0i64;
         let mut add_size = 0;
-        for block in blocks {
+        for block in &blocks {
             let id = block.block_id;
             let len = block.length;
             add_size += len as i64;
-            blocks_map.insert(id, Arc::new(block));
             block_cnt += 1;
         }
+        staging.get_mut().push_front(blocks);
 
         buffer.staging_size += add_size;
         buffer.total_size += add_size;
@@ -185,9 +224,40 @@ impl MemoryBuffer {
     }
 }
 
+#[derive(Debug)]
+struct Wrapper<T> {
+    obj: Vec<T>
+}
+
+impl<T> Wrapper<T> {
+    fn new() -> Wrapper<T> {
+        Wrapper {
+            obj: vec![],
+        }
+    }
+
+    fn get_mut(&mut self) -> &mut T {
+        self.obj.get_mut(0).unwrap()
+    }
+
+    fn unwrap(&mut self) -> T {
+        self.obj.remove(0)
+    }
+
+    fn wrap(&mut self, t: T) {
+        self.obj.push(t)
+    }
+}
+
+#[derive(Debug)]
+pub enum FLIGHT_ID {
+    ID(u64),
+}
+
 #[cfg(test)]
 mod test {
-    use crate::store::mem::buffer::MemoryBuffer;
+    use std::collections::LinkedList;
+    use crate::store::mem::buffer::{MemoryBuffer, Wrapper};
     use crate::store::PartitionedDataBlock;
     use hashlink::LinkedHashMap;
     use std::sync::RwLock;
@@ -355,9 +425,32 @@ mod test {
         }
     }
 
-    use test::Bencher;
-    #[bench]
-    fn bench_add_two(b: &mut Bencher) {
-        b.iter(|| add_two(2));
+    #[test]
+    fn test_linkedlist() {
+        let mut list: Vec<LinkedList<i32>> = vec![LinkedList::new()];
+        let mut a= list.get_mut(0).unwrap();
+        a.push_front(1);
+
+        let data = list.remove(0);
+        list.push(LinkedList::new());
+    }
+
+    #[test]
+    fn test_wrap() {
+        let mut wrapper = Wrapper::new();
+        let mut list: LinkedList<i64> = LinkedList::new();
+        list.push_front(1i64);
+        wrapper.wrap(list);
+
+        let list = wrapper.get_mut();
+        list.push_front(2);
+        assert_eq!(2, list.len());
+
+        let list = wrapper.unwrap();
+        assert_eq!(2, list.len());
+
+        let mut list = LinkedList::new();
+        list.push_front(10);
+        wrapper.wrap(list);
     }
 }

@@ -428,8 +428,14 @@ impl Store for LocalFileStore {
 
     async fn spill_insert(&self, ctx: SpillWritingViewContext) -> Result<(), WorkerError> {
         let uid = ctx.uid;
-        let blocks: Vec<&PartitionedDataBlock> = ctx.data_blocks.iter().map(|x| (*x).deref()).collect();
-        self.data_insert(uid, blocks).await
+        let mut data = vec![];
+        let linked_blocks = ctx.data_blocks;
+        for blocks in linked_blocks.iter() {
+            for block in blocks {
+                data.push(block);
+            }
+        }
+        self.data_insert(uid, data).await
     }
 }
 
