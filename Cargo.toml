@@ -58,10 +58,10 @@ toml = "0.7.4"
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tonic = "0.9.1"
-prost = "0.11.9"
+tonic = { git = "https://github.com/zuston/tonic.git", branch = "zero_copy_bytes" }
+prost = "0.12.1"
 bytes = "1"
-tonic-build = "0.9.1"
+tonic-build = { git = "https://github.com/zuston/tonic.git", branch = "zero_copy_bytes" }
 thiserror = "1"
 dashmap = "5.4.0"
 log = "0.4.17"
@@ -120,8 +120,8 @@ optional = true
 features = ["stats"]
 
 [build-dependencies]
-tonic-build = "0.9.1"
-prost-build = "0.11.9"
+tonic-build = { git = "https://github.com/zuston/tonic.git", branch = "zero_copy_bytes" }
+prost-build = "0.12.1"
 
 [dev-dependencies]
 env_logger = "0.10.0"
