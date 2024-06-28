@@ -161,6 +161,8 @@ pub async fn write_read_for_one_time(mut client: ShuffleServerClient<Channel>) -
                     }],
                 }],
                 timestamp: 0,
+                stage_attempt_number: 0,
+                contiguous_shuffle_data: Default::default(),
             })
             .await?;
 
