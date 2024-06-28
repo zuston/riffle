@@ -159,8 +159,105 @@ impl ShuffleServer for DefaultShuffleServer {
 
     async fn send_shuffle_data(
         &self,
-        _: Request<SendShuffleDataRequest>,
+        request: Request<SendShuffleDataRequest>,
     ) -> Result<Response<SendShuffleDataResponse>, Status> {
+        let timer = GRPC_SEND_DATA_PROCESS_TIME.start_timer();
+        let req = request.into_inner();
+        GRPC_SEND_DATA_TRANSPORT_TIME
+            .observe(((util::current_timestamp_ms() - req.timestamp as u128) / 1000) as f64);
+
+        let app_id = req.app_id;
+        let shuffle_id: i32 = req.shuffle_id;
+        let ticket_id = req.require_buffer_id;
+
+        let app_option = self.app_manager_ref.get_app(&app_id);
+
+        if app_option.is_none() {
+            return Ok(Response::new(SendShuffleDataResponse {
+                status: StatusCode::NO_REGISTER.into(),
+                ret_msg: "The app is not found".to_string(),
+            }));
+        }
+
+        let app = app_option.unwrap();
+
+        let release_result = app.release_buffer(ticket_id).await;
+        if release_result.is_err() {
+            return Ok(Response::new(SendShuffleDataResponse {
+                status: StatusCode::NO_BUFFER.into(),
+                ret_msg: "No such buffer ticket id, it may be discarded due to timeout".to_string(),
+            }));
+        }
+
+        let contiguous_bytes = req.contiguous_shuffle_data;
+        let ticket_required_size = release_result.unwrap();
+        let mut blocks_map = HashMap::new();
+        for shuffle_data in req.shuffle_data {
+            let data: PartitionedData = shuffle_data.into();
+            let partitioned_blocks = data.blocks;
+
+            let partition_id = data.partition_id;
+            let blocks = blocks_map.entry(partition_id).or_insert_with(|| vec![]);
+            blocks.extend(partitioned_blocks);
+        }
+
+        let mut inserted_failure_occurs = false;
+        let mut inserted_failure_error = None;
+        let mut inserted_total_size = 0;
+
+        for (partition_id, blocks) in blocks_map.into_iter() {
+            if inserted_failure_occurs {
+                continue;
+            }
+
+            let uid = PartitionedUId {
+                app_id: app_id.clone(),
+                shuffle_id,
+                partition_id,
+            };
+            let ctx = WritingViewContext::from(uid.clone(), blocks);
+
+            let inserted = app
+                .insert(ctx)
+                .instrument_await(format!("insert data for app. uid: {:?}", &uid))
+                .await;
+            if inserted.is_err() {
+                let err = format!(
+                    "Errors on putting data. app_id: {}, err: {:?}",
+                    &app_id,
+                    inserted.err()
+                );
+                error!("{}", &err);
+
+                inserted_failure_error = Some(err);
+                inserted_failure_occurs = true;
+                continue;
+            }
+
+            let inserted_size = inserted.unwrap();
+            inserted_total_size += inserted_size as i64;
+        }
+
+        let unused_allocated_size = ticket_required_size - inserted_total_size;
+        if unused_allocated_size != 0 {
+            debug!("The required buffer size:[{:?}] has remaining allocated size:[{:?}] of unused, this should not happen",
+                ticket_required_size, unused_allocated_size);
+            if let Err(e) = app.free_allocated_memory_size(unused_allocated_size).await {
+                warn!(
+                    "Errors on free allocated size: {:?} for app: {:?}. err: {:#?}",
+                    unused_allocated_size, &app_id, e
+                );
+            }
+        }
+
+        if inserted_failure_occurs {
+            return Ok(Response::new(SendShuffleDataResponse {
+                status: StatusCode::INTERNAL_ERROR.into(),
+                ret_msg: inserted_failure_error.unwrap(),
+            }));
+        }
+
+        timer.observe_duration();
         Ok(Response::new(SendShuffleDataResponse {
             status: StatusCode::SUCCESS.into(),
             ret_msg: "".to_string(),
