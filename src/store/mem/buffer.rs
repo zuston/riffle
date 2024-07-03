@@ -56,15 +56,17 @@ impl BufferInternal {
 
 impl MemoryBuffer {
     pub fn new() -> MemoryBuffer {
+        let partition_num = 10;
+        let mut buffers = vec![];
+        for _ in 0..partition_num {
+            buffers.push(
+                RwLock::new(BufferInternal::new())
+            );
+        }
         MemoryBuffer {
             buffer: RwLock::new(BufferInternal::new()),
-            buffers: vec![
-                RwLock::new(BufferInternal::new()),
-                RwLock::new(BufferInternal::new()),
-                RwLock::new(BufferInternal::new()),
-                RwLock::new(BufferInternal::new()),
-            ],
-            partitions: 4,
+            buffers,
+            partitions: partition_num,
         }
     }
 
@@ -481,5 +483,13 @@ mod test {
     #[test]
     fn test_cache_line() {
 
+    }
+
+    #[test]
+    fn test_hash() {
+        let id = 10;
+        assert_eq!(1, id % 9);
+        assert_eq!(2, id % 8);
+        assert_eq!(10, id % 20);
     }
 }

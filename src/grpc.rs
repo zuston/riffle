@@ -190,11 +190,19 @@ impl ShuffleServer for DefaultShuffleServer {
         }
 
         let contiguous_bytes = req.contiguous_shuffle_data;
+        let mut offset = 0usize;
+
         let ticket_required_size = release_result.unwrap();
         let mut blocks_map = HashMap::new();
         for shuffle_data in req.shuffle_data {
             let data: PartitionedData = shuffle_data.into();
-            let partitioned_blocks = data.blocks;
+            let mut partitioned_blocks = data.blocks;
+            for mut partitioned_block in &mut partitioned_blocks {
+                let len = partitioned_block.length;
+                let bytes = contiguous_bytes.slice(offset..(len as usize + offset));
+                partitioned_block.data = bytes;
+                offset += len as usize;
+            }
 
             let partition_id = data.partition_id;
             let blocks = blocks_map.entry(partition_id).or_insert_with(|| vec![]);
