@@ -3862,6 +3862,7 @@ dependencies = [
  "croaring",
  "crossbeam",
  "crossbeam-channel",
+ "crossbeam-utils",
  "dashmap",
  "env_logger",
  "fs2",

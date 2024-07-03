@@ -1,4 +1,5 @@
 use std::collections::{HashMap, LinkedList};
+use std::hash::Hash;
 use crate::store::{ExecutionTime, PartitionedDataBlock};
 use anyhow::Result;
 use croaring::Treemap;
@@ -10,6 +11,10 @@ use std::time::Instant;
 
 pub struct MemoryBuffer {
     buffer: RwLock<BufferInternal>,
+
+    // segment locks
+    buffers: Vec<RwLock<BufferInternal>>,
+    partitions: u32,
 }
 
 #[derive(Debug)]
@@ -30,24 +35,36 @@ pub struct BufferInternal {
     flight_inc: u64,
 }
 
-impl MemoryBuffer {
-    pub fn new() -> MemoryBuffer {
+impl BufferInternal {
+    fn new() -> Self {
         let mut staging_wrapper = Wrapper::new();
         staging_wrapper.wrap(LinkedList::new());
+        BufferInternal {
+            total_size: 0,
+            staging_size: 0,
+            flight_size: 0,
+            staging_block_num: 0,
+            flight_block_num: 0,
+            blocks: Default::default(),
+            boundary_block_id: 0,
+            staging: staging_wrapper,
+            flight: Default::default(),
+            flight_inc: 0,
+        }
+    }
+}
 
+impl MemoryBuffer {
+    pub fn new() -> MemoryBuffer {
         MemoryBuffer {
-            buffer: RwLock::new(BufferInternal {
-                total_size: 0,
-                staging_size: 0,
-                flight_size: 0,
-                staging_block_num: 0,
-                flight_block_num: 0,
-                blocks: Default::default(),
-                boundary_block_id: -1,
-                staging: staging_wrapper,
-                flight: Default::default(),
-                flight_inc: 0,
-            }),
+            buffer: RwLock::new(BufferInternal::new()),
+            buffers: vec![
+                RwLock::new(BufferInternal::new()),
+                RwLock::new(BufferInternal::new()),
+                RwLock::new(BufferInternal::new()),
+                RwLock::new(BufferInternal::new()),
+            ],
+            partitions: 4,
         }
     }
 
@@ -202,8 +219,15 @@ impl MemoryBuffer {
         ))
     }
 
+    fn hash(&self, task_attempt_id: i64) -> usize {
+        (task_attempt_id % self.partitions as i64) as usize
+    }
+
     pub fn add(&self, blocks: Vec<PartitionedDataBlock>) -> Result<i64> {
-        let mut buffer = self.buffer.write();
+        let hash_idx = self.hash(blocks.get(0).unwrap().task_attempt_id);
+        let buffer= self.buffers.get(hash_idx).unwrap();
+        let mut buffer = buffer.write();
+
         let staging = &mut buffer.staging;
 
         let mut block_cnt = 0i64;
@@ -452,5 +476,10 @@ mod test {
         let mut list = LinkedList::new();
         list.push_front(10);
         wrapper.wrap(list);
+    }
+
+    #[test]
+    fn test_cache_line() {
+
     }
 }
