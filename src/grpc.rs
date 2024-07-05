@@ -40,6 +40,7 @@ use croaring::Treemap;
 use std::collections::HashMap;
 
 use log::{debug, error, info, warn};
+use rand::seq::SliceRandom;
 
 use crate::metric::{
     GRPC_BUFFER_REQUIRE_PROCESS_TIME, GRPC_GET_LOCALFILE_DATA_PROCESS_TIME,
@@ -213,7 +214,14 @@ impl ShuffleServer for DefaultShuffleServer {
         let mut inserted_failure_error = None;
         let mut inserted_total_size = 0;
 
-        for (partition_id, blocks) in blocks_map.into_iter() {
+        let mut shuffled_blocks: Vec<_> = blocks_map.into_iter().collect();
+        let mut shuffled_blocks: Vec<_> = {
+            let mut rng = rand::thread_rng();
+            shuffled_blocks.shuffle(&mut rng);
+            shuffled_blocks
+        };
+
+        for (partition_id, blocks) in shuffled_blocks {
             if inserted_failure_occurs {
                 continue;
             }

@@ -99,6 +99,7 @@ cap = "0.1.2"
 spin = "0.9.8"
 opendal = { version = "0.44.0", features = ["services-fs"]}
 hashlink = "0.9.1"
+rand = "0.8.5"
 
 [dependencies.hdfs-native]
 version = "0.7.0"

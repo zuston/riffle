@@ -3879,6 +3879,7 @@ dependencies = [
  "prometheus",
  "prost 0.12.3",
  "prost-build",
+ "rand 0.8.5",
  "serde",
  "signal-hook",
  "socket2 0.4.9",
