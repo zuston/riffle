@@ -1,20 +1,30 @@
-use std::collections::{HashMap, LinkedList};
-use std::hash::Hash;
 use crate::store::{ExecutionTime, PartitionedDataBlock};
 use anyhow::Result;
 use croaring::Treemap;
 use hashlink::LinkedHashMap;
+use once_cell::sync::Lazy;
+use rand::distributions::uniform::SampleBorrow;
 use spin::RwLock;
+use std::collections::{HashMap, LinkedList};
+use std::hash::Hash;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Instant;
+
+pub static SHARD_NUMBER: Lazy<i32> = Lazy::new(|| {
+    let shard = std::env::var("MEM_BUFFER_SHARD_NUMBER").map_or(1, |v| {
+        let shard: i32 = v.as_str().parse().unwrap();
+        shard
+    });
+    shard
+});
 
 pub struct MemoryBuffer {
     buffer: RwLock<BufferInternal>,
 
     // segment locks
     buffers: Vec<std::sync::RwLock<BufferInternal>>,
-    partitions: u32,
+    shards_num: u32,
 }
 
 #[derive(Debug)]
@@ -56,17 +66,15 @@ impl BufferInternal {
 
 impl MemoryBuffer {
     pub fn new() -> MemoryBuffer {
-        let partition_num = 1;
+        let shards = SHARD_NUMBER.to_owned() as u32;
         let mut buffers = vec![];
-        for _ in 0..partition_num {
-            buffers.push(
-                std::sync::RwLock::new(BufferInternal::new())
-            );
+        for _ in 0..shards {
+            buffers.push(std::sync::RwLock::new(BufferInternal::new()));
         }
         MemoryBuffer {
             buffer: RwLock::new(BufferInternal::new()),
             buffers,
-            partitions: partition_num,
+            shards_num: shards,
         }
     }
 
@@ -133,7 +141,7 @@ impl MemoryBuffer {
                 Some(block) => {
                     block_cnt += 1;
                     removed += block.length;
-                },
+                }
                 _ => {
                     // ignore
                 }
@@ -151,7 +159,14 @@ impl MemoryBuffer {
         flight.remove(&flight_id);
     }
 
-    pub fn create_flight_v2(&self) -> Result<(ExecutionTime, i64, Arc<LinkedList<Vec<PartitionedDataBlock>>>, u64)> {
+    pub fn create_flight_v2(
+        &self,
+    ) -> Result<(
+        ExecutionTime,
+        i64,
+        Arc<LinkedList<Vec<PartitionedDataBlock>>>,
+        u64,
+    )> {
         let buffer = &mut self.buffer.write();
         let timer = Instant::now();
         let list = buffer.staging.unwrap();
@@ -167,11 +182,13 @@ impl MemoryBuffer {
         let flight = &mut buffer.flight;
         flight.insert(flight_id, arc_staging.clone());
 
-        Ok(
-            (ExecutionTime::BUFFER_CREATE_FLIGHT(0, 0, timer.elapsed().as_millis()), size, arc_staging.clone(), flight_id)
-        )
+        Ok((
+            ExecutionTime::BUFFER_CREATE_FLIGHT(0, 0, timer.elapsed().as_millis()),
+            size,
+            arc_staging.clone(),
+            flight_id,
+        ))
     }
-
 
     pub fn create_flight(&self) -> Result<(ExecutionTime, i64, Vec<Arc<PartitionedDataBlock>>)> {
         let timer = Instant::now();
@@ -222,12 +239,12 @@ impl MemoryBuffer {
     }
 
     fn hash(&self, task_attempt_id: i64) -> usize {
-        (task_attempt_id % self.partitions as i64) as usize
+        (task_attempt_id % self.shards_num as i64) as usize
     }
 
     pub fn add(&self, blocks: Vec<PartitionedDataBlock>) -> Result<i64> {
         let hash_idx = self.hash(blocks.get(0).unwrap().task_attempt_id);
-        let buffer= self.buffers.get(hash_idx).unwrap();
+        let buffer = self.buffers.get(hash_idx).unwrap();
         let mut buffer = buffer.write().unwrap();
 
         let staging = &mut buffer.staging;
@@ -252,14 +269,12 @@ impl MemoryBuffer {
 
 #[derive(Debug)]
 struct Wrapper<T> {
-    obj: Vec<T>
+    obj: Vec<T>,
 }
 
 impl<T> Wrapper<T> {
     fn new() -> Wrapper<T> {
-        Wrapper {
-            obj: vec![],
-        }
+        Wrapper { obj: vec![] }
     }
 
     fn get_mut(&mut self) -> &mut T {
@@ -282,10 +297,10 @@ pub enum FLIGHT_ID {
 
 #[cfg(test)]
 mod test {
-    use std::collections::LinkedList;
     use crate::store::mem::buffer::{MemoryBuffer, Wrapper};
     use crate::store::PartitionedDataBlock;
     use hashlink::LinkedHashMap;
+    use std::collections::LinkedList;
     use std::sync::RwLock;
 
     fn create_blocks(start_block_idx: i32, cnt: i32, len: i32) -> Vec<PartitionedDataBlock> {
@@ -409,7 +424,7 @@ mod test {
 
         struct LockedStruct {
             lock: RwLock<i64>,
-            inner: MyStruct
+            inner: MyStruct,
         }
 
         impl LockedStruct {
@@ -454,7 +469,7 @@ mod test {
     #[test]
     fn test_linkedlist() {
         let mut list: Vec<LinkedList<i32>> = vec![LinkedList::new()];
-        let mut a= list.get_mut(0).unwrap();
+        let mut a = list.get_mut(0).unwrap();
         a.push_front(1);
 
         let data = list.remove(0);
@@ -481,9 +496,7 @@ mod test {
     }
 
     #[test]
-    fn test_cache_line() {
-
-    }
+    fn test_cache_line() {}
 
     #[test]
     fn test_hash() {

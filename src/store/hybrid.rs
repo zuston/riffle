@@ -35,7 +35,10 @@ use crate::store::hdfs::HdfsStore;
 use crate::store::localfile::LocalFileStore;
 use crate::store::memory::{MemorySnapshot, MemoryStore};
 
-use crate::store::{ExecutionTime, PartitionedDataBlock, Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex, SpillWritingViewContext, Store};
+use crate::store::{
+    ExecutionTime, PartitionedDataBlock, Persistent, RequireBufferResponse, ResponseData,
+    ResponseDataIndex, SpillWritingViewContext, Store,
+};
 use anyhow::{anyhow, Result};
 
 use async_trait::async_trait;
@@ -322,7 +325,8 @@ impl HybridStore {
             .clear_flight_blocks_v2(uid.clone(), message.flight_id)
             .await?;
         self.hot_store.free_used(data_size).await?;
-        self.hot_store.desc_to_in_flight_buffer_size(data_size as u64);
+        self.hot_store
+            .desc_to_in_flight_buffer_size(data_size as u64);
         Ok(())
     }
 }
@@ -578,7 +582,7 @@ pub async fn watermark_flush(store: Arc<HybridStore>) -> Result<()> {
         let (exec_time_snapshot, spill_size, blocks, flight_id) = buffer.create_flight_v2()?;
         let (lock_time_ms, search_time_ms, execution_time_ms) = match exec_time_snapshot {
             ExecutionTime::BUFFER_CREATE_FLIGHT(a, b, c) => (a, b, c),
-            _ => (0, 0, 0)
+            _ => (0, 0, 0),
         };
         lock_time += lock_time_ms;
         exec_time += execution_time_ms;

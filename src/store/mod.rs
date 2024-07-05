@@ -23,8 +23,6 @@ pub mod localfile;
 pub mod mem;
 pub mod memory;
 
-use std::collections::LinkedList;
-use std::fmt::{Display, Formatter};
 use crate::app::{
     PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingViewContext,
     RegisterAppContext, ReleaseBufferContext, RequireBufferContext, WritingViewContext,
@@ -33,6 +31,8 @@ use crate::config::{Config, StorageType};
 use crate::error::WorkerError;
 use crate::proto::uniffle::{ShuffleData, ShuffleDataBlockSegment};
 use crate::store::hybrid::HybridStore;
+use std::collections::LinkedList;
+use std::fmt::{Display, Formatter};
 
 use crate::util::current_timestamp_sec;
 use anyhow::Result;
@@ -40,8 +40,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 
 use crate::runtime::manager::RuntimeManager;
-use std::sync::Arc;
 use env_logger::fmt::Color::Magenta;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct PartitionedData {
@@ -215,14 +215,14 @@ impl SpillWritingViewContext {
 
 // ==================
 pub enum ExecutionTime {
-    BUFFER_CREATE_FLIGHT(u128, u128, u128)
+    BUFFER_CREATE_FLIGHT(u128, u128, u128),
 }
 
 impl Display for ExecutionTime {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             ExecutionTime::BUFFER_CREATE_FLIGHT(x, y, z) => write!(f, "execution time shown:"),
-            _ => write!(f, "Nothing display")
+            _ => write!(f, "Nothing display"),
         }
     }
 }

@@ -24,7 +24,10 @@ use crate::config::{LocalfileStoreConfig, StorageType};
 use crate::error::WorkerError;
 use crate::metric::TOTAL_LOCALFILE_USED;
 use crate::store::ResponseDataIndex::Local;
-use crate::store::{LocalDataIndex, PartitionedDataBlock, PartitionedLocalData, Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex, SpillWritingViewContext, Store};
+use crate::store::{
+    LocalDataIndex, PartitionedDataBlock, PartitionedLocalData, Persistent, RequireBufferResponse,
+    ResponseData, ResponseDataIndex, SpillWritingViewContext, Store,
+};
 use std::ops::Deref;
 use std::path::Path;
 
@@ -169,7 +172,11 @@ impl LocalFileStore {
         }
     }
 
-    async fn data_insert(&self, uid: PartitionedUId, blocks: Vec<&PartitionedDataBlock>) -> Result<(), WorkerError> {
+    async fn data_insert(
+        &self,
+        uid: PartitionedUId,
+        blocks: Vec<&PartitionedDataBlock>,
+    ) -> Result<(), WorkerError> {
         let (data_file_path, index_file_path) =
             LocalFileStore::gen_relative_path_for_partition(&uid);
 
