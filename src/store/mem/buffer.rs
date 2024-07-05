@@ -13,7 +13,7 @@ pub struct MemoryBuffer {
     buffer: RwLock<BufferInternal>,
 
     // segment locks
-    buffers: Vec<RwLock<BufferInternal>>,
+    buffers: Vec<std::sync::RwLock<BufferInternal>>,
     partitions: u32,
 }
 
@@ -56,11 +56,11 @@ impl BufferInternal {
 
 impl MemoryBuffer {
     pub fn new() -> MemoryBuffer {
-        let partition_num = 10;
+        let partition_num = 1;
         let mut buffers = vec![];
         for _ in 0..partition_num {
             buffers.push(
-                RwLock::new(BufferInternal::new())
+                std::sync::RwLock::new(BufferInternal::new())
             );
         }
         MemoryBuffer {
@@ -228,7 +228,7 @@ impl MemoryBuffer {
     pub fn add(&self, blocks: Vec<PartitionedDataBlock>) -> Result<i64> {
         let hash_idx = self.hash(blocks.get(0).unwrap().task_attempt_id);
         let buffer= self.buffers.get(hash_idx).unwrap();
-        let mut buffer = buffer.write();
+        let mut buffer = buffer.write().unwrap();
 
         let staging = &mut buffer.staging;
 
