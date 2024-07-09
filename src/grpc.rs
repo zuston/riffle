@@ -231,11 +231,11 @@ impl ShuffleServer for DefaultShuffleServer {
                 shuffle_id,
                 partition_id,
             };
-            let ctx = WritingViewContext::from(uid.clone(), blocks);
-
+            let await_tree_msg = format!("insert data for app. appId: {:?}", &uid.app_id);
+            let ctx = WritingViewContext::from(uid, blocks);
             let inserted = app
                 .insert(ctx)
-                .instrument_await(format!("insert data for app. uid: {:?}", &uid))
+                .instrument_await(await_tree_msg)
                 .await;
             if inserted.is_err() {
                 let err = format!(
