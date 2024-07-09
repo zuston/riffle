@@ -40,15 +40,15 @@ pub struct BufferInternal {
     // the boundary blockId to distinguish the staging and flush blocks
     boundary_block_id: i64,
 
-    staging: Wrapper<LinkedList<Vec<PartitionedDataBlock>>>,
-    flight: HashMap<u64, Arc<LinkedList<Vec<PartitionedDataBlock>>>>,
+    staging: Wrapper<Vec<Vec<PartitionedDataBlock>>>,
+    flight: HashMap<u64, Arc<Vec<Vec<PartitionedDataBlock>>>>,
     flight_inc: u64,
 }
 
 impl BufferInternal {
     fn new() -> Self {
         let mut staging_wrapper = Wrapper::new();
-        staging_wrapper.wrap(LinkedList::new());
+        staging_wrapper.wrap(Vec::new());
         BufferInternal {
             total_size: 0,
             staging_size: 0,
@@ -170,7 +170,7 @@ impl MemoryBuffer {
         let buffer = &mut self.buffer.write();
         let timer = Instant::now();
         let list = buffer.staging.unwrap();
-        buffer.staging.wrap(LinkedList::new());
+        buffer.staging.wrap(Vec::new());
 
         let size = buffer.staging_size;
         buffer.staging_size = 0;
@@ -185,7 +185,7 @@ impl MemoryBuffer {
         Ok((
             ExecutionTime::BUFFER_CREATE_FLIGHT(0, 0, timer.elapsed().as_millis()),
             size,
-            arc_staging.clone(),
+            Arc::new(LinkedList::new()),
             flight_id,
         ))
     }
@@ -257,7 +257,7 @@ impl MemoryBuffer {
             add_size += len as i64;
             block_cnt += 1;
         }
-        staging.get_mut().push_front(blocks);
+        staging.get_mut().push(blocks);
 
         buffer.staging_size += add_size;
         buffer.total_size += add_size;
