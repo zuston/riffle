@@ -256,7 +256,7 @@ impl Store for MemoryStore {
 
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
         let uid = ctx.uid;
-        let buffer = self.get_or_create_underlying_staging_buffer(uid.clone());
+        let buffer = self.get_or_create_underlying_staging_buffer(uid);
         let blocks = ctx.data_blocks;
         let inserted_size = buffer.add(blocks)?;
 
