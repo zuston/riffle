@@ -1,85 +1,86 @@
+use std::sync::Arc;
 use crate::metric::{GAUGE_MEMORY_ALLOCATED, GAUGE_MEMORY_CAPACITY, GAUGE_MEMORY_USED};
 use crate::store::mem::capacity::CapacitySnapshot;
 use anyhow::Result;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 #[derive(Clone)]
 pub struct MemoryBudget {
-    inner: Arc<std::sync::Mutex<MemoryBudgetInner>>,
-}
-
-struct MemoryBudgetInner {
     capacity: i64,
-    allocated: i64,
-    used: i64,
-    allocation_incr_id: i64,
+    allocated: Arc<AtomicI64>,
+    used: Arc<AtomicI64>,
+    allocation_incr_id: Arc<AtomicI64>,
 }
 
 impl MemoryBudget {
-    fn new(capacity: i64) -> MemoryBudget {
+    pub(crate) fn new(capacity: i64) -> MemoryBudget {
         GAUGE_MEMORY_CAPACITY.set(capacity);
         MemoryBudget {
-            inner: Arc::new(std::sync::Mutex::new(MemoryBudgetInner {
-                capacity,
-                allocated: 0,
-                used: 0,
-                allocation_incr_id: 0,
-            })),
+            capacity,
+            allocated: Default::default(),
+            used: Default::default(),
+            allocation_incr_id: Default::default(),
         }
     }
 
     pub fn snapshot(&self) -> CapacitySnapshot {
-        let inner = self.inner.lock().unwrap();
-        (inner.capacity, inner.allocated, inner.used).into()
+        (self.capacity, self.allocated.load(Ordering::Relaxed), self.used.load(Ordering::Relaxed)).into()
     }
 
-    fn pre_allocate(&self, size: i64) -> Result<(bool, i64)> {
-        let mut inner = self.inner.lock().unwrap();
-        let free_space = inner.capacity - inner.allocated - inner.used;
+    pub(crate) fn pre_allocate(&self, size: i64) -> Result<(bool, i64)> {
+        let capacity = self.capacity;
+        let allocated = self.allocated.load(Ordering::SeqCst);
+        let used = self.used.load(Ordering::SeqCst);
+
+        let free_space = capacity - allocated - used;
         if free_space < size {
             Ok((false, -1))
         } else {
-            inner.allocated += size;
-            let now = inner.allocation_incr_id;
-            inner.allocation_incr_id += 1;
-            GAUGE_MEMORY_ALLOCATED.set(inner.allocated);
-            Ok((true, now))
+            self.allocated.fetch_add(size, Ordering::SeqCst);
+            GAUGE_MEMORY_ALLOCATED.set(allocated + size);
+            let id = self.allocation_incr_id.fetch_add(1, Ordering::SeqCst);
+            Ok((true, id))
         }
     }
 
-    fn allocated_to_used(&self, size: i64) -> Result<bool> {
-        let mut inner = self.inner.lock().unwrap();
-        if inner.allocated < size {
-            inner.allocated = 0;
+    pub(crate) fn allocated_to_used(&self, size: i64) -> Result<bool> {
+        let mut allocated = self.allocated.load(Ordering::SeqCst);
+        if allocated < size {
+            self.allocated.store(0, Ordering::SeqCst);
+            allocated = 0;
         } else {
-            inner.allocated -= size;
+            self.allocated.fetch_add(-size, Ordering::SeqCst);
+            allocated -= size;
         }
-        inner.used += size;
-        GAUGE_MEMORY_ALLOCATED.set(inner.allocated);
-        GAUGE_MEMORY_USED.set(inner.used);
+        let previous = self.used.fetch_add(size, Ordering::SeqCst);
+        GAUGE_MEMORY_ALLOCATED.set(allocated);
+        GAUGE_MEMORY_USED.set(previous + size);
         Ok(true)
     }
 
-    fn free_used(&self, size: i64) -> Result<bool> {
-        let mut inner = self.inner.lock().unwrap();
-        if inner.used < size {
-            inner.used = 0;
-            // todo: metric
+    pub(crate) fn free_used(&self, size: i64) -> Result<bool> {
+        let mut used = self.used.load(Ordering::SeqCst);
+        if used < size {
+            self.used.store(0, Ordering::SeqCst);
+            used = 0;
         } else {
-            inner.used -= size;
+            self.used.fetch_add(-size, Ordering::SeqCst);
+            used -= size;
         }
-        GAUGE_MEMORY_USED.set(inner.used);
+        GAUGE_MEMORY_USED.set(used);
         Ok(true)
     }
 
-    fn free_allocated(&self, size: i64) -> Result<bool> {
-        let mut inner = self.inner.lock().unwrap();
-        if inner.allocated < size {
-            inner.allocated = 0;
+    pub fn free_allocated(&self, size: i64) -> Result<bool> {
+        let mut allocated = self.allocated.load(Ordering::SeqCst);
+        if allocated < size {
+            self.allocated.store(0, Ordering::SeqCst);
+            allocated = 0;
         } else {
-            inner.allocated -= size;
+            self.allocated.fetch_add(-size, Ordering::SeqCst);
+            allocated -= size;
         }
-        GAUGE_MEMORY_ALLOCATED.set(inner.allocated);
+        GAUGE_MEMORY_ALLOCATED.set(allocated);
         Ok(true)
     }
 }

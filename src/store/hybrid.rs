@@ -57,6 +57,7 @@ use std::sync::Arc;
 use crate::runtime::manager::RuntimeManager;
 use tokio::sync::Semaphore;
 use tokio::time::Instant;
+use crate::store::mem::capacity::CapacitySnapshot;
 
 trait PersistentStore: Store + Persistent + Send + Sync {}
 impl PersistentStore for LocalFileStore {}
@@ -275,7 +276,7 @@ impl HybridStore {
         self.hot_store.free_allocated(size).await
     }
 
-    pub async fn get_hot_store_memory_snapshot(&self) -> Result<MemorySnapshot> {
+    pub async fn get_hot_store_memory_snapshot(&self) -> Result<CapacitySnapshot> {
         self.hot_store.memory_snapshot().await
     }
 

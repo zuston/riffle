@@ -53,6 +53,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+use crate::store::mem::capacity::CapacitySnapshot;
 
 pub static SHUFFLE_SERVER_ID: OnceLock<String> = OnceLock::new();
 
@@ -652,7 +653,7 @@ impl AppManager {
         self.store.is_healthy().await
     }
 
-    pub async fn store_memory_snapshot(&self) -> Result<MemorySnapshot> {
+    pub async fn store_memory_snapshot(&self) -> Result<CapacitySnapshot> {
         self.store.get_hot_store_memory_snapshot().await
     }
 

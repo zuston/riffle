@@ -22,9 +22,7 @@ use crate::app::{
 };
 use crate::config::{MemoryStoreConfig, StorageType};
 use crate::error::WorkerError;
-use crate::metric::{
-    GAUGE_MEMORY_ALLOCATED, GAUGE_MEMORY_CAPACITY, GAUGE_MEMORY_USED, TOTAL_MEMORY_USED,
-};
+use crate::metric::TOTAL_MEMORY_USED;
 use crate::readable_size::ReadableSize;
 use crate::store::{
     DataSegment, PartitionedDataBlock, PartitionedMemoryData, RequireBufferResponse, ResponseData,
@@ -44,6 +42,8 @@ use crate::store::mem::ticket::TicketManager;
 use croaring::Treemap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use crate::store::mem::budget::MemoryBudget;
+use crate::store::mem::capacity::CapacitySnapshot;
 
 pub struct MemoryStore {
     state: DashMap<PartitionedUId, Arc<MemoryBuffer>>,
@@ -106,13 +106,7 @@ impl MemoryStore {
         }
     }
 
-    // todo: make this used size as a var
-    pub async fn memory_usage_ratio(&self) -> f32 {
-        let snapshot = self.budget.snapshot();
-        snapshot.get_used_percent()
-    }
-
-    pub async fn memory_snapshot(&self) -> Result<MemorySnapshot> {
+    pub async fn memory_snapshot(&self) -> Result<CapacitySnapshot> {
         Ok(self.budget.snapshot())
     }
 
@@ -122,9 +116,9 @@ impl MemoryStore {
 
     pub async fn memory_used_ratio(&self) -> f32 {
         let snapshot = self.budget.snapshot();
-        (snapshot.used + snapshot.allocated
+        (snapshot.get_used() + snapshot.get_allocated()
             - self.in_flush_buffer_size.load(Ordering::SeqCst) as i64) as f32
-            / snapshot.capacity as f32
+            / snapshot.get_capacity() as f32
     }
 
     pub fn add_to_in_flight_buffer_size(&self, size: u64) {
@@ -151,7 +145,7 @@ impl MemoryStore {
         // 2. get the spill buffers until reaching the single max batch size
 
         let snapshot = self.budget.snapshot();
-        let required_spilled_size = snapshot.used - target_len;
+        let required_spilled_size = snapshot.get_used() - target_len;
         if required_spilled_size <= 0 {
             return HashMap::new();
         }
@@ -409,102 +403,6 @@ impl From<(i64, i64, i64)> for MemorySnapshot {
             allocated: value.1,
             used: value.2,
         }
-    }
-}
-
-impl MemorySnapshot {
-    pub fn get_capacity(&self) -> i64 {
-        self.capacity
-    }
-    pub fn get_allocated(&self) -> i64 {
-        self.allocated
-    }
-    pub fn get_used(&self) -> i64 {
-        self.used
-    }
-    fn get_used_percent(&self) -> f32 {
-        (self.allocated + self.used) as f32 / self.capacity as f32
-    }
-}
-
-#[derive(Clone)]
-pub struct MemoryBudget {
-    inner: Arc<std::sync::Mutex<MemoryBudgetInner>>,
-}
-
-struct MemoryBudgetInner {
-    capacity: i64,
-    allocated: i64,
-    used: i64,
-    allocation_incr_id: i64,
-}
-
-impl MemoryBudget {
-    fn new(capacity: i64) -> MemoryBudget {
-        GAUGE_MEMORY_CAPACITY.set(capacity);
-        MemoryBudget {
-            inner: Arc::new(std::sync::Mutex::new(MemoryBudgetInner {
-                capacity,
-                allocated: 0,
-                used: 0,
-                allocation_incr_id: 0,
-            })),
-        }
-    }
-
-    pub fn snapshot(&self) -> MemorySnapshot {
-        let inner = self.inner.lock().unwrap();
-        (inner.capacity, inner.allocated, inner.used).into()
-    }
-
-    fn pre_allocate(&self, size: i64) -> Result<(bool, i64)> {
-        let mut inner = self.inner.lock().unwrap();
-        let free_space = inner.capacity - inner.allocated - inner.used;
-        if free_space < size {
-            Ok((false, -1))
-        } else {
-            inner.allocated += size;
-            let now = inner.allocation_incr_id;
-            inner.allocation_incr_id += 1;
-            GAUGE_MEMORY_ALLOCATED.set(inner.allocated);
-            Ok((true, now))
-        }
-    }
-
-    fn allocated_to_used(&self, size: i64) -> Result<bool> {
-        let mut inner = self.inner.lock().unwrap();
-        if inner.allocated < size {
-            inner.allocated = 0;
-        } else {
-            inner.allocated -= size;
-        }
-        inner.used += size;
-        GAUGE_MEMORY_ALLOCATED.set(inner.allocated);
-        GAUGE_MEMORY_USED.set(inner.used);
-        Ok(true)
-    }
-
-    fn free_used(&self, size: i64) -> Result<bool> {
-        let mut inner = self.inner.lock().unwrap();
-        if inner.used < size {
-            inner.used = 0;
-            // todo: metric
-        } else {
-            inner.used -= size;
-        }
-        GAUGE_MEMORY_USED.set(inner.used);
-        Ok(true)
-    }
-
-    fn free_allocated(&self, size: i64) -> Result<bool> {
-        let mut inner = self.inner.lock().unwrap();
-        if inner.allocated < size {
-            inner.allocated = 0;
-        } else {
-            inner.allocated -= size;
-        }
-        GAUGE_MEMORY_ALLOCATED.set(inner.allocated);
-        Ok(true)
     }
 }
 
@@ -832,8 +730,8 @@ mod test {
             "Arc should not exist after purge"
         );
         let snapshot = store.budget.snapshot();
-        assert_eq!(snapshot.used, 0);
-        assert_eq!(snapshot.capacity, 1024);
+        assert_eq!(snapshot.get_used(), 0);
+        assert_eq!(snapshot.get_capacity(), 1024);
         let data = runtime.wait(store.get(reading_ctx.clone())).expect("");
         assert_eq!(0, data.from_memory().shuffle_data_block_segments.len());
 
