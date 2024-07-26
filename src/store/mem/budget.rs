@@ -1,8 +1,8 @@
-use std::sync::Arc;
 use crate::metric::{GAUGE_MEMORY_ALLOCATED, GAUGE_MEMORY_CAPACITY, GAUGE_MEMORY_USED};
 use crate::store::mem::capacity::CapacitySnapshot;
 use anyhow::Result;
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct MemoryBudget {
@@ -24,7 +24,12 @@ impl MemoryBudget {
     }
 
     pub fn snapshot(&self) -> CapacitySnapshot {
-        (self.capacity, self.allocated.load(Ordering::Relaxed), self.used.load(Ordering::Relaxed)).into()
+        (
+            self.capacity,
+            self.allocated.load(Ordering::Relaxed),
+            self.used.load(Ordering::Relaxed),
+        )
+            .into()
     }
 
     pub(crate) fn pre_allocate(&self, size: i64) -> Result<(bool, i64)> {

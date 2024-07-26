@@ -23,6 +23,7 @@ use std::path::Path;
 pub struct MemoryStoreConfig {
     pub capacity: String,
     pub buffer_ticket_timeout_sec: Option<i64>,
+    pub dashmap_shard_amount: Option<usize>,
 }
 
 impl MemoryStoreConfig {
@@ -30,6 +31,7 @@ impl MemoryStoreConfig {
         Self {
             capacity,
             buffer_ticket_timeout_sec: Some(5 * 60),
+            dashmap_shard_amount: Some(96),
         }
     }
 
@@ -37,6 +39,7 @@ impl MemoryStoreConfig {
         Self {
             capacity,
             buffer_ticket_timeout_sec: Some(buffer_ticket_timeout_sec),
+            dashmap_shard_amount: Some(96),
         }
     }
 }

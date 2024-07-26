@@ -25,8 +25,8 @@ use crate::error::WorkerError;
 use crate::metric::TOTAL_LOCALFILE_USED;
 use crate::store::ResponseDataIndex::Local;
 use crate::store::{
-    LocalDataIndex, PartitionedDataBlock, PartitionedLocalData, Persistent, RequireBufferResponse,
-    ResponseData, ResponseDataIndex, SpillWritingViewContext, Store,
+    Block, LocalDataIndex, PartitionedLocalData, Persistent, RequireBufferResponse, ResponseData,
+    ResponseDataIndex, SpillWritingViewContext, Store,
 };
 use std::ops::Deref;
 use std::path::Path;
@@ -175,7 +175,7 @@ impl LocalFileStore {
     async fn data_insert(
         &self,
         uid: PartitionedUId,
-        blocks: Vec<&PartitionedDataBlock>,
+        blocks: Vec<&Block>,
     ) -> Result<(), WorkerError> {
         let (data_file_path, index_file_path) =
             LocalFileStore::gen_relative_path_for_partition(&uid);
@@ -274,7 +274,7 @@ impl Store for LocalFileStore {
         }
 
         let uid = ctx.uid;
-        let blocks: Vec<&PartitionedDataBlock> = ctx.data_blocks.iter().collect();
+        let blocks: Vec<&Block> = ctx.data_blocks.iter().collect();
         self.data_insert(uid, blocks).await
     }
 
@@ -436,8 +436,8 @@ impl Store for LocalFileStore {
     async fn spill_insert(&self, ctx: SpillWritingViewContext) -> Result<(), WorkerError> {
         let uid = ctx.uid;
         let mut data = vec![];
-        let linked_blocks = ctx.data_blocks;
-        for blocks in linked_blocks.iter() {
+        let batch_memory_block = ctx.data_blocks;
+        for blocks in batch_memory_block.iter() {
             for block in blocks {
                 data.push(block);
             }
@@ -455,7 +455,7 @@ mod test {
     use crate::store::localfile::LocalFileStore;
 
     use crate::error::WorkerError;
-    use crate::store::{PartitionedDataBlock, ResponseData, ResponseDataIndex, Store};
+    use crate::store::{Block, ResponseData, ResponseDataIndex, Store};
     use bytes::{Buf, Bytes, BytesMut};
     use log::{error, info};
 
@@ -471,7 +471,7 @@ mod test {
         let writing_ctx = WritingViewContext::from(
             uid.clone(),
             vec![
-                PartitionedDataBlock {
+                Block {
                     block_id: 0,
                     length: size as i32,
                     uncompress_length: 200,
@@ -479,7 +479,7 @@ mod test {
                     data: Bytes::copy_from_slice(data),
                     task_attempt_id: 0,
                 },
-                PartitionedDataBlock {
+                Block {
                     block_id: 1,
                     length: size as i32,
                     uncompress_length: 200,
@@ -563,7 +563,7 @@ mod test {
         let writing_ctx = WritingViewContext::from(
             uid.clone(),
             vec![
-                PartitionedDataBlock {
+                Block {
                     block_id: 0,
                     length: size as i32,
                     uncompress_length: 200,
@@ -571,7 +571,7 @@ mod test {
                     data: Bytes::copy_from_slice(data),
                     task_attempt_id: 0,
                 },
-                PartitionedDataBlock {
+                Block {
                     block_id: 1,
                     length: size as i32,
                     uncompress_length: 200,
@@ -638,7 +638,7 @@ mod test {
         let writing_ctx = WritingViewContext::from(
             uid.clone(),
             vec![
-                PartitionedDataBlock {
+                Block {
                     block_id: 0,
                     length: size as i32,
                     uncompress_length: 200,
@@ -646,7 +646,7 @@ mod test {
                     data: Bytes::copy_from_slice(data),
                     task_attempt_id: 0,
                 },
-                PartitionedDataBlock {
+                Block {
                     block_id: 1,
                     length: size as i32,
                     uncompress_length: 200,

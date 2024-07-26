@@ -28,8 +28,7 @@ use crate::runtime::manager::RuntimeManager;
 use crate::store::hybrid::HybridStore;
 use crate::store::memory::MemorySnapshot;
 use crate::store::{
-    PartitionedDataBlock, RequireBufferResponse, ResponseData, ResponseDataIndex, Store,
-    StoreProvider,
+    Block, RequireBufferResponse, ResponseData, ResponseDataIndex, Store, StoreProvider,
 };
 use crate::util::current_timestamp_sec;
 use anyhow::{anyhow, Result};
@@ -48,12 +47,12 @@ use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
 use crate::proto::uniffle::RemoteStorage;
+use crate::store::mem::capacity::CapacitySnapshot;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
-use crate::store::mem::capacity::CapacitySnapshot;
 
 pub static SHUFFLE_SERVER_ID: OnceLock<String> = OnceLock::new();
 
@@ -158,18 +157,18 @@ impl PartitionedMeta {
         }
     }
 
-    fn get_data_size(&self) -> Result<u64> {
+    fn get_size(&self) -> Result<u64> {
         let meta = self.inner.read().unwrap();
         Ok(meta.total_size)
     }
 
-    fn incr_data_size(&mut self, data_size: i32) -> Result<()> {
+    fn inc_size(&mut self, data_size: i32) -> Result<()> {
         let mut meta = self.inner.write().unwrap();
         meta.total_size += data_size as u64;
         Ok(())
     }
 
-    fn get_block_ids_bytes(&self) -> Result<Bytes> {
+    fn get_block_ids(&self) -> Result<Bytes> {
         let meta = self.inner.read().unwrap();
         let serialized_data = meta.blocks_bitmap.serialize()?;
         Ok(Bytes::from(serialized_data))
@@ -248,21 +247,39 @@ impl App {
         Ok(())
     }
 
-    pub async fn insert(&self, ctx: WritingViewContext) -> Result<i32, WorkerError> {
-        let len: i32 = ctx.data_blocks.iter().map(|block| block.length).sum();
-        self.get_underlying_partition_bitmap(ctx.uid.clone())
-            .incr_data_size(len)?;
-        TOTAL_RECEIVED_DATA.inc_by(len as u64);
-        self.total_received_data_size.fetch_add(len as u64, SeqCst);
-        self.total_resident_data_size.fetch_add(len as u64, SeqCst);
+    fn is_limit_huge_partition(&self) -> bool {
+        if self.huge_partition_marked_threshold.is_none() {
+            return false;
+        }
+        if self.huge_partition_memory_max_available_size.is_none() {
+            return false;
+        }
+        return true;
+    }
 
-        let ctx = match self.is_huge_partition(&ctx.uid).await {
-            Ok(true) => WritingViewContext::new(ctx.uid.clone(), ctx.data_blocks, true),
-            _ => ctx,
+    pub async fn insert(&self, ctx: WritingViewContext) -> Result<i32, WorkerError> {
+        let len: u64 = ctx
+            .data_blocks
+            .iter()
+            .map(|block| block.length)
+            .sum::<i32>() as u64;
+        TOTAL_RECEIVED_DATA.inc_by(len);
+
+        self.total_received_data_size.fetch_add(len, SeqCst);
+        self.total_resident_data_size.fetch_add(len, SeqCst);
+
+        let context = if self.is_limit_huge_partition() {
+            self.get_blocks_bitmap(&ctx.uid).inc_size(len as i32)?;
+            match self.is_huge_partition(&ctx.uid).await {
+                Ok(true) => WritingViewContext::new(ctx.uid, ctx.data_blocks, true, len),
+                _ => ctx,
+            }
+        } else {
+            ctx
         };
 
-        self.store.insert(ctx).await?;
-        Ok(len)
+        self.store.insert(context).await?;
+        Ok(len as i32)
     }
 
     pub async fn select(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
@@ -293,21 +310,12 @@ impl App {
     }
 
     async fn is_huge_partition(&self, uid: &PartitionedUId) -> Result<bool> {
-        let huge_partition_threshold_option = &self.huge_partition_marked_threshold;
-        let huge_partition_memory_used_option = &self.huge_partition_memory_max_available_size;
-        if huge_partition_threshold_option.is_none() || huge_partition_memory_used_option.is_none()
-        {
-            return Ok(false);
-        }
-
-        let huge_partition_threshold = &huge_partition_threshold_option.unwrap();
-
-        let meta = self.get_underlying_partition_bitmap(uid.clone());
-        let data_size = meta.get_data_size()?;
-        if data_size > *huge_partition_threshold {
+        let huge_partition_threshold = self.huge_partition_marked_threshold.unwrap();
+        let meta = self.get_blocks_bitmap(uid);
+        let data_size = meta.get_size()?;
+        if data_size > huge_partition_threshold {
             return Ok(true);
         }
-
         return Ok(false);
     }
 
@@ -343,7 +351,9 @@ impl App {
         &self,
         ctx: RequireBufferContext,
     ) -> Result<RequireBufferResponse, WorkerError> {
-        if self.is_backpressure_for_huge_partition(&ctx.uid).await? {
+        if self.is_limit_huge_partition()
+            && self.is_backpressure_for_huge_partition(&ctx.uid).await?
+        {
             TOTAL_REQUIRE_BUFFER_FAILED.inc();
             return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
         }
@@ -360,7 +370,7 @@ impl App {
             .await
     }
 
-    fn get_underlying_partition_bitmap(&self, uid: PartitionedUId) -> PartitionedMeta {
+    fn get_blocks_bitmap(&self, uid: &PartitionedUId) -> PartitionedMeta {
         let shuffle_id = uid.shuffle_id;
         let partition_id = uid.partition_id;
         let partitioned_meta = self
@@ -372,13 +382,13 @@ impl App {
 
     pub fn get_block_ids(&self, ctx: GetBlocksContext) -> Result<Bytes> {
         debug!("get blocks: {:?}", ctx.clone());
-        let partitioned_meta = self.get_underlying_partition_bitmap(ctx.uid);
-        partitioned_meta.get_block_ids_bytes()
+        let partitioned_meta = self.get_blocks_bitmap(&ctx.uid);
+        partitioned_meta.get_block_ids()
     }
 
     pub async fn report_block_ids(&self, ctx: ReportBlocksContext) -> Result<()> {
         debug!("Report blocks: {:?}", ctx.clone());
-        let mut partitioned_meta = self.get_underlying_partition_bitmap(ctx.uid);
+        let mut partitioned_meta = self.get_blocks_bitmap(&ctx.uid);
         partitioned_meta.report_block_ids(ctx.blocks)?;
 
         Ok(())
@@ -438,28 +448,32 @@ pub struct GetBlocksContext {
 #[derive(Debug, Clone)]
 pub struct WritingViewContext {
     pub uid: PartitionedUId,
-    pub data_blocks: Vec<PartitionedDataBlock>,
+    pub data_blocks: Vec<Block>,
     pub owned_by_huge_partition: bool,
+    pub data_size: u64,
 }
 
 impl WritingViewContext {
-    pub fn from(uid: PartitionedUId, data_blocks: Vec<PartitionedDataBlock>) -> Self {
+    pub fn from(uid: PartitionedUId, data_blocks: Vec<Block>) -> Self {
         WritingViewContext {
             uid,
             data_blocks,
             owned_by_huge_partition: false,
+            data_size: 0,
         }
     }
 
     pub fn new(
         uid: PartitionedUId,
-        data_blocks: Vec<PartitionedDataBlock>,
+        data_blocks: Vec<Block>,
         owned_by_huge_partition: bool,
+        data_size: u64,
     ) -> Self {
         WritingViewContext {
             uid,
             data_blocks,
             owned_by_huge_partition,
+            data_size,
         }
     }
 }
@@ -775,7 +789,7 @@ mod test {
     use crate::config::{Config, HybridStoreConfig, LocalfileStoreConfig, MemoryStoreConfig};
 
     use crate::runtime::manager::RuntimeManager;
-    use crate::store::{PartitionedDataBlock, ResponseData};
+    use crate::store::{Block, ResponseData};
     use croaring::treemap::JvmSerializer;
     use croaring::Treemap;
     use dashmap::DashMap;
@@ -817,7 +831,7 @@ mod test {
                     partition_id: 0,
                 },
                 vec![
-                    PartitionedDataBlock {
+                    Block {
                         block_id: 0,
                         length: 10,
                         uncompress_length: 20,
@@ -825,7 +839,7 @@ mod test {
                         data: Default::default(),
                         task_attempt_id: 0,
                     },
-                    PartitionedDataBlock {
+                    Block {
                         block_id: 1,
                         length: 20,
                         uncompress_length: 30,

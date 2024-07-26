@@ -215,17 +215,10 @@ impl ShuffleServer for DefaultShuffleServer {
         let mut inserted_total_size = 0;
 
         let mut shuffled_blocks: Vec<_> = blocks_map.into_iter().collect();
-        let mut shuffled_blocks: Vec<_> = {
-            let mut rng = rand::thread_rng();
-            shuffled_blocks.shuffle(&mut rng);
-            shuffled_blocks
-        };
-
         for (partition_id, blocks) in shuffled_blocks {
             if inserted_failure_occurs {
                 continue;
             }
-
             let uid = PartitionedUId {
                 app_id: app_id.clone(),
                 shuffle_id,
@@ -233,10 +226,7 @@ impl ShuffleServer for DefaultShuffleServer {
             };
             let await_tree_msg = format!("insert data for app. appId: {:?}", &uid.app_id);
             let ctx = WritingViewContext::from(uid, blocks);
-            let inserted = app
-                .insert(ctx)
-                .instrument_await(await_tree_msg)
-                .await;
+            let inserted = app.insert(ctx).instrument_await(await_tree_msg).await;
             if inserted.is_err() {
                 let err = format!(
                     "Errors on putting data. app_id: {}, err: {:?}",

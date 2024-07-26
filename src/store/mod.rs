@@ -40,17 +40,18 @@ use async_trait::async_trait;
 use bytes::Bytes;
 
 use crate::runtime::manager::RuntimeManager;
+use crate::store::mem::buffer::BatchMemoryBlock;
 use env_logger::fmt::Color::Magenta;
 use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct PartitionedData {
     pub partition_id: i32,
-    pub blocks: Vec<PartitionedDataBlock>,
+    pub blocks: Vec<Block>,
 }
 
 #[derive(Debug, Clone)]
-pub struct PartitionedDataBlock {
+pub struct Block {
     pub block_id: i64,
     pub length: i32,
     pub uncompress_length: i32,
@@ -63,7 +64,7 @@ impl From<ShuffleData> for PartitionedData {
     fn from(shuffle_data: ShuffleData) -> PartitionedData {
         let mut blocks = vec![];
         for data in shuffle_data.block {
-            let block = PartitionedDataBlock {
+            let block = Block {
                 block_id: data.block_id,
                 length: data.length,
                 uncompress_length: data.uncompress_length,
@@ -201,11 +202,11 @@ impl StoreProvider {
 #[derive(Debug, Clone)]
 pub struct SpillWritingViewContext {
     pub uid: PartitionedUId,
-    pub data_blocks: Arc<LinkedList<Vec<PartitionedDataBlock>>>,
+    pub data_blocks: Arc<BatchMemoryBlock>,
 }
 
 impl SpillWritingViewContext {
-    pub fn new(uid: PartitionedUId, blocks: Arc<LinkedList<Vec<PartitionedDataBlock>>>) -> Self {
+    pub fn new(uid: PartitionedUId, blocks: Arc<BatchMemoryBlock>) -> Self {
         Self {
             uid,
             data_blocks: blocks,

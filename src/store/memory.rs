@@ -25,7 +25,7 @@ use crate::error::WorkerError;
 use crate::metric::TOTAL_MEMORY_USED;
 use crate::readable_size::ReadableSize;
 use crate::store::{
-    DataSegment, PartitionedDataBlock, PartitionedMemoryData, RequireBufferResponse, ResponseData,
+    Block, DataSegment, PartitionedMemoryData, RequireBufferResponse, ResponseData,
     ResponseDataIndex, SpillWritingViewContext, Store,
 };
 use crate::*;
@@ -37,13 +37,13 @@ use std::collections::{BTreeMap, HashMap};
 
 use std::str::FromStr;
 
+use crate::store::mem::budget::MemoryBudget;
 use crate::store::mem::buffer::MemoryBuffer;
+use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::mem::ticket::TicketManager;
 use croaring::Treemap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use crate::store::mem::budget::MemoryBudget;
-use crate::store::mem::capacity::CapacitySnapshot;
 
 pub struct MemoryStore {
     state: DashMap<PartitionedUId, Arc<MemoryBuffer>>,
@@ -96,8 +96,9 @@ impl MemoryStore {
             free_allocated_size_func,
             runtime_manager.clone(),
         );
+        let shard_amount = conf.dashmap_shard_amount.unwrap_or(96);
         MemoryStore {
-            state: DashMap::new(),
+            state: DashMap::with_shard_amount(shard_amount),
             budget: MemoryBudget::new(capacity.as_bytes() as i64),
             memory_capacity: capacity.as_bytes() as i64,
             ticket_manager,
@@ -137,7 +138,7 @@ impl MemoryStore {
         self.budget.free_allocated(size)
     }
 
-    pub async fn get_required_spill_buffer(
+    pub async fn get_spilled_buffer(
         &self,
         target_len: i64,
     ) -> HashMap<PartitionedUId, Arc<MemoryBuffer>> {
@@ -156,7 +157,7 @@ impl MemoryStore {
         for buffer in buffers.iter() {
             let key = buffer.0;
             let memory_buf = buffer.1;
-            let staging_size = memory_buf.get_staging_size().unwrap();
+            let staging_size = memory_buf.staging_size().unwrap();
             let valset = sorted_tree_map
                 .entry(staging_size)
                 .or_insert_with(|| vec![]);
@@ -188,33 +189,21 @@ impl MemoryStore {
 
     pub async fn get_partitioned_buffer_size(&self, uid: &PartitionedUId) -> Result<u64> {
         let buffer = self.get_underlying_partition_buffer(uid);
-        Ok(buffer.get_total_size()? as u64)
+        Ok(buffer.total_size()? as u64)
     }
 
-    fn get_underlying_partition_buffer(&self, pid: &PartitionedUId) -> Arc<MemoryBuffer> {
-        self.state.get(pid).unwrap().clone()
-    }
-
-    pub async fn clear_flight_blocks(
+    pub async fn clear_spilled_memory_buffer(
         &self,
         uid: PartitionedUId,
-        block_ids: Vec<i64>,
+        flight_id: u64,
+        flight_len: u64,
     ) -> Result<()> {
-        let buffer = self.get_or_create_underlying_staging_buffer(uid);
-        buffer.clear_flight(block_ids)?;
+        let buffer = self.get_or_create_memory_buffer(uid);
+        buffer.clear(flight_id, flight_len)?;
         Ok(())
     }
 
-    pub async fn clear_flight_blocks_v2(&self, uid: PartitionedUId, flight_id: u64) -> Result<()> {
-        let buffer = self.get_or_create_underlying_staging_buffer(uid);
-        buffer.clear_flight_v2(flight_id);
-        Ok(())
-    }
-
-    pub fn get_or_create_underlying_staging_buffer(
-        &self,
-        uid: PartitionedUId,
-    ) -> Arc<MemoryBuffer> {
+    pub fn get_or_create_memory_buffer(&self, uid: PartitionedUId) -> Arc<MemoryBuffer> {
         let buffer = self
             .state
             .entry(uid)
@@ -222,12 +211,16 @@ impl MemoryStore {
         buffer.clone()
     }
 
+    fn get_underlying_partition_buffer(&self, pid: &PartitionedUId) -> Arc<MemoryBuffer> {
+        self.state.get(pid).unwrap().clone()
+    }
+
     pub(crate) fn read_partial_data_with_max_size_limit_and_filter<'a>(
         &'a self,
-        blocks: Vec<&'a PartitionedDataBlock>,
+        blocks: Vec<&'a Block>,
         fetched_size_limit: i64,
         serialized_expected_task_ids_bitmap: Option<Treemap>,
-    ) -> (Vec<&PartitionedDataBlock>, i64) {
+    ) -> (Vec<&Block>, i64) {
         let mut fetched = vec![];
         let mut fetched_size = 0;
 
@@ -256,27 +249,32 @@ impl Store for MemoryStore {
 
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
         let uid = ctx.uid;
-        let buffer = self.get_or_create_underlying_staging_buffer(uid);
         let blocks = ctx.data_blocks;
-        let inserted_size = buffer.add(blocks)?;
+        let size = ctx.data_size;
 
-        self.budget.allocated_to_used(inserted_size)?;
-        TOTAL_MEMORY_USED.inc_by(inserted_size as u64);
+        let buffer = self.get_or_create_memory_buffer(uid);
+        buffer.append(blocks, ctx.data_size)?;
+
+        self.budget.allocated_to_used(size as i64)?;
+        TOTAL_MEMORY_USED.inc_by(size);
+
         Ok(())
     }
 
     async fn get(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
         let uid = ctx.uid;
-        let buffer = self.get_or_create_underlying_staging_buffer(uid);
+        let buffer = self.get_or_create_memory_buffer(uid);
         let options = ctx.reading_options;
-        let (size, blocks) = match options {
-            MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(last_block_id, max_size) => buffer.read(
+        let buffer_read_result = match options {
+            MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(last_block_id, max_size) => buffer.get(
                 last_block_id,
                 max_size,
                 ctx.serialized_expected_task_ids_bitmap,
             )?,
-            _ => (0, vec![]),
+            _ => panic!("Should not happen."),
         };
+        let size = buffer_read_result.read_len();
+        let blocks = buffer_read_result.blocks();
 
         let mut bytes_holder = BytesMut::with_capacity(size as usize);
         let mut segments = vec![];
@@ -333,7 +331,7 @@ impl Store for MemoryStore {
         let mut used = 0;
         for removed_pid in _removed_list {
             if let Some(entry) = self.state.remove(removed_pid) {
-                used += entry.1.get_total_size()?;
+                used += entry.1.total_size()?;
             }
         }
 
@@ -416,7 +414,7 @@ mod test {
     use crate::store::memory::MemoryStore;
     use crate::store::ResponseData::Mem;
 
-    use crate::store::{PartitionedDataBlock, PartitionedMemoryData, ResponseData, Store};
+    use crate::store::{Block, PartitionedMemoryData, ResponseData, Store};
 
     use bytes::BytesMut;
     use core::panic;
@@ -628,7 +626,7 @@ mod test {
     ) -> WritingViewContext {
         let mut data_blocks = vec![];
         for idx in 0..=9 {
-            data_blocks.push(PartitionedDataBlock {
+            data_blocks.push(Block {
                 block_id: idx,
                 length: single_block_size.clone(),
                 uncompress_length: 0,
@@ -660,9 +658,9 @@ mod test {
             _ => panic!(),
         }
 
-        let budget = store.budget.inner.lock().unwrap();
-        assert_eq!(0, budget.used);
-        assert_eq!(1024 * 1024 * 1024, budget.capacity);
+        let snapshot = store.budget.snapshot();
+        assert_eq!(0, snapshot.get_used());
+        assert_eq!(1024 * 1024 * 1024, snapshot.get_capacity());
     }
 
     #[test]
@@ -684,7 +682,7 @@ mod test {
 
         let writing_ctx = WritingViewContext::from(
             uid.clone(),
-            vec![PartitionedDataBlock {
+            vec![Block {
                 block_id: 0,
                 length: 10,
                 uncompress_length: 100,
@@ -746,7 +744,7 @@ mod test {
         let writing_ctx = WritingViewContext::from(
             Default::default(),
             vec![
-                PartitionedDataBlock {
+                Block {
                     block_id: 0,
                     length: 10,
                     uncompress_length: 100,
@@ -754,7 +752,7 @@ mod test {
                     data: Default::default(),
                     task_attempt_id: 0,
                 },
-                PartitionedDataBlock {
+                Block {
                     block_id: 1,
                     length: 20,
                     uncompress_length: 200,
@@ -791,7 +789,7 @@ mod test {
         let writing_ctx = WritingViewContext::from(
             Default::default(),
             vec![
-                PartitionedDataBlock {
+                Block {
                     block_id: 0,
                     length: 10,
                     uncompress_length: 100,
@@ -799,7 +797,7 @@ mod test {
                     data: Default::default(),
                     task_attempt_id: 0,
                 },
-                PartitionedDataBlock {
+                Block {
                     block_id: 1,
                     length: 20,
                     uncompress_length: 200,

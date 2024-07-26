@@ -33,11 +33,11 @@ use crate::readable_size::ReadableSize;
 #[cfg(feature = "hdfs")]
 use crate::store::hdfs::HdfsStore;
 use crate::store::localfile::LocalFileStore;
-use crate::store::memory::{MemorySnapshot, MemoryStore};
+use crate::store::memory::MemoryStore;
 
 use crate::store::{
-    ExecutionTime, PartitionedDataBlock, Persistent, RequireBufferResponse, ResponseData,
-    ResponseDataIndex, SpillWritingViewContext, Store,
+    ExecutionTime, Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex,
+    SpillWritingViewContext, Store,
 };
 use anyhow::{anyhow, Result};
 
@@ -46,7 +46,7 @@ use log::{debug, error, info, warn};
 use prometheus::core::{Atomic, AtomicU64};
 use std::any::Any;
 
-use std::collections::{LinkedList, VecDeque};
+use std::collections::VecDeque;
 use std::ops::Deref;
 
 use await_tree::InstrumentAwait;
@@ -55,9 +55,10 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::runtime::manager::RuntimeManager;
+use crate::store::mem::buffer::BatchMemoryBlock;
+use crate::store::mem::capacity::CapacitySnapshot;
 use tokio::sync::Semaphore;
 use tokio::time::Instant;
-use crate::store::mem::capacity::CapacitySnapshot;
 
 trait PersistentStore: Store + Persistent + Send + Sync {}
 impl PersistentStore for LocalFileStore {}
@@ -291,10 +292,10 @@ impl HybridStore {
         Ok(self.memory_spill_event_num.get())
     }
 
-    async fn make_memory_buffer_flush(
+    async fn spill_memory_buffer(
         &self,
         spill_size: i64,
-        blocks: Arc<LinkedList<Vec<PartitionedDataBlock>>>,
+        blocks: Arc<BatchMemoryBlock>,
         uid: PartitionedUId,
         flight_id: u64,
     ) -> Result<()> {
@@ -323,7 +324,7 @@ impl HybridStore {
     async fn release_data_in_memory(&self, data_size: i64, message: &SpillMessage) -> Result<()> {
         let uid = &message.ctx.uid;
         self.hot_store
-            .clear_flight_blocks_v2(uid.clone(), message.flight_id)
+            .clear_spilled_memory_buffer(uid.clone(), message.flight_id, data_size as u64)
             .await?;
         self.hot_store.free_used(data_size).await?;
         self.hot_store
@@ -430,13 +431,11 @@ impl Store for HybridStore {
             return insert_result;
         }
 
+        /// single buffer flush
         if let Some(max_spill_size) = &self.config.memory_single_buffer_max_spill_size {
-            // single buffer flush
             // if let Ok(size) = ReadableSize::from_str(max_spill_size.as_str()) {
-            //     let buffer = self
-            //         .hot_store
-            //         .get_or_create_underlying_staging_buffer(uid.clone());
-            //     if size.as_bytes() < buffer.get_staging_size()? as u64 {
+            //     let buffer = self.hot_store.get_or_create_memory_buffer(uid.clone());
+            //     if size.as_bytes() < buffer.staging_size()? as u64 {
             //         let (_, spill_size, blocks) = buffer.create_flight()?;
             //         self.make_memory_buffer_flush(spill_size, blocks, uid.clone())
             //             .await?;
@@ -444,8 +443,7 @@ impl Store for HybridStore {
             // }
         }
 
-        // if the used size exceed the ratio of high watermark,
-        // then send watermark flush trigger
+        /// if the used size exceed the ratio of high watermark, then send watermark flush trigger
         if let Some(_lock) = self.memory_spill_lock.try_lock() {
             let used_ratio = self.hot_store.memory_used_ratio().await;
             if used_ratio > self.config.memory_spill_high_watermark {
@@ -563,12 +561,12 @@ pub async fn watermark_flush(store: Arc<HybridStore>) -> Result<()> {
         (store.hot_store.get_capacity()? as f32 * store.config.memory_spill_low_watermark) as i64;
     let buffers = store
         .hot_store
-        .get_required_spill_buffer(target_size)
+        .get_spilled_buffer(target_size)
         .instrument_await(format!("getting spill buffers."))
         .await;
 
     info!(
-        "[Spill] Getting all required spill blocks due to used_ratio:{}, target_size:{}. it costs {}(ms)",
+        "[Spill] Getting all spill blocks due to used_ratio:{}, target_size:{}. it costs {}(ms)",
         used_ratio,
         target_size,
         timer.elapsed().as_millis()
@@ -576,26 +574,23 @@ pub async fn watermark_flush(store: Arc<HybridStore>) -> Result<()> {
 
     let timer = Instant::now();
     let mut flushed_size = 0u64;
-    let mut lock_time = 0;
-    let mut exec_time = 0;
-    let mut search_time = 0;
     for (partition_id, buffer) in buffers {
-        let (exec_time_snapshot, spill_size, blocks, flight_id) = buffer.create_flight_v2()?;
-        let (lock_time_ms, search_time_ms, execution_time_ms) = match exec_time_snapshot {
-            ExecutionTime::BUFFER_CREATE_FLIGHT(a, b, c) => (a, b, c),
-            _ => (0, 0, 0),
-        };
-        lock_time += lock_time_ms;
-        exec_time += execution_time_ms;
-        search_time += search_time_ms;
-        flushed_size += spill_size as u64;
+        let spill_result = buffer.spill()?;
+        let flight_len = spill_result.flight_len();
+        flushed_size += flight_len;
         store
-            .make_memory_buffer_flush(spill_size, blocks, partition_id, flight_id)
+            .spill_memory_buffer(
+                flight_len as i64,
+                spill_result.blocks(),
+                partition_id,
+                spill_result.flight_id(),
+            )
             .await?;
     }
     info!(
-        "[Spill] All required spill blocks notify to flusher with {}(bytes) that costs {}(ms). lock costs {}(ms). execution costs {}(ms). search costs {}(ms)",
-        flushed_size, timer.elapsed().as_millis(), lock_time, exec_time, search_time
+        "[Spill] Async flush with {}(bytes) that costs {}(ms).",
+        flushed_size,
+        timer.elapsed().as_millis()
     );
     store.hot_store.add_to_in_flight_buffer_size(flushed_size);
     Ok(())
@@ -614,7 +609,7 @@ mod tests {
 
     use crate::store::hybrid::HybridStore;
     use crate::store::ResponseData::Mem;
-    use crate::store::{PartitionedDataBlock, ResponseData, ResponseDataIndex, Store};
+    use crate::store::{Block, ResponseData, ResponseDataIndex, Store};
     use bytes::{Buf, Bytes};
 
     use std::any::Any;
@@ -708,7 +703,7 @@ mod tests {
             block_ids.push(i);
             let writing_ctx = WritingViewContext::from(
                 uid.clone(),
-                vec![PartitionedDataBlock {
+                vec![Block {
                     block_id: i,
                     length: data_len as i32,
                     uncompress_length: 100,
