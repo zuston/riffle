@@ -50,7 +50,7 @@ impl Ticket {
         (crate::util::current_timestamp_sec() - self.created_time) as i64 > timeout_sec
     }
 
-    pub fn get_id(&self) -> i64 {
+    pub fn id(&self) -> i64 {
         self.id
     }
 }
@@ -71,7 +71,7 @@ impl TicketManager {
         free_allocated_size_func: F,
         runtime_manager: RuntimeManager,
     ) -> Self {
-        let manager = Self {
+        let manager = TicketManager {
             ticket_store: Default::default(),
             ticket_timeout_sec,
             ticket_timeout_check_interval_sec,

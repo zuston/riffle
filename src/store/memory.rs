@@ -117,9 +117,9 @@ impl MemoryStore {
 
     pub async fn memory_used_ratio(&self) -> f32 {
         let snapshot = self.budget.snapshot();
-        (snapshot.get_used() + snapshot.get_allocated()
+        (snapshot.used() + snapshot.allocated()
             - self.in_flush_buffer_size.load(Ordering::SeqCst) as i64) as f32
-            / snapshot.get_capacity() as f32
+            / snapshot.capacity() as f32
     }
 
     pub fn add_to_in_flight_buffer_size(&self, size: u64) {
@@ -146,7 +146,7 @@ impl MemoryStore {
         // 2. get the spill buffers until reaching the single max batch size
 
         let snapshot = self.budget.snapshot();
-        let required_spilled_size = snapshot.get_used() - target_len;
+        let required_spilled_size = snapshot.used() - target_len;
         if required_spilled_size <= 0 {
             return HashMap::new();
         }
@@ -659,8 +659,8 @@ mod test {
         }
 
         let snapshot = store.budget.snapshot();
-        assert_eq!(0, snapshot.get_used());
-        assert_eq!(1024 * 1024 * 1024, snapshot.get_capacity());
+        assert_eq!(0, snapshot.used());
+        assert_eq!(1024 * 1024 * 1024, snapshot.capacity());
     }
 
     #[test]
@@ -728,8 +728,8 @@ mod test {
             "Arc should not exist after purge"
         );
         let snapshot = store.budget.snapshot();
-        assert_eq!(snapshot.get_used(), 0);
-        assert_eq!(snapshot.get_capacity(), 1024);
+        assert_eq!(snapshot.used(), 0);
+        assert_eq!(snapshot.capacity(), 1024);
         let data = runtime.wait(store.get(reading_ctx.clone())).expect("");
         assert_eq!(0, data.from_memory().shuffle_data_block_segments.len());
 

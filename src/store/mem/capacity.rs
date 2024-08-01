@@ -15,16 +15,13 @@ impl From<(i64, i64, i64)> for CapacitySnapshot {
 }
 
 impl CapacitySnapshot {
-    pub fn get_capacity(&self) -> i64 {
+    pub fn capacity(&self) -> i64 {
         self.capacity
     }
-    pub fn get_allocated(&self) -> i64 {
+    pub fn allocated(&self) -> i64 {
         self.allocated
     }
-    pub fn get_used(&self) -> i64 {
+    pub fn used(&self) -> i64 {
         self.used
-    }
-    fn get_used_percent(&self) -> f32 {
-        (self.allocated + self.used) as f32 / self.capacity as f32
     }
 }

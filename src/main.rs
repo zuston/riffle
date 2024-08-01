@@ -115,11 +115,11 @@ fn start_coordinator_report(
 
             let heartbeat_req = ShuffleServerHeartBeatRequest {
                 server_id: Some(shuffle_server_id.clone()),
-                used_memory: memory_snapshot.get_used(),
-                pre_allocated_memory: memory_snapshot.get_allocated(),
-                available_memory: memory_snapshot.get_capacity()
-                    - memory_snapshot.get_used()
-                    - memory_snapshot.get_allocated(),
+                used_memory: memory_snapshot.used(),
+                pre_allocated_memory: memory_snapshot.allocated(),
+                available_memory: memory_snapshot.capacity()
+                    - memory_snapshot.used()
+                    - memory_snapshot.allocated(),
                 event_num_in_flush: memory_spill_event_num,
                 tags: all_tags,
                 is_healthy: Some(healthy),
