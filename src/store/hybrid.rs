@@ -36,8 +36,8 @@ use crate::store::localfile::LocalFileStore;
 use crate::store::memory::MemoryStore;
 
 use crate::store::{
-    ExecutionTime, Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex,
-    SpillWritingViewContext, Store,
+    Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex, SpillWritingViewContext,
+    Store,
 };
 use anyhow::{anyhow, Result};
 
@@ -50,6 +50,8 @@ use std::collections::VecDeque;
 use std::ops::Deref;
 
 use await_tree::InstrumentAwait;
+use fastrace::future::FutureExt;
+use fastrace::{trace, Span};
 use spin::mutex::Mutex;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -70,7 +72,7 @@ const DEFAULT_MEMORY_SPILL_MAX_CONCURRENCY: i32 = 20;
 
 pub struct HybridStore {
     // Box<dyn Store> will build fail
-    hot_store: Box<MemoryStore>,
+    hot_store: Arc<MemoryStore>,
 
     warm_store: Option<Box<dyn PersistentStore>>,
     cold_store: Option<Box<dyn PersistentStore>>,
@@ -135,7 +137,7 @@ impl HybridStore {
             .unwrap_or(DEFAULT_MEMORY_SPILL_MAX_CONCURRENCY);
 
         let store = HybridStore {
-            hot_store: Box::new(MemoryStore::from(
+            hot_store: Arc::new(MemoryStore::from(
                 config.memory_store.unwrap(),
                 runtime_manager.clone(),
             )),
@@ -323,6 +325,7 @@ impl HybridStore {
         Ok(())
     }
 
+    #[trace]
     pub async fn watermark_spill(&self) -> Result<()> {
         let timer = Instant::now();
         let mem_target =
@@ -433,32 +436,22 @@ impl Store for HybridStore {
         });
     }
 
+    #[trace]
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
-        let insert_result = self
-            .hot_store
-            .insert(ctx)
-            .instrument_await("inserting data into memory")
-            .await;
+        let store = self.hot_store.clone();
+
+        let func = async move { store.insert(ctx).await }
+            .in_span(Span::enter_with_local_parent("Mem insert"));
+
+        let insert_result = self.runtime_manager.grpc_runtime.spawn(func).await?;
+
         if self.is_memory_only() {
             return insert_result;
-        }
-
-        /// single buffer flush
-        if let Some(max_spill_size) = &self.config.memory_single_buffer_max_spill_size {
-            // if let Ok(size) = ReadableSize::from_str(max_spill_size.as_str()) {
-            //     let buffer = self.hot_store.get_or_create_memory_buffer(uid.clone());
-            //     if size.as_bytes() < buffer.staging_size()? as u64 {
-            //         let (_, spill_size, blocks) = buffer.create_flight()?;
-            //         self.make_memory_buffer_flush(spill_size, blocks, uid.clone())
-            //             .await?;
-            //     }
-            // }
         }
 
         if let Some(_lock) = self.memory_spill_lock.try_lock() {
             let ratio = self.hot_store.calculate_usage_ratio();
             if ratio > self.config.memory_spill_high_watermark {
-                /// get the spilled buffer and then push into flush queue
                 self.watermark_spill().await?;
             }
         }
@@ -466,6 +459,7 @@ impl Store for HybridStore {
         insert_result
     }
 
+    #[trace]
     async fn get(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
         match ctx.reading_options {
             ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(_, _) => {
@@ -475,6 +469,7 @@ impl Store for HybridStore {
         }
     }
 
+    #[trace]
     async fn get_index(
         &self,
         ctx: ReadingIndexViewContext,
@@ -482,6 +477,7 @@ impl Store for HybridStore {
         self.warm_store.as_ref().unwrap().get_index(ctx).await
     }
 
+    #[trace]
     async fn purge(&self, ctx: PurgeDataContext) -> Result<i64> {
         let app_id = &ctx.app_id;
         let mut removed_size = 0i64;
@@ -499,6 +495,7 @@ impl Store for HybridStore {
         Ok(removed_size)
     }
 
+    #[trace]
     async fn is_healthy(&self) -> Result<bool> {
         async fn check_healthy(store: Option<&Box<dyn PersistentStore>>) -> Result<bool> {
             match store {
@@ -515,6 +512,7 @@ impl Store for HybridStore {
         Ok(self.hot_store.is_healthy().await? && (warm || cold))
     }
 
+    #[trace]
     async fn require_buffer(
         &self,
         ctx: RequireBufferContext,
@@ -526,10 +524,12 @@ impl Store for HybridStore {
             .await
     }
 
+    #[trace]
     async fn release_buffer(&self, ctx: ReleaseBufferContext) -> Result<i64, WorkerError> {
         self.hot_store.release_buffer(ctx).await
     }
 
+    #[trace]
     async fn register_app(&self, ctx: RegisterAppContext) -> Result<()> {
         self.hot_store.register_app(ctx.clone()).await?;
         if self.warm_store.is_some() {
@@ -549,10 +549,12 @@ impl Store for HybridStore {
         Ok(())
     }
 
+    #[trace]
     async fn name(&self) -> StorageType {
         unimplemented!()
     }
 
+    #[trace]
     async fn spill_insert(&self, _ctx: SpillWritingViewContext) -> Result<(), WorkerError> {
         todo!()
     }

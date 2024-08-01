@@ -1,6 +1,7 @@
 use crate::metric::{GAUGE_MEMORY_ALLOCATED, GAUGE_MEMORY_CAPACITY, GAUGE_MEMORY_USED};
 use crate::store::mem::capacity::CapacitySnapshot;
 use anyhow::Result;
+use fastrace::trace;
 use spin::RwLock;
 use std::sync::Arc;
 
@@ -26,6 +27,7 @@ impl MemoryBudget {
         }
     }
 
+    #[trace]
     pub fn snapshot(&self) -> CapacitySnapshot {
         let capacity = self.capacity;
         let inner = self.inner.read();
@@ -35,6 +37,7 @@ impl MemoryBudget {
         (capacity, allocated, used).into()
     }
 
+    #[trace]
     pub fn require_allocated(&self, size: i64) -> Result<(bool, i64)> {
         let capacity = self.capacity;
 
@@ -53,6 +56,7 @@ impl MemoryBudget {
         }
     }
 
+    #[trace]
     pub fn move_allocated_to_used(&self, size: i64) -> Result<bool> {
         let mut inner = self.inner.write();
         let allocated = inner.allocated;
@@ -70,6 +74,7 @@ impl MemoryBudget {
         Ok(true)
     }
 
+    #[trace]
     pub fn dec_used(&self, size: i64) -> Result<bool> {
         let mut inner = self.inner.write();
         if inner.used < size {
@@ -81,6 +86,7 @@ impl MemoryBudget {
         Ok(true)
     }
 
+    #[trace]
     pub fn dec_allocated(&self, size: i64) -> Result<bool> {
         let mut inner = self.inner.write();
         if inner.allocated < size {

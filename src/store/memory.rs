@@ -42,6 +42,7 @@ use crate::store::mem::buffer::MemoryBuffer;
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::mem::ticket::TicketManager;
 use croaring::Treemap;
+use fastrace::trace;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -244,6 +245,7 @@ impl Store for MemoryStore {
         // ignore
     }
 
+    #[trace]
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
         let uid = ctx.uid;
         let blocks = ctx.data_blocks;
@@ -258,6 +260,7 @@ impl Store for MemoryStore {
         Ok(())
     }
 
+    #[trace]
     async fn get(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
         let uid = ctx.uid;
         let buffer = self.get_or_create_memory_buffer(uid);
@@ -296,6 +299,7 @@ impl Store for MemoryStore {
         }))
     }
 
+    #[trace]
     async fn get_index(
         &self,
         _ctx: ReadingIndexViewContext,
@@ -303,6 +307,7 @@ impl Store for MemoryStore {
         panic!("It should not be invoked.")
     }
 
+    #[trace]
     async fn purge(&self, ctx: PurgeDataContext) -> Result<i64> {
         let app_id = ctx.app_id;
         let shuffle_id_option = ctx.shuffle_id;
@@ -343,10 +348,12 @@ impl Store for MemoryStore {
         Ok(used)
     }
 
+    #[trace]
     async fn is_healthy(&self) -> Result<bool> {
         Ok(true)
     }
 
+    #[trace]
     async fn require_buffer(
         &self,
         ctx: RequireBufferContext,
@@ -367,19 +374,23 @@ impl Store for MemoryStore {
         }
     }
 
+    #[trace]
     async fn release_buffer(&self, ctx: ReleaseBufferContext) -> Result<i64, WorkerError> {
         let ticket_id = ctx.ticket_id;
         self.ticket_manager.delete(ticket_id)
     }
 
+    #[trace]
     async fn register_app(&self, _ctx: RegisterAppContext) -> Result<()> {
         Ok(())
     }
 
+    #[trace]
     async fn name(&self) -> StorageType {
         StorageType::MEMORY
     }
 
+    #[trace]
     async fn spill_insert(&self, _ctx: SpillWritingViewContext) -> Result<(), WorkerError> {
         todo!()
     }

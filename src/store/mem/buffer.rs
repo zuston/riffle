@@ -1,6 +1,7 @@
 use crate::store::Block;
 use anyhow::Result;
 use croaring::Treemap;
+use fastrace::trace;
 use spin::RwLock;
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -92,18 +93,22 @@ impl MemoryBuffer {
         }
     }
 
+    #[trace]
     pub fn total_size(&self) -> Result<i64> {
         return Ok(self.buffer.read().total_size);
     }
 
+    #[trace]
     pub fn flight_size(&self) -> Result<i64> {
         return Ok(self.buffer.read().flight_size);
     }
 
+    #[trace]
     pub fn staging_size(&self) -> Result<i64> {
         return Ok(self.buffer.read().staging_size);
     }
 
+    #[trace]
     pub fn clear(&self, flight_id: u64, flight_size: u64) -> Result<()> {
         let mut buffer = self.buffer.write();
         let flight = &mut buffer.flight;
@@ -115,7 +120,7 @@ impl MemoryBuffer {
         Ok(())
     }
 
-    /// todo: avoid cloning.
+    #[trace]
     pub fn get(
         &self,
         last_block_id: i64,
@@ -189,6 +194,7 @@ impl MemoryBuffer {
         })
     }
 
+    #[trace]
     pub fn spill(&self) -> Result<BufferSpillResult> {
         let mut buffer = self.buffer.write();
         let staging: BatchMemoryBlock = { mem::replace(&mut buffer.staging, Default::default()) };
@@ -210,6 +216,7 @@ impl MemoryBuffer {
         })
     }
 
+    #[trace]
     pub fn append(&self, blocks: Vec<Block>, size: u64) -> Result<()> {
         let mut buffer = self.buffer.write();
         let mut staging = &mut buffer.staging;

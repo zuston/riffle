@@ -27,6 +27,7 @@ mod mem_allocator;
 pub mod metric;
 pub mod proto;
 pub mod readable_size;
+pub mod rpc;
 pub mod runtime;
 pub mod signal;
 pub mod store;

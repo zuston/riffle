@@ -20,8 +20,6 @@
 use crate::app::{AppManager, AppManagerRef, SHUFFLE_SERVER_ID};
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::config::{Config, LogConfig, RotationConfig};
-use crate::grpc::await_tree_middleware::AwaitTreeMiddlewareLayer;
-use crate::grpc::metrics_middleware::MetricsMiddlewareLayer;
 use crate::grpc::{DefaultShuffleServer, MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use crate::http::{HTTPServer, HTTP_SERVICE};
 use crate::metric::{init_metric_service, GRPC_LATENCY_TIME_SEC};
@@ -34,8 +32,12 @@ use crate::util::{gen_worker_uid, get_local_ip};
 
 use crate::mem_allocator::ALLOCATOR;
 use crate::readable_size::ReadableSize;
+use crate::rpc::awaittree::AwaitTreeMiddlewareLayer;
+use crate::rpc::metric::MetricsMiddlewareLayer;
+use crate::rpc::tracing::TracingMiddleWareLayer;
 use anyhow::Result;
 use clap::{App, Arg};
+use fastrace::collector::ConsoleReporter;
 use log::{debug, error, info};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::num::NonZeroUsize;
@@ -60,6 +62,7 @@ mod mem_allocator;
 mod metric;
 pub mod proto;
 mod readable_size;
+pub mod rpc;
 pub mod runtime;
 pub mod signal;
 pub mod store;
@@ -171,6 +174,7 @@ fn init_log(log: &LogConfig) -> WorkerGuard {
 }
 
 fn main() -> Result<()> {
+    fastrace::set_reporter(ConsoleReporter, fastrace::collector::Config::default());
     setup_max_memory_allocation();
 
     let args_match = App::new("Uniffle Worker")
@@ -249,6 +253,7 @@ fn main() -> Result<()> {
 
     graceful_wait_for_signal(tx);
 
+    fastrace::flush();
     Ok(())
 }
 
@@ -286,6 +291,7 @@ async fn grpc_serve(
         .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
         .initial_stream_window_size(STREAM_WINDOW_SIZE)
         .tcp_nodelay(true)
+        .layer(TracingMiddleWareLayer::new())
         .layer(MetricsMiddlewareLayer::new(GRPC_LATENCY_TIME_SEC.clone()))
         .layer(AwaitTreeMiddlewareLayer::new_optional(Some(
             AWAIT_TREE_REGISTRY.clone(),
@@ -300,15 +306,4 @@ async fn grpc_serve(
         })
         .await
         .unwrap();
-}
-
-#[cfg(test)]
-mod test {
-    use crate::get_local_ip;
-
-    #[test]
-    fn get_local_ip_test() {
-        let ip = get_local_ip().unwrap();
-        println!("{}", ip.to_string());
-    }
 }

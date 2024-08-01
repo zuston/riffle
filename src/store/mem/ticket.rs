@@ -19,6 +19,7 @@ use crate::error::WorkerError;
 use crate::runtime::manager::RuntimeManager;
 use anyhow::Result;
 use dashmap::DashMap;
+use fastrace::trace;
 use log::debug;
 use std::sync::Arc;
 use std::thread;
@@ -81,11 +82,13 @@ impl TicketManager {
     }
 
     /// check the ticket existence
+    #[trace]
     pub fn exist(&self, ticket_id: i64) -> bool {
         self.ticket_store.contains_key(&ticket_id)
     }
 
     /// Delete one ticket by its id, and it will return the allocated size for this ticket
+    #[trace]
     pub fn delete(&self, ticket_id: i64) -> Result<i64, WorkerError> {
         if let Some(entry) = self.ticket_store.remove(&ticket_id) {
             Ok(entry.1.size)
@@ -96,6 +99,7 @@ impl TicketManager {
 
     /// Delete all the ticket owned by the app id. And
     /// it will return all the allocated size of ticket ids that owned by this app_id
+    #[trace]
     pub fn delete_by_app_id(&self, app_id: &str) -> i64 {
         let read_view = self.ticket_store.clone();
         let mut deleted_ids = vec![];
@@ -116,6 +120,7 @@ impl TicketManager {
     }
 
     /// insert one ticket managed by this ticket manager
+    #[trace]
     pub fn insert(&self, ticket_id: i64, size: i64, created_timestamp: u64, app_id: &str) -> bool {
         let ticket = Ticket {
             id: ticket_id,
