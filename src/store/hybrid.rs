@@ -434,8 +434,6 @@ impl Store for HybridStore {
     }
 
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
-        let uid = ctx.uid.clone();
-
         let insert_result = self
             .hot_store
             .insert(ctx)
@@ -484,21 +482,6 @@ impl Store for HybridStore {
         self.warm_store.as_ref().unwrap().get_index(ctx).await
     }
 
-    async fn require_buffer(
-        &self,
-        ctx: RequireBufferContext,
-    ) -> Result<RequireBufferResponse, WorkerError> {
-        let uid = &ctx.uid.clone();
-        self.hot_store
-            .require_buffer(ctx)
-            .instrument_await(format!("requiring buffers. uid: {:?}", uid))
-            .await
-    }
-
-    async fn release_buffer(&self, ctx: ReleaseBufferContext) -> Result<i64, WorkerError> {
-        self.hot_store.release_buffer(ctx).await
-    }
-
     async fn purge(&self, ctx: PurgeDataContext) -> Result<i64> {
         let app_id = &ctx.app_id;
         let mut removed_size = 0i64;
@@ -530,6 +513,21 @@ impl Store for HybridStore {
             .await
             .unwrap_or(false);
         Ok(self.hot_store.is_healthy().await? && (warm || cold))
+    }
+
+    async fn require_buffer(
+        &self,
+        ctx: RequireBufferContext,
+    ) -> Result<RequireBufferResponse, WorkerError> {
+        let uid = &ctx.uid.clone();
+        self.hot_store
+            .require_buffer(ctx)
+            .instrument_await(format!("requiring buffers. uid: {:?}", uid))
+            .await
+    }
+
+    async fn release_buffer(&self, ctx: ReleaseBufferContext) -> Result<i64, WorkerError> {
+        self.hot_store.release_buffer(ctx).await
     }
 
     async fn register_app(&self, ctx: RegisterAppContext) -> Result<()> {
