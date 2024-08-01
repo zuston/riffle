@@ -31,6 +31,7 @@ pub mod rpc;
 pub mod runtime;
 pub mod signal;
 pub mod store;
+pub mod tracing;
 pub mod util;
 
 use crate::app::AppManager;

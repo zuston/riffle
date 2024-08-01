@@ -35,6 +35,7 @@ use crate::readable_size::ReadableSize;
 use crate::rpc::awaittree::AwaitTreeMiddlewareLayer;
 use crate::rpc::metric::MetricsMiddlewareLayer;
 use crate::rpc::tracing::TracingMiddleWareLayer;
+use crate::tracing::FastraceWrapper;
 use anyhow::Result;
 use clap::{App, Arg};
 use fastrace::collector::ConsoleReporter;
@@ -66,6 +67,7 @@ pub mod rpc;
 pub mod runtime;
 pub mod signal;
 pub mod store;
+pub mod tracing;
 mod util;
 
 const MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY: &str = "MAX_MEMORY_ALLOCATION_SIZE";
@@ -174,7 +176,7 @@ fn init_log(log: &LogConfig) -> WorkerGuard {
 }
 
 fn main() -> Result<()> {
-    fastrace::set_reporter(ConsoleReporter, fastrace::collector::Config::default());
+    FastraceWrapper::init();
     setup_max_memory_allocation();
 
     let args_match = App::new("Uniffle Worker")
@@ -252,8 +254,6 @@ fn main() -> Result<()> {
     }
 
     graceful_wait_for_signal(tx);
-
-    fastrace::flush();
     Ok(())
 }
 
