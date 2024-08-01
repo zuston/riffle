@@ -344,7 +344,7 @@ impl App {
     }
 
     pub async fn free_allocated_memory_size(&self, size: i64) -> Result<bool> {
-        self.store.free_hot_store_allocated_memory_size(size).await
+        self.store.free_hot_store_allocated_memory_size(size)
     }
 
     pub async fn require_buffer(

@@ -65,14 +65,11 @@ impl MemoryStore {
         let runtime_manager: RuntimeManager = Default::default();
 
         let budget_clone = budget.clone();
-        let free_allocated_size_func =
+        let release_allocated_func =
             move |size: i64| budget_clone.dec_allocated(size).map_or(false, |v| v);
-        let ticket_manager = TicketManager::new(
-            5 * 60,
-            10,
-            free_allocated_size_func,
-            runtime_manager.clone(),
-        );
+
+        let ticket_manager =
+            TicketManager::new(5 * 60, 10, release_allocated_func, runtime_manager.clone());
         MemoryStore {
             budget,
             state: DashMap::new(),
@@ -88,15 +85,15 @@ impl MemoryStore {
         let budget = MemoryBudget::new(capacity.as_bytes() as i64);
 
         let budget_clone = budget.clone();
-        let free_allocated_size_func =
+        let release_allocated_func =
             move |size: i64| budget_clone.dec_allocated(size).map_or(false, |v| v);
-        let ticket_manager = TicketManager::new(
-            5 * 60,
-            10,
-            free_allocated_size_func,
-            runtime_manager.clone(),
-        );
+
+        let ticket_manager =
+            TicketManager::new(5 * 60, 10, release_allocated_func, runtime_manager.clone());
+
+        /// the dashmap shard that will effect the lookup performance.
         let shard_amount = conf.dashmap_shard_amount.unwrap_or(96);
+
         MemoryStore {
             state: DashMap::with_shard_amount(shard_amount),
             budget: MemoryBudget::new(capacity.as_bytes() as i64),
@@ -107,7 +104,7 @@ impl MemoryStore {
         }
     }
 
-    pub async fn memory_snapshot(&self) -> Result<CapacitySnapshot> {
+    pub fn memory_snapshot(&self) -> Result<CapacitySnapshot> {
         Ok(self.budget.snapshot())
     }
 
@@ -115,38 +112,38 @@ impl MemoryStore {
         Ok(self.memory_capacity)
     }
 
-    pub async fn memory_used_ratio(&self) -> f32 {
+    pub fn calculate_usage_ratio(&self) -> f32 {
         let snapshot = self.budget.snapshot();
         (snapshot.used() + snapshot.allocated()
             - self.in_flush_buffer_size.load(Ordering::SeqCst) as i64) as f32
             / snapshot.capacity() as f32
     }
 
-    pub fn add_to_in_flight_buffer_size(&self, size: u64) {
+    pub fn inc_inflight(&self, size: u64) {
         self.in_flush_buffer_size.fetch_add(size, Ordering::SeqCst);
     }
 
-    pub fn desc_to_in_flight_buffer_size(&self, size: u64) {
+    pub fn dec_inflight(&self, size: u64) {
         self.in_flush_buffer_size.fetch_sub(size, Ordering::SeqCst);
     }
 
-    pub async fn free_used(&self, size: i64) -> Result<bool> {
+    pub fn dec_used(&self, size: i64) -> Result<bool> {
         self.budget.dec_used(size)
     }
 
-    pub async fn free_allocated(&self, size: i64) -> Result<bool> {
+    pub fn dec_allocated(&self, size: i64) -> Result<bool> {
         self.budget.dec_allocated(size)
     }
 
-    pub async fn get_spilled_buffer(
+    pub fn calculate_spilled_blocks(
         &self,
-        target_len: i64,
+        mem_target_len: i64,
     ) -> HashMap<PartitionedUId, Arc<MemoryBuffer>> {
         // 1. sort by the staging size.
         // 2. get the spill buffers until reaching the single max batch size
 
         let snapshot = self.budget.snapshot();
-        let required_spilled_size = snapshot.used() - target_len;
+        let required_spilled_size = snapshot.used() - mem_target_len;
         if required_spilled_size <= 0 {
             return HashMap::new();
         }
@@ -181,13 +178,13 @@ impl MemoryStore {
         }
 
         info!(
-            "[Spill] expected removed size: {}, real: {}",
+            "[Spill] expected spill size: {}, real: {}",
             &required_spilled_size, &spill_staging_size
         );
         spill_candidates
     }
 
-    pub async fn get_partitioned_buffer_size(&self, uid: &PartitionedUId) -> Result<u64> {
+    pub fn get_partitioned_buffer_size(&self, uid: &PartitionedUId) -> Result<u64> {
         let buffer = self.get_underlying_partition_buffer(uid);
         Ok(buffer.total_size()? as u64)
     }

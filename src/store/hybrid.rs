@@ -82,11 +82,7 @@ pub struct HybridStore {
     memory_spill_event_num: AtomicU64,
 
     memory_spill_to_cold_threshold_size: Option<u64>,
-
     memory_spill_max_concurrency: i32,
-
-    memory_watermark_flush_trigger_sender: async_channel::Sender<()>,
-    memory_watermark_flush_trigger_recv: async_channel::Receiver<()>,
 
     runtime_manager: RuntimeManager,
 }
@@ -138,8 +134,6 @@ impl HybridStore {
             .memory_spill_max_concurrency
             .unwrap_or(DEFAULT_MEMORY_SPILL_MAX_CONCURRENCY);
 
-        let (watermark_flush_send, watermark_flush_recv) = async_channel::unbounded();
-
         let store = HybridStore {
             hot_store: Box::new(MemoryStore::from(
                 config.memory_store.unwrap(),
@@ -154,8 +148,6 @@ impl HybridStore {
             memory_spill_event_num: AtomicU64::new(0),
             memory_spill_to_cold_threshold_size,
             memory_spill_max_concurrency,
-            memory_watermark_flush_trigger_sender: watermark_flush_send,
-            memory_watermark_flush_trigger_recv: watermark_flush_recv,
             runtime_manager,
         };
         store
@@ -273,19 +265,19 @@ impl HybridStore {
         Ok(message)
     }
 
-    pub async fn free_hot_store_allocated_memory_size(&self, size: i64) -> Result<bool> {
-        self.hot_store.free_allocated(size).await
+    pub fn free_hot_store_allocated_memory_size(&self, size: i64) -> Result<bool> {
+        self.hot_store.dec_allocated(size)
     }
 
     pub async fn get_hot_store_memory_snapshot(&self) -> Result<CapacitySnapshot> {
-        self.hot_store.memory_snapshot().await
+        self.hot_store.memory_snapshot()
     }
 
     pub async fn get_hot_store_memory_partitioned_buffer_size(
         &self,
         uid: &PartitionedUId,
     ) -> Result<u64> {
-        self.hot_store.get_partitioned_buffer_size(uid).await
+        self.hot_store.get_partitioned_buffer_size(uid)
     }
 
     pub fn memory_spill_event_num(&self) -> Result<u64> {
@@ -326,9 +318,42 @@ impl HybridStore {
         self.hot_store
             .clear_spilled_memory_buffer(uid.clone(), message.flight_id, data_size as u64)
             .await?;
-        self.hot_store.free_used(data_size).await?;
-        self.hot_store
-            .desc_to_in_flight_buffer_size(data_size as u64);
+        self.hot_store.dec_used(data_size)?;
+        self.hot_store.dec_inflight(data_size as u64);
+        Ok(())
+    }
+
+    pub async fn watermark_spill(&self) -> Result<()> {
+        let timer = Instant::now();
+        let mem_target =
+            (self.hot_store.get_capacity()? as f32 * self.config.memory_spill_low_watermark) as i64;
+        let buffers = self.hot_store.calculate_spilled_blocks(mem_target);
+        info!(
+            "[Spill] Getting all spill blocks. target_size:{}. it costs {}(ms)",
+            mem_target,
+            timer.elapsed().as_millis()
+        );
+
+        let timer = Instant::now();
+        let mut flushed_size = 0u64;
+        for (partition_id, buffer) in buffers {
+            let spill_result = buffer.spill()?;
+            let flight_len = spill_result.flight_len();
+            flushed_size += flight_len;
+            self.spill_memory_buffer(
+                flight_len as i64,
+                spill_result.blocks(),
+                partition_id,
+                spill_result.flight_id(),
+            )
+            .await?;
+        }
+        info!(
+            "[Spill] Picked up blocks that should be async flushed with {}(bytes) that costs {}(ms).",
+            flushed_size,
+            timer.elapsed().as_millis()
+        );
+        self.hot_store.inc_inflight(flushed_size);
         Ok(())
     }
 }
@@ -342,17 +367,6 @@ impl Store for HybridStore {
         if self.is_memory_only() {
             return;
         }
-
-        // the handler to accept watermark flush trigger
-        let hybrid_store = self.clone();
-        self.runtime_manager.dispatch_runtime.spawn(async move {
-            let store = hybrid_store.clone();
-            while let Ok(_) = &store.memory_watermark_flush_trigger_recv.recv().await {
-                if let Err(e) = watermark_flush(store.clone()).await {
-                    error!("Errors on handling watermark flush events. err: {:?}", e)
-                }
-            }
-        });
 
         let await_tree_registry = AWAIT_TREE_REGISTRY.clone();
         let store = self.clone();
@@ -443,16 +457,11 @@ impl Store for HybridStore {
             // }
         }
 
-        /// if the used size exceed the ratio of high watermark, then send watermark flush trigger
         if let Some(_lock) = self.memory_spill_lock.try_lock() {
-            let used_ratio = self.hot_store.memory_used_ratio().await;
-            if used_ratio > self.config.memory_spill_high_watermark {
-                if let Err(e) = self.memory_watermark_flush_trigger_sender.send(()).await {
-                    error!(
-                        "Errors on send watermark flush event to handler. err: {:?}",
-                        e
-                    );
-                }
+            let ratio = self.hot_store.calculate_usage_ratio();
+            if ratio > self.config.memory_spill_high_watermark {
+                /// get the spilled buffer and then push into flush queue
+                self.watermark_spill().await?;
             }
         }
 
@@ -549,51 +558,6 @@ impl Store for HybridStore {
     async fn spill_insert(&self, _ctx: SpillWritingViewContext) -> Result<(), WorkerError> {
         todo!()
     }
-}
-
-pub async fn watermark_flush(store: Arc<HybridStore>) -> Result<()> {
-    let used_ratio = store.hot_store.memory_used_ratio().await;
-    if used_ratio <= store.config.memory_spill_high_watermark {
-        return Ok(());
-    }
-    let timer = Instant::now();
-    let target_size =
-        (store.hot_store.get_capacity()? as f32 * store.config.memory_spill_low_watermark) as i64;
-    let buffers = store
-        .hot_store
-        .get_spilled_buffer(target_size)
-        .instrument_await(format!("getting spill buffers."))
-        .await;
-
-    info!(
-        "[Spill] Getting all spill blocks due to used_ratio:{}, target_size:{}. it costs {}(ms)",
-        used_ratio,
-        target_size,
-        timer.elapsed().as_millis()
-    );
-
-    let timer = Instant::now();
-    let mut flushed_size = 0u64;
-    for (partition_id, buffer) in buffers {
-        let spill_result = buffer.spill()?;
-        let flight_len = spill_result.flight_len();
-        flushed_size += flight_len;
-        store
-            .spill_memory_buffer(
-                flight_len as i64,
-                spill_result.blocks(),
-                partition_id,
-                spill_result.flight_id(),
-            )
-            .await?;
-    }
-    info!(
-        "[Spill] Async flush with {}(bytes) that costs {}(ms).",
-        flushed_size,
-        timer.elapsed().as_millis()
-    );
-    store.hot_store.add_to_in_flight_buffer_size(flushed_size);
-    Ok(())
 }
 
 #[cfg(test)]
