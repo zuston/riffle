@@ -1,15 +1,20 @@
 use crate::metric::{GAUGE_MEMORY_ALLOCATED, GAUGE_MEMORY_CAPACITY, GAUGE_MEMORY_USED};
 use crate::store::mem::capacity::CapacitySnapshot;
 use anyhow::Result;
-use std::sync::atomic::{AtomicI64, Ordering};
+use spin::RwLock;
 use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct MemoryBudget {
     capacity: i64,
-    allocated: Arc<AtomicI64>,
-    used: Arc<AtomicI64>,
-    allocation_incr_id: Arc<AtomicI64>,
+    inner: Arc<RwLock<BudgetInner>>,
+}
+
+#[derive(Default)]
+struct BudgetInner {
+    allocated: i64,
+    used: i64,
+    allocation_inc_counter: i64,
 }
 
 impl MemoryBudget {
@@ -17,75 +22,118 @@ impl MemoryBudget {
         GAUGE_MEMORY_CAPACITY.set(capacity);
         MemoryBudget {
             capacity,
-            allocated: Default::default(),
-            used: Default::default(),
-            allocation_incr_id: Default::default(),
+            inner: Default::default(),
         }
     }
 
     pub fn snapshot(&self) -> CapacitySnapshot {
-        (
-            self.capacity,
-            self.allocated.load(Ordering::Relaxed),
-            self.used.load(Ordering::Relaxed),
-        )
-            .into()
+        let capacity = self.capacity;
+        let inner = self.inner.read();
+        let allocated = inner.allocated;
+        let used = inner.used;
+        drop(inner);
+        (capacity, allocated, used).into()
     }
 
-    pub(crate) fn pre_allocate(&self, size: i64) -> Result<(bool, i64)> {
+    pub fn require_allocated(&self, size: i64) -> Result<(bool, i64)> {
         let capacity = self.capacity;
-        let allocated = self.allocated.load(Ordering::SeqCst);
-        let used = self.used.load(Ordering::SeqCst);
 
-        let free_space = capacity - allocated - used;
-        if free_space < size {
+        let mut inner = self.inner.write();
+        let allocated = inner.allocated;
+        let used = inner.used;
+
+        let remaining = capacity - allocated - used;
+        if remaining < size {
             Ok((false, -1))
         } else {
-            self.allocated.fetch_add(size, Ordering::SeqCst);
-            GAUGE_MEMORY_ALLOCATED.set(allocated + size);
-            let id = self.allocation_incr_id.fetch_add(1, Ordering::SeqCst);
-            Ok((true, id))
+            inner.allocated += size;
+            GAUGE_MEMORY_ALLOCATED.set(inner.allocated);
+            inner.allocation_inc_counter += 1;
+            Ok((true, inner.allocation_inc_counter))
         }
     }
 
-    pub(crate) fn allocated_to_used(&self, size: i64) -> Result<bool> {
-        let mut allocated = self.allocated.load(Ordering::SeqCst);
+    pub fn move_allocated_to_used(&self, size: i64) -> Result<bool> {
+        let mut inner = self.inner.write();
+        let allocated = inner.allocated;
+
+        let mut desc = size;
         if allocated < size {
-            self.allocated.store(0, Ordering::SeqCst);
-            allocated = 0;
+            desc = allocated;
+            inner.allocated = 0;
         } else {
-            self.allocated.fetch_add(-size, Ordering::SeqCst);
-            allocated -= size;
+            inner.allocated -= size;
         }
-        let previous = self.used.fetch_add(size, Ordering::SeqCst);
-        GAUGE_MEMORY_ALLOCATED.set(allocated);
-        GAUGE_MEMORY_USED.set(previous + size);
+        inner.used += desc;
+        GAUGE_MEMORY_ALLOCATED.set(inner.allocated);
+        GAUGE_MEMORY_USED.set(inner.used);
         Ok(true)
     }
 
-    pub(crate) fn free_used(&self, size: i64) -> Result<bool> {
-        let mut used = self.used.load(Ordering::SeqCst);
-        if used < size {
-            self.used.store(0, Ordering::SeqCst);
-            used = 0;
+    pub fn dec_used(&self, size: i64) -> Result<bool> {
+        let mut inner = self.inner.write();
+        if inner.used < size {
+            inner.used = 0;
         } else {
-            self.used.fetch_add(-size, Ordering::SeqCst);
-            used -= size;
+            inner.used -= size;
         }
-        GAUGE_MEMORY_USED.set(used);
+        GAUGE_MEMORY_USED.set(inner.used);
         Ok(true)
     }
 
-    pub fn free_allocated(&self, size: i64) -> Result<bool> {
-        let mut allocated = self.allocated.load(Ordering::SeqCst);
-        if allocated < size {
-            self.allocated.store(0, Ordering::SeqCst);
-            allocated = 0;
+    pub fn dec_allocated(&self, size: i64) -> Result<bool> {
+        let mut inner = self.inner.write();
+        if inner.allocated < size {
+            inner.allocated = 0;
         } else {
-            self.allocated.fetch_add(-size, Ordering::SeqCst);
-            allocated -= size;
+            inner.allocated -= size;
         }
-        GAUGE_MEMORY_ALLOCATED.set(allocated);
+        GAUGE_MEMORY_ALLOCATED.set(inner.allocated);
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::metric::{GAUGE_MEMORY_ALLOCATED, GAUGE_MEMORY_USED};
+    use crate::store::mem::budget::MemoryBudget;
+
+    #[test]
+    fn basic() -> anyhow::Result<()> {
+        let memory_budget = MemoryBudget::new(100);
+
+        /// case1: reject the overflow allocation size
+        let (succeed, id) = memory_budget.require_allocated(120)?;
+        assert!(!succeed);
+
+        /// case2: pass the legal allocation size
+        let (succeed, _) = memory_budget.require_allocated(50)?;
+        assert!(succeed);
+
+        let snapshot = memory_budget.snapshot();
+        assert_eq!(100, snapshot.capacity());
+        assert_eq!(0, snapshot.used());
+        assert_eq!(50, snapshot.allocated());
+
+        /// case3: allocation to used
+        memory_budget.move_allocated_to_used(50)?;
+
+        let snapshot = memory_budget.snapshot();
+        assert_eq!(100, snapshot.capacity());
+        assert_eq!(50, snapshot.used());
+        assert_eq!(0, snapshot.allocated());
+
+        /// case4: release the used
+        memory_budget.dec_used(50)?;
+        let snapshot = memory_budget.snapshot();
+        assert_eq!(100, snapshot.capacity());
+        assert_eq!(0, snapshot.used());
+        assert_eq!(0, snapshot.allocated());
+
+        /// case5: check the metrics
+        assert_eq!(0, GAUGE_MEMORY_ALLOCATED.get());
+        assert_eq!(0, GAUGE_MEMORY_USED.get());
+
+        Ok(())
     }
 }

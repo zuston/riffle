@@ -66,7 +66,7 @@ impl MemoryStore {
 
         let budget_clone = budget.clone();
         let free_allocated_size_func =
-            move |size: i64| budget_clone.free_allocated(size).map_or(false, |v| v);
+            move |size: i64| budget_clone.dec_allocated(size).map_or(false, |v| v);
         let ticket_manager = TicketManager::new(
             5 * 60,
             10,
@@ -89,7 +89,7 @@ impl MemoryStore {
 
         let budget_clone = budget.clone();
         let free_allocated_size_func =
-            move |size: i64| budget_clone.free_allocated(size).map_or(false, |v| v);
+            move |size: i64| budget_clone.dec_allocated(size).map_or(false, |v| v);
         let ticket_manager = TicketManager::new(
             5 * 60,
             10,
@@ -131,11 +131,11 @@ impl MemoryStore {
     }
 
     pub async fn free_used(&self, size: i64) -> Result<bool> {
-        self.budget.free_used(size)
+        self.budget.dec_used(size)
     }
 
     pub async fn free_allocated(&self, size: i64) -> Result<bool> {
-        self.budget.free_allocated(size)
+        self.budget.dec_allocated(size)
     }
 
     pub async fn get_spilled_buffer(
@@ -255,7 +255,7 @@ impl Store for MemoryStore {
         let buffer = self.get_or_create_memory_buffer(uid);
         buffer.append(blocks, ctx.data_size)?;
 
-        self.budget.allocated_to_used(size as i64)?;
+        self.budget.move_allocated_to_used(size as i64)?;
         TOTAL_MEMORY_USED.inc_by(size);
 
         Ok(())
@@ -336,7 +336,7 @@ impl Store for MemoryStore {
         }
 
         // free used
-        self.budget.free_used(used)?;
+        self.budget.dec_used(used)?;
 
         info!(
             "removed used buffer size:[{}] for [{:?}], [{:?}]",
@@ -354,7 +354,7 @@ impl Store for MemoryStore {
         &self,
         ctx: RequireBufferContext,
     ) -> Result<RequireBufferResponse, WorkerError> {
-        let (succeed, ticket_id) = self.budget.pre_allocate(ctx.size)?;
+        let (succeed, ticket_id) = self.budget.require_allocated(ctx.size)?;
         match succeed {
             true => {
                 let require_buffer_resp = RequireBufferResponse::new(ticket_id);
