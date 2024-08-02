@@ -37,10 +37,11 @@ use await_tree::InstrumentAwait;
 use bytes::{BufMut, BytesMut};
 use croaring::treemap::JvmSerializer;
 use croaring::Treemap;
+use fastrace::future::FutureExt;
+use fastrace::{trace, Span};
 use std::collections::HashMap;
 
 use log::{debug, error, info, warn};
-use rand::seq::SliceRandom;
 
 use crate::metric::{
     GRPC_BUFFER_REQUIRE_PROCESS_TIME, GRPC_GET_LOCALFILE_DATA_PROCESS_TIME,
@@ -158,6 +159,7 @@ impl ShuffleServer for DefaultShuffleServer {
         }))
     }
 
+    #[trace]
     async fn send_shuffle_data(
         &self,
         request: Request<SendShuffleDataRequest>,
@@ -224,9 +226,24 @@ impl ShuffleServer for DefaultShuffleServer {
                 shuffle_id,
                 partition_id,
             };
+            let span_msg = format!(
+                "rpc insert for app[{:?}], shuffleID:[{:?}]. partitionID:[{:?}]",
+                &uid.app_id, uid.shuffle_id, uid.partition_id
+            );
             let await_tree_msg = format!("insert data for app. appId: {:?}", &uid.app_id);
             let ctx = WritingViewContext::from(uid, blocks);
-            let inserted = app.insert(ctx).instrument_await(await_tree_msg).await;
+            let app_ref = app.clone();
+            let inserted = self
+                .app_manager_ref
+                .runtime_manager()
+                .grpc_runtime
+                .spawn(
+                    async move { app_ref.insert(ctx).instrument_await(await_tree_msg).await }
+                        .in_span(Span::enter_with_local_parent(span_msg)),
+                )
+                .await
+                .unwrap();
+
             if inserted.is_err() {
                 let err = format!(
                     "Errors on putting data. app_id: {}, err: {:?}",

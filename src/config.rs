@@ -170,6 +170,15 @@ pub struct Config {
     pub huge_partition_memory_max_used_percent: Option<f64>,
 
     pub http_monitor_service_port: Option<u16>,
+
+    pub tracing: Option<TracingConfig>,
+}
+
+// =========================================================
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct TracingConfig {
+    pub jaeger_reporter_endpoint: String,
+    pub jaeger_service_name: String,
 }
 
 // =========================================================

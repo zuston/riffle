@@ -752,6 +752,10 @@ impl AppManager {
         self.sender.send(PurgeEvent::APP_PURGE(app_id)).await?;
         Ok(())
     }
+
+    pub fn runtime_manager(&self) -> RuntimeManager {
+        self.runtime_manager.clone()
+    }
 }
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Default, Debug, Hash, Clone)]

@@ -101,6 +101,7 @@ opendal = { version = "0.44.0", features = ["services-fs"]}
 hashlink = "0.9.1"
 rand = "0.8.5"
 fastrace = { version = "0.6", features = ["enable"] }
+fastrace-jaeger = { version = "0.6" }
 
 [dependencies.hdfs-native]
 version = "0.7.0"

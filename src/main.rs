@@ -176,7 +176,6 @@ fn init_log(log: &LogConfig) -> WorkerGuard {
 }
 
 fn main() -> Result<()> {
-    FastraceWrapper::init();
     setup_max_memory_allocation();
 
     let args_match = App::new("Uniffle Worker")
@@ -209,6 +208,8 @@ fn main() -> Result<()> {
 
     let metric_config = config.metrics.clone();
     init_metric_service(runtime_manager.clone(), &metric_config, worker_uid.clone());
+
+    FastraceWrapper::init(config.clone());
 
     let coordinator_quorum = config.coordinator_quorum.clone();
     let tags = config.tags.clone().unwrap_or(vec![]);
