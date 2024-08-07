@@ -34,6 +34,7 @@ use bytes::BytesMut;
 use dashmap::DashMap;
 
 use std::collections::{BTreeMap, HashMap};
+use std::hash::BuildHasherDefault;
 
 use std::str::FromStr;
 
@@ -43,11 +44,12 @@ use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::mem::ticket::TicketManager;
 use croaring::Treemap;
 use fastrace::trace;
+use fxhash::{FxBuildHasher, FxHasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 pub struct MemoryStore {
-    state: DashMap<PartitionedUId, Arc<MemoryBuffer>>,
+    state: DashMap<PartitionedUId, Arc<MemoryBuffer>, BuildHasherDefault<FxHasher>>,
     budget: MemoryBudget,
     // key: app_id, value: allocated memory size
     memory_capacity: i64,
@@ -73,7 +75,7 @@ impl MemoryStore {
             TicketManager::new(5 * 60, 10, release_allocated_func, runtime_manager.clone());
         MemoryStore {
             budget,
-            state: DashMap::new(),
+            state: DashMap::with_hasher(FxBuildHasher::default()),
             memory_capacity: max_memory_size,
             ticket_manager,
             in_flush_buffer_size: Default::default(),
@@ -94,9 +96,10 @@ impl MemoryStore {
 
         /// the dashmap shard that will effect the lookup performance.
         let shard_amount = conf.dashmap_shard_amount.unwrap_or(96);
+        let dashmap = DashMap::with_hasher_and_shard_amount(FxBuildHasher::default(), shard_amount);
 
         MemoryStore {
-            state: DashMap::with_shard_amount(shard_amount),
+            state: dashmap,
             budget: MemoryBudget::new(capacity.as_bytes() as i64),
             memory_capacity: capacity.as_bytes() as i64,
             ticket_manager,

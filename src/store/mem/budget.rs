@@ -2,7 +2,7 @@ use crate::metric::{GAUGE_MEMORY_ALLOCATED, GAUGE_MEMORY_CAPACITY, GAUGE_MEMORY_
 use crate::store::mem::capacity::CapacitySnapshot;
 use anyhow::Result;
 use fastrace::trace;
-use spin::RwLock;
+use parking_lot::RwLock;
 use std::sync::Arc;
 
 #[derive(Clone)]

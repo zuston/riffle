@@ -102,6 +102,8 @@ hashlink = "0.9.1"
 rand = "0.8.5"
 fastrace = { version = "0.6", features = ["enable"] }
 fastrace-jaeger = { version = "0.6" }
+fxhash = "0.2.1"
+parking_lot = "0.12.1"
 
 [dependencies.hdfs-native]
 version = "0.7.0"

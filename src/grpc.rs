@@ -32,7 +32,7 @@ use crate::proto::uniffle::{
     ShuffleRegisterRequest, ShuffleRegisterResponse, ShuffleUnregisterByAppIdRequest,
     ShuffleUnregisterByAppIdResponse, ShuffleUnregisterRequest, ShuffleUnregisterResponse,
 };
-use crate::store::{PartitionedData, ResponseDataIndex};
+use crate::store::{Block, PartitionedData, ResponseDataIndex};
 use await_tree::InstrumentAwait;
 use bytes::{BufMut, BytesMut};
 use croaring::treemap::JvmSerializer;
@@ -184,45 +184,44 @@ impl ShuffleServer for DefaultShuffleServer {
 
         let app = app_option.unwrap();
 
-        let release_result = app.release_buffer(ticket_id).await;
+        let release_result = app
+            .release_buffer(ticket_id)
+            .instrument_await(format!(
+                "releasing buffer for appId: {:?}. shuffleId: {}.",
+                &app_id, shuffle_id
+            ))
+            .await;
         if release_result.is_err() {
             return Ok(Response::new(SendShuffleDataResponse {
                 status: StatusCode::NO_BUFFER.into(),
                 ret_msg: "No such buffer ticket id, it may be discarded due to timeout".to_string(),
             }));
         }
+        let required_len_with_ticket = release_result.unwrap();
 
-        let contiguous_bytes = req.contiguous_shuffle_data;
-        let mut offset = 0usize;
-
-        let ticket_required_size = release_result.unwrap();
         let mut blocks_map = HashMap::new();
         for shuffle_data in req.shuffle_data {
             let data: PartitionedData = shuffle_data.into();
-            let mut partitioned_blocks = data.blocks;
-            for mut partitioned_block in &mut partitioned_blocks {
-                let len = partitioned_block.length;
-                let bytes = contiguous_bytes.slice(offset..(len as usize + offset));
-                partitioned_block.data = bytes;
-                offset += len as usize;
-            }
-
             let partition_id = data.partition_id;
+            let data_blocks = data.blocks;
             let blocks = blocks_map.entry(partition_id).or_insert_with(|| vec![]);
-            blocks.extend(partitioned_blocks);
+            blocks.extend(data_blocks);
         }
 
         let mut inserted_failure_occurs = false;
         let mut inserted_failure_error = None;
         let mut inserted_total_size = 0;
 
+        let insert_start = util::current_timestamp_ms();
         let mut shuffled_blocks: Vec<_> = blocks_map.into_iter().collect();
         for (partition_id, blocks) in shuffled_blocks {
             if inserted_failure_occurs {
                 continue;
             }
+            let app_id_ref = app_id.clone();
+            let await_tree_msg = format!("inserting data that has costed {}(ms). appId: {:?}. shuffleId: {}. partitionId: {}", util::current_timestamp_ms() - insert_start, &app_id_ref, shuffle_id, partition_id);
             let uid = PartitionedUId {
-                app_id: app_id.clone(),
+                app_id: app_id_ref,
                 shuffle_id,
                 partition_id,
             };
@@ -230,7 +229,6 @@ impl ShuffleServer for DefaultShuffleServer {
                 "rpc insert for app[{:?}], shuffleID:[{:?}]. partitionID:[{:?}]",
                 &uid.app_id, uid.shuffle_id, uid.partition_id
             );
-            let await_tree_msg = format!("insert data for app. appId: {:?}", &uid.app_id);
             let ctx = WritingViewContext::from(uid, blocks);
             let app_ref = app.clone();
             let inserted = self
@@ -261,10 +259,10 @@ impl ShuffleServer for DefaultShuffleServer {
             inserted_total_size += inserted_size as i64;
         }
 
-        let unused_allocated_size = ticket_required_size - inserted_total_size;
+        let unused_allocated_size = required_len_with_ticket - inserted_total_size;
         if unused_allocated_size != 0 {
             debug!("The required buffer size:[{:?}] has remaining allocated size:[{:?}] of unused, this should not happen",
-                ticket_required_size, unused_allocated_size);
+                required_len_with_ticket, unused_allocated_size);
             if let Err(e) = app.free_allocated_memory_size(unused_allocated_size).await {
                 warn!(
                     "Errors on free allocated size: {:?} for app: {:?}. err: {:#?}",

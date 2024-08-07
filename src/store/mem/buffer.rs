@@ -2,7 +2,7 @@ use crate::store::Block;
 use anyhow::Result;
 use croaring::Treemap;
 use fastrace::trace;
-use spin::RwLock;
+use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::mem;
