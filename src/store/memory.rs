@@ -47,6 +47,7 @@ use fastrace::trace;
 use fxhash::{FxBuildHasher, FxHasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use log::warn;
 
 pub struct MemoryStore {
     state: DashMap<PartitionedUId, Arc<MemoryBuffer>, BuildHasherDefault<FxHasher>>,
@@ -139,7 +140,7 @@ impl MemoryStore {
         self.budget.dec_allocated(size)
     }
 
-    pub fn calculate_spilled_blocks(
+    pub fn pickup_spilled_blocks(
         &self,
         mem_target_len: i64,
     ) -> HashMap<PartitionedUId, Arc<MemoryBuffer>> {
@@ -149,6 +150,7 @@ impl MemoryStore {
         let snapshot = self.budget.snapshot();
         let required_spilled_size = snapshot.used() - mem_target_len;
         if required_spilled_size <= 0 {
+            warn!("This should not happen that nothing should be picked up! snapshot used: {}, require spill: {}", snapshot.used(), required_spilled_size);
             return HashMap::new();
         }
 

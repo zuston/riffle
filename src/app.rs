@@ -275,7 +275,7 @@ impl App {
                 _ => ctx,
             }
         } else {
-            ctx
+            WritingViewContext::new(ctx.uid, ctx.data_blocks, false, len)
         };
 
         self.store.insert(context).await?;
