@@ -225,22 +225,9 @@ impl ShuffleServer for DefaultShuffleServer {
                 shuffle_id,
                 partition_id,
             };
-            let span_msg = format!(
-                "rpc insert for app[{:?}], shuffleID:[{:?}]. partitionID:[{:?}]",
-                &uid.app_id, uid.shuffle_id, uid.partition_id
-            );
             let ctx = WritingViewContext::from(uid, blocks);
             let app_ref = app.clone();
-            let inserted = self
-                .app_manager_ref
-                .runtime_manager()
-                .grpc_runtime
-                .spawn(
-                    async move { app_ref.insert(ctx).instrument_await(await_tree_msg).await }
-                        .in_span(Span::enter_with_local_parent(span_msg)),
-                )
-                .await
-                .unwrap();
+            let inserted = app_ref.insert(ctx).instrument_await(await_tree_msg).await;
 
             if inserted.is_err() {
                 let err = format!(

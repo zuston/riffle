@@ -439,11 +439,7 @@ impl Store for HybridStore {
     #[trace]
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
         let store = self.hot_store.clone();
-
-        let func = async move { store.insert(ctx).await }
-            .in_span(Span::enter_with_local_parent("Mem insert"));
-
-        let insert_result = self.runtime_manager.grpc_runtime.spawn(func).await?;
+        let insert_result = store.insert(ctx).await;
 
         if self.is_memory_only() {
             return insert_result;
