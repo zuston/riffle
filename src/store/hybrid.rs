@@ -51,15 +51,14 @@ use std::ops::Deref;
 
 use await_tree::InstrumentAwait;
 use fastrace::future::FutureExt;
-use fastrace::{trace, Span};
-use spin::mutex::Mutex;
+use fastrace::trace;
 use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::runtime::manager::RuntimeManager;
 use crate::store::mem::buffer::BatchMemoryBlock;
 use crate::store::mem::capacity::CapacitySnapshot;
-use tokio::sync::Semaphore;
+use tokio::sync::{Mutex, Semaphore};
 use tokio::time::Instant;
 
 trait PersistentStore: Store + Persistent + Send + Sync {}
@@ -445,7 +444,7 @@ impl Store for HybridStore {
             return insert_result;
         }
 
-        if let Some(_lock) = self.memory_spill_lock.try_lock() {
+        if let Ok(_) = self.memory_spill_lock.try_lock() {
             let ratio = self.hot_store.calculate_usage_ratio();
             if ratio > self.config.memory_spill_high_watermark {
                 self.watermark_spill().await?;
