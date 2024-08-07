@@ -47,6 +47,7 @@ use fastrace::trace;
 use fxhash::{FxBuildHasher, FxHasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use anyhow::anyhow;
 use log::warn;
 
 pub struct MemoryStore {
@@ -143,7 +144,7 @@ impl MemoryStore {
     pub fn pickup_spilled_blocks(
         &self,
         mem_target_len: i64,
-    ) -> HashMap<PartitionedUId, Arc<MemoryBuffer>> {
+    ) -> Result<HashMap<PartitionedUId, Arc<MemoryBuffer>>, anyhow::Error> {
         // 1. sort by the staging size.
         // 2. get the spill buffers until reaching the single max batch size
 
@@ -151,7 +152,7 @@ impl MemoryStore {
         let required_spilled_size = snapshot.used() - mem_target_len;
         if required_spilled_size <= 0 {
             warn!("This should not happen that nothing should be picked up! snapshot used: {}, require spill: {}", snapshot.used(), required_spilled_size);
-            return HashMap::new();
+            return Err(anyhow!(""));
         }
 
         let mut sorted_tree_map = BTreeMap::new();
@@ -187,7 +188,7 @@ impl MemoryStore {
             "[Spill] expected spill size: {}, real: {}",
             &required_spilled_size, &spill_staging_size
         );
-        spill_candidates
+        Ok(spill_candidates)
     }
 
     pub fn get_partitioned_buffer_size(&self, uid: &PartitionedUId) -> Result<u64> {
