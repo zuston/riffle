@@ -447,7 +447,9 @@ impl Store for HybridStore {
         if let Ok(_) = self.memory_spill_lock.try_lock() {
             let ratio = self.hot_store.calculate_usage_ratio();
             if ratio > self.config.memory_spill_high_watermark {
-                self.watermark_spill().await?;
+                if let Err(err) = self.watermark_spill().await {
+                    warn!("Errors on watermark spill. {:?}", err)
+                }
             }
         }
 
