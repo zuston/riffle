@@ -100,7 +100,8 @@ spin = "0.9.8"
 opendal = { version = "0.44.0", features = ["services-fs"]}
 hashlink = "0.9.1"
 rand = "0.8.5"
-fastrace = { version = "0.6", features = ["enable"] }
+#fastrace = { version = "0.6", features = ["enable"] }
+fastrace = { version = "0.6" }
 fastrace-jaeger = { version = "0.6" }
 fxhash = "0.2.1"
 parking_lot = "0.12.1"
