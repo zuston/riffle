@@ -38,7 +38,6 @@ use crate::rpc::tracing::TracingMiddleWareLayer;
 use crate::tracing::FastraceWrapper;
 use anyhow::Result;
 use clap::{App, Arg};
-use fastrace::collector::ConsoleReporter;
 use log::{debug, error, info};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::num::NonZeroUsize;

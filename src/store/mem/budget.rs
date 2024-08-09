@@ -2,13 +2,12 @@ use crate::metric::{GAUGE_MEMORY_ALLOCATED, GAUGE_MEMORY_CAPACITY, GAUGE_MEMORY_
 use crate::store::mem::capacity::CapacitySnapshot;
 use anyhow::Result;
 use fastrace::trace;
-use parking_lot::RwLock;
 use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct MemoryBudget {
     capacity: i64,
-    inner: Arc<RwLock<BudgetInner>>,
+    inner: Arc<parking_lot::Mutex<BudgetInner>>,
 }
 
 #[derive(Default)]
@@ -30,7 +29,7 @@ impl MemoryBudget {
     #[trace]
     pub fn snapshot(&self) -> CapacitySnapshot {
         let capacity = self.capacity;
-        let inner = self.inner.read();
+        let inner = self.inner.lock();
         let allocated = inner.allocated;
         let used = inner.used;
         drop(inner);
@@ -41,7 +40,7 @@ impl MemoryBudget {
     pub fn require_allocated(&self, size: i64) -> Result<(bool, i64)> {
         let capacity = self.capacity;
 
-        let mut inner = self.inner.write();
+        let mut inner = self.inner.lock();
         let allocated = inner.allocated;
         let used = inner.used;
 
@@ -58,7 +57,7 @@ impl MemoryBudget {
 
     #[trace]
     pub fn move_allocated_to_used(&self, size: i64) -> Result<bool> {
-        let mut inner = self.inner.write();
+        let mut inner = self.inner.lock();
         let allocated = inner.allocated;
 
         let mut desc = size;
@@ -76,7 +75,7 @@ impl MemoryBudget {
 
     #[trace]
     pub fn dec_used(&self, size: i64) -> Result<bool> {
-        let mut inner = self.inner.write();
+        let mut inner = self.inner.lock();
         if inner.used < size {
             inner.used = 0;
         } else {
@@ -88,7 +87,7 @@ impl MemoryBudget {
 
     #[trace]
     pub fn dec_allocated(&self, size: i64) -> Result<bool> {
-        let mut inner = self.inner.write();
+        let mut inner = self.inner.lock();
         if inner.allocated < size {
             inner.allocated = 0;
         } else {

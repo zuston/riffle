@@ -212,8 +212,7 @@ impl LocalDisk {
             .instrument_await("meet the concurrency limiter")
             .await?;
 
-        let mut writer = self.operator.writer_with(path)
-            .append(true).call()?;
+        let mut writer = self.operator.writer_with(path).append(true).call()?;
         // we must use the write_all to ensure the buffer consumed by the OS.
         // Please see the detail: https://doc.rust-lang.org/std/io/trait.Write.html#method.write_all
         writer.write_all(&*data)?;

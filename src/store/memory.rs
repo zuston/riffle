@@ -42,13 +42,13 @@ use crate::store::mem::budget::MemoryBudget;
 use crate::store::mem::buffer::MemoryBuffer;
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::mem::ticket::TicketManager;
+use anyhow::anyhow;
 use croaring::Treemap;
 use fastrace::trace;
 use fxhash::{FxBuildHasher, FxHasher};
+use log::warn;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use anyhow::anyhow;
-use log::warn;
 
 pub struct MemoryStore {
     state: DashMap<PartitionedUId, Arc<MemoryBuffer>, BuildHasherDefault<FxHasher>>,
