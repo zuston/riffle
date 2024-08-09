@@ -31,7 +31,7 @@ impl MemoryStoreConfig {
         Self {
             capacity,
             buffer_ticket_timeout_sec: Some(5 * 60),
-            dashmap_shard_amount: Some(96),
+            dashmap_shard_amount: Some(128),
         }
     }
 
@@ -39,7 +39,7 @@ impl MemoryStoreConfig {
         Self {
             capacity,
             buffer_ticket_timeout_sec: Some(buffer_ticket_timeout_sec),
-            dashmap_shard_amount: Some(96),
+            dashmap_shard_amount: Some(128),
         }
     }
 }

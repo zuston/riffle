@@ -97,7 +97,7 @@ impl MemoryStore {
             TicketManager::new(5 * 60, 10, release_allocated_func, runtime_manager.clone());
 
         /// the dashmap shard that will effect the lookup performance.
-        let shard_amount = conf.dashmap_shard_amount.unwrap_or(96);
+        let shard_amount = conf.dashmap_shard_amount.unwrap_or(128);
         let dashmap = DashMap::with_hasher_and_shard_amount(FxBuildHasher::default(), shard_amount);
 
         MemoryStore {

@@ -56,6 +56,7 @@ mod test {
             huge_partition_marked_threshold: None,
             huge_partition_memory_max_used_percent: None,
             http_monitor_service_port: None,
+            tracing: None,
         }
     }
 
