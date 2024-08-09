@@ -41,9 +41,9 @@ use log::{debug, error, warn};
 
 use crate::runtime::manager::RuntimeManager;
 use dashmap::mapref::entry::Entry;
+use tokio::sync::Mutex;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
-use tokio::net::unix::uid_t;
 
 use crate::store::local::disk::{LocalDisk, LocalDiskConfig};
 
@@ -65,7 +65,7 @@ pub struct LocalFileStore {
     local_disks: Vec<Arc<LocalDisk>>,
     healthy_check_min_disks: i32,
     runtime_manager: RuntimeManager,
-    partition_locks: DashMap<String, Arc<LockedObj>>,
+    partition_locks: DashMap<String, Arc<Mutex<LockedObj>>>,
 }
 
 impl Persistent for LocalFileStore {}
@@ -185,13 +185,14 @@ impl LocalFileStore {
             Entry::Vacant(e) => {
                 parent_dir_is_created = true;
                 let disk = self.select_disk(&uid)?;
-                let locked_obj = Arc::new(LockedObj::from(disk));
+                let locked_obj = Arc::new(Mutex::new(LockedObj::from(disk)));
                 let obj = e.insert_entry(locked_obj.clone());
                 obj.get().clone()
             }
             Entry::Occupied(v) => v.get().clone(),
         };
 
+        let locked_obj = locked_obj.lock().await;
         let local_disk = &locked_obj.disk;
         let mut next_offset = locked_obj.pointer.load(Ordering::SeqCst);
 
@@ -307,9 +308,12 @@ impl Store for LocalFileStore {
         let locked_object = self
             .partition_locks
             .entry(data_file_path.clone())
-            .or_insert_with(|| Arc::new(LockedObj::from(self.select_disk(&uid).unwrap())))
+            .or_insert_with(|| {
+                Arc::new(Mutex::new(LockedObj::from(self.select_disk(&uid).unwrap())))
+            })
             .clone();
 
+        let locked_object = locked_object.lock().await;
         let local_disk = &locked_object.disk;
 
         if local_disk.is_corrupted()? {
@@ -350,9 +354,12 @@ impl Store for LocalFileStore {
         let locked_object = self
             .partition_locks
             .entry(data_file_path.clone())
-            .or_insert_with(|| Arc::new(LockedObj::from(self.select_disk(&uid).unwrap())))
+            .or_insert_with(|| {
+                Arc::new(Mutex::new(LockedObj::from(self.select_disk(&uid).unwrap())))
+            })
             .clone();
 
+        let locked_object = locked_object.lock().await;
         let local_disk = &locked_object.disk;
         if local_disk.is_corrupted()? {
             return Err(WorkerError::LOCAL_DISK_OWNED_BY_PARTITION_CORRUPTED(
@@ -402,7 +409,7 @@ impl Store for LocalFileStore {
         for key in keys_to_delete {
             let meta = self.partition_locks.remove(&key);
             if let Some(x) = meta {
-                let size = x.1.pointer.load(Ordering::SeqCst);
+                let size = x.1.lock().await.pointer.load(Ordering::SeqCst);
                 removed_data_size += size;
             }
         }
