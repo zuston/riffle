@@ -1,4 +1,12 @@
-Another implementation of Apache Uniffle shuffle server (Single binary, no extra dependencies)
+Another implementation of Apache Uniffle shuffle server (Single binary, no extra dependencies and quick)
+
+## Roadmap
+1. Support storing data into s3
+2. Support single buffer flush
+3. Support huge partition limit
+4. Quick decommission that will spill data into remote storage like s3
+5. Using DirectIO to access file data
+6. Support netty protocol to interact with netty based uniffle client
 
 ## Benchmark report
 
