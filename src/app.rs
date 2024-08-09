@@ -343,8 +343,12 @@ impl App {
         }
     }
 
-    pub async fn free_allocated_memory_size(&self, size: i64) -> Result<bool> {
-        self.store.free_hot_store_allocated_memory_size(size)
+    pub fn dec_allocated_from_budget(&self, size: i64) -> Result<bool> {
+        self.store.release_allocated_from_hot_store(size)
+    }
+
+    pub fn move_allocated_used_from_budget(&self, size: i64) -> Result<bool> {
+        self.store.move_allocated_to_used_from_hot_store(size)
     }
 
     pub async fn require_buffer(
@@ -668,7 +672,7 @@ impl AppManager {
     }
 
     pub async fn store_memory_snapshot(&self) -> Result<CapacitySnapshot> {
-        self.store.get_hot_store_memory_snapshot().await
+        self.store.mem_snapshot().await
     }
 
     pub fn store_memory_spill_event_num(&self) -> Result<u64> {

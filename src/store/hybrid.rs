@@ -266,11 +266,15 @@ impl HybridStore {
         Ok(message)
     }
 
-    pub fn free_hot_store_allocated_memory_size(&self, size: i64) -> Result<bool> {
+    pub fn move_allocated_to_used_from_hot_store(&self, size: i64) -> Result<bool> {
+        self.hot_store.move_allocated_to_used(size)
+    }
+
+    pub fn release_allocated_from_hot_store(&self, size: i64) -> Result<bool> {
         self.hot_store.dec_allocated(size)
     }
 
-    pub async fn get_hot_store_memory_snapshot(&self) -> Result<CapacitySnapshot> {
+    pub async fn mem_snapshot(&self) -> Result<CapacitySnapshot> {
         self.hot_store.memory_snapshot()
     }
 

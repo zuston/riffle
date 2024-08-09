@@ -140,6 +140,10 @@ impl MemoryStore {
         self.budget.dec_allocated(size)
     }
 
+    pub fn move_allocated_to_used(&self, size: i64) -> Result<bool> {
+        self.budget.move_allocated_to_used(size)
+    }
+
     pub fn pickup_spilled_blocks(
         &self,
         mem_target_len: i64,
@@ -259,7 +263,6 @@ impl Store for MemoryStore {
         let buffer = self.get_or_create_memory_buffer(uid);
         buffer.append(blocks, ctx.data_size)?;
 
-        self.budget.move_allocated_to_used(size as i64)?;
         TOTAL_MEMORY_USED.inc_by(size);
 
         Ok(())

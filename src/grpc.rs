@@ -246,11 +246,13 @@ impl ShuffleServer for DefaultShuffleServer {
             inserted_total_size += inserted_size as i64;
         }
 
+        let _ = app.move_allocated_used_from_budget(inserted_total_size);
+
         let unused_allocated_size = required_len_with_ticket - inserted_total_size;
         if unused_allocated_size != 0 {
             debug!("The required buffer size:[{:?}] has remaining allocated size:[{:?}] of unused, this should not happen",
                 required_len_with_ticket, unused_allocated_size);
-            if let Err(e) = app.free_allocated_memory_size(unused_allocated_size).await {
+            if let Err(e) = app.dec_allocated_from_budget(unused_allocated_size) {
                 warn!(
                     "Errors on free allocated size: {:?} for app: {:?}. err: {:#?}",
                     unused_allocated_size, &app_id, e
