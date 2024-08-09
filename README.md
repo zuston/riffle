@@ -62,6 +62,7 @@ dispatch_thread_num = 10
 | type/buffer capacity             | 273G (compressed)  |
 |----------------------------------|:------------------:|
 | vanilla spark ESS                | 4.2min (1.3m/2.9m) | 
+| rust based shuffle server / 10g  | 4.0min (1.9m/2.1m) |
 | rust based shuffle server / 300g | 3.5min (1.4m/2.1m) |
 
 
@@ -70,7 +71,7 @@ dispatch_thread_num = 10
 `cargo build --release --features hdfs,jemalloc`
 
 Uniffle-x currently treats all compiler warnings as error, with some dead-code warning excluded. When you are developing
-and really want to ignore the warnings for now, you can use `ccargo --config 'build.rustflags=["-W", "warnings"]' build`
+and really want to ignore the warnings for now, you can use `cargo --config 'build.rustflags=["-W", "warnings"]' build`
 to restore the default behavior. However, before submit your pr, you should fix all the warnings.
 
 
