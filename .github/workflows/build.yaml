@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-name: Rust
+name: Build
 
 on:
   push:
@@ -30,8 +30,6 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: "centos:7"
     steps:
       - name: Install Protoc
         uses: arduino/setup-protoc@v2
