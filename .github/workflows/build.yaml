@@ -20,7 +20,7 @@ name: Build
 on:
   push:
     branches:
-      - 'master'
+      - "master"
   pull_request:
   workflow_dispatch:
 
@@ -29,7 +29,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: centos:7
     steps:
       - name: Install Protoc
         uses: arduino/setup-protoc@v2
