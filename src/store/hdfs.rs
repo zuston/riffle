@@ -17,7 +17,7 @@
 
 use crate::app::{
     PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingViewContext,
-    RegisterAppContext, ReleaseBufferContext, RequireBufferContext, WritingViewContext,
+    RegisterAppContext, ReleaseTicketContext, RequireBufferContext, WritingViewContext,
 };
 use crate::config::{HdfsStoreConfig, StorageType};
 use crate::error::WorkerError;
@@ -241,7 +241,7 @@ impl Store for HdfsStore {
         todo!()
     }
 
-    async fn release_buffer(&self, _ctx: ReleaseBufferContext) -> Result<i64, WorkerError> {
+    async fn release_ticket(&self, _ctx: ReleaseTicketContext) -> Result<i64, WorkerError> {
         todo!()
     }
 

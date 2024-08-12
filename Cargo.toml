@@ -23,8 +23,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[bin]]
-name="uniffle-worker"
-path= "src/main.rs"
+name = "uniffle-worker"
+path = "src/main.rs"
 
 [lib]
 name = "uniffle_worker"
@@ -39,21 +39,16 @@ jemalloc = [
 ]
 
 # whether to enable memory profiling or not, once enabled, it implies using jemalloc as the global allocator
-memory-prof = [
-    "jemalloc",
-    "tikv-jemallocator/profiling"
-]
+memory-prof = ["jemalloc", "tikv-jemallocator/profiling"]
 
-hdfs = [
-    "dep:hdfs-native"
-]
+hdfs = ["dep:hdfs-native"]
 
 [dependencies]
 anyhow = "1"
-tokio = { version = "1.28.2", features = ["full" ] }
+tokio = { version = "1.28.2", features = ["full"] }
 tokio-rustls = "0.22"
 tokio-stream = { version = "0.1", features = ["sync", "net"] }
-tokio-util = { version = "0.6", features = ["compat"]}
+tokio-util = { version = "0.6", features = ["full"] }
 toml = "0.7.4"
 tracing = "0.1"
 tracing-appender = "0.2"
@@ -80,7 +75,7 @@ crc32fast = "1.3.2"
 fs2 = "0.4.3"
 url = "2.4.0"
 await-tree = "0.1.1"
-poem = { version = "1.3.56", features = ["rustls", "test"]}
+poem = { version = "1.3.56", features = ["rustls", "test"] }
 pprof = { version = "0.11.1", features = [
     "flamegraph",
     "protobuf-codec",
@@ -94,10 +89,10 @@ tokio-console = "0.1.8"
 pin-project-lite = "0.2.8"
 signal-hook = "0.3.17"
 clap = "3.0.14"
-socket2 = { version="0.4", features = ["all"]}
+socket2 = { version = "0.4", features = ["all"] }
 cap = "0.1.2"
 spin = "0.9.8"
-opendal = { version = "0.44.0", features = ["services-fs"]}
+opendal = { version = "0.44.0", features = ["services-fs"] }
 hashlink = "0.9.1"
 rand = "0.8.5"
 #fastrace = { version = "0.6", features = ["enable"] }

@@ -18,7 +18,7 @@
 use crate::app::ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE;
 use crate::app::{
     PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingViewContext,
-    RegisterAppContext, ReleaseBufferContext, RequireBufferContext, WritingViewContext,
+    RegisterAppContext, ReleaseTicketContext, RequireBufferContext, WritingViewContext,
 };
 use crate::config::{MemoryStoreConfig, StorageType};
 use crate::error::WorkerError;
@@ -383,7 +383,7 @@ impl Store for MemoryStore {
     }
 
     #[trace]
-    async fn release_buffer(&self, ctx: ReleaseBufferContext) -> Result<i64, WorkerError> {
+    async fn release_ticket(&self, ctx: ReleaseTicketContext) -> Result<i64, WorkerError> {
         let ticket_id = ctx.ticket_id;
         self.ticket_manager.delete(ticket_id)
     }

@@ -368,9 +368,9 @@ impl App {
         })
     }
 
-    pub async fn release_buffer(&self, ticket_id: i64) -> Result<i64, WorkerError> {
+    pub async fn release_ticket(&self, ticket_id: i64) -> Result<i64, WorkerError> {
         self.store
-            .release_buffer(ReleaseBufferContext::from(ticket_id))
+            .release_ticket(ReleaseTicketContext::from(ticket_id))
             .await
     }
 
@@ -506,11 +506,11 @@ pub struct RegisterAppContext {
 }
 
 #[derive(Debug, Clone)]
-pub struct ReleaseBufferContext {
+pub struct ReleaseTicketContext {
     pub(crate) ticket_id: i64,
 }
 
-impl From<i64> for ReleaseBufferContext {
+impl From<i64> for ReleaseTicketContext {
     fn from(value: i64) -> Self {
         Self { ticket_id: value }
     }

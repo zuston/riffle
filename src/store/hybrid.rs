@@ -17,7 +17,7 @@
 
 use crate::app::{
     PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
-    RegisterAppContext, ReleaseBufferContext, RequireBufferContext, WritingViewContext,
+    RegisterAppContext, ReleaseTicketContext, RequireBufferContext, WritingViewContext,
 };
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 
@@ -526,8 +526,8 @@ impl Store for HybridStore {
     }
 
     #[trace]
-    async fn release_buffer(&self, ctx: ReleaseBufferContext) -> Result<i64, WorkerError> {
-        self.hot_store.release_buffer(ctx).await
+    async fn release_ticket(&self, ctx: ReleaseTicketContext) -> Result<i64, WorkerError> {
+        self.hot_store.release_ticket(ctx).await
     }
 
     #[trace]

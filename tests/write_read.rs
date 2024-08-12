@@ -29,7 +29,11 @@ mod tests {
     use tonic::transport::Channel;
     use uniffle_worker::metric::GAUGE_MEMORY_ALLOCATED;
 
-    fn create_mocked_config(grpc_port: i32, capacity: String, local_data_path: String) -> Config {
+    pub fn create_mocked_config(
+        grpc_port: i32,
+        capacity: String,
+        local_data_path: String,
+    ) -> Config {
         Config {
             memory_store: Some(MemoryStoreConfig::new(capacity)),
             localfile_store: Some(LocalfileStoreConfig {

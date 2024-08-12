@@ -20,12 +20,14 @@
 pub mod app;
 pub mod await_tree;
 pub mod config;
+pub mod constant;
 pub mod error;
 pub mod grpc;
 pub mod http;
 mod mem_allocator;
 pub mod metric;
 pub mod proto;
+pub mod protocol;
 pub mod readable_size;
 pub mod rpc;
 pub mod runtime;
@@ -34,7 +36,7 @@ pub mod store;
 pub mod tracing;
 pub mod util;
 
-use crate::app::AppManager;
+use crate::app::{AppManager, AppManagerRef};
 use crate::grpc::DefaultShuffleServer;
 use crate::http::{HTTPServer, HTTP_SERVICE};
 use crate::metric::init_metric_service;
@@ -58,7 +60,7 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::oneshot;
 use tonic::transport::{Channel, Server};
 
-pub async fn start_uniffle_worker(config: config::Config) -> Result<()> {
+pub async fn start_uniffle_worker(config: config::Config) -> Result<AppManagerRef> {
     let rpc_port = config.grpc_port.unwrap_or(19999);
     let worker_uid = gen_worker_uid(rpc_port);
     let metric_config = config.metrics.clone();
@@ -73,9 +75,10 @@ pub async fn start_uniffle_worker(config: config::Config) -> Result<()> {
     let (tx, rx) = oneshot::channel::<()>();
 
     // implement server startup
-    let cloned_runtime_manager = runtime_manager.clone();
+    let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone());
+    let app_manager_ref_cloned = app_manager_ref.clone();
     runtime_manager.grpc_runtime.spawn(async move {
-        let app_manager_ref = AppManager::get_ref(cloned_runtime_manager, config.clone());
+        let app_manager_ref = app_manager_ref_cloned;
         let rpc_port = config.grpc_port.unwrap_or(19999);
         info!("Starting GRpc server with port:[{}] ......", rpc_port);
         let shuffle_server = DefaultShuffleServer::from(app_manager_ref);
@@ -101,7 +104,7 @@ pub async fn start_uniffle_worker(config: config::Config) -> Result<()> {
         let _ = tx.send(());
     });
 
-    Ok(())
+    Ok(app_manager_ref)
 }
 
 pub async fn write_read_for_one_time(mut client: ShuffleServerClient<Channel>) -> Result<()> {

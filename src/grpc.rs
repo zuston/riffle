@@ -43,6 +43,7 @@ use std::collections::HashMap;
 
 use log::{debug, error, info, warn};
 
+use crate::constant::StatusCode;
 use crate::metric::{
     GRPC_BUFFER_REQUIRE_PROCESS_TIME, GRPC_GET_LOCALFILE_DATA_PROCESS_TIME,
     GRPC_GET_MEMORY_DATA_PROCESS_TIME, GRPC_GET_MEMORY_DATA_TRANSPORT_TIME,
@@ -57,25 +58,6 @@ pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
 /// Use a large value for HTTP/2 stream window size to improve the performance of remote exchange,
 /// as we don't rely on this for back-pressure.
 pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
-
-#[allow(non_camel_case_types)]
-enum StatusCode {
-    SUCCESS = 0,
-    DOUBLE_REGISTER = 1,
-    NO_BUFFER = 2,
-    INVALID_STORAGE = 3,
-    NO_REGISTER = 4,
-    NO_PARTITION = 5,
-    INTERNAL_ERROR = 6,
-    TIMEOUT = 7,
-    NO_BUFFER_FOR_HUGE_PARTITION = 8,
-}
-
-impl Into<i32> for StatusCode {
-    fn into(self) -> i32 {
-        self as i32
-    }
-}
 
 pub struct DefaultShuffleServer {
     app_manager_ref: AppManagerRef,
@@ -185,7 +167,7 @@ impl ShuffleServer for DefaultShuffleServer {
         let app = app_option.unwrap();
 
         let release_result = app
-            .release_buffer(ticket_id)
+            .release_ticket(ticket_id)
             .instrument_await(format!(
                 "releasing buffer for appId: {:?}. shuffleId: {}.",
                 &app_id, shuffle_id

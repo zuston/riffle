@@ -16,6 +16,7 @@
 // under the License.
 
 use anyhow::Error;
+use std::string::FromUtf8Error;
 
 use log::error;
 use poem::error::ParseQueryError;
@@ -63,6 +64,15 @@ pub enum WorkerError {
 
     #[error("Spill event has been retried exceed the max limit for app: {0}")]
     SPILL_EVENT_EXCEED_RETRY_MAX_LIMIT(String),
+
+    #[error("stream is incomplete")]
+    STREAM_INCOMPLETE,
+
+    #[error("stream is incorrect")]
+    STREAM_INCORRECT,
+
+    #[error("stream is abnormal")]
+    STREAM_ABNORMAL,
 }
 
 impl From<AcquireError> for WorkerError {
@@ -74,6 +84,18 @@ impl From<AcquireError> for WorkerError {
 impl From<ParseQueryError> for WorkerError {
     fn from(error: ParseQueryError) -> Self {
         WorkerError::Other(Error::new(error))
+    }
+}
+
+impl From<std::io::Error> for WorkerError {
+    fn from(err: std::io::Error) -> Self {
+        WorkerError::Other(Error::new(err))
+    }
+}
+
+impl From<FromUtf8Error> for WorkerError {
+    fn from(value: FromUtf8Error) -> Self {
+        WorkerError::Other(Error::new(value))
     }
 }
 

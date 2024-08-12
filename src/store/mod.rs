@@ -25,7 +25,7 @@ pub mod memory;
 
 use crate::app::{
     PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingViewContext,
-    RegisterAppContext, ReleaseBufferContext, RequireBufferContext, WritingViewContext,
+    RegisterAppContext, ReleaseTicketContext, RequireBufferContext, WritingViewContext,
 };
 use crate::config::{Config, StorageType};
 use crate::error::WorkerError;
@@ -179,7 +179,7 @@ pub trait Store {
         &self,
         ctx: RequireBufferContext,
     ) -> Result<RequireBufferResponse, WorkerError>;
-    async fn release_buffer(&self, ctx: ReleaseBufferContext) -> Result<i64, WorkerError>;
+    async fn release_ticket(&self, ctx: ReleaseTicketContext) -> Result<i64, WorkerError>;
     async fn register_app(&self, ctx: RegisterAppContext) -> Result<()>;
 
     async fn name(&self) -> StorageType;

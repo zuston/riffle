@@ -55,6 +55,7 @@ use tracing_subscriber::{fmt, EnvFilter, Registry};
 pub mod app;
 mod await_tree;
 mod config;
+pub mod constant;
 mod error;
 pub mod grpc;
 mod http;
@@ -67,7 +68,7 @@ pub mod runtime;
 pub mod signal;
 pub mod store;
 pub mod tracing;
-mod util;
+pub mod util;
 
 const MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY: &str = "MAX_MEMORY_ALLOCATION_SIZE";
 const DEFAULT_SHUFFLE_SERVER_TAG: &str = "ss_v4";
