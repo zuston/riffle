@@ -1,4 +1,4 @@
-use log::{error, info};
+use log::{debug, error, info};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -36,7 +36,7 @@ impl Listener {
                 .unwrap();
 
             let socket = self.accept().await?;
-            info!("Accepted connection from client: {:?}", &socket.peer_addr());
+            debug!("Accepted connection from client: {:?}", &socket.peer_addr());
 
             let mut handler = Handler {
                 connection: Connection::new(socket),
