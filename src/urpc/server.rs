@@ -110,7 +110,7 @@ impl Handler {
 }
 
 pub async fn urpc_serve(port: usize, shutdown: impl Future, app_manager_ref: AppManagerRef) {
-    let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
         .await
         .unwrap();
     run(listener, shutdown, app_manager_ref).await
@@ -162,8 +162,8 @@ mod test {
     #[tokio::test]
     async fn test() -> anyhow::Result<()> {
         let mut config = Config::create_simple_config();
-        config.grpc_port = Some(19999);
-        config.urpc_port = Some(20000);
+        config.grpc_port = Some(21100);
+        config.urpc_port = Some(21101);
 
         let runtime_manager = RuntimeManager::from(config.clone().runtime_config.clone());
         let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone());
