@@ -159,7 +159,7 @@ pub struct Config {
     pub metrics: Option<MetricsConfig>,
 
     pub grpc_port: Option<i32>,
-    pub uprc_port: Option<i32>,
+    pub urpc_port: Option<i32>,
 
     pub coordinator_quorum: Vec<String>,
     pub tags: Option<Vec<String>>,

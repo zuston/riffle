@@ -43,7 +43,7 @@ pub fn generate_worker_uid(config: &Config) -> String {
     if grpc_port.is_none() {
         panic!("GRPC port must be specified in config file");
     }
-    let urpc_port = config.uprc_port;
+    let urpc_port = config.urpc_port;
     if urpc_port.is_none() {
         return format!("{}-{}", &ip, grpc_port.unwrap());
     }

@@ -207,7 +207,7 @@ fn main() -> Result<()> {
         app_manager_ref.clone(),
         coordinator_quorum,
         config.grpc_port.unwrap_or(19999),
-        config.uprc_port.unwrap_or(0),
+        config.urpc_port.unwrap_or(0),
         tags,
         worker_uid,
     );

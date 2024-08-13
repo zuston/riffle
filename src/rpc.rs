@@ -48,7 +48,7 @@ impl DefaultRpcService {
         tx: Sender<()>,
         app_manager_ref: AppManagerRef,
     ) -> Result<()> {
-        let urpc_port = config.uprc_port.unwrap();
+        let urpc_port = config.urpc_port.unwrap();
 
         async fn shutdown(tx: Sender<()>) -> Result<()> {
             let mut rx = tx.subscribe();
@@ -110,7 +110,7 @@ impl DefaultRpcService {
             app_manager_ref.clone(),
         )?;
 
-        let urpc_port = config.uprc_port;
+        let urpc_port = config.urpc_port;
         if urpc_port.is_some() {
             DefaultRpcService::start_urpc(
                 config,

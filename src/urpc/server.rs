@@ -127,11 +127,11 @@ async fn run(listener: TcpListener, shutdown: impl Future, app_manager_ref: AppM
     tokio::select! {
         res = server.run(app_manager_ref) => {
             if let Err(err) = res {
-                error!("Errors on running uproto server. err: {:#?}", err);
+                error!("Errors on running urpc server. err: {:#?}", err);
             }
         }
         _ = shutdown => {
-            info!("Accepting the shutdown signal for the uproto net service");
+            info!("Accepting the shutdown signal for the urpc net service");
         }
     }
 
@@ -188,7 +188,7 @@ mod test {
                 push_interval_sec: None,
             }),
             grpc_port: Some(grpc_port),
-            uprc_port: None,
+            urpc_port: None,
             coordinator_quorum: vec![],
             tags: None,
             log: None,
