@@ -188,6 +188,7 @@ mod test {
                 push_interval_sec: None,
             }),
             grpc_port: Some(grpc_port),
+            uprc_port: None,
             coordinator_quorum: vec![],
             tags: None,
             log: None,

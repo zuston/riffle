@@ -18,6 +18,7 @@
 use bytes::Bytes;
 use crc32fast::Hasher;
 
+use crate::config::Config;
 use std::net::IpAddr;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -34,6 +35,19 @@ pub fn get_local_ip() -> Result<IpAddr, std::io::Error> {
         let local_addr = socket.local_addr()?;
         Ok(local_addr.ip())
     }
+}
+
+pub fn generate_worker_uid(config: &Config) -> String {
+    let ip = get_local_ip().unwrap().to_string();
+    let grpc_port = config.grpc_port;
+    if grpc_port.is_none() {
+        panic!("GRPC port must be specified in config file");
+    }
+    let urpc_port = config.uprc_port;
+    if urpc_port.is_none() {
+        return format!("{}-{}", &ip, grpc_port.unwrap());
+    }
+    return format!("{}-{}-{}", &ip, grpc_port.unwrap(), urpc_port.unwrap());
 }
 
 pub fn gen_worker_uid(grpc_port: i32) -> String {
