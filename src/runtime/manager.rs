@@ -26,7 +26,7 @@ pub struct RuntimeManager {
     pub read_runtime: RuntimeRef,
     // for writing data
     pub write_runtime: RuntimeRef,
-    // for grpc service
+    // for service service
     pub grpc_runtime: RuntimeRef,
     // for http monitor service
     pub http_runtime: RuntimeRef,

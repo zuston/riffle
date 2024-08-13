@@ -4,7 +4,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 use tokio::net::TcpStream;
 
 use crate::error::WorkerError;
-use crate::protocol::frame::Frame;
+use crate::urpc::frame::Frame;
 use anyhow::Result;
 
 #[derive(Debug)]

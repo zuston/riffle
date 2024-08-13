@@ -1,7 +1,7 @@
 use crate::error::WorkerError;
 use crate::error::WorkerError::STREAM_INCOMPLETE;
-use crate::protocol::command::{RpcResponseCommand, SendDataRequestCommand};
 use crate::store::Block;
+use crate::urpc::command::{RpcResponseCommand, SendDataRequestCommand};
 use anyhow::Result;
 use bytes::{Buf, Bytes};
 use std::collections::HashMap;
@@ -11,7 +11,7 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::net::TcpStream;
 
 ///
-/// The encode protocol:
+/// The encode urpc:
 ///
 /// HEADER
 /// 1. content_length   (i32, 4 bytes)
@@ -211,13 +211,13 @@ fn get_u8(src: &mut Cursor<&[u8]>) -> Result<u8, WorkerError> {
 #[cfg(test)]
 mod test {
     use crate::error::WorkerError;
-    use crate::protocol::frame::Frame;
+    use crate::urpc::frame::Frame;
     use anyhow::Result;
     use bytes::{BufMut, Bytes, BytesMut};
     use std::io::Cursor;
 
     ///
-    /// The encode protocol:
+    /// The encode urpc:
     ///
     /// 1. encoded_length(i32, 4 bytes)
     /// 2. message_type(u8, 1 byte)

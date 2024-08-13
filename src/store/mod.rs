@@ -29,7 +29,7 @@ use crate::app::{
 };
 use crate::config::{Config, StorageType};
 use crate::error::WorkerError;
-use crate::proto::uniffle::{ShuffleData, ShuffleDataBlockSegment};
+use crate::grpc::protobuf::uniffle::{ShuffleData, ShuffleDataBlockSegment};
 use crate::store::hybrid::HybridStore;
 use std::collections::LinkedList;
 use std::fmt::{Display, Formatter};

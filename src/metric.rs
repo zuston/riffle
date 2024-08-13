@@ -248,8 +248,9 @@ pub static GAUGE_IN_SPILL_DATA_SIZE: Lazy<IntGauge> =
 pub static TOTAL_GRPC_REQUEST: Lazy<IntCounter> =
     Lazy::new(|| IntCounter::new("total_grpc_request_number", "total request number").expect(""));
 
-pub static GAUGE_GRPC_REQUEST_QUEUE_SIZE: Lazy<IntGauge> =
-    Lazy::new(|| IntGauge::new("grpc_request_number", "current grpc request queue size").unwrap());
+pub static GAUGE_GRPC_REQUEST_QUEUE_SIZE: Lazy<IntGauge> = Lazy::new(|| {
+    IntGauge::new("grpc_request_number", "current service request queue size").unwrap()
+});
 
 pub static TOTAL_SPILL_EVENTS_DROPPED: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new(

@@ -19,17 +19,20 @@ use std::fs;
 use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // generate the uniffle code for grpc server
+    // generate the uniffle code for service server
     let mut config = prost_build::Config::new();
     config.bytes(&["."]);
 
     tonic_build::configure()
         .build_server(true)
-        .out_dir("src/proto")
-        .compile_with_config(config, &["src/proto/uniffle.proto"], &["."])?;
+        .out_dir("src/grpc/protobuf")
+        .compile_with_config(config, &["src/grpc/protobuf/uniffle.proto"], &["."])?;
 
     // rename the generated filename to uniffle.rs
-    rename_file("src/proto/rss.common.rs", "src/proto/uniffle.rs");
+    rename_file(
+        "src/grpc/protobuf/rss.common.rs",
+        "src/grpc/protobuf/uniffle.rs",
+    );
 
     Ok(())
 }

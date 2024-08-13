@@ -26,27 +26,25 @@ pub mod grpc;
 pub mod http;
 mod mem_allocator;
 pub mod metric;
-pub mod proto;
-pub mod protocol;
 pub mod readable_size;
-pub mod rpc;
 pub mod runtime;
 pub mod signal;
 pub mod store;
 pub mod tracing;
+pub mod urpc;
 pub mod util;
 
 use crate::app::{AppManager, AppManagerRef};
-use crate::grpc::DefaultShuffleServer;
-use crate::http::{HTTPServer, HTTP_SERVICE};
-use crate::metric::init_metric_service;
-use crate::proto::uniffle::shuffle_server_client::ShuffleServerClient;
-use crate::proto::uniffle::shuffle_server_server::ShuffleServerServer;
-use crate::proto::uniffle::{
+use crate::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
+use crate::grpc::protobuf::uniffle::shuffle_server_server::ShuffleServerServer;
+use crate::grpc::protobuf::uniffle::{
     GetLocalShuffleDataRequest, GetLocalShuffleIndexRequest, GetMemoryShuffleDataRequest,
     GetShuffleResultRequest, PartitionToBlockIds, ReportShuffleResultRequest, RequireBufferRequest,
     SendShuffleDataRequest, ShuffleBlock, ShuffleData, ShuffleRegisterRequest,
 };
+use crate::grpc::service::DefaultShuffleServer;
+use crate::http::{HTTPServer, HTTP_SERVICE};
+use crate::metric::init_metric_service;
 use crate::runtime::manager::RuntimeManager;
 use crate::util::gen_worker_uid;
 use anyhow::Result;

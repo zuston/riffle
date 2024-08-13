@@ -20,8 +20,8 @@ use crate::app::{
     ReadingIndexViewContext, ReadingOptions, ReadingViewContext, RemoteStorageConfig,
     ReportBlocksContext, RequireBufferContext, WritingViewContext,
 };
-use crate::proto::uniffle::shuffle_server_server::ShuffleServer;
-use crate::proto::uniffle::{
+use crate::grpc::protobuf::uniffle::shuffle_server_server::ShuffleServer;
+use crate::grpc::protobuf::uniffle::{
     AppHeartBeatRequest, AppHeartBeatResponse, FinishShuffleRequest, FinishShuffleResponse,
     GetLocalShuffleDataRequest, GetLocalShuffleDataResponse, GetLocalShuffleIndexRequest,
     GetLocalShuffleIndexResponse, GetMemoryShuffleDataRequest, GetMemoryShuffleDataResponse,

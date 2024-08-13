@@ -5,12 +5,12 @@ use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc, Semaphore};
 
-use crate::protocol::connection::Connection;
-use crate::protocol::shutdown::Shutdown;
+use crate::urpc::connection::Connection;
+use crate::urpc::shutdown::Shutdown;
 
 use crate::app::AppManagerRef;
 use crate::error::WorkerError;
-use crate::protocol::command::Command;
+use crate::urpc::command::Command;
 use anyhow::Result;
 
 const MAX_CONNECTIONS: usize = 40000;
@@ -155,8 +155,8 @@ mod test {
         Config, HybridStoreConfig, LocalfileStoreConfig, MemoryStoreConfig, MetricsConfig,
         StorageType,
     };
-    use crate::protocol::server::run;
     use crate::start_uniffle_worker;
+    use crate::urpc::server::run;
     use std::time::Duration;
     use tokio::net::TcpListener;
 

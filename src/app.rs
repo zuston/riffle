@@ -26,7 +26,6 @@ use crate::metric::{
 use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::hybrid::HybridStore;
-use crate::store::memory::MemorySnapshot;
 use crate::store::{
     Block, RequireBufferResponse, ResponseData, ResponseDataIndex, Store, StoreProvider,
 };
@@ -46,7 +45,7 @@ use std::hash::{Hash, Hasher};
 
 use std::str::FromStr;
 
-use crate::proto::uniffle::RemoteStorage;
+use crate::grpc::protobuf::uniffle::RemoteStorage;
 use crate::store::mem::capacity::CapacitySnapshot;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -656,7 +655,7 @@ impl AppManager {
                         app_manager_cloned.purge_app_data(app_id, None).await
                     }
                     PurgeEvent::APP_PARTIAL_SHUFFLES_PURGE(app_id, shuffle_id) => {
-                        info!("The app:[{:?}] with shuffleId: [{:?}] will be purged due to unregister grpc interface", &app_id, shuffle_id);
+                        info!("The app:[{:?}] with shuffleId: [{:?}] will be purged due to unregister service interface", &app_id, shuffle_id);
                         app_manager_cloned.purge_app_data(app_id, Some(shuffle_id)).await
                     }
                 }
