@@ -27,7 +27,7 @@ mod test {
         Config, HybridStoreConfig, LocalfileStoreConfig, MemoryStoreConfig, MetricsConfig,
         StorageType,
     };
-    use uniffle_worker::proto::uniffle::shuffle_server_client::ShuffleServerClient;
+    use uniffle_worker::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
     use uniffle_worker::{start_uniffle_worker, write_read_for_one_time};
 
     fn create_mocked_config(grpc_port: i32, capacity: String, local_data_path: String) -> Config {
@@ -49,6 +49,7 @@ mod test {
                 push_interval_sec: None,
             }),
             grpc_port: Some(grpc_port),
+            urpc_port: None,
             coordinator_quorum: vec![],
             tags: None,
             log: None,

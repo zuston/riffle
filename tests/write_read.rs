@@ -22,11 +22,11 @@ mod tests {
         Config, HybridStoreConfig, LocalfileStoreConfig, MemoryStoreConfig, MetricsConfig,
         StorageType,
     };
-    use uniffle_worker::proto::uniffle::shuffle_server_client::ShuffleServerClient;
     use uniffle_worker::{start_uniffle_worker, write_read_for_one_time};
 
     use std::time::Duration;
     use tonic::transport::Channel;
+    use uniffle_worker::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
     use uniffle_worker::metric::GAUGE_MEMORY_ALLOCATED;
 
     pub fn create_mocked_config(
@@ -52,6 +52,7 @@ mod tests {
                 push_interval_sec: None,
             }),
             grpc_port: Some(grpc_port),
+            urpc_port: None,
             coordinator_quorum: vec![],
             tags: None,
             log: None,

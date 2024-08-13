@@ -267,6 +267,24 @@ impl Config {
 
         Config::from(&path)
     }
+
+    pub fn create_simple_config() -> Config {
+        let toml_str = r#"
+        store_type = "MEMORY"
+        coordinator_quorum = [""]
+        grpc_port = 19999
+
+        [memory_store]
+        capacity = "1M"
+
+        [hybrid_store]
+        memory_spill_high_watermark = 0.8
+        memory_spill_low_watermark = 0.2
+        memory_single_buffer_max_spill_size = "256M"
+        "#;
+
+        toml::from_str(toml_str).unwrap()
+    }
 }
 
 #[cfg(test)]

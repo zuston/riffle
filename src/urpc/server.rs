@@ -151,66 +151,22 @@ async fn run(listener: TcpListener, shutdown: impl Future, app_manager_ref: AppM
 
 #[cfg(test)]
 mod test {
-    use crate::config::{
-        Config, HybridStoreConfig, LocalfileStoreConfig, MemoryStoreConfig, MetricsConfig,
-        StorageType,
-    };
-    use crate::start_uniffle_worker;
-    use crate::urpc::server::run;
-    use std::time::Duration;
-    use tokio::net::TcpListener;
-
-    async fn hang() -> anyhow::Result<()> {
-        tokio::time::sleep(Duration::from_secs(1000000)).await;
-        Ok(())
-    }
-
-    pub fn create_mocked_config(
-        grpc_port: i32,
-        capacity: String,
-        local_data_path: String,
-    ) -> Config {
-        Config {
-            memory_store: Some(MemoryStoreConfig::new(capacity)),
-            localfile_store: Some(LocalfileStoreConfig {
-                data_paths: vec![local_data_path],
-                healthy_check_min_disks: Some(0),
-                disk_high_watermark: None,
-                disk_low_watermark: None,
-                disk_max_concurrency: None,
-            }),
-            hybrid_store: Some(HybridStoreConfig::new(0.9, 0.5, None)),
-            hdfs_store: None,
-            store_type: Some(StorageType::MEMORY_LOCALFILE),
-            runtime_config: Default::default(),
-            metrics: Some(MetricsConfig {
-                push_gateway_endpoint: None,
-                push_interval_sec: None,
-            }),
-            grpc_port: Some(grpc_port),
-            urpc_port: None,
-            coordinator_quorum: vec![],
-            tags: None,
-            log: None,
-            app_heartbeat_timeout_min: None,
-            huge_partition_marked_threshold: None,
-            huge_partition_memory_max_used_percent: None,
-            http_monitor_service_port: None,
-            tracing: None,
-        }
-    }
+    use crate::app::AppManager;
+    use crate::config::Config;
+    use crate::rpc::DefaultRpcService;
+    use crate::runtime::manager::RuntimeManager;
 
     #[tokio::test]
     async fn test() -> anyhow::Result<()> {
-        let temp_dir = tempdir::TempDir::new("test_write_read").unwrap();
-        let temp_path = temp_dir.path().to_str().unwrap().to_string();
-        println!("created the temp file path: {}", &temp_path);
+        let mut config = Config::create_simple_config();
+        config.grpc_port = Some(19999);
+        config.urpc_port = Some(20000);
 
-        let config = create_mocked_config(20001, "10M".to_string(), temp_path);
-        let app_ref = start_uniffle_worker(config).await.unwrap();
+        let runtime_manager = RuntimeManager::from(config.clone().runtime_config.clone());
+        let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone());
 
-        let listener = TcpListener::bind("127.0.0.1:19991").await.unwrap();
-        run(listener, hang(), app_ref).await;
+        DefaultRpcService {}.start(&config, runtime_manager.clone(), app_manager_ref.clone())?;
+
         Ok(())
     }
 }
