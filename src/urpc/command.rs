@@ -5,7 +5,7 @@ use crate::urpc::connection::Connection;
 use crate::urpc::frame::Frame;
 use crate::urpc::shutdown::Shutdown;
 use anyhow::Result;
-use log::{error, warn};
+use log::{debug, error, warn};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -123,7 +123,7 @@ impl SendDataRequestCommand {
         let _ = app.move_allocated_used_from_budget(insert_len);
         let unused = ticket_len - insert_len;
         if unused > 0 {
-            warn!("Has remaining {} allocated buffer.", &unused);
+            debug!("Has remaining {} allocated buffer.", &unused);
             let _ = app.dec_allocated_from_budget(unused);
         }
 

@@ -4,11 +4,13 @@ use crate::store::Block;
 use crate::urpc::command::{RpcResponseCommand, SendDataRequestCommand};
 use anyhow::Result;
 use bytes::{Buf, Bytes};
+use log::warn;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::io::Cursor;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::net::TcpStream;
+use tracing::info;
 
 ///
 /// The encode urpc:
@@ -75,6 +77,11 @@ impl Frame {
         let encode_msg_len = get_i32(src)?;
         let msg_type = get_u8(src)?;
         let body_len = get_i32(src)?;
+
+        if Buf::remaining(src) < encode_msg_len as usize {
+            warn!("This should not happen that the frame has been passed in check logic, but not have enough buffer to parse.");
+            return Err(WorkerError::STREAM_ABNORMAL);
+        }
 
         match msg_type {
             3u8 => {
