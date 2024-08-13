@@ -53,9 +53,9 @@ impl DefaultRpcService {
         async fn shutdown(tx: Sender<()>) -> Result<()> {
             let mut rx = tx.subscribe();
             if let Err(err) = rx.recv().await {
-                error!("Errors on stopping the GRPC service, err: {:?}.", err);
+                error!("Errors on stopping the urpc service, err: {:?}.", err);
             } else {
-                debug!("GRPC service has been graceful stopped.");
+                debug!("urpc service has been graceful stopped.");
             }
             Ok(())
         }
