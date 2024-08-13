@@ -36,6 +36,8 @@ impl Listener {
                 .unwrap();
 
             let socket = self.accept().await?;
+            info!("Accepted connection from client: {:?}", &socket.peer_addr());
+
             let mut handler = Handler {
                 connection: Connection::new(socket),
                 shutdown: Shutdown::new(self.notify_shutdown.subscribe()),
@@ -66,6 +68,7 @@ impl Listener {
 
             tokio::time::sleep(Duration::from_secs(backoff)).await;
             backoff *= 2;
+            info!("Backoff: {}", backoff);
         }
     }
 }
