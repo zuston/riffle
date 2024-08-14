@@ -7,6 +7,8 @@ use crate::error::WorkerError;
 use crate::urpc::frame::Frame;
 use anyhow::Result;
 
+const INITIAL_BUFFER_LENGTH: usize = 1024 * 1024;
+
 #[derive(Debug)]
 pub struct Connection {
     stream: BufWriter<TcpStream>,
@@ -17,7 +19,7 @@ impl Connection {
     pub fn new(socket: TcpStream) -> Self {
         Connection {
             stream: BufWriter::new(socket),
-            buffer: BytesMut::with_capacity(1024 * 1024),
+            buffer: BytesMut::with_capacity(INITIAL_BUFFER_LENGTH),
         }
     }
 
