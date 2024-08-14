@@ -68,8 +68,8 @@ pub enum WorkerError {
     #[error("stream is incomplete")]
     STREAM_INCOMPLETE,
 
-    #[error("stream is incorrect")]
-    STREAM_INCORRECT,
+    #[error("stream is incorrect: {0}")]
+    STREAM_INCORRECT(String),
 
     #[error("stream is abnormal")]
     STREAM_ABNORMAL,

@@ -10,7 +10,6 @@ use std::hash::Hash;
 use std::io::Cursor;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::net::TcpStream;
-use tracing::info;
 
 ///
 /// The encode urpc:
@@ -62,13 +61,14 @@ impl Frame {
             return Err(STREAM_INCOMPLETE);
         }
 
-        let encode_msg_len = get_i32(src)?;
+        let msg_len = get_i32(src)?;
         let msg_type = get_u8(src)?;
         let body_len = get_i32(src)?;
 
-        if Buf::remaining(src) < encode_msg_len as usize {
+        if Buf::remaining(src) < msg_len as usize {
             return Err(STREAM_INCOMPLETE);
         }
+        skip(src, msg_len as usize)?;
 
         Ok(())
     }
@@ -161,7 +161,7 @@ impl Frame {
 
 fn get_bytes(src: &mut Cursor<&[u8]>, len: usize) -> Result<Bytes, WorkerError> {
     if Buf::remaining(src) < len.into() {
-        return Err(STREAM_INCORRECT);
+        return Err(STREAM_INCORRECT("get_bytes".into()));
     }
 
     let data = Bytes::copy_from_slice(&Buf::chunk(src)[..len]);
@@ -170,23 +170,23 @@ fn get_bytes(src: &mut Cursor<&[u8]>, len: usize) -> Result<Bytes, WorkerError> 
 }
 
 fn get_i64(src: &mut Cursor<&[u8]>) -> Result<i64, WorkerError> {
-    if !src.has_remaining() {
-        return Err(STREAM_INCORRECT);
+    if !Buf::has_remaining(src) {
+        return Err(STREAM_INCORRECT("get_i64".into()));
     }
 
     Ok(src.get_i64())
 }
 
 fn get_i32(src: &mut Cursor<&[u8]>) -> Result<i32, WorkerError> {
-    if !src.has_remaining() {
-        return Err(STREAM_INCORRECT);
+    if !Buf::has_remaining(src) {
+        return Err(STREAM_INCORRECT("get_i32".into()));
     }
     Ok(src.get_i32())
 }
 
 fn skip(src: &mut Cursor<&[u8]>, n: usize) -> Result<(), WorkerError> {
     if Buf::remaining(src) < n {
-        return Err(STREAM_INCORRECT);
+        return Err(STREAM_INCORRECT("skip".into()));
     }
 
     Buf::advance(src, n);
@@ -194,12 +194,20 @@ fn skip(src: &mut Cursor<&[u8]>, n: usize) -> Result<(), WorkerError> {
 }
 
 fn get_string(src: &mut Cursor<&[u8]>) -> Result<String, WorkerError> {
-    if !src.has_remaining() {
-        return Err(STREAM_INCORRECT);
+    if !Buf::has_remaining(src) {
+        return Err(STREAM_INCORRECT("get_string 1".into()));
     }
     let len = get_i32(src)? as usize;
-    if Buf::remaining(src) < len as usize {
-        return Err(STREAM_INCORRECT);
+    if len <= 0 {
+        return Ok("".into());
+    }
+
+    if Buf::remaining(src) < len {
+        return Err(STREAM_INCORRECT(format!(
+            "get string. src remaining: {}. len: {}",
+            Buf::remaining(src),
+            len
+        )));
     }
 
     let msg = Bytes::copy_from_slice(&Buf::chunk(src)[..len]);
@@ -209,8 +217,8 @@ fn get_string(src: &mut Cursor<&[u8]>) -> Result<String, WorkerError> {
 }
 
 fn get_u8(src: &mut Cursor<&[u8]>) -> Result<u8, WorkerError> {
-    if !src.has_remaining() {
-        return Err(STREAM_INCORRECT);
+    if !Buf::has_remaining(src) {
+        return Err(STREAM_INCORRECT("get_u8".into()));
     }
     Ok(src.get_u8())
 }
