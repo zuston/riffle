@@ -1,10 +1,14 @@
 use crate::error::WorkerError;
 use crate::error::WorkerError::{STREAM_INCOMPLETE, STREAM_INCORRECT};
 use crate::store::Block;
-use crate::urpc::command::{RpcResponseCommand, SendDataRequestCommand};
-use anyhow::Result;
+use crate::urpc::command::{
+    GetMemoryDataRequestCommand, GetMemoryDataResponseCommand, RpcResponseCommand,
+    SendDataRequestCommand,
+};
+use anyhow::{Error, Result};
 use bytes::{Buf, Bytes};
 use log::warn;
+use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::io::Cursor;
@@ -23,31 +27,111 @@ use tokio::net::TcpStream;
 /// 4. data
 ///
 
+impl From<TryFromPrimitiveError<MessageType>> for WorkerError {
+    fn from(value: TryFromPrimitiveError<MessageType>) -> Self {
+        WorkerError::Other(Error::new(value))
+    }
+}
+
+#[allow(non_camel_case_types)]
+#[derive(Debug, Eq, PartialEq, TryFromPrimitive)]
+#[repr(u8)]
+enum MessageType {
+    SendShuffleData = 3,
+    GetMemoryData = 6,
+    GetMemoryDataResponse = 16,
+
+    GetLocalDataIndex = 4,
+    GetLocalDataIndexResponse = 14,
+
+    GetLocalData = 5,
+    GetLocalDataResponse = 15,
+
+    RpcResponse = 0,
+}
+
 const HEADER_LEN: usize = 4 + 1 + 4;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Frame {
     SendShuffleData(SendDataRequestCommand),
+
+    GetMemoryData(GetMemoryDataRequestCommand),
+    GetMemoryDataResponse(GetMemoryDataResponseCommand),
+
+    // GetLocalDataIndex(GetLocalDataIndexRequestCommand),
+    // GetLocalDataIndexResponse(GetLocalDataIndexResponseCommand),
+    //
+    // GetLocalData(GetLocalDataRequestCommand),
+    // GetLocalDataResponse(GetLocalDataResponseCommand),
     RpcResponse(RpcResponseCommand),
 }
 
 impl Frame {
     pub async fn write(stream: &mut BufWriter<TcpStream>, frame: &Frame) -> Result<()> {
         match frame {
-            Frame::RpcResponse(req) => {
-                let request_id = req.request_id;
-                let status_code = req.status_code;
-                let msg = &req.ret_msg;
+            Frame::GetMemoryDataResponse(resp) => {
+                let request_id = resp.request_id;
+                let status_code = resp.status_code;
+
+                let msg = &resp.ret_msg;
+                let msg_bytes = msg.as_bytes();
+
+                let mem_data = resp.data.from_memory();
+                let data_bytes = mem_data.data;
+                let data_bytes_len = data_bytes.len() as i32;
+
+                let segments = mem_data.shuffle_data_block_segments;
+                let segments_encode_len = (4 + segments.len() * (3 * 8 + 3 * 4)) as i32;
+
+                // header
+                stream
+                    .write_i32(msg_bytes.len() as i32 + 8 + 4 + 4 + segments_encode_len)
+                    .await?;
+                stream
+                    .write_u8(MessageType::GetMemoryDataResponse as u8)
+                    .await?;
+                stream.write_i32(data_bytes_len).await?;
+
+                // partial content with general response info
+                stream.write_i64(request_id).await?;
+                stream.write_i32(status_code).await?;
+
+                stream.write_i32(msg_bytes.len() as i32).await?;
+                stream.write_all(msg_bytes).await?;
+
+                // write segment
+                stream.write_i32(segments.len() as i32).await?;
+                for segment in segments {
+                    stream.write_i64(segment.block_id).await?;
+                    stream.write_i32(segment.offset as i32).await?;
+                    stream.write_i32(segment.length).await?;
+                    stream.write_i32(segment.uncompress_length).await?;
+                    stream.write_i64(segment.crc).await?;
+                    stream.write_i64(segment.task_attempt_id).await?;
+                }
+
+                // data_bytes
+                stream.write_all(&*data_bytes).await?;
+
+                return Ok(());
+            }
+            Frame::RpcResponse(resp) => {
+                let request_id = resp.request_id;
+                let status_code = resp.status_code;
+
+                let msg = &resp.ret_msg;
                 let msg_bytes = msg.as_bytes();
 
                 // header
                 stream.write_i32(msg_bytes.len() as i32 + 8 + 4 + 4).await?;
-                stream.write_u8(0u8).await?;
+                stream.write_u8(MessageType::RpcResponse as u8).await?;
                 stream.write_i32(0).await?;
 
                 // content
                 stream.write_i64(request_id).await?;
                 stream.write_i32(status_code).await?;
+
                 stream.write_i32(msg_bytes.len() as i32).await?;
                 stream.write_all(msg_bytes).await?;
                 return Ok(());
@@ -65,7 +149,7 @@ impl Frame {
         let msg_type = get_u8(src)?;
         let body_len = get_i32(src)?;
 
-        if Buf::remaining(src) < msg_len as usize {
+        if Buf::remaining(src) < (msg_len + body_len) as usize {
             return Err(STREAM_INCOMPLETE);
         }
         skip(src, msg_len as usize)?;
@@ -73,18 +157,51 @@ impl Frame {
         Ok(())
     }
 
+    fn parse_to_get_memory_data_command(
+        src: &mut Cursor<&[u8]>,
+    ) -> Result<GetMemoryDataRequestCommand> {
+        let request_id = get_i64(src)?;
+        let app_id = get_string(src)?;
+        let shuffle_id = get_i32(src)?;
+        let partition_id = get_i32(src)?;
+        let last_block_id = get_i64(src)?;
+        let read_buffer_size = get_i32(src)?;
+        let timestamp = get_i64(src)?;
+
+        let expected_task_bitmap_raw_option = get_bytes(src)?;
+        Ok(GetMemoryDataRequestCommand {
+            request_id,
+            app_id,
+            shuffle_id,
+            partition_id,
+            last_block_id,
+            read_buffer_size,
+            expected_tasks_bitmap_raw: expected_task_bitmap_raw_option,
+        })
+    }
+
     pub fn parse(src: &mut Cursor<&[u8]>) -> Result<Frame, WorkerError> {
         let encode_msg_len = get_i32(src)?;
         let msg_type = get_u8(src)?;
         let body_len = get_i32(src)?;
 
-        if Buf::remaining(src) < encode_msg_len as usize {
+        if Buf::remaining(src) < (encode_msg_len + body_len) as usize {
             warn!("This should not happen that the frame has been passed in check logic, but not have enough buffer to parse.");
             return Err(WorkerError::STREAM_ABNORMAL);
         }
 
+        let msg_type = MessageType::try_from(msg_type);
         match msg_type {
-            3u8 => {
+            Err(e) => return Err(WorkerError::STREAM_MESSAGE_TYPE_NOT_FOUND),
+            _ => {}
+        }
+
+        match msg_type? {
+            MessageType::GetMemoryData => {
+                let command = Frame::parse_to_get_memory_data_command(src)?;
+                return Ok(Frame::GetMemoryData(command));
+            }
+            MessageType::SendShuffleData => {
                 let request_id = get_i64(src)?;
                 let app_id = get_string(src)?;
                 let shuffle_id = get_i32(src)?;
@@ -104,8 +221,8 @@ impl Frame {
                         let shuffle_id = get_i32(src)?;
                         let crc = get_i64(src)?;
                         let task_attempt_id = get_i64(src)?;
-                        let data_len = get_i32(src)?;
-                        let buffer = get_bytes(src, data_len as usize)?;
+                        // todo: make this allocated with the contiguous memory buffer.
+                        let buffer = get_bytes(src)?.unwrap_or(Bytes::new());
 
                         /// skip the shuffle-servers data?
                         let length_of_shuffle_servers = get_i32(src)?;
@@ -141,7 +258,7 @@ impl Frame {
                 };
                 return Ok(Frame::SendShuffleData(req));
             }
-            0u8 => {
+            MessageType::RpcResponse => {
                 let request_id = get_i64(src)?;
                 let status_code = get_i32(src)?;
                 let ret_msg = get_string(src)?;
@@ -159,14 +276,24 @@ impl Frame {
     }
 }
 
-fn get_bytes(src: &mut Cursor<&[u8]>, len: usize) -> Result<Bytes, WorkerError> {
-    if Buf::remaining(src) < len.into() {
+fn get_bytes(src: &mut Cursor<&[u8]>) -> Result<Option<Bytes>, WorkerError> {
+    if !Buf::has_remaining(src) {
         return Err(STREAM_INCORRECT("get_bytes".into()));
     }
+    let bytes_data_len = get_i32(src)? as usize;
+    if bytes_data_len < 0 {
+        return Ok(None);
+    }
 
-    let data = Bytes::copy_from_slice(&Buf::chunk(src)[..len]);
-    skip(src, len)?;
-    Ok(data)
+    if Buf::remaining(src) < bytes_data_len {
+        return Err(STREAM_INCORRECT(
+            "get_bytes but not have enough remaining bytes".into(),
+        ));
+    }
+
+    let data = Bytes::copy_from_slice(&Buf::chunk(src)[..bytes_data_len]);
+    skip(src, bytes_data_len)?;
+    Ok(Some(data))
 }
 
 fn get_i64(src: &mut Cursor<&[u8]>) -> Result<i64, WorkerError> {

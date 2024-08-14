@@ -19,6 +19,7 @@ use anyhow::Error;
 use std::string::FromUtf8Error;
 
 use log::error;
+use num_enum::TryFromPrimitiveError;
 use poem::error::ParseQueryError;
 use thiserror::Error;
 use tokio::sync::AcquireError;
@@ -65,14 +66,17 @@ pub enum WorkerError {
     #[error("Spill event has been retried exceed the max limit for app: {0}")]
     SPILL_EVENT_EXCEED_RETRY_MAX_LIMIT(String),
 
-    #[error("stream is incomplete")]
+    #[error("urpc stream is incomplete")]
     STREAM_INCOMPLETE,
 
-    #[error("stream is incorrect: {0}")]
+    #[error("urpc stream is incorrect: {0}")]
     STREAM_INCORRECT(String),
 
-    #[error("stream is abnormal")]
+    #[error("urpc stream is abnormal")]
     STREAM_ABNORMAL,
+
+    #[error("urpc stream message type not found")]
+    STREAM_MESSAGE_TYPE_NOT_FOUND,
 }
 
 impl From<AcquireError> for WorkerError {

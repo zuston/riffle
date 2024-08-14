@@ -90,6 +90,7 @@ pub struct LocalDataIndex {
     pub data_file_len: i64,
 }
 
+#[derive(Debug)]
 pub enum ResponseData {
     Local(PartitionedLocalData),
     Mem(PartitionedMemoryData),
@@ -111,17 +112,18 @@ impl ResponseData {
     }
 }
 
+#[derive(Debug)]
 pub struct PartitionedLocalData {
     pub data: Bytes,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct PartitionedMemoryData {
     pub shuffle_data_block_segments: Vec<DataSegment>,
     pub data: Bytes,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DataSegment {
     pub block_id: i64,
     pub offset: i64,

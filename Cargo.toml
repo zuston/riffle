@@ -100,6 +100,7 @@ fastrace = { version = "0.6" }
 fastrace-jaeger = { version = "0.6" }
 fxhash = "0.2.1"
 parking_lot = "0.12.1"
+num_enum = "0.7.0"
 
 [dependencies.hdfs-native]
 version = "0.7.0"
