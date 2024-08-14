@@ -152,7 +152,7 @@ impl Frame {
         if Buf::remaining(src) < (msg_len + body_len) as usize {
             return Err(STREAM_INCOMPLETE);
         }
-        skip(src, msg_len as usize)?;
+        skip(src, (msg_len + body_len) as usize)?;
 
         Ok(())
     }
