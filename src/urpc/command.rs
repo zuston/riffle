@@ -24,7 +24,11 @@ impl Command {
                 let request = req;
                 Ok(Command::Send(request))
             }
-            _ => todo!(),
+            Frame::GetMemoryData(req) => {
+                let request = req;
+                Ok(Command::GetMem(request))
+            }
+            _ => todo!()
         }
     }
 

@@ -280,19 +280,21 @@ fn get_bytes(src: &mut Cursor<&[u8]>) -> Result<Option<Bytes>, WorkerError> {
     if !Buf::has_remaining(src) {
         return Err(STREAM_INCORRECT("get_bytes".into()));
     }
-    let bytes_data_len = get_i32(src)? as usize;
+    let bytes_data_len = get_i32(src)?;
     if bytes_data_len <= 0 {
         return Ok(None);
     }
 
-    if Buf::remaining(src) < bytes_data_len {
-        return Err(STREAM_INCORRECT(
-            "get_bytes but not have enough remaining bytes".into(),
-        ));
+    if Buf::remaining(src) < bytes_data_len as usize {
+        return Err(STREAM_INCORRECT(format!(
+            "get_bytes but not have enough remaining bytes. expected: {}, real: {}",
+            bytes_data_len,
+            Buf::remaining(src)
+        )));
     }
 
-    let data = Bytes::copy_from_slice(&Buf::chunk(src)[..bytes_data_len]);
-    skip(src, bytes_data_len)?;
+    let data = Bytes::copy_from_slice(&Buf::chunk(src)[..bytes_data_len as usize]);
+    skip(src, bytes_data_len as usize)?;
     Ok(Some(data))
 }
 
