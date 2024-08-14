@@ -281,7 +281,7 @@ fn get_bytes(src: &mut Cursor<&[u8]>) -> Result<Option<Bytes>, WorkerError> {
         return Err(STREAM_INCORRECT("get_bytes".into()));
     }
     let bytes_data_len = get_i32(src)? as usize;
-    if bytes_data_len < 0 {
+    if bytes_data_len <= 0 {
         return Ok(None);
     }
 
