@@ -9,22 +9,31 @@ use crate::grpc::service::{DefaultShuffleServer, MAX_CONNECTION_WINDOW_SIZE, STR
 use crate::metric::GRPC_LATENCY_TIME_SEC;
 use crate::runtime::manager::RuntimeManager;
 use crate::signal::details::graceful_wait_for_signal;
-use crate::urpc::server::urpc_serve;
+use crate::urpc;
 use anyhow::Result;
 use async_trait::async_trait;
 use log::{debug, error, info};
 use once_cell::sync::Lazy;
+use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::num::NonZeroUsize;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
-use tokio::sync::broadcast::Sender;
+use tokio::sync::broadcast::{Receiver, Sender};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Server;
 
 pub static GRPC_PARALLELISM: Lazy<NonZeroUsize> = Lazy::new(|| {
     let available_cores = std::thread::available_parallelism().unwrap();
     std::env::var("GRPC_PARALLELISM").map_or(available_cores, |v| {
+        let parallelism: NonZeroUsize = v.as_str().parse().unwrap();
+        parallelism
+    })
+});
+
+pub static URPC_PARALLELISM: Lazy<NonZeroUsize> = Lazy::new(|| {
+    let available_cores = std::thread::available_parallelism().unwrap();
+    std::env::var("URPC_PARALLELISM").map_or(available_cores, |v| {
         let parallelism: NonZeroUsize = v.as_str().parse().unwrap();
         parallelism
     })
@@ -49,21 +58,25 @@ impl DefaultRpcService {
         app_manager_ref: AppManagerRef,
     ) -> Result<()> {
         let urpc_port = config.urpc_port.unwrap();
+        info!("Starting urpc server with port:[{}] ......", urpc_port);
 
-        async fn shutdown(tx: Sender<()>) -> Result<()> {
-            let mut rx = tx.subscribe();
-            if let Err(err) = rx.recv().await {
-                error!("Errors on stopping the urpc service, err: {:?}.", err);
-            } else {
-                debug!("urpc service has been graceful stopped.");
+        for _ in 0..URPC_PARALLELISM.get() {
+            let rx = tx.subscribe();
+            async fn shutdown(mut rx: Receiver<()>) -> Result<()> {
+                if let Err(err) = rx.recv().await {
+                    error!("Errors on stopping the urpc service, err: {:?}.", err);
+                } else {
+                    debug!("urpc service has been graceful stopped.");
+                }
+                Ok(())
             }
-            Ok(())
-        }
 
-        runtime_manager.grpc_runtime.spawn(async move {
-            info!("Starting urpc server with port:[{}] ......", urpc_port);
-            urpc_serve(urpc_port as usize, shutdown(tx), app_manager_ref).await
-        });
+            let app_manager = app_manager_ref.clone();
+            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port as u16);
+            runtime_manager.grpc_runtime.spawn(async move {
+                urpc_serve(addr, shutdown(rx), app_manager).await;
+            });
+        }
 
         Ok(())
     }
@@ -124,6 +137,27 @@ impl DefaultRpcService {
 
         Ok(())
     }
+}
+
+async fn urpc_serve(addr: SocketAddr, shutdown: impl Future, app_manager_ref: AppManagerRef) {
+    let sock = socket2::Socket::new(
+        match addr {
+            SocketAddr::V4(_) => socket2::Domain::IPV4,
+            SocketAddr::V6(_) => socket2::Domain::IPV6,
+        },
+        socket2::Type::STREAM,
+        None,
+    )
+    .unwrap();
+
+    sock.set_reuse_address(true).unwrap();
+    sock.set_reuse_port(true).unwrap();
+    sock.set_nonblocking(true).unwrap();
+    sock.bind(&addr.into()).unwrap();
+    sock.listen(8192).unwrap();
+
+    let listener = TcpListener::from_std(sock.into()).unwrap();
+    let _ = urpc::server::run(listener, shutdown, app_manager_ref).await;
 }
 
 async fn grpc_serve(

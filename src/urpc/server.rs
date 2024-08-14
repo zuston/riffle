@@ -1,5 +1,6 @@
 use log::{debug, error, info};
 use std::future::Future;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
@@ -109,14 +110,7 @@ impl Handler {
     }
 }
 
-pub async fn urpc_serve(port: usize, shutdown: impl Future, app_manager_ref: AppManagerRef) {
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
-        .await
-        .unwrap();
-    run(listener, shutdown, app_manager_ref).await
-}
-
-async fn run(listener: TcpListener, shutdown: impl Future, app_manager_ref: AppManagerRef) {
+pub async fn run(listener: TcpListener, shutdown: impl Future, app_manager_ref: AppManagerRef) {
     let (notify_shutdown, _) = broadcast::channel(1);
     let (shutdown_complete_tx, mut shutdown_complete_rx) = mpsc::channel(1);
 
