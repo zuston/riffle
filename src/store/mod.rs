@@ -85,6 +85,7 @@ pub enum ResponseDataIndex {
     Local(LocalDataIndex),
 }
 
+#[derive(Default, Debug)]
 pub struct LocalDataIndex {
     pub index_data: Bytes,
     pub data_file_len: i64,

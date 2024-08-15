@@ -1,8 +1,10 @@
 use crate::app::{
-    AppManagerRef, PartitionedUId, ReadingOptions, ReadingViewContext, WritingViewContext,
+    AppManagerRef, PartitionedUId, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
+    WritingViewContext,
 };
 use crate::constant::StatusCode;
-use crate::store::{Block, PartitionedMemoryData, ResponseData};
+use crate::store::ResponseDataIndex::Local;
+use crate::store::{Block, LocalDataIndex, ResponseData};
 use crate::urpc::connection::Connection;
 use crate::urpc::frame::Frame;
 use crate::urpc::shutdown::Shutdown;
@@ -11,24 +13,22 @@ use bytes::Bytes;
 use log::{debug, error};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Command {
     Send(SendDataRequestCommand),
     GetMem(GetMemoryDataRequestCommand),
+    GetLocalIndex(GetLocalDataIndexRequestCommand),
+    GetLocalData(GetLocalDataRequestCommand),
 }
 
 impl Command {
     pub fn from_frame(frame: Frame) -> Result<Command> {
         match frame {
-            Frame::SendShuffleData(req) => {
-                let request = req;
-                Ok(Command::Send(request))
-            }
-            Frame::GetMemoryData(req) => {
-                let request = req;
-                Ok(Command::GetMem(request))
-            }
-            _ => todo!()
+            Frame::SendShuffleData(req) => Ok(Command::Send(req)),
+            Frame::GetMemoryData(req) => Ok(Command::GetMem(req)),
+            Frame::GetLocalDataIndex(req) => Ok(Command::GetLocalIndex(req)),
+            Frame::GetLocalData(req) => Ok(Command::GetLocalData(req)),
+            _ => todo!(),
         }
     }
 
@@ -41,6 +41,8 @@ impl Command {
         match self {
             Command::Send(req) => req.apply(app_manager_ref, conn, shutdown).await?,
             Command::GetMem(req) => req.apply(app_manager_ref, conn, shutdown).await?,
+            Command::GetLocalIndex(req) => req.apply(app_manager_ref, conn, shutdown).await?,
+            Command::GetLocalData(req) => req.apply(app_manager_ref, conn, shutdown).await?,
             _ => {}
         }
         Ok(())
@@ -111,6 +113,173 @@ impl GetMemoryDataRequestCommand {
         let frame = Frame::GetMemoryDataResponse(response);
         conn.write_frame(&frame).await?;
 
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct GetLocalDataResponseCommand {
+    pub(crate) request_id: i64,
+    pub(crate) status_code: i32,
+    pub(crate) ret_msg: String,
+    pub(crate) data: Bytes,
+}
+
+#[derive(Debug)]
+pub struct GetLocalDataRequestCommand {
+    pub(crate) request_id: i64,
+    pub(crate) app_id: String,
+    pub(crate) shuffle_id: i32,
+    pub(crate) partition_id: i32,
+    pub(crate) partition_num_per_range: i32,
+    pub(crate) partition_num: i32,
+    pub(crate) offset: i64,
+    pub(crate) length: i32,
+    pub(crate) timestamp: i64,
+}
+
+impl GetLocalDataRequestCommand {
+    pub(crate) async fn apply(
+        &self,
+        app_manager_ref: AppManagerRef,
+        conn: &mut Connection,
+        shutdown: &mut Shutdown,
+    ) -> Result<()> {
+        let request_id = self.request_id;
+        let app_id = self.app_id.as_str();
+        let shuffle_id = self.shuffle_id;
+        let partition_id = self.partition_id;
+        let offset = self.offset;
+        let length = self.length;
+
+        let app = app_manager_ref.get_app(&app_id);
+        if app.is_none() {
+            let command = GetLocalDataResponseCommand {
+                request_id,
+                status_code: StatusCode::NO_REGISTER.into(),
+                ret_msg: "No such app in server side".to_string(),
+                data: Default::default(),
+            };
+            let frame = Frame::GetLocalDataResponse(command);
+            conn.write_frame(&frame).await?;
+            return Ok(());
+        }
+
+        let app = app.unwrap();
+        let uid = PartitionedUId::from(app_id.to_string(), shuffle_id, partition_id);
+        let ctx = ReadingViewContext {
+            uid,
+            reading_options: ReadingOptions::FILE_OFFSET_AND_LEN(offset, length as i64),
+            serialized_expected_task_ids_bitmap: None,
+        };
+        let command = match app.select(ctx).await {
+            Err(e) => GetLocalDataResponseCommand {
+                request_id,
+                status_code: StatusCode::INTERNAL_ERROR.into(),
+                ret_msg: format!("Errors on getting file data. err: {:#?}", e),
+                data: Default::default(),
+            },
+            Ok(result) => {
+                if let ResponseData::Local(data) = result {
+                    GetLocalDataResponseCommand {
+                        request_id,
+                        status_code: StatusCode::SUCCESS.into(),
+                        ret_msg: "".to_string(),
+                        data: data.data,
+                    }
+                } else {
+                    GetLocalDataResponseCommand {
+                        request_id,
+                        status_code: StatusCode::INTERNAL_ERROR.into(),
+                        ret_msg: "Incorrect local data type.".to_string(),
+                        data: Default::default(),
+                    }
+                }
+            }
+        };
+
+        let frame = Frame::GetLocalDataResponse(command);
+        conn.write_frame(&frame).await?;
+        return Ok(());
+    }
+}
+
+#[derive(Debug)]
+pub struct GetLocalDataIndexResponseCommand {
+    pub(crate) request_id: i64,
+    pub(crate) status_code: i32,
+    pub(crate) ret_msg: String,
+    pub(crate) data_index: LocalDataIndex,
+}
+
+#[derive(Debug)]
+pub struct GetLocalDataIndexRequestCommand {
+    pub(crate) request_id: i64,
+    pub(crate) app_id: String,
+    pub(crate) shuffle_id: i32,
+    pub(crate) partition_id: i32,
+    pub(crate) partition_num_per_range: i32,
+    pub(crate) partition_num: i32,
+}
+
+impl GetLocalDataIndexRequestCommand {
+    pub(crate) async fn apply(
+        &self,
+        app_manager_ref: AppManagerRef,
+        conn: &mut Connection,
+        shutdown: &mut Shutdown,
+    ) -> Result<()> {
+        let request_id = self.request_id;
+        let app_id = self.app_id.as_str();
+        let shuffle_id = self.shuffle_id;
+        let partition_id = self.partition_id;
+
+        let app = app_manager_ref.get_app(&app_id);
+        if app.is_none() {
+            let command = GetLocalDataIndexResponseCommand {
+                request_id,
+                status_code: StatusCode::NO_REGISTER.into(),
+                ret_msg: "No such app in server side".to_string(),
+                data_index: Default::default(),
+            };
+            let frame = Frame::GetLocalDataIndexResponse(command);
+            conn.write_frame(&frame).await?;
+            return Ok(());
+        }
+
+        let app = app.unwrap();
+        let uid = PartitionedUId::from(app_id.to_string(), shuffle_id, partition_id);
+        let ctx = ReadingIndexViewContext { partition_id: uid };
+
+        let command = match app.list_index(ctx).await {
+            Err(err) => GetLocalDataIndexResponseCommand {
+                request_id,
+                status_code: StatusCode::INTERNAL_ERROR.into(),
+                ret_msg: format!("Errors on listing local index. err: {:#?}", err),
+                data_index: Default::default(),
+            },
+            Ok(index) => {
+                if let Local(result) = index {
+                    GetLocalDataIndexResponseCommand {
+                        request_id,
+                        status_code: StatusCode::SUCCESS.into(),
+                        ret_msg: "".to_string(),
+                        data_index: result,
+                    }
+                } else {
+                    GetLocalDataIndexResponseCommand {
+                        request_id,
+                        status_code: StatusCode::INTERNAL_ERROR.into(),
+                        ret_msg: format!(
+                            "Errors on getting non local index. this should not happen."
+                        ),
+                        data_index: Default::default(),
+                    }
+                }
+            }
+        };
+        let frame = Frame::GetLocalDataIndexResponse(command);
+        conn.write_frame(&frame).await?;
         Ok(())
     }
 }

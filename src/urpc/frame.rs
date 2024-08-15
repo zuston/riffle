@@ -2,8 +2,9 @@ use crate::error::WorkerError;
 use crate::error::WorkerError::{STREAM_INCOMPLETE, STREAM_INCORRECT};
 use crate::store::Block;
 use crate::urpc::command::{
-    GetMemoryDataRequestCommand, GetMemoryDataResponseCommand, RpcResponseCommand,
-    SendDataRequestCommand,
+    GetLocalDataIndexRequestCommand, GetLocalDataIndexResponseCommand, GetLocalDataRequestCommand,
+    GetLocalDataResponseCommand, GetMemoryDataRequestCommand, GetMemoryDataResponseCommand,
+    RpcResponseCommand, SendDataRequestCommand,
 };
 use anyhow::{Error, Result};
 use bytes::{Buf, Bytes};
@@ -59,17 +60,79 @@ pub enum Frame {
     GetMemoryData(GetMemoryDataRequestCommand),
     GetMemoryDataResponse(GetMemoryDataResponseCommand),
 
-    // GetLocalDataIndex(GetLocalDataIndexRequestCommand),
-    // GetLocalDataIndexResponse(GetLocalDataIndexResponseCommand),
-    //
-    // GetLocalData(GetLocalDataRequestCommand),
-    // GetLocalDataResponse(GetLocalDataResponseCommand),
+    GetLocalDataIndex(GetLocalDataIndexRequestCommand),
+    GetLocalDataIndexResponse(GetLocalDataIndexResponseCommand),
+
+    GetLocalData(GetLocalDataRequestCommand),
+    GetLocalDataResponse(GetLocalDataResponseCommand),
+
     RpcResponse(RpcResponseCommand),
 }
 
 impl Frame {
     pub async fn write(stream: &mut BufWriter<TcpStream>, frame: &Frame) -> Result<()> {
         match frame {
+            Frame::GetLocalDataResponse(resp) => {
+                let request_id = resp.request_id;
+                let status_code = resp.status_code;
+
+                let msg = &resp.ret_msg;
+                let msg_bytes = msg.as_bytes();
+
+                let data = &resp.data;
+
+                // header
+                stream.write_i32(msg_bytes.len() as i32 + 8 + 4 + 4).await?;
+                stream
+                    .write_u8(MessageType::GetLocalDataResponse as u8)
+                    .await?;
+                stream.write_i32(data.len() as i32).await?;
+
+                // partial content with general response info
+                stream.write_i64(request_id).await?;
+                stream.write_i32(status_code).await?;
+
+                stream.write_i32(msg_bytes.len() as i32).await?;
+                stream.write_all(msg_bytes).await?;
+
+                // write all data
+                stream.write_all(data).await?;
+
+                return Ok(());
+            }
+            Frame::GetLocalDataIndexResponse(resp) => {
+                let request_id = resp.request_id;
+                let status_code = resp.status_code;
+
+                let msg = &resp.ret_msg;
+                let msg_bytes = msg.as_bytes();
+
+                let local_data = &resp.data_index.index_data;
+                let data_len = resp.data_index.data_file_len;
+
+                // header
+                stream
+                    .write_i32(msg_bytes.len() as i32 + 8 + 4 + 4 + 4)
+                    .await?;
+                stream
+                    .write_u8(MessageType::GetLocalDataResponse as u8)
+                    .await?;
+                stream.write_i32(data_len as i32).await?;
+
+                // partial content with general response info
+                stream.write_i64(request_id).await?;
+                stream.write_i32(status_code).await?;
+
+                stream.write_i32(msg_bytes.len() as i32).await?;
+                stream.write_all(msg_bytes).await?;
+
+                // write the data length
+                stream.write_i32(data_len as i32).await?;
+                // write the all bytes
+                stream.write_all(local_data).await?;
+
+                return Ok(());
+            }
             Frame::GetMemoryDataResponse(resp) => {
                 let request_id = resp.request_id;
                 let status_code = resp.status_code;
@@ -112,7 +175,7 @@ impl Frame {
                 }
 
                 // data_bytes
-                stream.write_all(&*data_bytes).await?;
+                stream.write_all(&data_bytes).await?;
 
                 return Ok(());
             }
@@ -157,6 +220,112 @@ impl Frame {
         Ok(())
     }
 
+    fn parse_to_get_localfile_data_command(
+        src: &mut Cursor<&[u8]>,
+    ) -> Result<GetLocalDataRequestCommand> {
+        let request_id = get_i64(src)?;
+        let app_id = get_string(src)?;
+        let shuffle_id = get_i32(src)?;
+        let partition_id = get_i32(src)?;
+        let partition_num_per_range = get_i32(src)?;
+        let partition_num = get_i32(src)?;
+        let offset = get_i64(src)?;
+        let length = get_i32(src)?;
+        let timestamp = get_i64(src)?;
+
+        Ok(GetLocalDataRequestCommand {
+            request_id,
+            app_id,
+            shuffle_id,
+            partition_id,
+            partition_num_per_range,
+            partition_num,
+            offset,
+            length,
+            timestamp,
+        })
+    }
+
+    fn parse_to_send_shuffle_data_command(
+        src: &mut Cursor<&[u8]>,
+    ) -> Result<SendDataRequestCommand> {
+        let request_id = get_i64(src)?;
+        let app_id = get_string(src)?;
+        let shuffle_id = get_i32(src)?;
+        let require_id = get_i64(src)?;
+
+        let mut blocks_map: HashMap<i32, Vec<Block>> = HashMap::new();
+
+        let partition_batch_size = get_i32(src)?;
+        for idx in 0..partition_batch_size {
+            let partition_id = get_i32(src)?;
+            let block_batch_size = get_i32(src)?;
+            let mut blocks = Vec::with_capacity(block_batch_size as usize);
+            for block_idx in 0..block_batch_size {
+                let pid = get_i32(src)?;
+                let blockId = get_i64(src)?;
+                let length = get_i32(src)?;
+                let shuffle_id = get_i32(src)?;
+                let crc = get_i64(src)?;
+                let task_attempt_id = get_i64(src)?;
+                // todo: make this allocated with the contiguous memory buffer.
+                let buffer = get_bytes(src)?.unwrap_or(Bytes::new());
+
+                /// skip the shuffle-servers data?
+                let length_of_shuffle_servers = get_i32(src)?;
+                for idx in 0..length_of_shuffle_servers {
+                    let _ = get_string(src)?;
+                    let _ = get_string(src)?;
+                    let _ = get_i32(src)?;
+                    let _ = get_i32(src)?;
+                }
+
+                let uncompress_len = get_i32(src)?;
+                let free_mem = get_i64(src)?;
+
+                let block = Block {
+                    block_id: blockId,
+                    length,
+                    uncompress_length: uncompress_len,
+                    crc,
+                    data: buffer,
+                    task_attempt_id,
+                };
+                blocks.push(block);
+            }
+
+            blocks_map.insert(partition_id, blocks);
+        }
+        let req = SendDataRequestCommand {
+            request_id,
+            app_id,
+            shuffle_id,
+            blocks: blocks_map,
+            ticket_id: require_id,
+        };
+        return Ok(req);
+    }
+
+    fn parse_to_get_localfile_index_command(
+        src: &mut Cursor<&[u8]>,
+    ) -> Result<GetLocalDataIndexRequestCommand> {
+        let request_id = get_i64(src)?;
+        let app_id = get_string(src)?;
+        let shuffle_id = get_i32(src)?;
+        let partition_id = get_i32(src)?;
+        let partition_num_per_range = get_i32(src)?;
+        let partition_num = get_i32(src)?;
+
+        Ok(GetLocalDataIndexRequestCommand {
+            request_id,
+            app_id,
+            shuffle_id,
+            partition_id,
+            partition_num_per_range,
+            partition_num,
+        })
+    }
+
     fn parse_to_get_memory_data_command(
         src: &mut Cursor<&[u8]>,
     ) -> Result<GetMemoryDataRequestCommand> {
@@ -197,66 +366,21 @@ impl Frame {
         }
 
         match msg_type? {
+            MessageType::GetLocalData => {
+                let command = Frame::parse_to_get_localfile_data_command(src)?;
+                return Ok(Frame::GetLocalData(command));
+            }
+            MessageType::GetLocalDataIndex => {
+                let command = Frame::parse_to_get_localfile_index_command(src)?;
+                return Ok(Frame::GetLocalDataIndex(command));
+            }
             MessageType::GetMemoryData => {
                 let command = Frame::parse_to_get_memory_data_command(src)?;
                 return Ok(Frame::GetMemoryData(command));
             }
             MessageType::SendShuffleData => {
-                let request_id = get_i64(src)?;
-                let app_id = get_string(src)?;
-                let shuffle_id = get_i32(src)?;
-                let require_id = get_i64(src)?;
-
-                let mut blocks_map: HashMap<i32, Vec<Block>> = HashMap::new();
-
-                let partition_batch_size = get_i32(src)?;
-                for idx in 0..partition_batch_size {
-                    let partition_id = get_i32(src)?;
-                    let block_batch_size = get_i32(src)?;
-                    let mut blocks = Vec::with_capacity(block_batch_size as usize);
-                    for block_idx in 0..block_batch_size {
-                        let pid = get_i32(src)?;
-                        let blockId = get_i64(src)?;
-                        let length = get_i32(src)?;
-                        let shuffle_id = get_i32(src)?;
-                        let crc = get_i64(src)?;
-                        let task_attempt_id = get_i64(src)?;
-                        // todo: make this allocated with the contiguous memory buffer.
-                        let buffer = get_bytes(src)?.unwrap_or(Bytes::new());
-
-                        /// skip the shuffle-servers data?
-                        let length_of_shuffle_servers = get_i32(src)?;
-                        for idx in 0..length_of_shuffle_servers {
-                            let _ = get_string(src)?;
-                            let _ = get_string(src)?;
-                            let _ = get_i32(src)?;
-                            let _ = get_i32(src)?;
-                        }
-
-                        let uncompress_len = get_i32(src)?;
-                        let free_mem = get_i64(src)?;
-
-                        let block = Block {
-                            block_id: blockId,
-                            length,
-                            uncompress_length: uncompress_len,
-                            crc,
-                            data: buffer,
-                            task_attempt_id,
-                        };
-                        blocks.push(block);
-                    }
-
-                    blocks_map.insert(partition_id, blocks);
-                }
-                let req = SendDataRequestCommand {
-                    request_id,
-                    app_id,
-                    shuffle_id,
-                    blocks: blocks_map,
-                    ticket_id: require_id,
-                };
-                return Ok(Frame::SendShuffleData(req));
+                let command = Frame::parse_to_send_shuffle_data_command(src)?;
+                return Ok(Frame::SendShuffleData(command));
             }
             MessageType::RpcResponse => {
                 let request_id = get_i64(src)?;
