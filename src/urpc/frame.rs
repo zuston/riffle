@@ -15,6 +15,7 @@ use std::hash::Hash;
 use std::io::Cursor;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::net::TcpStream;
+use tracing::{debug, info};
 
 ///
 /// The encode urpc:
@@ -73,6 +74,8 @@ impl Frame {
     pub async fn write(stream: &mut BufWriter<TcpStream>, frame: &Frame) -> Result<()> {
         match frame {
             Frame::GetLocalDataResponse(resp) => {
+                debug!("gotten the localfile data response");
+
                 let request_id = resp.request_id;
                 let status_code = resp.status_code;
 
@@ -101,23 +104,25 @@ impl Frame {
                 return Ok(());
             }
             Frame::GetLocalDataIndexResponse(resp) => {
+                debug!("gotten the localfile index response");
+
                 let request_id = resp.request_id;
                 let status_code = resp.status_code;
 
                 let msg = &resp.ret_msg;
                 let msg_bytes = msg.as_bytes();
 
-                let local_data = &resp.data_index.index_data;
-                let data_len = resp.data_index.data_file_len;
+                let index_bytes = &resp.data_index.index_data;
+                let data_file_len = resp.data_index.data_file_len;
 
                 // header
                 stream
-                    .write_i32(msg_bytes.len() as i32 + 8 + 4 + 4 + 4)
+                    .write_i32(msg_bytes.len() as i32 + 8 + 4 + 4 + 8)
                     .await?;
                 stream
-                    .write_u8(MessageType::GetLocalDataResponse as u8)
+                    .write_u8(MessageType::GetLocalDataIndexResponse as u8)
                     .await?;
-                stream.write_i32(data_len as i32).await?;
+                stream.write_i32(index_bytes.len() as i32).await?;
 
                 // partial content with general response info
                 stream.write_i64(request_id).await?;
@@ -127,9 +132,9 @@ impl Frame {
                 stream.write_all(msg_bytes).await?;
 
                 // write the data length
-                stream.write_i32(data_len as i32).await?;
+                stream.write_i64(data_file_len).await?;
                 // write the all bytes
-                stream.write_all(local_data).await?;
+                stream.write_all(index_bytes).await?;
 
                 return Ok(());
             }
@@ -223,6 +228,8 @@ impl Frame {
     fn parse_to_get_localfile_data_command(
         src: &mut Cursor<&[u8]>,
     ) -> Result<GetLocalDataRequestCommand> {
+        debug!("Gotten the localfile data request");
+
         let request_id = get_i64(src)?;
         let app_id = get_string(src)?;
         let shuffle_id = get_i32(src)?;
@@ -309,6 +316,7 @@ impl Frame {
     fn parse_to_get_localfile_index_command(
         src: &mut Cursor<&[u8]>,
     ) -> Result<GetLocalDataIndexRequestCommand> {
+        debug!("Gotten the localfile index request");
         let request_id = get_i64(src)?;
         let app_id = get_string(src)?;
         let shuffle_id = get_i32(src)?;
