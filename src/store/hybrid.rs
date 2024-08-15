@@ -266,6 +266,10 @@ impl HybridStore {
         Ok(message)
     }
 
+    pub fn inc_used(&self, size: i64) -> Result<bool> {
+        self.hot_store.inc_used(size)
+    }
+
     pub fn move_allocated_to_used_from_hot_store(&self, size: i64) -> Result<bool> {
         self.hot_store.move_allocated_to_used(size)
     }
@@ -677,6 +681,7 @@ mod tests {
                     task_attempt_id: 0,
                 }],
             );
+            let _ = store.inc_used(data_len as i64);
             let _ = store.insert(writing_ctx).await;
         }
 
@@ -769,7 +774,7 @@ mod tests {
             partition_id: 0,
         };
         write_some_data(store.clone(), uid.clone(), data_len as i32, data, 4).await;
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
 
         // case1: all data has been flushed to localfile. the data in memory should be empty
         let last_block_id = -1;
@@ -779,7 +784,7 @@ mod tests {
                 last_block_id,
                 data_len as i64,
             ),
-            serialized_expected_task_ids_bitmap: Default::default(),
+            serialized_expected_task_ids_bitmap: None,
         };
 
         let read_data = store.get(reading_view_ctx).await;

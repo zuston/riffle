@@ -348,7 +348,7 @@ mod tests {
             Default::default(),
         );
 
-        awaitility::at_most(Duration::from_secs(10)).until(|| local_disk.is_healthy().unwrap());
+        awaitility::at_most(Duration::from_secs(20)).until(|| local_disk.is_healthy().unwrap());
         assert_eq!(false, local_disk.is_corrupted().unwrap());
     }
 

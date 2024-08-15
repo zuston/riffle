@@ -156,6 +156,11 @@ impl MemoryBuffer {
                             if read_len >= batch_len {
                                 break;
                             }
+                            if let Some(ref expected_task_id) = task_ids {
+                                if !expected_task_id.contains(block.task_attempt_id as u64) {
+                                    continue;
+                                }
+                            }
                             read_len += block.length as i64;
                             read_result.push(block.clone());
                         }
@@ -175,6 +180,11 @@ impl MemoryBuffer {
                         }
                         if read_len >= batch_len {
                             break;
+                        }
+                        if let Some(ref expected_task_id) = task_ids {
+                            if !expected_task_id.contains(block.task_attempt_id as u64) {
+                                continue;
+                            }
                         }
                         read_len += block.length as i64;
                         read_result.push(block.clone());

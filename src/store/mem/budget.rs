@@ -73,6 +73,13 @@ impl MemoryBudget {
         Ok(true)
     }
 
+    pub fn inc_used(&self, size: i64) -> Result<bool> {
+        let mut inner = self.inner.lock();
+        inner.used += size;
+        GAUGE_MEMORY_USED.set(inner.used);
+        Ok(true)
+    }
+
     #[trace]
     pub fn dec_used(&self, size: i64) -> Result<bool> {
         let mut inner = self.inner.lock();

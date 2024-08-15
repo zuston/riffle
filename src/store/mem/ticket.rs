@@ -198,7 +198,6 @@ mod test {
     }
 
     #[test]
-    #[ignore]
     fn test_ticket_manager() {
         let released_size = Arc::new(Mutex::new(0));
 

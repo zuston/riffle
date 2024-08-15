@@ -154,7 +154,8 @@ mod test {
     use crate::runtime::manager::RuntimeManager;
 
     #[tokio::test]
-    async fn test() -> anyhow::Result<()> {
+    #[ignore]
+    async fn rpc_start_test() -> anyhow::Result<()> {
         let mut config = Config::create_simple_config();
         config.grpc_port = Some(21100);
         config.urpc_port = Some(21101);

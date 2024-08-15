@@ -132,6 +132,10 @@ impl MemoryStore {
         self.in_flush_buffer_size.fetch_sub(size, Ordering::SeqCst);
     }
 
+    pub fn inc_used(&self, size: i64) -> Result<bool> {
+        self.budget.inc_used(size)
+    }
+
     pub fn dec_used(&self, size: i64) -> Result<bool> {
         self.budget.dec_used(size)
     }
