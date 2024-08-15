@@ -73,7 +73,7 @@ dispatch_thread_num = 10
 | riffle(grpc) / 10g   | 4.0min (1.9m/2.1m) |
 | riffle(grpc) / 300g  | 3.5min (1.4m/2.1m) |
 | riffle(urpc) / 10g   | 3.8min (1.6m/2.2m) |
-| riffle(urpc) / 300g  | 3.3min (1.2m/2.1m) |
+| riffle(urpc) / 300g  | 3.2min (1.2m/2.0m) |
 
 ## Build
 
