@@ -334,7 +334,7 @@ impl HybridStore {
         let mem_target =
             (self.hot_store.get_capacity()? as f32 * self.config.memory_spill_low_watermark) as i64;
         let buffers = self.hot_store.pickup_spilled_blocks(mem_target)?;
-        info!(
+        debug!(
             "[Spill] Getting all spill blocks. target_size:{}. it costs {}(ms)",
             mem_target,
             timer.elapsed().as_millis()
@@ -354,7 +354,7 @@ impl HybridStore {
             )
             .await?;
         }
-        info!(
+        debug!(
             "[Spill] Picked up blocks that should be async flushed with {}(bytes) that costs {}(ms).",
             flushed_size,
             timer.elapsed().as_millis()

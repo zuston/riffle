@@ -25,7 +25,7 @@ struct Listener {
 
 impl Listener {
     async fn run(&mut self, app_manager_ref: AppManagerRef) -> Result<()> {
-        info!("Accepting inbound connections");
+        debug!("Accepting inbound connections");
 
         loop {
             let app_manager = app_manager_ref.clone();

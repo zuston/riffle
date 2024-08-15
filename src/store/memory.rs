@@ -46,7 +46,7 @@ use anyhow::anyhow;
 use croaring::Treemap;
 use fastrace::trace;
 use fxhash::{FxBuildHasher, FxHasher};
-use log::warn;
+use log::{debug, warn};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -187,7 +187,7 @@ impl MemoryStore {
             }
         }
 
-        info!(
+        debug!(
             "[Spill] expected spill size: {}, real: {}",
             &required_spilled_size, &spill_staging_size
         );
