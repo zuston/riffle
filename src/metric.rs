@@ -117,6 +117,47 @@ pub static GRPC_LATENCY_TIME_SEC: Lazy<HistogramVec> = Lazy::new(|| {
     grpc_latency
 });
 
+// for urpc metrics
+
+pub static URPC_GET_LOCALFILE_DATA_PROCESS_TIME: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new("urpc_get_localfile_data_process_time", "none")
+        .buckets(Vec::from(DEFAULT_BUCKETS as &'static [f64]));
+
+    let histogram = Histogram::with_opts(opts).unwrap();
+    histogram
+});
+
+pub static URPC_SEND_DATA_PROCESS_TIME: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new("urpc_send_data_process_time", "none")
+        .buckets(Vec::from(DEFAULT_BUCKETS as &'static [f64]));
+
+    let histogram = Histogram::with_opts(opts).unwrap();
+    histogram
+});
+
+pub static URPC_SEND_DATA_TRANSPORT_TIME: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new("urpc_send_data_transport_time", "none")
+        .buckets(Vec::from(DEFAULT_BUCKETS as &'static [f64]));
+
+    let histogram = Histogram::with_opts(opts).unwrap();
+    histogram
+});
+
+pub static URPC_GET_MEMORY_DATA_PROCESS_TIME: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new("urpc_get_memory_data_process_time", "none")
+        .buckets(Vec::from(DEFAULT_BUCKETS as &'static [f64]));
+    let histogram = Histogram::with_opts(opts).unwrap();
+    histogram
+});
+
+pub static URPC_GET_LOCALFILE_DATA_TRANSPORT_TIME: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new("urpc_get_localfile_data_transport_time", "none")
+        .buckets(Vec::from(DEFAULT_BUCKETS as &'static [f64]));
+
+    let histogram = Histogram::with_opts(opts).unwrap();
+    histogram
+});
+
 pub static TOTAL_MEMORY_USED: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new("total_memory_used", "Total memory used").expect("metric should be created")
 });
@@ -395,6 +436,23 @@ fn register_custom_metrics() {
     REGISTRY
         .register(Box::new(GRPC_GET_MEMORY_DATA_TRANSPORT_TIME.clone()))
         .expect("grpc_get_memory_data_transport_time must be registered");
+
+    // for urpc
+    REGISTRY
+        .register(Box::new(URPC_SEND_DATA_PROCESS_TIME.clone()))
+        .expect("");
+    REGISTRY
+        .register(Box::new(URPC_SEND_DATA_TRANSPORT_TIME.clone()))
+        .expect("");
+    REGISTRY
+        .register(Box::new(URPC_GET_LOCALFILE_DATA_PROCESS_TIME.clone()))
+        .expect("");
+    REGISTRY
+        .register(Box::new(URPC_GET_LOCALFILE_DATA_TRANSPORT_TIME.clone()))
+        .expect("");
+    REGISTRY
+        .register(Box::new(URPC_GET_MEMORY_DATA_PROCESS_TIME.clone()))
+        .expect("");
 }
 
 pub fn init_metric_service(

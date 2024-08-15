@@ -303,12 +303,14 @@ impl Frame {
 
             blocks_map.insert(partition_id, blocks);
         }
+        let timestamp = get_i64(src)?;
         let req = SendDataRequestCommand {
             request_id,
             app_id,
             shuffle_id,
             blocks: blocks_map,
             ticket_id: require_id,
+            timestamp,
         };
         return Ok(req);
     }
@@ -354,6 +356,7 @@ impl Frame {
             last_block_id,
             read_buffer_size,
             expected_tasks_bitmap_raw: expected_task_bitmap_raw_option,
+            timestamp,
         })
     }
 

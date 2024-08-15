@@ -3,11 +3,16 @@ use crate::app::{
     WritingViewContext,
 };
 use crate::constant::StatusCode;
+use crate::metric::{
+    URPC_GET_LOCALFILE_DATA_PROCESS_TIME, URPC_GET_MEMORY_DATA_PROCESS_TIME,
+    URPC_SEND_DATA_PROCESS_TIME, URPC_SEND_DATA_TRANSPORT_TIME,
+};
 use crate::store::ResponseDataIndex::Local;
 use crate::store::{Block, LocalDataIndex, ResponseData};
 use crate::urpc::connection::Connection;
 use crate::urpc::frame::Frame;
 use crate::urpc::shutdown::Shutdown;
+use crate::util;
 use anyhow::Result;
 use bytes::Bytes;
 use log::{debug, error};
@@ -58,6 +63,7 @@ pub struct GetMemoryDataRequestCommand {
     pub(crate) last_block_id: i64,
     pub(crate) read_buffer_size: i32,
     pub(crate) expected_tasks_bitmap_raw: Option<Bytes>,
+    pub(crate) timestamp: i64,
 }
 
 impl GetMemoryDataRequestCommand {
@@ -67,6 +73,7 @@ impl GetMemoryDataRequestCommand {
         conn: &mut Connection,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
+        let timer = URPC_GET_MEMORY_DATA_PROCESS_TIME.start_timer();
         let request_id = self.request_id;
         let app_id = self.app_id.as_str();
         let shuffle_id = self.shuffle_id;
@@ -112,7 +119,7 @@ impl GetMemoryDataRequestCommand {
         };
         let frame = Frame::GetMemoryDataResponse(response);
         conn.write_frame(&frame).await?;
-
+        timer.observe_duration();
         Ok(())
     }
 }
@@ -145,6 +152,7 @@ impl GetLocalDataRequestCommand {
         conn: &mut Connection,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
+        let timer = URPC_GET_LOCALFILE_DATA_PROCESS_TIME.start_timer();
         let request_id = self.request_id;
         let app_id = self.app_id.as_str();
         let shuffle_id = self.shuffle_id;
@@ -200,6 +208,7 @@ impl GetLocalDataRequestCommand {
 
         let frame = Frame::GetLocalDataResponse(command);
         conn.write_frame(&frame).await?;
+        timer.observe_duration();
         return Ok(());
     }
 }
@@ -299,6 +308,7 @@ pub struct SendDataRequestCommand {
     pub(crate) shuffle_id: i32,
     pub(crate) blocks: HashMap<i32, Vec<Block>>,
     pub(crate) ticket_id: i64,
+    pub(crate) timestamp: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -320,10 +330,16 @@ impl SendDataRequestCommand {
         conn: &mut Connection,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
+        let timer = URPC_SEND_DATA_PROCESS_TIME.start_timer();
+
         let request_id = self.request_id;
         let ticket_id = self.ticket_id;
         let shuffle_id = self.shuffle_id;
         let app_id = self.app_id.as_str();
+        let timestamp = self.timestamp;
+
+        URPC_SEND_DATA_TRANSPORT_TIME
+            .observe(((util::current_timestamp_ms() - timestamp as u128) / 1000) as f64);
 
         let app = app_manager_ref.get_app(&app_id);
         if app.is_none() {
@@ -394,6 +410,7 @@ impl SendDataRequestCommand {
             },
         };
         write_response(conn, response).await?;
+        timer.observe_duration();
         Ok(())
     }
 }
