@@ -11,6 +11,7 @@ use crate::urpc::shutdown::Shutdown;
 
 use crate::app::AppManagerRef;
 use crate::error::WorkerError;
+use crate::metric::URPC_CONNECTION_NUMBER;
 use crate::urpc::command::Command;
 use anyhow::Result;
 
@@ -46,10 +47,12 @@ impl Listener {
             };
 
             tokio::spawn(async move {
+                URPC_CONNECTION_NUMBER.inc();
                 if let Err(error) = handler.run(app_manager).await {
                     error!("Errors on handling the request. {:#?}", error);
                 }
                 drop(permit);
+                URPC_CONNECTION_NUMBER.dec();
             });
         }
     }

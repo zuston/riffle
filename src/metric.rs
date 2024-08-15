@@ -158,6 +158,11 @@ pub static URPC_GET_LOCALFILE_DATA_TRANSPORT_TIME: Lazy<Histogram> = Lazy::new(|
     histogram
 });
 
+pub static URPC_CONNECTION_NUMBER: Lazy<IntGauge> =
+    Lazy::new(|| IntGauge::new("urpc_connection_number", "urpc_connection_number").expect(""));
+
+// ===========
+
 pub static TOTAL_MEMORY_USED: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new("total_memory_used", "Total memory used").expect("metric should be created")
 });
@@ -452,6 +457,9 @@ fn register_custom_metrics() {
         .expect("");
     REGISTRY
         .register(Box::new(URPC_GET_MEMORY_DATA_PROCESS_TIME.clone()))
+        .expect("");
+    REGISTRY
+        .register(Box::new(URPC_CONNECTION_NUMBER.clone()))
         .expect("");
 }
 
