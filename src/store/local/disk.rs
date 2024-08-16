@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::metric::{
     GAUGE_LOCAL_DISK_CAPACITY, GAUGE_LOCAL_DISK_IS_HEALTHY, GAUGE_LOCAL_DISK_USED,
 };
@@ -98,9 +99,15 @@ impl LocalDisk {
 
         let runtime = runtime_manager.default_runtime.clone();
         let cloned = instance.clone();
-        runtime.spawn(async {
+        let await_tree_registry = AWAIT_TREE_REGISTRY.clone();
+        runtime.spawn(async move {
+            let await_root = await_tree_registry
+                .register(format!("Disk healthy check: {}", &cloned.root))
+                .await;
             info!("Starting the disk healthy check, root: {}", &cloned.root);
-            LocalDisk::loop_check_disk(cloned).await;
+            await_root
+                .instrument(LocalDisk::loop_check_disk(cloned))
+                .await;
         });
 
         GAUGE_LOCAL_DISK_CAPACITY
