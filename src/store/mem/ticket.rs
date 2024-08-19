@@ -16,13 +16,13 @@
 // under the License.
 
 use crate::error::WorkerError;
+use crate::metric::TOTAL_EVICT_TIMEOUT_TICKETS_NUM;
 use crate::runtime::manager::RuntimeManager;
 use anyhow::Result;
 use dashmap::DashMap;
 use fastrace::trace;
-use log::debug;
+use log::warn;
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 
 #[derive(Clone)]
@@ -137,15 +137,18 @@ impl TicketManager {
     fn schedule_ticket_check<F: FnMut(i64) -> bool + Send + 'static>(
         ticket_manager: TicketManager,
         mut free_allocated_fn: F,
-        _runtime_manager: RuntimeManager,
+        runtime_manager: RuntimeManager,
     ) {
-        thread::spawn(move || {
+        runtime_manager.default_runtime.spawn(async move {
             let ticket_store = ticket_manager.ticket_store;
+            let ticket_timeout_sec = ticket_manager.ticket_timeout_sec;
+            let interval_sec = ticket_manager.ticket_timeout_check_interval_sec;
+
             loop {
                 let read_view = ticket_store.clone();
                 let mut timeout_tickets = vec![];
                 for ticket in read_view.iter() {
-                    if ticket.is_timeout(ticket_manager.ticket_timeout_sec) {
+                    if ticket.is_timeout(ticket_timeout_sec) {
                         timeout_tickets.push(ticket.id);
                     }
                 }
@@ -158,11 +161,10 @@ impl TicketManager {
                 }
                 if total_removed_size != 0 {
                     free_allocated_fn(total_removed_size);
-                    debug!("remove {:#?} memory allocated tickets, release pre-allocated memory size: {:?}", timeout_tickets, total_removed_size);
+                    warn!("Removed {:#?} memory allocated timeout tickets, release pre-allocated memory size: {:?}", timeout_tickets, total_removed_size);
+                    TOTAL_EVICT_TIMEOUT_TICKETS_NUM.inc_by(timeout_tickets.len() as u64);
                 }
-                thread::sleep(Duration::from_secs(
-                    ticket_manager.ticket_timeout_check_interval_sec as u64,
-                ));
+                tokio::time::sleep(Duration::from_secs(interval_sec as u64, )).await;
             }
         });
     }

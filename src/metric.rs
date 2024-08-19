@@ -306,6 +306,10 @@ pub static TOTAL_SPILL_EVENTS_DROPPED: Lazy<IntCounter> = Lazy::new(|| {
     .expect("")
 });
 
+// total timeout tickets
+pub static TOTAL_EVICT_TIMEOUT_TICKETS_NUM: Lazy<IntCounter> =
+    Lazy::new(|| IntCounter::new("total_evict_timeout_tickets_num", "").expect(""));
+
 fn register_custom_metrics() {
     REGISTRY
         .register(Box::new(TOTAL_GRPC_REQUEST.clone()))
@@ -460,6 +464,9 @@ fn register_custom_metrics() {
         .expect("");
     REGISTRY
         .register(Box::new(URPC_CONNECTION_NUMBER.clone()))
+        .expect("");
+    REGISTRY
+        .register(Box::new(TOTAL_EVICT_TIMEOUT_TICKETS_NUM.clone()))
         .expect("");
 }
 
