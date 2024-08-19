@@ -14,6 +14,7 @@ use crate::urpc::frame::Frame;
 use crate::urpc::shutdown::Shutdown;
 use crate::util;
 use anyhow::Result;
+use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use log::{debug, error};
 use std::collections::HashMap;
@@ -169,7 +170,9 @@ impl GetLocalDataRequestCommand {
                 data: Default::default(),
             };
             let frame = Frame::GetLocalDataResponse(command);
-            conn.write_frame(&frame).await?;
+            conn.write_frame(&frame)
+                .instrument_await("No such app and then fast return")
+                .await?;
             return Ok(());
         }
 
@@ -180,7 +183,11 @@ impl GetLocalDataRequestCommand {
             reading_options: ReadingOptions::FILE_OFFSET_AND_LEN(offset, length as i64),
             serialized_expected_task_ids_bitmap: None,
         };
-        let command = match app.select(ctx).await {
+        let command = match app
+            .select(ctx)
+            .instrument_await(format!("getting local shuffle data for app:{}", &app_id))
+            .await
+        {
             Err(e) => GetLocalDataResponseCommand {
                 request_id,
                 status_code: StatusCode::INTERNAL_ERROR.into(),
@@ -260,7 +267,11 @@ impl GetLocalDataIndexRequestCommand {
         let uid = PartitionedUId::from(app_id.to_string(), shuffle_id, partition_id);
         let ctx = ReadingIndexViewContext { partition_id: uid };
 
-        let command = match app.list_index(ctx).await {
+        let command = match app
+            .list_index(ctx)
+            .instrument_await(format!("listing localfile index for app:{}", &app_id))
+            .await
+        {
             Err(err) => GetLocalDataIndexResponseCommand {
                 request_id,
                 status_code: StatusCode::INTERNAL_ERROR.into(),
@@ -353,7 +364,11 @@ impl SendDataRequestCommand {
         }
 
         let app = app.unwrap();
-        let ticket_len = match app.release_ticket(ticket_id).await {
+        let ticket_len = match app
+            .release_ticket(ticket_id)
+            .instrument_await(format!("releasing allocated ticket for app:{}", &app_id))
+            .await
+        {
             Err(e) => {
                 let response = RpcResponseCommand {
                     request_id,
@@ -377,12 +392,16 @@ impl SendDataRequestCommand {
             let partition_blocks = block.1;
             let uid = PartitionedUId::from(app_id.to_string(), shuffle_id, partition_id);
             let ctx = WritingViewContext::from(uid, partition_blocks);
-            match app.insert(ctx).await {
+            match app
+                .insert(ctx)
+                .instrument_await(format!("inserting shuffle data for app:{}", &app_id))
+                .await
+            {
                 Ok(size) => insert_len += size as i64,
                 Err(e) => {
                     let msg = format!(
                         "Errors on inserting data for app: {:?}. error:{:#?}",
-                        app_id, e
+                        &app_id, e
                     );
                     error!("{}", &msg);
                     insert_failure_occur = true;

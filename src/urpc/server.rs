@@ -10,10 +10,13 @@ use crate::urpc::connection::Connection;
 use crate::urpc::shutdown::Shutdown;
 
 use crate::app::AppManagerRef;
+use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::error::WorkerError;
 use crate::metric::URPC_CONNECTION_NUMBER;
 use crate::urpc::command::Command;
 use anyhow::Result;
+use await_tree::InstrumentAwait;
+use tracing::Instrument;
 
 const MAX_CONNECTIONS: usize = 40000;
 
@@ -38,7 +41,8 @@ impl Listener {
                 .unwrap();
 
             let socket = self.accept().await?;
-            debug!("Accepted connection from client: {:?}", &socket.peer_addr());
+            let addr = socket.peer_addr()?.to_string();
+            debug!("Accepted connection from client: {}", &addr);
 
             let mut handler = Handler {
                 connection: Connection::new(socket),
@@ -46,14 +50,18 @@ impl Listener {
                 _shutdown_complete: self.shutdown_complete_tx.clone(),
             };
 
-            tokio::spawn(async move {
+            let await_registry = AWAIT_TREE_REGISTRY.clone();
+            let await_root = await_registry
+                .register(format!("urpc connection with remote client: {}", addr))
+                .await;
+            tokio::spawn(await_root.instrument(async move {
                 URPC_CONNECTION_NUMBER.inc();
                 if let Err(error) = handler.run(app_manager).await {
                     error!("Errors on handling the request. {:#?}", error);
                 }
                 drop(permit);
                 URPC_CONNECTION_NUMBER.dec();
-            });
+            }));
         }
     }
 
@@ -107,6 +115,7 @@ impl Handler {
                     &mut self.connection,
                     &mut self.shutdown,
                 )
+                .instrument_await("handling the complete request")
                 .await?;
         }
         Ok(())
