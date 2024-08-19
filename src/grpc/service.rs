@@ -32,16 +32,15 @@ use crate::grpc::protobuf::uniffle::{
     ShuffleRegisterRequest, ShuffleRegisterResponse, ShuffleUnregisterByAppIdRequest,
     ShuffleUnregisterByAppIdResponse, ShuffleUnregisterRequest, ShuffleUnregisterResponse,
 };
-use crate::store::{Block, PartitionedData, ResponseDataIndex};
+use crate::store::{PartitionedData, ResponseDataIndex};
 use await_tree::InstrumentAwait;
 use bytes::{BufMut, BytesMut};
 use croaring::treemap::JvmSerializer;
 use croaring::Treemap;
 use fastrace::future::FutureExt;
-use fastrace::{trace, Span};
-use std::collections::HashMap;
-
+use fastrace::trace;
 use log::{debug, error, info, warn};
+use std::collections::HashMap;
 
 use crate::constant::StatusCode;
 use crate::metric::{
@@ -109,9 +108,18 @@ impl ShuffleServer for DefaultShuffleServer {
         );
         let status_code = self
             .app_manager_ref
-            .unregister_shuffle(app_id, shuffle_id)
+            .unregister_shuffle(app_id.clone(), shuffle_id)
             .await
-            .map_or_else(|_e| StatusCode::INTERNAL_ERROR, |_| StatusCode::SUCCESS);
+            .map_or_else(
+                |e| {
+                    warn!(
+                        "Errors on unregister shuffle for appId:{}. shuffleId:{}. err: {:#?}",
+                        &app_id, shuffle_id, e
+                    );
+                    StatusCode::INTERNAL_ERROR
+                },
+                |_| StatusCode::SUCCESS,
+            );
 
         Ok(Response::new(ShuffleUnregisterResponse {
             status: status_code.into(),
@@ -131,9 +139,18 @@ impl ShuffleServer for DefaultShuffleServer {
 
         let code = self
             .app_manager_ref
-            .unregister_app(app_id)
+            .unregister_app(app_id.clone())
             .await
-            .map_or_else(|_e| StatusCode::INTERNAL_ERROR, |_| StatusCode::SUCCESS);
+            .map_or_else(
+                |e| {
+                    warn!(
+                        "Errors on unregister shuffle for appId:{}. err: {:#?}",
+                        &app_id, e
+                    );
+                    StatusCode::INTERNAL_ERROR
+                },
+                |_| StatusCode::SUCCESS,
+            );
 
         Ok(Response::new(ShuffleUnregisterByAppIdResponse {
             status: code.into(),
@@ -158,6 +175,10 @@ impl ShuffleServer for DefaultShuffleServer {
         let app_option = self.app_manager_ref.get_app(&app_id);
 
         if app_option.is_none() {
+            warn!(
+                "Reject the NO_REGISTER app: {}. This should not happen",
+                &app_id
+            );
             return Ok(Response::new(SendShuffleDataResponse {
                 status: StatusCode::NO_REGISTER.into(),
                 ret_msg: "The app is not found".to_string(),
@@ -174,6 +195,10 @@ impl ShuffleServer for DefaultShuffleServer {
             ))
             .await;
         if release_result.is_err() {
+            warn!(
+                "No such buffer ticketId: {} for app:{} that may be evicted due to the timeout.",
+                ticket_id, &app_id
+            );
             return Ok(Response::new(SendShuffleDataResponse {
                 status: StatusCode::NO_BUFFER.into(),
                 ret_msg: "No such buffer ticket id, it may be discarded due to timeout".to_string(),
@@ -270,10 +295,11 @@ impl ShuffleServer for DefaultShuffleServer {
         let app_option = self.app_manager_ref.get_app(&app_id);
 
         if app_option.is_none() {
+            warn!("Reject the NO_REGISTER app: {} when getting localShuffleIndex. This should not happen", &app_id);
             return Ok(Response::new(GetLocalShuffleIndexResponse {
                 index_data: Default::default(),
-                status: StatusCode::NO_PARTITION.into(),
-                ret_msg: "Partition not found".to_string(),
+                status: StatusCode::NO_REGISTER.into(),
+                ret_msg: "App not found".to_string(),
                 data_file_len: 0,
             }));
         }
@@ -332,6 +358,7 @@ impl ShuffleServer for DefaultShuffleServer {
 
         let app = self.app_manager_ref.get_app(&app_id);
         if app.is_none() {
+            warn!("Reject the NO_REGISTER app: {} when getting localShuffleData. This should not happen", &app_id);
             return Ok(Response::new(GetLocalShuffleDataResponse {
                 data: Default::default(),
                 status: StatusCode::NO_REGISTER.into(),
@@ -394,6 +421,7 @@ impl ShuffleServer for DefaultShuffleServer {
 
         let app = self.app_manager_ref.get_app(&app_id);
         if app.is_none() {
+            warn!("Reject the NO_REGISTER app: {} when getting memoryShuffleData. This should not happen", &app_id);
             return Ok(Response::new(GetMemoryShuffleDataResponse {
                 shuffle_data_block_segments: Default::default(),
                 data: Default::default(),
