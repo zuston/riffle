@@ -1,12 +1,16 @@
 Another implementation of Apache Uniffle shuffle server (Single binary, no extra dependencies and quick)
 
 ## Roadmap
-1. Support storing data into s3
-2. Support single buffer flush
-3. Support huge partition limit
-4. Quick decommission that will spill data into remote storage like s3
-5. Using DirectIO to access file data
-6. Support netty protocol to interact with netty based uniffle client
+
+- [ ] Support storing data into s3
+- [ ] Support single buffer flush
+- [ ] Support huge partition limit
+- [ ] Quick decommission that will spill data into remote storage like s3
+- [ ] Using DirectIO to access file data
+- [x] Support customized protocol to interact with netty based uniffle client
+- [ ] Support writing multiple replicas by pipeline mode in server side
+- [ ] Create the grafana template to show the metrics dashboard by the unified style
+- [ ] Introduce the clippy to validate
 
 ## Benchmark report
 
@@ -14,10 +18,10 @@ Another implementation of Apache Uniffle shuffle server (Single binary, no extra
 
 | type                | description                                                             |
 |---------------------|:------------------------------------------------------------------------|
-| Software            | Uniffle 0.8.0 / Hadoop 3.2.2 / Spark 3.1.2                              | 
+| Software            | Uniffle 0.8.0 / Hadoop 3.2.2 / Spark 3.1.2                              |
 | Hardware            | Machine 96 cores, 512G memory, 1T * 4 SATA SSD, network bandwidth 8GB/s |
 | Hadoop Yarn Cluster | 1 * ResourceManager + 40 * NodeManager, every machine 1T * 4 SATA SSD   |
-| Uniffle Cluster     | 1 * Coordinator + 1 * Shuffle Server, every machine 1T * 4 SATA SSD     | 
+| Uniffle Cluster     | 1 * Coordinator + 1 * Shuffle Server, every machine 1T * 4 SATA SSD     |
 
 #### Configuration
 
@@ -28,7 +32,7 @@ spark.executor.cores 1
 spark.executor.memory 2g
 spark.shuffle.manager org.apache.spark.shuffle.RssShuffleManager
 spark.rss.storage.type MEMORY_LOCALFILE
-``` 
+```
 
 __Rust-based shuffle-server conf__
 ```
@@ -62,14 +66,14 @@ grpc_thread_num = 100
 http_thread_num = 10
 default_thread_num = 20
 dispatch_thread_num = 10
-``` 
+```
 `GRPC_PARALLELISM=100 WORKER_IP=10.74.44.129 RUST_LOG=info ./uniffle-worker`
 
 #### TeraSort Result
 
 | type/buffer capacity | 273G (compressed)  |
 |----------------------|:------------------:|
-| vanilla spark ESS    | 4.2min (1.3m/2.9m) | 
+| vanilla spark ESS    | 4.2min (1.3m/2.9m) |
 | riffle(grpc) / 10g   | 4.0min (1.9m/2.1m) |
 | riffle(grpc) / 300g  | 3.5min (1.4m/2.1m) |
 | riffle(urpc) / 10g   | 3.8min (1.6m/2.2m) |
@@ -87,7 +91,7 @@ to restore the default behavior. However, before submit your pr, you should fix 
 
 `WORKER_IP={ip} RUST_LOG=info WORKER_CONFIG_PATH=./config.toml ./uniffle-worker`
 
-### HDFS Setup 
+### HDFS Setup
 
 Benefit from the hdfs-native crate, there is no need to setup the JAVA_HOME and relative dependencies.
 If HDFS store is valid, the spark client must specify the conf of `spark.rss.client.remote.storage.useLocalConfAsDefault=true`
@@ -102,7 +106,7 @@ HADOOP_CONF_DIR=/etc/hadoop/conf KRB5_CONFIG=/etc/krb5.conf KRB5CCNAME=/tmp/krb5
 ```
 
 ## Profiling
-   
+
 ### Heap profiling
 1. build with profile support
     ```shell
@@ -112,7 +116,7 @@ HADOOP_CONF_DIR=/etc/hadoop/conf KRB5_CONFIG=/etc/krb5.conf KRB5CCNAME=/tmp/krb5
     ```shell
     _RJEM_MALLOC_CONF=prof:true,prof_prefix:jeprof.out ./uniffle-worker
     ```
-   
+
 ### CPU Profiling
 1. build with jemalloc feature
     ```shell
@@ -125,6 +129,5 @@ HADOOP_CONF_DIR=/etc/hadoop/conf KRB5_CONFIG=/etc/krb5.conf KRB5CCNAME=/tmp/krb5
    - localhost:8080: riffle server.
    - remote_ip: pprof server address.
    - seconds=30: Profiling lasts for 30 seconds.
-   
+
    Then open the URL <your-ip>:8081/ui/flamegraph in your browser to view the flamegraph:
-   
