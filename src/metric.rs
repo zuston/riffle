@@ -307,8 +307,13 @@ pub static TOTAL_SPILL_EVENTS_DROPPED: Lazy<IntCounter> = Lazy::new(|| {
 });
 
 // total timeout tickets
-pub static TOTAL_EVICT_TIMEOUT_TICKETS_NUM: Lazy<IntCounter> =
-    Lazy::new(|| IntCounter::new("total_evict_timeout_tickets_num", "total_evict_timeout_tickets_num").expect(""));
+pub static TOTAL_EVICT_TIMEOUT_TICKETS_NUM: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new(
+        "total_evict_timeout_tickets_num",
+        "total_evict_timeout_tickets_num",
+    )
+    .expect("")
+});
 
 fn register_custom_metrics() {
     REGISTRY

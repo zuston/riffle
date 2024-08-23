@@ -167,6 +167,11 @@ impl PartitionedMeta {
         Ok(())
     }
 
+    fn get_block_ids_bitmap(&self) -> Result<Treemap> {
+        let meta = self.inner.read().unwrap();
+        Ok(meta.blocks_bitmap.clone())
+    }
+
     fn get_block_ids(&self) -> Result<Bytes> {
         let meta = self.inner.read().unwrap();
         let serialized_data = meta.blocks_bitmap.serialize()?;
@@ -387,6 +392,11 @@ impl App {
         debug!("get blocks: {:?}", ctx.clone());
         let partitioned_meta = self.get_blocks_bitmap(&ctx.uid);
         partitioned_meta.get_block_ids()
+    }
+
+    pub fn get_block_ids_bitmap(&self, ctx: GetBlocksContext) -> Result<Treemap> {
+        let partitioned_meta = self.get_blocks_bitmap(&ctx.uid);
+        partitioned_meta.get_block_ids_bitmap()
     }
 
     pub async fn report_block_ids(&self, ctx: ReportBlocksContext) -> Result<()> {

@@ -34,7 +34,7 @@ use crate::grpc::protobuf::uniffle::{
 };
 use crate::store::{PartitionedData, ResponseDataIndex};
 use await_tree::InstrumentAwait;
-use bytes::{BufMut, BytesMut};
+use bytes::Bytes;
 use croaring::treemap::JvmSerializer;
 use croaring::Treemap;
 use fastrace::future::FutureExt;
@@ -620,17 +620,17 @@ impl ShuffleServer for DefaultShuffleServer {
         }
         let app = app.unwrap();
 
-        let mut bytes_mut = BytesMut::new();
+        let mut bitmap_result = Treemap::default();
         for partition_id in req.partitions {
-            let block_ids_result = app.get_block_ids(GetBlocksContext {
+            let block_ids_bitmap_result = app.get_block_ids_bitmap(GetBlocksContext {
                 uid: PartitionedUId {
                     app_id: app_id.clone(),
                     shuffle_id,
                     partition_id,
                 },
             });
-            if block_ids_result.is_err() {
-                let err_msg = block_ids_result.err();
+            if block_ids_bitmap_result.is_err() {
+                let err_msg = block_ids_bitmap_result.err();
                 error!(
                     "Errors on getting shuffle block ids by multipart way of app:[{}], error: {:?}",
                     &app_id, err_msg
@@ -641,13 +641,17 @@ impl ShuffleServer for DefaultShuffleServer {
                     serialized_bitmap: Default::default(),
                 }));
             }
-            bytes_mut.put(block_ids_result.unwrap());
+
+            for block_id in block_ids_bitmap_result.unwrap().iter() {
+                bitmap_result.add(block_id);
+            }
         }
 
+        let serialization = bitmap_result.serialize().unwrap();
         Ok(Response::new(GetShuffleResultForMultiPartResponse {
             status: 0,
             ret_msg: "".to_string(),
-            serialized_bitmap: bytes_mut.freeze(),
+            serialized_bitmap: Bytes::from(serialization),
         }))
     }
 
