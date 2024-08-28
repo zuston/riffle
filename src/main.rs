@@ -17,10 +17,8 @@
 
 #![feature(impl_trait_in_assoc_type)]
 
-use crate::app::{AppManager, AppManagerRef, SHUFFLE_SERVER_ID};
+use crate::app::{AppManager, SHUFFLE_SERVER_ID};
 use crate::config::Config;
-use crate::grpc::protobuf::uniffle::coordinator_server_client::CoordinatorServerClient;
-use crate::grpc::protobuf::uniffle::{ShuffleServerHeartBeatRequest, ShuffleServerId};
 use crate::http::{HTTPServer, HTTP_SERVICE};
 use crate::log_service::LogService;
 use crate::mem_allocator::ALLOCATOR;
@@ -29,14 +27,13 @@ use crate::readable_size::ReadableSize;
 use crate::rpc::DefaultRpcService;
 use crate::runtime::manager::RuntimeManager;
 use crate::tracing::FastraceWrapper;
-use crate::util::{generate_worker_uid, get_local_ip};
+use crate::util::generate_worker_uid;
 
+use crate::heartbeat::HeartbeatTask;
 use anyhow::Result;
 use clap::{App, Arg};
 use log::info;
 use std::str::FromStr;
-use std::time::Duration;
-use tonic::transport::Channel;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -46,6 +43,7 @@ pub mod config;
 pub mod constant;
 mod error;
 pub mod grpc;
+pub mod heartbeat;
 mod http;
 mod log_service;
 mod mem_allocator;
@@ -60,80 +58,6 @@ pub mod urpc;
 pub mod util;
 
 const MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY: &str = "MAX_MEMORY_ALLOCATION_SIZE";
-const DEFAULT_SHUFFLE_SERVER_TAG: &str = "ss_v4";
-
-fn start_coordinator_report(
-    runtime_manager: RuntimeManager,
-    app_manager: AppManagerRef,
-    coordinator_quorum: Vec<String>,
-    grpc_port: i32,
-    urpc_port: i32,
-    tags: Vec<String>,
-    worker_uid: String,
-) -> Result<()> {
-    runtime_manager.default_runtime.spawn(async move {
-        let ip = get_local_ip().unwrap().to_string();
-
-        info!("machine ip: {}", ip.clone());
-
-        let shuffle_server_id = ShuffleServerId {
-            id: worker_uid,
-            ip,
-            port: grpc_port,
-            netty_port: urpc_port,
-        };
-
-        let mut multi_coordinator_clients: Vec<CoordinatorServerClient<Channel>> =
-            futures::future::try_join_all(
-                coordinator_quorum
-                    .iter()
-                    .map(|quorum| CoordinatorServerClient::connect(format!("http://{}", quorum))),
-            )
-            .await
-            .unwrap();
-
-        loop {
-            // todo: add interval as config var
-            tokio::time::sleep(Duration::from_secs(10)).await;
-
-            let mut all_tags = vec![];
-            all_tags.push(DEFAULT_SHUFFLE_SERVER_TAG.to_string());
-            all_tags.extend_from_slice(&*tags);
-
-            let healthy = app_manager.store_is_healthy().await.unwrap_or(false);
-            let memory_snapshot = app_manager
-                .store_memory_snapshot()
-                .await
-                .unwrap_or((0, 0, 0).into());
-            let memory_spill_event_num =
-                app_manager.store_memory_spill_event_num().unwrap_or(0) as i32;
-
-            let heartbeat_req = ShuffleServerHeartBeatRequest {
-                server_id: Some(shuffle_server_id.clone()),
-                used_memory: memory_snapshot.used(),
-                pre_allocated_memory: memory_snapshot.allocated(),
-                available_memory: memory_snapshot.capacity()
-                    - memory_snapshot.used()
-                    - memory_snapshot.allocated(),
-                event_num_in_flush: memory_spill_event_num,
-                tags: all_tags,
-                is_healthy: Some(healthy),
-                status: 0,
-                storage_info: Default::default(),
-            };
-
-            // It must use the 0..len to avoid borrow check in loop.
-            for idx in 0..multi_coordinator_clients.len() {
-                let client = multi_coordinator_clients.get_mut(idx).unwrap();
-                let _ = client
-                    .heartbeat(tonic::Request::new(heartbeat_req.clone()))
-                    .await;
-            }
-        }
-    });
-
-    Ok(())
-}
 
 fn main() -> Result<()> {
     setup_max_memory_allocation();
@@ -155,31 +79,21 @@ fn main() -> Result<()> {
     let config_path = args_match.value_of("config").unwrap_or("./config.toml");
     let config = Config::from(config_path);
 
-    let runtime_manager = RuntimeManager::from(config.runtime_config.clone());
-
-    let _guard = LogService::initialize(&config.log.clone().unwrap_or(Default::default()));
+    let _guard = LogService::init(&config.log.clone().unwrap_or(Default::default()));
 
     let worker_uid = generate_worker_uid(&config);
     // todo: remove some unnecessary worker_id transfer.
     SHUFFLE_SERVER_ID.get_or_init(|| worker_uid.clone());
+
+    let runtime_manager = RuntimeManager::from(config.runtime_config.clone());
+    let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone());
 
     let metric_config = config.metrics.clone();
     init_metric_service(runtime_manager.clone(), &metric_config, worker_uid.clone());
 
     FastraceWrapper::init(config.clone());
 
-    let coordinator_quorum = config.coordinator_quorum.clone();
-    let tags = config.tags.clone().unwrap_or(vec![]);
-    let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone());
-    let _ = start_coordinator_report(
-        runtime_manager.clone(),
-        app_manager_ref.clone(),
-        coordinator_quorum,
-        config.grpc_port.unwrap_or(19999),
-        config.urpc_port.unwrap_or(0),
-        tags,
-        worker_uid,
-    );
+    HeartbeatTask::init(&config, runtime_manager.clone(), app_manager_ref.clone());
 
     let http_port = config.http_monitor_service_port.unwrap_or(20010);
     info!(

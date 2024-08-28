@@ -9,7 +9,7 @@ const LOG_FILE_NAME: &str = "uniffle-worker.log";
 
 pub struct LogService;
 impl LogService {
-    pub fn initialize(log: &LogConfig) -> WorkerGuard {
+    pub fn init(log: &LogConfig) -> WorkerGuard {
         let file_appender = match log.rotation {
             RotationConfig::Hourly => tracing_appender::rolling::hourly(&log.path, LOG_FILE_NAME),
             RotationConfig::Daily => tracing_appender::rolling::daily(&log.path, LOG_FILE_NAME),

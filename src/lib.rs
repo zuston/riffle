@@ -23,6 +23,7 @@ pub mod config;
 pub mod constant;
 pub mod error;
 pub mod grpc;
+mod heartbeat;
 pub mod http;
 pub mod log_service;
 mod mem_allocator;
