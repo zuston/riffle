@@ -209,7 +209,7 @@ impl LocalFileStore {
         if !parent_dir_is_created {
             if let Some(path) = Path::new(&data_file_path).parent() {
                 local_disk
-                    .create_dir(format!("{:?}/", path.to_str().unwrap()).as_str())
+                    .create_dir(format!("{}/", path.to_str().unwrap()).as_str())
                     .await?;
             }
         }

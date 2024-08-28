@@ -203,6 +203,7 @@ impl LocalDisk {
 
     pub async fn create_dir(&self, dir: &str) -> Result<()> {
         self.operator.create_dir(dir)?;
+        info!("Created the dir: {}/{}", &self.root, dir);
         Ok(())
     }
 
