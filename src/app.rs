@@ -54,6 +54,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 pub static SHUFFLE_SERVER_ID: OnceLock<String> = OnceLock::new();
+pub static SHUFFLE_SERVER_IP: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub enum DataDistribution {

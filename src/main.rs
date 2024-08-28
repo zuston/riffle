@@ -17,18 +17,19 @@
 
 #![feature(impl_trait_in_assoc_type)]
 
-use crate::app::{AppManager, SHUFFLE_SERVER_ID};
+use crate::app::{AppManager, SHUFFLE_SERVER_ID, SHUFFLE_SERVER_IP};
 use crate::config::Config;
 use crate::http::{HTTPServer, HTTP_SERVICE};
 use crate::log_service::LogService;
 use crate::mem_allocator::ALLOCATOR;
-use crate::metric::init_metric_service;
+use crate::metric::MetricService;
 use crate::readable_size::ReadableSize;
 use crate::rpc::DefaultRpcService;
 use crate::runtime::manager::RuntimeManager;
 use crate::tracing::FastraceWrapper;
-use crate::util::generate_worker_uid;
+use crate::util::{generate_worker_uid, get_local_ip};
 
+use crate::common::init_global_variable;
 use crate::heartbeat::HeartbeatTask;
 use anyhow::Result;
 use clap::{App, Arg};
@@ -39,6 +40,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 pub mod app;
 mod await_tree;
+pub mod common;
 pub mod config;
 pub mod constant;
 mod error;
@@ -81,18 +83,13 @@ fn main() -> Result<()> {
 
     let _guard = LogService::init(&config.log.clone().unwrap_or(Default::default()));
 
-    let worker_uid = generate_worker_uid(&config);
-    // todo: remove some unnecessary worker_id transfer.
-    SHUFFLE_SERVER_ID.get_or_init(|| worker_uid.clone());
+    init_global_variable(&config);
 
     let runtime_manager = RuntimeManager::from(config.runtime_config.clone());
     let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone());
 
-    let metric_config = config.metrics.clone();
-    init_metric_service(runtime_manager.clone(), &metric_config, worker_uid.clone());
-
+    MetricService::init(&config, runtime_manager.clone());
     FastraceWrapper::init(config.clone());
-
     HeartbeatTask::init(&config, runtime_manager.clone(), app_manager_ref.clone());
 
     let http_port = config.http_monitor_service_port.unwrap_or(20010);

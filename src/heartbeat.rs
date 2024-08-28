@@ -1,4 +1,4 @@
-use crate::app::{AppManagerRef, SHUFFLE_SERVER_ID};
+use crate::app::{AppManagerRef, SHUFFLE_SERVER_ID, SHUFFLE_SERVER_IP};
 use crate::config::Config;
 use crate::grpc::protobuf::uniffle::coordinator_server_client::CoordinatorServerClient;
 use crate::grpc::protobuf::uniffle::{ShuffleServerHeartBeatRequest, ShuffleServerId};
@@ -21,8 +21,8 @@ impl HeartbeatTask {
         let urpc_port = config.urpc_port.unwrap_or(0);
 
         runtime_manager.default_runtime.spawn(async move {
-            let ip = get_local_ip().unwrap().to_string();
-            info!("machine ip: {}", ip.clone());
+            let ip = SHUFFLE_SERVER_IP.get().unwrap().to_string();
+            info!("machine ip: {}", &ip);
 
             let shuffle_server_id = ShuffleServerId {
                 id: SHUFFLE_SERVER_ID.get().unwrap().to_string(),

@@ -19,6 +19,7 @@
 
 pub mod app;
 pub mod await_tree;
+pub mod common;
 pub mod config;
 pub mod constant;
 pub mod error;
@@ -38,6 +39,7 @@ pub mod urpc;
 pub mod util;
 
 use crate::app::{AppManager, AppManagerRef};
+use crate::common::init_global_variable;
 use crate::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
 use crate::grpc::protobuf::uniffle::shuffle_server_server::ShuffleServerServer;
 use crate::grpc::protobuf::uniffle::{
@@ -47,9 +49,8 @@ use crate::grpc::protobuf::uniffle::{
 };
 use crate::grpc::service::DefaultShuffleServer;
 use crate::http::{HTTPServer, HTTP_SERVICE};
-use crate::metric::init_metric_service;
+use crate::metric::MetricService;
 use crate::runtime::manager::RuntimeManager;
-use crate::util::gen_worker_uid;
 use anyhow::Result;
 use bytes::{Buf, Bytes, BytesMut};
 use croaring::treemap::JvmSerializer;
@@ -62,14 +63,10 @@ use tokio::sync::oneshot;
 use tonic::transport::{Channel, Server};
 
 pub async fn start_uniffle_worker(config: config::Config) -> Result<AppManagerRef> {
-    let rpc_port = config.grpc_port.unwrap_or(19999);
-    let worker_uid = gen_worker_uid(rpc_port);
-    let metric_config = config.metrics.clone();
-
+    init_global_variable(&config);
     let runtime_manager = RuntimeManager::from(config.runtime_config.clone());
 
-    init_metric_service(runtime_manager.clone(), &metric_config, worker_uid.clone());
-    // start the http monitor service
+    MetricService::init(&config, runtime_manager.clone());
     let http_port = config.http_monitor_service_port.unwrap_or(20010);
     HTTP_SERVICE.start(runtime_manager.clone(), http_port);
 

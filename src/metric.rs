@@ -15,7 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::config::MetricsConfig;
+use crate::app::SHUFFLE_SERVER_IP;
+use crate::config::{Config, MetricsConfig};
 use crate::runtime::manager::RuntimeManager;
 use log::{error, info};
 use once_cell::sync::Lazy;
@@ -475,48 +476,45 @@ fn register_custom_metrics() {
         .expect("");
 }
 
-pub fn init_metric_service(
-    runtime_manager: RuntimeManager,
-    metric_config: &Option<MetricsConfig>,
-    worker_uid: String,
-) -> bool {
-    if metric_config.is_none() {
-        return false;
-    }
+pub struct MetricService;
+impl MetricService {
+    pub fn init(config: &Config, runtime_manager: RuntimeManager) {
+        if config.metrics.is_none() {
+            info!("Metrics config is not found. Disable this");
+            return;
+        }
 
-    register_custom_metrics();
+        register_custom_metrics();
 
-    let job_name = "uniffle-worker";
+        let job_name = "uniffle-worker";
+        let cfg = config.metrics.clone().unwrap();
 
-    let cfg = metric_config.clone().unwrap();
+        let push_gateway_endpoint = cfg.push_gateway_endpoint;
+        if let Some(ref _endpoint) = push_gateway_endpoint {
+            let push_interval_sec = cfg.push_interval_sec.unwrap_or(60);
+            runtime_manager.default_runtime.spawn(async move {
+                info!("Starting prometheus metrics exporter...");
+                loop {
+                    tokio::time::sleep(Duration::from_secs(push_interval_sec as u64)).await;
 
-    let push_gateway_endpoint = cfg.push_gateway_endpoint;
+                    let general_metrics = prometheus::gather();
+                    let custom_metrics = REGISTRY.gather();
+                    let mut metrics = vec![];
+                    metrics.extend_from_slice(&custom_metrics);
+                    metrics.extend_from_slice(&general_metrics);
 
-    if let Some(ref _endpoint) = push_gateway_endpoint {
-        let push_interval_sec = cfg.push_interval_sec.unwrap_or(60);
-        runtime_manager.default_runtime.spawn(async move {
-            info!("Starting prometheus metrics exporter...");
-            loop {
-                tokio::time::sleep(Duration::from_secs(push_interval_sec as u64)).await;
-
-                let general_metrics = prometheus::gather();
-                let custom_metrics = REGISTRY.gather();
-                let mut metrics = vec![];
-                metrics.extend_from_slice(&custom_metrics);
-                metrics.extend_from_slice(&general_metrics);
-
-                let pushed_result = prometheus::push_metrics(
-                    job_name,
-                    labels! {"worker_id".to_owned() => worker_uid.to_owned(),},
-                    &push_gateway_endpoint.to_owned().unwrap().to_owned(),
-                    metrics,
-                    None,
-                );
-                if pushed_result.is_err() {
-                    error!("Errors on pushing metrics. {:?}", pushed_result.err());
+                    let pushed_result = prometheus::push_metrics(
+                        job_name,
+                        labels! {"worker_id".to_owned() => SHUFFLE_SERVER_IP.get().unwrap().to_string(),},
+                        &push_gateway_endpoint.to_owned().unwrap().to_owned(),
+                        metrics,
+                        None,
+                    );
+                    if pushed_result.is_err() {
+                        error!("Errors on pushing metrics. {:?}", pushed_result.err());
+                    }
                 }
-            }
-        });
+            });
+        }
     }
-    return true;
 }
