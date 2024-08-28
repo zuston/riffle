@@ -24,6 +24,7 @@ pub mod constant;
 pub mod error;
 pub mod grpc;
 pub mod http;
+pub mod log_service;
 mod mem_allocator;
 pub mod metric;
 pub mod readable_size;

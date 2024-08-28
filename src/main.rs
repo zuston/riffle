@@ -18,10 +18,11 @@
 #![feature(impl_trait_in_assoc_type)]
 
 use crate::app::{AppManager, AppManagerRef, SHUFFLE_SERVER_ID};
-use crate::config::{Config, LogConfig, RotationConfig};
+use crate::config::Config;
 use crate::grpc::protobuf::uniffle::coordinator_server_client::CoordinatorServerClient;
 use crate::grpc::protobuf::uniffle::{ShuffleServerHeartBeatRequest, ShuffleServerId};
 use crate::http::{HTTPServer, HTTP_SERVICE};
+use crate::log_service::LogService;
 use crate::mem_allocator::ALLOCATOR;
 use crate::metric::init_metric_service;
 use crate::readable_size::ReadableSize;
@@ -29,16 +30,15 @@ use crate::rpc::DefaultRpcService;
 use crate::runtime::manager::RuntimeManager;
 use crate::tracing::FastraceWrapper;
 use crate::util::{generate_worker_uid, get_local_ip};
+
 use anyhow::Result;
 use clap::{App, Arg};
 use log::info;
 use std::str::FromStr;
 use std::time::Duration;
 use tonic::transport::Channel;
-use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{fmt, EnvFilter, Registry};
 
 pub mod app;
 mod await_tree;
@@ -47,6 +47,7 @@ pub mod constant;
 mod error;
 pub mod grpc;
 mod http;
+mod log_service;
 mod mem_allocator;
 mod metric;
 mod readable_size;
@@ -134,36 +135,6 @@ fn start_coordinator_report(
     Ok(())
 }
 
-const LOG_FILE_NAME: &str = "uniffle-worker.log";
-
-fn init_log(log: &LogConfig) -> WorkerGuard {
-    let file_appender = match log.rotation {
-        RotationConfig::Hourly => tracing_appender::rolling::hourly(&log.path, LOG_FILE_NAME),
-        RotationConfig::Daily => tracing_appender::rolling::daily(&log.path, LOG_FILE_NAME),
-        RotationConfig::Never => tracing_appender::rolling::never(&log.path, LOG_FILE_NAME),
-    };
-
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let formatting_layer = fmt::layer().pretty().with_writer(std::io::stderr);
-
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    let file_layer = fmt::layer()
-        .with_ansi(false)
-        .with_line_number(true)
-        .with_writer(non_blocking);
-
-    Registry::default()
-        .with(env_filter)
-        .with(formatting_layer)
-        .with(file_layer)
-        .init();
-
-    // Note: _guard is a WorkerGuard which is returned by tracing_appender::non_blocking to
-    // ensure buffered logs are flushed to their output in the case of abrupt terminations of a process.
-    // See WorkerGuard module for more details.
-    _guard
-}
-
 fn main() -> Result<()> {
     setup_max_memory_allocation();
 
@@ -186,9 +157,7 @@ fn main() -> Result<()> {
 
     let runtime_manager = RuntimeManager::from(config.runtime_config.clone());
 
-    // init log
-    let log_config = &config.log.clone().unwrap_or(Default::default());
-    let _guard = init_log(log_config);
+    let _guard = LogService::initialize(&config.log.clone().unwrap_or(Default::default()));
 
     let worker_uid = generate_worker_uid(&config);
     // todo: remove some unnecessary worker_id transfer.
