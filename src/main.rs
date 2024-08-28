@@ -17,9 +17,11 @@
 
 #![feature(impl_trait_in_assoc_type)]
 
-use crate::app::{AppManager, SHUFFLE_SERVER_ID, SHUFFLE_SERVER_IP};
+use crate::app::AppManager;
+use crate::common::init_global_variable;
 use crate::config::Config;
-use crate::http::{HTTPServer, HTTP_SERVICE};
+use crate::heartbeat::HeartbeatTask;
+use crate::http::{HTTPServer, HttpMonitorService};
 use crate::log_service::LogService;
 use crate::mem_allocator::ALLOCATOR;
 use crate::metric::MetricService;
@@ -27,10 +29,6 @@ use crate::readable_size::ReadableSize;
 use crate::rpc::DefaultRpcService;
 use crate::runtime::manager::RuntimeManager;
 use crate::tracing::FastraceWrapper;
-use crate::util::{generate_worker_uid, get_local_ip};
-
-use crate::common::init_global_variable;
-use crate::heartbeat::HeartbeatTask;
 use anyhow::Result;
 use clap::{App, Arg};
 use log::info;
@@ -91,15 +89,10 @@ fn main() -> Result<()> {
     MetricService::init(&config, runtime_manager.clone());
     FastraceWrapper::init(config.clone());
     HeartbeatTask::init(&config, runtime_manager.clone(), app_manager_ref.clone());
-
-    let http_port = config.http_monitor_service_port.unwrap_or(20010);
-    info!(
-        "Starting http monitor service with port:[{}] ......",
-        http_port
-    );
-    HTTP_SERVICE.start(runtime_manager.clone(), http_port);
+    HttpMonitorService::init(&config, runtime_manager.clone());
 
     DefaultRpcService {}.start(&config, runtime_manager, app_manager_ref)?;
+
     Ok(())
 }
 

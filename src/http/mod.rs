@@ -21,15 +21,29 @@ mod jeprof;
 mod metrics;
 mod pprof;
 
+use crate::config::Config;
 use crate::http::await_tree::AwaitTreeHandler;
 use crate::http::http_service::PoemHTTPServer;
 use crate::http::jeprof::JeProfHandler;
 use crate::http::metrics::MetricsHTTPHandler;
 use crate::http::pprof::PProfHandler;
 use crate::runtime::manager::RuntimeManager;
-use once_cell::sync::Lazy;
+
+use log::info;
 use poem::RouteMethod;
-pub static HTTP_SERVICE: Lazy<Box<PoemHTTPServer>> = Lazy::new(|| new_server());
+
+pub struct HttpMonitorService;
+impl HttpMonitorService {
+    pub fn init(config: &Config, runtime_manager: RuntimeManager) {
+        let http_port = config.http_monitor_service_port.unwrap_or(20010);
+        info!(
+            "Starting http monitor service with port:[{}] ......",
+            http_port
+        );
+        let server = new_server();
+        server.start(runtime_manager, http_port);
+    }
+}
 
 /// Implement the own handlers for concrete components
 pub trait Handler {

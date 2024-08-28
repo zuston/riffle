@@ -48,7 +48,7 @@ use crate::grpc::protobuf::uniffle::{
     SendShuffleDataRequest, ShuffleBlock, ShuffleData, ShuffleRegisterRequest,
 };
 use crate::grpc::service::DefaultShuffleServer;
-use crate::http::{HTTPServer, HTTP_SERVICE};
+use crate::http::{HTTPServer, HttpMonitorService};
 use crate::metric::MetricService;
 use crate::runtime::manager::RuntimeManager;
 use anyhow::Result;
@@ -67,8 +67,7 @@ pub async fn start_uniffle_worker(config: config::Config) -> Result<AppManagerRe
     let runtime_manager = RuntimeManager::from(config.runtime_config.clone());
 
     MetricService::init(&config, runtime_manager.clone());
-    let http_port = config.http_monitor_service_port.unwrap_or(20010);
-    HTTP_SERVICE.start(runtime_manager.clone(), http_port);
+    HttpMonitorService::init(&config, runtime_manager.clone());
 
     let (tx, rx) = oneshot::channel::<()>();
 
