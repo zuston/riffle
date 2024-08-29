@@ -11,6 +11,7 @@ Another implementation of Apache Uniffle shuffle server (Single binary, no extra
 - [ ] Support writing multiple replicas by pipeline mode in server side
 - [ ] Create the grafana template to show the metrics dashboard by the unified style
 - [ ] Introduce the clippy to validate
+- [ ] Zero copy for **urpc** and mem + localfile getting/writing
 
 ## Benchmark report
 
