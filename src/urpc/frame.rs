@@ -1,6 +1,7 @@
 use crate::error::WorkerError;
 use crate::error::WorkerError::{STREAM_INCOMPLETE, STREAM_INCORRECT};
 use crate::store::Block;
+use crate::store::ResponseData::Mem;
 use crate::urpc::command::{
     GetLocalDataIndexRequestCommand, GetLocalDataIndexResponseCommand, GetLocalDataRequestCommand,
     GetLocalDataResponseCommand, GetMemoryDataRequestCommand, GetMemoryDataResponseCommand,
@@ -145,11 +146,16 @@ impl Frame {
                 let msg = &resp.ret_msg;
                 let msg_bytes = msg.as_bytes();
 
-                let mem_data = resp.data.from_memory();
-                let data_bytes = mem_data.data;
+                let read_result_data = &resp.data;
+                let mem_data = match read_result_data {
+                    Mem(mem_data) => mem_data,
+                    _ => panic!("This should not happen that the result data is not mem type."),
+                };
+
+                let data_bytes = &mem_data.data;
                 let data_bytes_len = data_bytes.len() as i32;
 
-                let segments = mem_data.shuffle_data_block_segments;
+                let segments = &mem_data.shuffle_data_block_segments;
                 let segments_encode_len = (4 + segments.len() * (3 * 8 + 3 * 4)) as i32;
 
                 // header

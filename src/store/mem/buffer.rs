@@ -1,5 +1,6 @@
-use crate::store::Block;
+use crate::store::{Block, DataSegment, PartitionedMemoryData};
 use anyhow::Result;
+use bytes::BytesMut;
 use croaring::Treemap;
 use fastrace::trace;
 use parking_lot::RwLock;
@@ -118,6 +119,107 @@ impl MemoryBuffer {
             buffer.flight_size -= flight_size as i64;
         }
         Ok(())
+    }
+
+    #[trace]
+    pub fn get_v2(
+        &self,
+        last_block_id: i64,
+        batch_len: i64,
+        task_ids: Option<Treemap>,
+    ) -> Result<PartitionedMemoryData> {
+        /// read sequence
+        /// 1. from flight (expect: last_block_id not found or last_block_id == 0)
+        /// 2. from staging
+        let buffer = self.buffer.read();
+
+        let mut read_result = vec![];
+        let mut read_len = 0i64;
+        let mut flight_found = false;
+
+        let mut exit = false;
+        while !exit {
+            exit = true;
+            {
+                if last_block_id == 0 {
+                    flight_found = true;
+                }
+                for (_, batch_block) in buffer.flight.iter() {
+                    for blocks in batch_block.iter() {
+                        for block in blocks {
+                            if !flight_found && block.block_id == last_block_id {
+                                flight_found = true;
+                                continue;
+                            }
+                            if !flight_found {
+                                continue;
+                            }
+                            if read_len >= batch_len {
+                                break;
+                            }
+                            if let Some(ref expected_task_id) = task_ids {
+                                if !expected_task_id.contains(block.task_attempt_id as u64) {
+                                    continue;
+                                }
+                            }
+                            read_len += block.length as i64;
+                            read_result.push(block);
+                        }
+                    }
+                }
+            }
+
+            {
+                for blocks in buffer.staging.iter() {
+                    for block in blocks {
+                        if !flight_found && block.block_id == last_block_id {
+                            flight_found = true;
+                            continue;
+                        }
+                        if !flight_found {
+                            continue;
+                        }
+                        if read_len >= batch_len {
+                            break;
+                        }
+                        if let Some(ref expected_task_id) = task_ids {
+                            if !expected_task_id.contains(block.task_attempt_id as u64) {
+                                continue;
+                            }
+                        }
+                        read_len += block.length as i64;
+                        read_result.push(block);
+                    }
+                }
+            }
+
+            if !flight_found {
+                flight_found = true;
+                exit = false;
+            }
+        }
+
+        let mut bytes_holder = BytesMut::with_capacity(read_len as usize);
+        let mut segments = Vec::with_capacity(read_result.len());
+        let mut offset = 0;
+        for block in read_result {
+            let data = &block.data;
+            bytes_holder.extend_from_slice(data);
+            segments.push(DataSegment {
+                block_id: block.block_id,
+                offset,
+                length: block.length,
+                uncompress_length: block.uncompress_length,
+                crc: block.crc,
+                task_attempt_id: block.task_attempt_id,
+            });
+            offset += block.length as i64;
+        }
+
+        Ok(PartitionedMemoryData {
+            shuffle_data_block_segments: segments,
+            data: bytes_holder.freeze(),
+        })
     }
 
     #[trace]

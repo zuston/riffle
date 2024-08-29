@@ -277,38 +277,16 @@ impl Store for MemoryStore {
         let uid = ctx.uid;
         let buffer = self.get_or_create_memory_buffer(uid);
         let options = ctx.reading_options;
-        let buffer_read_result = match options {
-            MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(last_block_id, max_size) => buffer.get(
+        let read_data = match options {
+            MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(last_block_id, max_size) => buffer.get_v2(
                 last_block_id,
                 max_size,
                 ctx.serialized_expected_task_ids_bitmap,
             )?,
             _ => panic!("Should not happen."),
         };
-        let size = buffer_read_result.read_len();
-        let blocks = buffer_read_result.blocks();
 
-        let mut bytes_holder = BytesMut::with_capacity(size as usize);
-        let mut segments = vec![];
-        let mut offset = 0;
-        for block in blocks {
-            let data = &block.data;
-            bytes_holder.extend_from_slice(data);
-            segments.push(DataSegment {
-                block_id: block.block_id,
-                offset,
-                length: block.length,
-                uncompress_length: block.uncompress_length,
-                crc: block.crc,
-                task_attempt_id: block.task_attempt_id,
-            });
-            offset += block.length as i64;
-        }
-
-        Ok(ResponseData::Mem(PartitionedMemoryData {
-            shuffle_data_block_segments: segments,
-            data: bytes_holder.freeze(),
-        }))
+        Ok(ResponseData::Mem(read_data))
     }
 
     #[trace]

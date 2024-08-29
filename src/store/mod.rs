@@ -98,16 +98,16 @@ pub enum ResponseData {
 }
 
 impl ResponseData {
-    pub fn from_local(&self) -> Bytes {
+    pub fn from_local(self) -> Bytes {
         match self {
-            ResponseData::Local(data) => data.data.clone(),
+            ResponseData::Local(data) => data.data,
             _ => Default::default(),
         }
     }
 
-    pub fn from_memory(&self) -> PartitionedMemoryData {
+    pub fn from_memory(self) -> PartitionedMemoryData {
         match self {
-            ResponseData::Mem(data) => data.clone(),
+            ResponseData::Mem(data) => data,
             _ => Default::default(),
         }
     }
