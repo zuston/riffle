@@ -17,6 +17,8 @@
 
 #![feature(impl_trait_in_assoc_type)]
 
+extern crate core;
+
 use crate::app::AppManager;
 use crate::common::init_global_variable;
 use crate::config::Config;
@@ -39,6 +41,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 pub mod app;
 mod await_tree;
 pub mod common;
+pub mod composed_bytes;
 pub mod config;
 pub mod constant;
 mod error;

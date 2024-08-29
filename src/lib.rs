@@ -20,6 +20,7 @@
 pub mod app;
 pub mod await_tree;
 pub mod common;
+mod composed_bytes;
 pub mod config;
 pub mod constant;
 pub mod error;

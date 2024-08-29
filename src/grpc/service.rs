@@ -32,9 +32,9 @@ use crate::grpc::protobuf::uniffle::{
     ShuffleRegisterRequest, ShuffleRegisterResponse, ShuffleUnregisterByAppIdRequest,
     ShuffleUnregisterByAppIdResponse, ShuffleUnregisterRequest, ShuffleUnregisterResponse,
 };
-use crate::store::{PartitionedData, ResponseDataIndex};
+use crate::store::{BytesWrapper, PartitionedData, ResponseDataIndex};
 use await_tree::InstrumentAwait;
-use bytes::Bytes;
+use bytes::{Buf, Bytes};
 use croaring::treemap::JvmSerializer;
 use croaring::Treemap;
 use fastrace::future::FutureExt;
@@ -477,6 +477,7 @@ impl ShuffleServer for DefaultShuffleServer {
         }
 
         let data = data_fetched_result.unwrap().from_memory();
+        let bytes = data.data.freeze();
 
         timer.observe_duration();
 
@@ -486,7 +487,7 @@ impl ShuffleServer for DefaultShuffleServer {
                 .into_iter()
                 .map(|x| x.into())
                 .collect(),
-            data: data.data,
+            data: bytes,
             status: StatusCode::SUCCESS.into(),
             ret_msg: "".to_string(),
         }))

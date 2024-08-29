@@ -31,7 +31,6 @@ use crate::config::{Config, StorageType};
 use crate::error::WorkerError;
 use crate::grpc::protobuf::uniffle::{ShuffleData, ShuffleDataBlockSegment};
 use crate::store::hybrid::HybridStore;
-use std::collections::LinkedList;
 use std::fmt::{Display, Formatter};
 
 use crate::util::current_timestamp_sec;
@@ -39,9 +38,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
 
+use crate::composed_bytes::ComposedBytes;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::mem::buffer::BatchMemoryBlock;
-use env_logger::fmt::Color::Magenta;
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -118,11 +117,69 @@ pub struct PartitionedLocalData {
     pub data: Bytes,
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Default, Debug)]
 pub struct PartitionedMemoryData {
     pub shuffle_data_block_segments: Vec<DataSegment>,
-    pub data: Bytes,
+    pub data: BytesWrapper,
 }
+
+#[derive(Debug)]
+pub enum BytesWrapper {
+    Direct(Bytes),
+    Composed(ComposedBytes),
+}
+
+impl Into<BytesWrapper> for Bytes {
+    fn into(self) -> BytesWrapper {
+        BytesWrapper::Direct(self)
+    }
+}
+
+impl Into<BytesWrapper> for ComposedBytes {
+    fn into(self) -> BytesWrapper {
+        BytesWrapper::Composed(self)
+    }
+}
+
+impl BytesWrapper {
+    pub fn len(&self) -> usize {
+        match self {
+            BytesWrapper::Direct(bytes) => bytes.len(),
+            BytesWrapper::Composed(composed) => composed.len(),
+        }
+    }
+
+    pub fn freeze(&self) -> Bytes {
+        match self {
+            BytesWrapper::Direct(bytes) => bytes.clone(),
+            BytesWrapper::Composed(composed) => composed.freeze(),
+            _ => panic!(),
+        }
+    }
+
+    pub fn get_direct(&self) -> Bytes {
+        match self {
+            BytesWrapper::Direct(bytes) => bytes.clone(),
+            _ => panic!(),
+        }
+    }
+
+    pub fn always_composed(&self) -> ComposedBytes {
+        match self {
+            BytesWrapper::Composed(bytes) => bytes.clone(),
+            BytesWrapper::Direct(data) => ComposedBytes::from(vec![data.clone()]),
+            _ => panic!(),
+        }
+    }
+}
+
+impl Default for BytesWrapper {
+    fn default() -> Self {
+        BytesWrapper::Direct(Default::default())
+    }
+}
+
+// ===============
 
 #[derive(Clone, Debug)]
 pub struct DataSegment {

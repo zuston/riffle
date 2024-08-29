@@ -122,7 +122,10 @@ impl Drop for Ticket<'_> {
 #[cfg(test)]
 mod test {
     use crate::util::{current_timestamp_sec, get_crc, ConcurrencyLimiter};
-    use bytes::Bytes;
+    use bytes::{Buf, BufMut, Bytes};
+    use chunked_bytes::ChunkedBytes;
+    use std::io;
+    use std::io::{IoSlice, Write};
 
     #[test]
     fn ticket_test() {
@@ -156,4 +159,30 @@ mod test {
 
     #[test]
     fn drop_test() {}
+
+    #[test]
+    fn test_chunked_bytes() {
+        let mut bytes = ChunkedBytes::with_chunk_size_hint(1000);
+        bytes.put_slice(b"foo");
+        bytes.put_slice(b"bar");
+        bytes.put_slice(b"bar");
+        bytes.put_slice(b"bar");
+        bytes.put_slice(b"bar");
+        bytes.put_bytes(Bytes::copy_from_slice(b"bar"));
+
+        assert_eq!(1000, bytes.chunk_size_hint());
+
+        let mut iovs = [io::IoSlice::new(&[]); 1];
+        assert_eq!(2, bytes.chunks_vectored(&mut iovs));
+
+        // assert_eq!(b"foo", iovs[0].as_ref());
+    }
+
+    fn write_vectored<W: Write>(buf: &mut ChunkedBytes, mut out: W) -> io::Result<usize> {
+        let mut io_bufs = [IoSlice::new(&[]); 32];
+        let io_vec_len = buf.chunks_vectored(&mut io_bufs);
+        let bytes_written = out.write_vectored(&io_bufs[..io_vec_len])?;
+        buf.advance(bytes_written);
+        Ok(bytes_written)
+    }
 }

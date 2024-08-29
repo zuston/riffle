@@ -20,6 +20,7 @@ use crate::metric::{
     GAUGE_LOCAL_DISK_CAPACITY, GAUGE_LOCAL_DISK_IS_HEALTHY, GAUGE_LOCAL_DISK_USED,
 };
 use crate::runtime::manager::RuntimeManager;
+use crate::store::BytesWrapper;
 use anyhow::{anyhow, Result};
 use await_tree::InstrumentAwait;
 use bytes::{Bytes, BytesMut};
@@ -213,7 +214,7 @@ impl LocalDisk {
         Ok(())
     }
 
-    pub async fn append(&self, data: Bytes, path: &str) -> Result<()> {
+    pub async fn append(&self, data: impl Into<BytesWrapper>, path: &str) -> Result<()> {
         let _concurrency_guarder = self
             .concurrency_limiter
             .acquire()
@@ -221,9 +222,11 @@ impl LocalDisk {
             .await?;
 
         let mut writer = self.operator.writer_with(path).append(true).call()?;
-        // we must use the write_all to ensure the buffer consumed by the OS.
-        // Please see the detail: https://doc.rust-lang.org/std/io/trait.Write.html#method.write_all
-        writer.write_all(&*data)?;
+        for x in data.into().always_composed().iter() {
+            // we must use the write_all to ensure the buffer consumed by the OS.
+            // Please see the detail: https://doc.rust-lang.org/std/io/trait.Write.html#method.write_all
+            writer.write_all(&x)?;
+        }
         writer.flush()?;
 
         Ok(())

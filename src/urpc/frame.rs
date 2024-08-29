@@ -1,7 +1,7 @@
 use crate::error::WorkerError;
 use crate::error::WorkerError::{STREAM_INCOMPLETE, STREAM_INCORRECT};
-use crate::store::Block;
 use crate::store::ResponseData::Mem;
+use crate::store::{Block, BytesWrapper};
 use crate::urpc::command::{
     GetLocalDataIndexRequestCommand, GetLocalDataIndexResponseCommand, GetLocalDataRequestCommand,
     GetLocalDataResponseCommand, GetMemoryDataRequestCommand, GetMemoryDataResponseCommand,
@@ -13,7 +13,7 @@ use log::warn;
 use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::io::Cursor;
+use std::io::{Cursor, IoSlice};
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::net::TcpStream;
 use tracing::{debug, info};
@@ -152,8 +152,8 @@ impl Frame {
                     _ => panic!("This should not happen that the result data is not mem type."),
                 };
 
-                let data_bytes = &mem_data.data;
-                let data_bytes_len = data_bytes.len() as i32;
+                let data_bytes_wrapper = &mem_data.data;
+                let data_bytes_len = data_bytes_wrapper.len() as i32;
 
                 let segments = &mem_data.shuffle_data_block_segments;
                 let segments_encode_len = (4 + segments.len() * (3 * 8 + 3 * 4)) as i32;
@@ -186,8 +186,9 @@ impl Frame {
                 }
 
                 // data_bytes
-                stream.write_all(&data_bytes).await?;
-
+                for composed_byte in data_bytes_wrapper.always_composed().iter() {
+                    stream.write_all(&composed_byte).await?;
+                }
                 return Ok(());
             }
             Frame::RpcResponse(resp) => {

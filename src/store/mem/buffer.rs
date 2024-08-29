@@ -1,6 +1,7 @@
+use crate::composed_bytes::ComposedBytes;
+use crate::store::BytesWrapper;
 use crate::store::{Block, DataSegment, PartitionedMemoryData};
 use anyhow::Result;
-use bytes::BytesMut;
 use croaring::Treemap;
 use fastrace::trace;
 use parking_lot::RwLock;
@@ -199,12 +200,12 @@ impl MemoryBuffer {
             }
         }
 
-        let mut bytes_holder = BytesMut::with_capacity(read_len as usize);
+        let mut block_bytes = Vec::with_capacity(read_result.len());
         let mut segments = Vec::with_capacity(read_result.len());
         let mut offset = 0;
         for block in read_result {
             let data = &block.data;
-            bytes_holder.extend_from_slice(data);
+            block_bytes.push(data.clone());
             segments.push(DataSegment {
                 block_id: block.block_id,
                 offset,
@@ -218,7 +219,7 @@ impl MemoryBuffer {
 
         Ok(PartitionedMemoryData {
             shuffle_data_block_segments: segments,
-            data: bytes_holder.freeze(),
+            data: BytesWrapper::Composed(ComposedBytes::from(block_bytes)),
         })
     }
 
