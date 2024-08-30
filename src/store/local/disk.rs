@@ -243,15 +243,16 @@ impl LocalDisk {
         if length.is_none() {
             return Ok(Bytes::from(self.operator.read(path)?));
         }
+        let length = length.unwrap() as usize;
 
         let mut reader = self.operator.reader(path)?;
         reader.seek(SeekFrom::Start(offset as u64))?;
 
-        let mut buffer = vec![0; length.unwrap() as usize];
-        reader.read_exact(buffer.as_mut())?;
-
-        let mut bytes_buffer = BytesMut::new();
-        bytes_buffer.extend_from_slice(&*buffer);
+        let mut bytes_buffer = BytesMut::with_capacity(length);
+        unsafe {
+            bytes_buffer.set_len(length);
+        }
+        reader.read_exact(&mut bytes_buffer)?;
         Ok(bytes_buffer.freeze())
     }
 
