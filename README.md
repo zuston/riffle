@@ -68,7 +68,7 @@ http_thread_num = 10
 default_thread_num = 20
 dispatch_thread_num = 10
 ```
-`GRPC_PARALLELISM=100 WORKER_IP=10.74.44.129 RUST_LOG=info ./uniffle-worker`
+`GRPC_PARALLELISM=100 WORKER_IP=10.0.0.1 RUST_LOG=info ./uniffle-worker`
 
 #### TeraSort Result
 
