@@ -277,7 +277,7 @@ impl Frame {
             let mut blocks = Vec::with_capacity(block_batch_size as usize);
             for block_idx in 0..block_batch_size {
                 let pid = get_i32(src)?;
-                let blockId = get_i64(src)?;
+                let block_id = get_i64(src)?;
                 let length = get_i32(src)?;
                 let shuffle_id = get_i32(src)?;
                 let crc = get_i64(src)?;
@@ -298,7 +298,7 @@ impl Frame {
                 let free_mem = get_i64(src)?;
 
                 let block = Block {
-                    block_id: blockId,
+                    block_id,
                     length,
                     uncompress_length: uncompress_len,
                     crc,

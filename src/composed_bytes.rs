@@ -30,11 +30,11 @@ impl ComposedBytes {
 
     /// this is expensive to consume like the Bytes
     pub fn freeze(&self) -> Bytes {
-        let mut bytesMut = BytesMut::with_capacity(self.total_len);
+        let mut bytes_mut = BytesMut::with_capacity(self.total_len);
         for x in self.composed.iter() {
-            bytesMut.extend_from_slice(x);
+            bytes_mut.extend_from_slice(x);
         }
-        bytesMut.freeze()
+        bytes_mut.freeze()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Bytes> + '_ {
@@ -59,8 +59,8 @@ mod test {
         assert_eq!(12, composed.len());
 
         let mut iter = composed.iter();
-        assert_eq!(b"hello", iter.next().as_ref());
-        assert_eq!(b"world", iter.next().as_ref());
+        assert_eq!(b"hello", iter.next().unwrap().as_ref());
+        assert_eq!(b"world", iter.next().unwrap().as_ref());
 
         let data = composed.freeze();
         assert_eq!(b"helloworld", data.as_ref());

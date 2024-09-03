@@ -114,11 +114,11 @@ mod test {
     fn basic() -> anyhow::Result<()> {
         let memory_budget = MemoryBudget::new(100);
 
-        /// case1: reject the overflow allocation size
+        // case1: reject the overflow allocation size
         let (succeed, id) = memory_budget.require_allocated(120)?;
         assert!(!succeed);
 
-        /// case2: pass the legal allocation size
+        // case2: pass the legal allocation size
         let (succeed, _) = memory_budget.require_allocated(50)?;
         assert!(succeed);
 
@@ -127,7 +127,7 @@ mod test {
         assert_eq!(0, snapshot.used());
         assert_eq!(50, snapshot.allocated());
 
-        /// case3: allocation to used
+        // case3: allocation to used
         memory_budget.move_allocated_to_used(50)?;
 
         let snapshot = memory_budget.snapshot();
@@ -135,14 +135,14 @@ mod test {
         assert_eq!(50, snapshot.used());
         assert_eq!(0, snapshot.allocated());
 
-        /// case4: release the used
+        // case4: release the used
         memory_budget.dec_used(50)?;
         let snapshot = memory_budget.snapshot();
         assert_eq!(100, snapshot.capacity());
         assert_eq!(0, snapshot.used());
         assert_eq!(0, snapshot.allocated());
 
-        /// case5: check the metrics
+        // case5: check the metrics
         assert_eq!(0, GAUGE_MEMORY_ALLOCATED.get());
         assert_eq!(0, GAUGE_MEMORY_USED.get());
 

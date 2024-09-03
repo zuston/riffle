@@ -84,65 +84,10 @@ pub fn current_timestamp_sec() -> u64 {
     timestamp
 }
 
-pub struct ConcurrencyLimiter {
-    remaining: Mutex<u32>,
-}
-
-pub struct Ticket<'a> {
-    limiter: &'a ConcurrencyLimiter,
-    id: u32,
-}
-
-impl ConcurrencyLimiter {
-    fn new(size: u32) -> Self {
-        ConcurrencyLimiter {
-            remaining: Mutex::new(size),
-        }
-    }
-
-    pub fn try_acquire(&self) -> Option<Ticket<'_>> {
-        let mut remaining = self.remaining.lock().unwrap();
-        if *remaining <= 0 {
-            None
-        } else {
-            let id = *remaining;
-            *remaining -= 1;
-            Some(Ticket { limiter: self, id })
-        }
-    }
-}
-
-impl Drop for Ticket<'_> {
-    fn drop(&mut self) {
-        let mut lock = self.limiter.remaining.lock().unwrap();
-        *lock += 1;
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use crate::util::{current_timestamp_sec, get_crc, ConcurrencyLimiter};
-    use bytes::{Buf, BufMut, Bytes};
-    use chunked_bytes::ChunkedBytes;
-    use std::io;
-    use std::io::{IoSlice, Write};
-
-    #[test]
-    fn ticket_test() {
-        let limiter = ConcurrencyLimiter::new(2);
-        {
-            let ticket = limiter.try_acquire().unwrap();
-            assert_eq!(2, ticket.id);
-
-            let ticket = limiter.try_acquire().unwrap();
-            assert_eq!(1, ticket.id);
-
-            assert_eq!(true, limiter.try_acquire().is_none());
-        }
-
-        let ticket = limiter.try_acquire();
-        assert_eq!(true, ticket.is_some());
-    }
+    use crate::util::{current_timestamp_sec, get_crc};
+    use bytes::Bytes;
 
     #[test]
     fn time_test() {
@@ -155,34 +100,5 @@ mod test {
         let crc_value = get_crc(&data);
         // This value is the same with java's implementation
         assert_eq!(3871485936, crc_value);
-    }
-
-    #[test]
-    fn drop_test() {}
-
-    #[test]
-    fn test_chunked_bytes() {
-        let mut bytes = ChunkedBytes::with_chunk_size_hint(1000);
-        bytes.put_slice(b"foo");
-        bytes.put_slice(b"bar");
-        bytes.put_slice(b"bar");
-        bytes.put_slice(b"bar");
-        bytes.put_slice(b"bar");
-        bytes.put_bytes(Bytes::copy_from_slice(b"bar"));
-
-        assert_eq!(1000, bytes.chunk_size_hint());
-
-        let mut iovs = [io::IoSlice::new(&[]); 1];
-        assert_eq!(2, bytes.chunks_vectored(&mut iovs));
-
-        // assert_eq!(b"foo", iovs[0].as_ref());
-    }
-
-    fn write_vectored<W: Write>(buf: &mut ChunkedBytes, mut out: W) -> io::Result<usize> {
-        let mut io_bufs = [IoSlice::new(&[]); 32];
-        let io_vec_len = buf.chunks_vectored(&mut io_bufs);
-        let bytes_written = out.write_vectored(&io_bufs[..io_vec_len])?;
-        buf.advance(bytes_written);
-        Ok(bytes_written)
     }
 }

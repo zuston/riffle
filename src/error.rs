@@ -19,7 +19,6 @@ use anyhow::Error;
 use std::string::FromUtf8Error;
 
 use log::error;
-use num_enum::TryFromPrimitiveError;
 use poem::error::ParseQueryError;
 use thiserror::Error;
 use tokio::sync::AcquireError;
