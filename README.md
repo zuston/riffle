@@ -75,12 +75,18 @@ dispatch_thread_num = 10
 | type/buffer capacity | 273G (compressed)  |
 |----------------------|:------------------:|
 | vanilla spark ESS    | 4.2min (1.3m/2.9m) |
+|                      |                    |
 | riffle(grpc) / 10g   | 4.0min (1.9m/2.1m) |
 | riffle(grpc) / 300g  | 3.5min (1.4m/2.1m) |
+|                      |                    |
 | riffle(urpc) / 10g   | 3.8min (1.6m/2.2m) |
 | riffle(urpc) / 300g  | 3.2min (1.2m/2.0m) |
-| uniffle(grpc)/ 300g  | 8.6min (2.7m/5.9m) |
+|                      |                    |
 | uniffle(grpc)/ 10g   | 4.0min (1.8m/2.2m) |
+| uniffle(grpc)/ 300g  | 8.6min (2.7m/5.9m) |
+|                      |                    |
+| uniffle(netty)/ 10g  |     min (m/m)      |
+| uniffle(netty)/ 300g | 4.0min (1.5m/2.5m) |
 
 ## Build
 
