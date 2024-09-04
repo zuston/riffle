@@ -56,7 +56,7 @@ mod test {
         let mut composed = ComposedBytes::new();
         composed.put(Bytes::copy_from_slice(b"hello"));
         composed.put(Bytes::copy_from_slice(b"world"));
-        assert_eq!(12, composed.len());
+        assert_eq!(10, composed.len());
 
         let mut iter = composed.iter();
         assert_eq!(b"hello", iter.next().unwrap().as_ref());
