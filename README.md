@@ -90,6 +90,8 @@ dispatch_thread_num = 10
 | uniffle(netty)(default malloc)/ 300g  | 4.0min (1.5m/2.5m) |
 | uniffle(netty)(jemalloc)/ 300g        | 6.6min (1.9m/4.7m) |
 
+> tips: the riffle's urpc implements the customized tcp stream's proto, that is named with the NETTY rpc type in java side. 
+
 ## Build
 
 `cargo build --release --features hdfs,jemalloc`
