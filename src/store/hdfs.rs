@@ -25,8 +25,8 @@ use std::collections::HashMap;
 
 use crate::metric::TOTAL_HDFS_USED;
 use crate::store::{
-    Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex, SpillWritingViewContext,
-    Store,
+    Block, Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex,
+    SpillWritingViewContext, Store,
 };
 use anyhow::{anyhow, Result};
 
@@ -116,18 +116,12 @@ impl HdfsStore {
             ),
         )
     }
-}
 
-#[async_trait]
-impl Store for HdfsStore {
-    fn start(self: Arc<Self>) {
-        info!("There is nothing to do in hdfs store");
-    }
-
-    async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
-        let uid = ctx.uid;
-        let data_blocks = ctx.data_blocks;
-
+    async fn data_insert(
+        &self,
+        uid: PartitionedUId,
+        data_blocks: Vec<&Block>,
+    ) -> Result<(), WorkerError> {
         let (data_file_path, index_file_path) = self.get_file_path_by_uid(&uid);
 
         let concurrency_guarder = self
@@ -195,7 +189,7 @@ impl Store for HdfsStore {
             index_bytes_holder.put_i64(block_id);
             index_bytes_holder.put_i64(task_attempt_id);
 
-            let data = data_block.data;
+            let data = &data_block.data;
             data_bytes_holder.extend_from_slice(&data);
 
             next_offset += length as i64;
@@ -222,6 +216,19 @@ impl Store for HdfsStore {
 
         Ok(())
     }
+}
+
+#[async_trait]
+impl Store for HdfsStore {
+    fn start(self: Arc<Self>) {
+        info!("There is nothing to do in hdfs store");
+    }
+
+    async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
+        let uid = ctx.uid;
+        let blocks: Vec<&Block> = ctx.data_blocks.iter().collect();
+        self.data_insert(uid, blocks).await
+    }
 
     async fn get(&self, _ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
         Err(WorkerError::NOT_READ_HDFS_DATA_FROM_SERVER)
@@ -232,17 +239,6 @@ impl Store for HdfsStore {
         _ctx: ReadingIndexViewContext,
     ) -> Result<ResponseDataIndex, WorkerError> {
         Err(WorkerError::NOT_READ_HDFS_DATA_FROM_SERVER)
-    }
-
-    async fn require_buffer(
-        &self,
-        _ctx: RequireBufferContext,
-    ) -> Result<RequireBufferResponse, WorkerError> {
-        todo!()
-    }
-
-    async fn release_ticket(&self, _ctx: ReleaseTicketContext) -> Result<i64, WorkerError> {
-        todo!()
     }
 
     async fn purge(&self, ctx: PurgeDataContext) -> Result<i64> {
@@ -286,6 +282,17 @@ impl Store for HdfsStore {
         Ok(true)
     }
 
+    async fn require_buffer(
+        &self,
+        _ctx: RequireBufferContext,
+    ) -> Result<RequireBufferResponse, WorkerError> {
+        todo!()
+    }
+
+    async fn release_ticket(&self, _ctx: ReleaseTicketContext) -> Result<i64, WorkerError> {
+        todo!()
+    }
+
     async fn register_app(&self, ctx: RegisterAppContext) -> Result<()> {
         let remote_storage_conf_option = ctx.app_config_options.remote_storage_config_option;
         if remote_storage_conf_option.is_none() {
@@ -308,8 +315,16 @@ impl Store for HdfsStore {
         StorageType::HDFS
     }
 
-    async fn spill_insert(&self, _ctx: SpillWritingViewContext) -> Result<(), WorkerError> {
-        todo!()
+    async fn spill_insert(&self, ctx: SpillWritingViewContext) -> Result<(), WorkerError> {
+        let uid = ctx.uid;
+        let mut data = vec![];
+        let batch_memory_block = ctx.data_blocks;
+        for blocks in batch_memory_block.iter() {
+            for block in blocks {
+                data.push(block);
+            }
+        }
+        self.data_insert(uid, data).await
     }
 }
 
