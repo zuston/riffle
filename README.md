@@ -12,6 +12,7 @@ Another implementation of Apache Uniffle shuffle server (Single binary, no extra
 - [ ] Create the grafana template to show the metrics dashboard by the unified style
 - [ ] Introduce the clippy to validate
 - [ ] Zero copy for **urpc** and mem + localfile getting/writing
+- [ ] Recover when upgrading
 
 ## Benchmark report
 
@@ -114,8 +115,8 @@ cargo build --features hdfs --release
 ```
 
 ```shell
-# configure the kerberos and conf env
-HADOOP_CONF_DIR=/etc/hadoop/conf KRB5_CONFIG=/etc/krb5.conf KRB5CCNAME=/tmp/krb5cc_2002 LOG=info ./uniffle-worker
+# configure the kerberos
+KRB5_CONFIG=/etc/krb5.conf KRB5CCNAME=/tmp/krb5cc_2002 LOG=info ./uniffle-worker
 ```
 
 ## Profiling
