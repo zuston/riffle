@@ -246,6 +246,7 @@ impl App {
     }
 
     pub fn register_shuffle(&self, shuffle_id: i32) -> Result<()> {
+        self.heartbeat()?;
         self.partitions
             .entry(shuffle_id)
             .or_insert_with(|| HashSet::new());
@@ -263,6 +264,8 @@ impl App {
     }
 
     pub async fn insert(&self, ctx: WritingViewContext) -> Result<i32, WorkerError> {
+        self.heartbeat()?;
+
         let len: u64 = ctx
             .data_blocks
             .iter()
@@ -288,6 +291,8 @@ impl App {
     }
 
     pub async fn select(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
+        self.heartbeat()?;
+
         let response = self.store.get(ctx).await;
         response.map(|data| {
             match &data {
@@ -311,6 +316,8 @@ impl App {
         &self,
         ctx: ReadingIndexViewContext,
     ) -> Result<ResponseDataIndex, WorkerError> {
+        self.heartbeat()?;
+
         self.store.get_index(ctx).await
     }
 
@@ -360,6 +367,8 @@ impl App {
         &self,
         ctx: RequireBufferContext,
     ) -> Result<RequireBufferResponse, WorkerError> {
+        self.heartbeat()?;
+
         if self.is_limit_huge_partition()
             && self.is_backpressure_for_huge_partition(&ctx.uid).await?
         {
@@ -401,6 +410,8 @@ impl App {
     }
 
     pub async fn report_block_ids(&self, ctx: ReportBlocksContext) -> Result<()> {
+        self.heartbeat()?;
+
         debug!("Report blocks: {:?}", ctx.clone());
         let mut partitioned_meta = self.get_blocks_bitmap(&ctx.uid);
         partitioned_meta.report_block_ids(ctx.blocks)?;
