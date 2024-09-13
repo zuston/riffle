@@ -689,6 +689,7 @@ impl AppManager {
                             "The app:[{}]'s data will be purged due to heartbeat timeout",
                             &app_id
                         );
+                        let _ = GAUGE_TOPN_APP_RESIDENT_DATA_SIZE.remove_label_values(&[&app_id]);
                         app_manager_cloned.purge_app_data(app_id, None).await
                     }
                     PurgeEvent::APP_PURGE(app_id) => {
@@ -696,6 +697,7 @@ impl AppManager {
                             "The app:[{}] has been finished, its data will be purged.",
                             &app_id
                         );
+                        let _ = GAUGE_TOPN_APP_RESIDENT_DATA_SIZE.remove_label_values(&[&app_id]);
                         app_manager_cloned.purge_app_data(app_id, None).await
                     }
                     PurgeEvent::APP_PARTIAL_SHUFFLES_PURGE(app_id, shuffle_id) => {
