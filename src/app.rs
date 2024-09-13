@@ -47,9 +47,9 @@ use std::str::FromStr;
 
 use crate::grpc::protobuf::uniffle::RemoteStorage;
 use crate::store::mem::capacity::CapacitySnapshot;
+use parking_lot::RwLock;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::RwLock;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -158,29 +158,29 @@ impl PartitionedMeta {
     }
 
     fn get_size(&self) -> Result<u64> {
-        let meta = self.inner.read().unwrap();
+        let meta = self.inner.read();
         Ok(meta.total_size)
     }
 
     fn inc_size(&mut self, data_size: i32) -> Result<()> {
-        let mut meta = self.inner.write().unwrap();
+        let mut meta = self.inner.write();
         meta.total_size += data_size as u64;
         Ok(())
     }
 
     fn get_block_ids_bitmap(&self) -> Result<Treemap> {
-        let meta = self.inner.read().unwrap();
+        let meta = self.inner.read();
         Ok(meta.blocks_bitmap.clone())
     }
 
     fn get_block_ids(&self) -> Result<Bytes> {
-        let meta = self.inner.read().unwrap();
+        let meta = self.inner.read();
         let serialized_data = meta.blocks_bitmap.serialize()?;
         Ok(Bytes::from(serialized_data))
     }
 
     fn report_block_ids(&mut self, ids: Vec<i64>) -> Result<()> {
-        let mut meta = self.inner.write().unwrap();
+        let mut meta = self.inner.write();
         for id in ids {
             meta.blocks_bitmap.add(id as u64);
         }
@@ -193,9 +193,8 @@ impl App {
         app_id: String,
         config_options: AppConfigOptions,
         store: Arc<HybridStore>,
-        huge_partition_marked_threshold: Option<u64>,
-        huge_partition_memory_max_available_size: Option<u64>,
         runtime_manager: RuntimeManager,
+        config: &Config,
     ) -> Self {
         // todo: should throw exception if register failed.
         let copy_app_id = app_id.to_string();
@@ -221,6 +220,25 @@ impl App {
             );
         }
 
+        let huge_partition_marked_threshold =
+            match &config.app_config.huge_partition_marked_threshold {
+                Some(v) => Some(
+                    ReadableSize::from_str(v.clone().as_str())
+                        .unwrap()
+                        .as_bytes(),
+                ),
+                _ => None,
+            };
+
+        let mem_capacity = ReadableSize::from_str(&config.memory_store.clone().unwrap().capacity)
+            .unwrap()
+            .as_bytes();
+        let huge_partition_backpressure_size =
+            match &config.app_config.huge_partition_memory_limit_percent {
+                Some(v) => Some(((mem_capacity as f64) * *v) as u64),
+                _ => None,
+            };
+
         App {
             app_id,
             partitions: DashMap::new(),
@@ -229,7 +247,7 @@ impl App {
             store,
             bitmap_of_blocks: DashMap::new(),
             huge_partition_marked_threshold,
-            huge_partition_memory_max_available_size,
+            huge_partition_memory_max_available_size: huge_partition_backpressure_size,
             total_received_data_size: Default::default(),
             total_resident_data_size: Default::default(),
         }
@@ -277,8 +295,7 @@ impl App {
         self.total_resident_data_size.fetch_add(len, SeqCst);
 
         let context = if self.is_limit_huge_partition() {
-            self.get_blocks_bitmap(&ctx.uid).inc_size(len as i32)?;
-            match self.is_huge_partition(&ctx.uid).await {
+            match self.is_huge_partition(&ctx.uid, Some(len)).await {
                 Ok(true) => WritingViewContext::new(ctx.uid, ctx.data_blocks, true, len),
                 _ => ctx,
             }
@@ -321,9 +338,14 @@ impl App {
         self.store.get_index(ctx).await
     }
 
-    async fn is_huge_partition(&self, uid: &PartitionedUId) -> Result<bool> {
+    async fn is_huge_partition(&self, uid: &PartitionedUId, len: Option<u64>) -> Result<bool> {
         let huge_partition_threshold = self.huge_partition_marked_threshold.unwrap();
-        let meta = self.get_blocks_bitmap(uid);
+        let mut meta = self.get_partition_meta(uid);
+
+        if len.is_some() {
+            meta.inc_size(len.unwrap() as i32)?;
+        }
+
         let data_size = meta.get_size()?;
         if data_size > huge_partition_threshold {
             return Ok(true);
@@ -332,7 +354,7 @@ impl App {
     }
 
     async fn is_backpressure_for_huge_partition(&self, uid: &PartitionedUId) -> Result<bool> {
-        if !self.is_huge_partition(uid).await? {
+        if !self.is_huge_partition(uid, None).await? {
             return Ok(false);
         }
         let huge_partition_memory_used = &self.huge_partition_memory_max_available_size;
@@ -388,7 +410,7 @@ impl App {
             .await
     }
 
-    fn get_blocks_bitmap(&self, uid: &PartitionedUId) -> PartitionedMeta {
+    fn get_partition_meta(&self, uid: &PartitionedUId) -> PartitionedMeta {
         let shuffle_id = uid.shuffle_id;
         let partition_id = uid.partition_id;
         let partitioned_meta = self
@@ -400,12 +422,12 @@ impl App {
 
     pub fn get_block_ids(&self, ctx: GetBlocksContext) -> Result<Bytes> {
         debug!("get blocks: {:?}", ctx.clone());
-        let partitioned_meta = self.get_blocks_bitmap(&ctx.uid);
+        let partitioned_meta = self.get_partition_meta(&ctx.uid);
         partitioned_meta.get_block_ids()
     }
 
     pub fn get_block_ids_bitmap(&self, ctx: GetBlocksContext) -> Result<Treemap> {
-        let partitioned_meta = self.get_blocks_bitmap(&ctx.uid);
+        let partitioned_meta = self.get_partition_meta(&ctx.uid);
         partitioned_meta.get_block_ids_bitmap()
     }
 
@@ -413,7 +435,7 @@ impl App {
         self.heartbeat()?;
 
         debug!("Report blocks: {:?}", ctx.clone());
-        let mut partitioned_meta = self.get_blocks_bitmap(&ctx.uid);
+        let mut partitioned_meta = self.get_partition_meta(&ctx.uid);
         partitioned_meta.report_block_ids(ctx.blocks)?;
 
         Ok(())
@@ -580,7 +602,7 @@ pub struct AppManager {
 impl AppManager {
     fn new(runtime_manager: RuntimeManager, config: Config) -> Self {
         let (sender, receiver) = async_channel::unbounded();
-        let app_heartbeat_timeout_min = config.app_heartbeat_timeout_min.unwrap_or(10);
+        let app_heartbeat_timeout_min = config.app_config.app_heartbeat_timeout_min;
         let store = Arc::new(StoreProvider::get(runtime_manager.clone(), config.clone()));
         store.clone().start();
         let manager = AppManager {
@@ -733,34 +755,12 @@ impl AppManager {
             TOTAL_APP_NUMBER.inc();
             GAUGE_APP_NUMBER.inc();
 
-            let capacity =
-                ReadableSize::from_str(&self.config.memory_store.clone().unwrap().capacity)
-                    .unwrap()
-                    .as_bytes();
-            let huge_partition_max_available_size = Some(
-                (self
-                    .config
-                    .huge_partition_memory_max_used_percent
-                    .unwrap_or(1.0)
-                    * capacity as f64) as u64,
-            );
-
-            let threshold = match &self.config.huge_partition_marked_threshold {
-                Some(v) => Some(
-                    ReadableSize::from_str(v.clone().as_str())
-                        .unwrap()
-                        .as_bytes(),
-                ),
-                _ => None,
-            };
-
             Arc::new(App::from(
                 app_id,
                 app_config_options,
                 self.store.clone(),
-                threshold,
-                huge_partition_max_available_size,
                 self.runtime_manager.clone(),
+                &self.config,
             ))
         });
         app_ref.register_shuffle(shuffle_id)

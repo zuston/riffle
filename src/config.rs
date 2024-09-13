@@ -166,14 +166,35 @@ pub struct Config {
 
     pub log: Option<LogConfig>,
 
-    pub app_heartbeat_timeout_min: Option<u32>,
-
-    pub huge_partition_marked_threshold: Option<String>,
-    pub huge_partition_memory_max_used_percent: Option<f64>,
+    #[serde(default = "as_default_app_config")]
+    pub app_config: AppConfig,
 
     pub http_monitor_service_port: Option<u16>,
 
     pub tracing: Option<TracingConfig>,
+}
+
+// ===========
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+pub struct AppConfig {
+    #[serde(default = "as_default_app_heartbeat_timeout_min")]
+    pub app_heartbeat_timeout_min: u32,
+
+    pub huge_partition_marked_threshold: Option<String>,
+    pub huge_partition_memory_limit_percent: Option<f64>,
+}
+
+fn as_default_app_config() -> AppConfig {
+    AppConfig {
+        app_heartbeat_timeout_min: as_default_app_heartbeat_timeout_min(),
+        huge_partition_marked_threshold: None,
+        huge_partition_memory_limit_percent: None,
+    }
+}
+
+fn as_default_app_heartbeat_timeout_min() -> u32 {
+    5
 }
 
 // =========================================================
@@ -289,7 +310,7 @@ impl Config {
 
 #[cfg(test)]
 mod test {
-    use crate::config::{Config, RuntimeConfig, StorageType};
+    use crate::config::{as_default_app_heartbeat_timeout_min, Config, RuntimeConfig, StorageType};
     use crate::readable_size::ReadableSize;
     use std::str::FromStr;
 
@@ -333,6 +354,12 @@ mod test {
         assert_eq!(
             decoded.runtime_config.read_thread_num,
             RuntimeConfig::default().read_thread_num
+        );
+
+        // check the app config
+        assert_eq!(
+            decoded.app_config.app_heartbeat_timeout_min,
+            as_default_app_heartbeat_timeout_min(),
         );
     }
 }
