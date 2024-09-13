@@ -82,11 +82,11 @@ fn main() -> Result<()> {
     let config_path = args_match.value_of("config").unwrap_or("./config.toml");
     let config = Config::from(config_path);
 
-    info!("The specified config show as follows: \n {:?}", config);
-
     let _guard = LogService::init(&config.log.clone());
 
     init_global_variable(&config);
+
+    info!("The specified config show as follows: \n {:#?}", config);
 
     let runtime_manager = RuntimeManager::from(config.runtime_config.clone());
     let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone());

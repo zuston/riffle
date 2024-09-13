@@ -295,7 +295,11 @@ fn as_default_push_interval_sec() -> u32 {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct LogConfig {
     pub path: String,
+    #[serde(default = "as_default_rotation_config")]
     pub rotation: RotationConfig,
+}
+fn as_default_rotation_config() -> RotationConfig {
+    RotationConfig::Daily
 }
 
 impl Default for LogConfig {
