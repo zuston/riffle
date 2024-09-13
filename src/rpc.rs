@@ -87,7 +87,7 @@ impl DefaultRpcService {
         tx: Sender<()>,
         app_manager_ref: AppManagerRef,
     ) -> Result<()> {
-        let grpc_port = config.grpc_port.unwrap();
+        let grpc_port = config.grpc_port;
 
         info!("Starting grpc server with port:[{}] ......", grpc_port);
         let parallelism = GRPC_PARALLELISM.get();

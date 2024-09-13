@@ -35,7 +35,7 @@ use poem::RouteMethod;
 pub struct HttpMonitorService;
 impl HttpMonitorService {
     pub fn init(config: &Config, runtime_manager: RuntimeManager) {
-        let http_port = config.http_monitor_service_port.unwrap_or(20010);
+        let http_port = config.http_monitor_service_port;
         info!(
             "Starting http monitor service with port:[{}] ......",
             http_port

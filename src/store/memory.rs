@@ -25,12 +25,11 @@ use crate::error::WorkerError;
 use crate::metric::TOTAL_MEMORY_USED;
 use crate::readable_size::ReadableSize;
 use crate::store::{
-    Block, DataSegment, PartitionedMemoryData, RequireBufferResponse, ResponseData,
+    Block, RequireBufferResponse, ResponseData,
     ResponseDataIndex, SpillWritingViewContext, Store,
 };
 use crate::*;
 use async_trait::async_trait;
-use bytes::BytesMut;
 use dashmap::DashMap;
 
 use std::collections::{BTreeMap, HashMap};
@@ -97,7 +96,7 @@ impl MemoryStore {
             TicketManager::new(5 * 60, 10, release_allocated_func, runtime_manager.clone());
 
         /// the dashmap shard that will effect the lookup performance.
-        let shard_amount = conf.dashmap_shard_amount.unwrap_or(128);
+        let shard_amount = conf.dashmap_shard_amount;
         let dashmap = DashMap::with_hasher_and_shard_amount(FxBuildHasher::default(), shard_amount);
 
         MemoryStore {

@@ -102,7 +102,7 @@ unsafe impl Sync for HybridStore {}
 
 impl HybridStore {
     pub fn from(config: Config, runtime_manager: RuntimeManager) -> Self {
-        let store_type = &config.store_type.unwrap_or(StorageType::MEMORY);
+        let store_type = &config.store_type;
         if !StorageType::contains_memory(&store_type) {
             panic!("Storage type must contains memory.");
         }
@@ -125,15 +125,13 @@ impl HybridStore {
         }
 
         let (send, recv) = async_channel::unbounded();
-        let hybrid_conf = config.hybrid_store.unwrap();
+        let hybrid_conf = config.hybrid_store;
         let memory_spill_to_cold_threshold_size =
             match &hybrid_conf.memory_spill_to_cold_threshold_size {
                 Some(v) => Some(ReadableSize::from_str(&v.clone()).unwrap().as_bytes()),
                 _ => None,
             };
-        let memory_spill_max_concurrency = hybrid_conf
-            .memory_spill_max_concurrency
-            .unwrap_or(DEFAULT_MEMORY_SPILL_MAX_CONCURRENCY);
+        let memory_spill_max_concurrency = hybrid_conf.memory_spill_max_concurrency;
 
         let store = HybridStore {
             hot_store: Arc::new(MemoryStore::from(
@@ -615,8 +613,8 @@ mod tests {
     fn test_only_memory() {
         let mut config = Config::default();
         config.memory_store = Some(MemoryStoreConfig::new("20M".to_string()));
-        config.hybrid_store = Some(HybridStoreConfig::new(0.8, 0.2, None));
-        config.store_type = Some(StorageType::MEMORY);
+        config.hybrid_store = HybridStoreConfig::new(0.8, 0.2, None);
+        config.store_type = StorageType::MEMORY;
         let store = HybridStore::from(config, Default::default());
 
         let runtime = store.runtime_manager.clone();
@@ -647,12 +645,8 @@ mod tests {
         let mut config = Config::default();
         config.memory_store = Some(MemoryStoreConfig::new(memory_capacity));
         config.localfile_store = Some(LocalfileStoreConfig::new(vec![temp_path]));
-        config.hybrid_store = Some(HybridStoreConfig::new(
-            0.8,
-            0.2,
-            memory_single_buffer_max_spill_size,
-        ));
-        config.store_type = Some(StorageType::MEMORY_LOCALFILE);
+        config.hybrid_store = HybridStoreConfig::new(0.8, 0.2, memory_single_buffer_max_spill_size);
+        config.store_type = StorageType::MEMORY_LOCALFILE;
 
         // The hybrid store will flush the memory data to file when
         // the data reaches the number of 4

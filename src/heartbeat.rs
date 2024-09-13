@@ -17,7 +17,7 @@ impl HeartbeatTask {
         let coordinator_quorum = config.coordinator_quorum.clone();
         let tags = config.tags.clone().unwrap_or(vec![]);
 
-        let grpc_port = config.grpc_port.unwrap_or(19999);
+        let grpc_port = config.grpc_port;
         let urpc_port = config.urpc_port.unwrap_or(0);
 
         runtime_manager.default_runtime.spawn(async move {

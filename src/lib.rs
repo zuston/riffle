@@ -77,7 +77,7 @@ pub async fn start_uniffle_worker(config: config::Config) -> Result<AppManagerRe
     let app_manager_ref_cloned = app_manager_ref.clone();
     runtime_manager.grpc_runtime.spawn(async move {
         let app_manager_ref = app_manager_ref_cloned;
-        let rpc_port = config.grpc_port.unwrap_or(19999);
+        let rpc_port = config.grpc_port;
         info!("Starting GRpc server with port:[{}] ......", rpc_port);
         let shuffle_server = DefaultShuffleServer::from(app_manager_ref);
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), rpc_port as u16);

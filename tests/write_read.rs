@@ -18,51 +18,13 @@
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use uniffle_worker::config::{
-        Config, HybridStoreConfig, LocalfileStoreConfig, MemoryStoreConfig, MetricsConfig,
-        StorageType,
-    };
+    use uniffle_worker::config::{Config, LocalfileStoreConfig, StorageType};
     use uniffle_worker::{start_uniffle_worker, write_read_for_one_time};
 
     use std::time::Duration;
     use tonic::transport::Channel;
     use uniffle_worker::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
     use uniffle_worker::metric::GAUGE_MEMORY_ALLOCATED;
-
-    pub fn create_mocked_config(
-        grpc_port: i32,
-        capacity: String,
-        local_data_path: String,
-    ) -> Config {
-        Config {
-            memory_store: Some(MemoryStoreConfig::new(capacity)),
-            localfile_store: Some(LocalfileStoreConfig {
-                data_paths: vec![local_data_path],
-                healthy_check_min_disks: Some(0),
-                disk_high_watermark: None,
-                disk_low_watermark: None,
-                disk_max_concurrency: None,
-            }),
-            hybrid_store: Some(HybridStoreConfig::new(0.9, 0.5, None)),
-            hdfs_store: None,
-            store_type: Some(StorageType::MEMORY_LOCALFILE),
-            runtime_config: Default::default(),
-            metrics: Some(MetricsConfig {
-                push_gateway_endpoint: None,
-                push_interval_sec: None,
-            }),
-            grpc_port: Some(grpc_port),
-            urpc_port: None,
-            coordinator_quorum: vec![],
-            tags: None,
-            log: None,
-            app_heartbeat_timeout_min: None,
-            huge_partition_marked_threshold: None,
-            huge_partition_memory_max_used_percent: None,
-            http_monitor_service_port: None,
-            tracing: None,
-        }
-    }
 
     async fn get_data_from_remote(
         _client: &ShuffleServerClient<Channel>,
@@ -73,7 +35,7 @@ mod tests {
     }
 
     async fn start_embedded_worker(path: String, port: i32) {
-        let config = create_mocked_config(port, "1G".to_string(), path);
+        let config = Config::create_mem_localfile_config(port, "1G".to_string(), path);
         let _ = start_uniffle_worker(config).await;
         tokio::time::sleep(Duration::from_secs(1)).await;
     }

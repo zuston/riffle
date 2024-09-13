@@ -97,16 +97,16 @@ impl LocalFileStore {
         let mut local_disk_instances = vec![];
         for path in localfile_config.data_paths {
             let config = LocalDiskConfig {
-                high_watermark: localfile_config.disk_high_watermark.unwrap_or(0.8),
-                low_watermark: localfile_config.disk_low_watermark.unwrap_or(0.6),
-                max_concurrency: localfile_config.disk_max_concurrency.unwrap_or(2000),
+                high_watermark: localfile_config.disk_high_watermark,
+                low_watermark: localfile_config.disk_low_watermark,
+                max_concurrency: localfile_config.disk_max_concurrency,
             };
 
             local_disk_instances.push(LocalDisk::new(path, config, runtime_manager.clone()));
         }
         LocalFileStore {
             local_disks: local_disk_instances,
-            healthy_check_min_disks: localfile_config.healthy_check_min_disks.unwrap_or(1),
+            healthy_check_min_disks: localfile_config.healthy_check_min_disks,
             runtime_manager,
             partition_locks: Default::default(),
         }

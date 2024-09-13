@@ -169,7 +169,7 @@ mod test {
     #[ignore]
     async fn rpc_start_test() -> anyhow::Result<()> {
         let mut config = Config::create_simple_config();
-        config.grpc_port = Some(21100);
+        config.grpc_port = 21100;
         config.urpc_port = Some(21101);
 
         let runtime_manager = RuntimeManager::from(config.clone().runtime_config.clone());

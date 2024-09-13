@@ -22,24 +22,36 @@ use std::path::Path;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct MemoryStoreConfig {
     pub capacity: String,
-    pub buffer_ticket_timeout_sec: Option<i64>,
-    pub dashmap_shard_amount: Option<usize>,
+
+    #[serde(default = "as_default_buffer_ticket_timeout_sec")]
+    pub buffer_ticket_timeout_sec: i64,
+
+    #[serde(default = "as_default_dashmap_shard_amount")]
+    pub dashmap_shard_amount: usize,
+}
+
+fn as_default_dashmap_shard_amount() -> usize {
+    128
+}
+
+fn as_default_buffer_ticket_timeout_sec() -> i64 {
+    3 * 60
 }
 
 impl MemoryStoreConfig {
     pub fn new(capacity: String) -> Self {
         Self {
             capacity,
-            buffer_ticket_timeout_sec: Some(5 * 60),
-            dashmap_shard_amount: Some(128),
+            buffer_ticket_timeout_sec: as_default_buffer_ticket_timeout_sec(),
+            dashmap_shard_amount: as_default_dashmap_shard_amount(),
         }
     }
 
     pub fn from(capacity: String, buffer_ticket_timeout_sec: i64) -> Self {
         Self {
             capacity,
-            buffer_ticket_timeout_sec: Some(buffer_ticket_timeout_sec),
-            dashmap_shard_amount: Some(128),
+            buffer_ticket_timeout_sec,
+            dashmap_shard_amount: as_default_dashmap_shard_amount(),
         }
     }
 }
@@ -48,7 +60,11 @@ impl MemoryStoreConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 pub struct HdfsStoreConfig {
-    pub max_concurrency: Option<i32>,
+    #[serde(default = "as_default_max_concurrency")]
+    pub max_concurrency: usize,
+}
+fn as_default_max_concurrency() -> usize {
+    100
 }
 
 // =========================================================
@@ -56,20 +72,36 @@ pub struct HdfsStoreConfig {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct LocalfileStoreConfig {
     pub data_paths: Vec<String>,
-    pub healthy_check_min_disks: Option<i32>,
-    pub disk_high_watermark: Option<f32>,
-    pub disk_low_watermark: Option<f32>,
-    pub disk_max_concurrency: Option<i32>,
+    #[serde(default = "as_default_healthy_check_min_disks")]
+    pub healthy_check_min_disks: i32,
+    #[serde(default = "as_default_disk_high_watermark")]
+    pub disk_high_watermark: f32,
+    #[serde(default = "as_default_disk_low_watermark")]
+    pub disk_low_watermark: f32,
+    #[serde(default = "as_default_disk_max_concurrency")]
+    pub disk_max_concurrency: i32,
+}
+fn as_default_disk_max_concurrency() -> i32 {
+    2000
+}
+fn as_default_disk_low_watermark() -> f32 {
+    0.7
+}
+fn as_default_disk_high_watermark() -> f32 {
+    0.8
+}
+fn as_default_healthy_check_min_disks() -> i32 {
+    1
 }
 
 impl LocalfileStoreConfig {
     pub fn new(data_paths: Vec<String>) -> Self {
         LocalfileStoreConfig {
             data_paths,
-            healthy_check_min_disks: None,
-            disk_high_watermark: None,
-            disk_low_watermark: None,
-            disk_max_concurrency: None,
+            healthy_check_min_disks: as_default_healthy_check_min_disks(),
+            disk_high_watermark: as_default_disk_high_watermark(),
+            disk_low_watermark: as_default_disk_low_watermark(),
+            disk_max_concurrency: as_default_disk_max_concurrency(),
         }
     }
 }
@@ -104,12 +136,27 @@ impl Default for RuntimeConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct HybridStoreConfig {
+    #[serde(default = "as_default_memory_spill_high_watermark")]
     pub memory_spill_high_watermark: f32,
+
+    #[serde(default = "as_default_memory_spill_low_watermark")]
     pub memory_spill_low_watermark: f32,
+
     pub memory_single_buffer_max_spill_size: Option<String>,
     pub memory_spill_to_cold_threshold_size: Option<String>,
 
-    pub memory_spill_max_concurrency: Option<i32>,
+    #[serde(default = "as_default_memory_spill_max_concurrency")]
+    pub memory_spill_max_concurrency: i32,
+}
+
+fn as_default_memory_spill_high_watermark() -> f32 {
+    0.8
+}
+fn as_default_memory_spill_low_watermark() -> f32 {
+    0.2
+}
+fn as_default_memory_spill_max_concurrency() -> i32 {
+    10000
 }
 
 impl HybridStoreConfig {
@@ -123,7 +170,7 @@ impl HybridStoreConfig {
             memory_spill_low_watermark,
             memory_single_buffer_max_spill_size,
             memory_spill_to_cold_threshold_size: None,
-            memory_spill_max_concurrency: None,
+            memory_spill_max_concurrency: 100,
         }
     }
 }
@@ -131,11 +178,11 @@ impl HybridStoreConfig {
 impl Default for HybridStoreConfig {
     fn default() -> Self {
         HybridStoreConfig {
-            memory_spill_high_watermark: 0.8,
-            memory_spill_low_watermark: 0.7,
+            memory_spill_high_watermark: as_default_memory_spill_high_watermark(),
+            memory_spill_low_watermark: as_default_memory_spill_low_watermark(),
             memory_single_buffer_max_spill_size: None,
             memory_spill_to_cold_threshold_size: None,
-            memory_spill_max_concurrency: None,
+            memory_spill_max_concurrency: as_default_memory_spill_max_concurrency(),
         }
     }
 }
@@ -146,32 +193,58 @@ fn as_default_runtime_config() -> RuntimeConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 pub struct Config {
+    #[serde(default = "as_default_hybrid_store_config")]
+    pub hybrid_store: HybridStoreConfig,
+
     pub memory_store: Option<MemoryStoreConfig>,
     pub localfile_store: Option<LocalfileStoreConfig>,
-    pub hybrid_store: Option<HybridStoreConfig>,
     pub hdfs_store: Option<HdfsStoreConfig>,
 
-    pub store_type: Option<StorageType>,
+    #[serde(default = "as_default_storage_type")]
+    pub store_type: StorageType,
 
     #[serde(default = "as_default_runtime_config")]
     pub runtime_config: RuntimeConfig,
 
     pub metrics: Option<MetricsConfig>,
 
-    pub grpc_port: Option<i32>,
+    #[serde(default = "as_default_grpc_port")]
+    pub grpc_port: i32,
     pub urpc_port: Option<i32>,
 
     pub coordinator_quorum: Vec<String>,
     pub tags: Option<Vec<String>>,
 
-    pub log: Option<LogConfig>,
+    #[serde(default = "as_default_log_config")]
+    pub log: LogConfig,
 
     #[serde(default = "as_default_app_config")]
     pub app_config: AppConfig,
 
-    pub http_monitor_service_port: Option<u16>,
+    #[serde(default = "as_default_http_monitor_port")]
+    pub http_monitor_service_port: u16,
 
     pub tracing: Option<TracingConfig>,
+}
+
+// ====
+fn as_default_hybrid_store_config() -> HybridStoreConfig {
+    HybridStoreConfig::default()
+}
+fn as_default_http_monitor_port() -> u16 {
+    20010
+}
+
+fn as_default_log_config() -> LogConfig {
+    Default::default()
+}
+
+fn as_default_storage_type() -> StorageType {
+    StorageType::MEMORY
+}
+
+fn as_default_grpc_port() -> i32 {
+    19999
 }
 
 // ===========
@@ -208,7 +281,13 @@ pub struct TracingConfig {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct MetricsConfig {
     pub push_gateway_endpoint: Option<String>,
-    pub push_interval_sec: Option<u32>,
+
+    #[serde(default = "as_default_push_interval_sec")]
+    pub push_interval_sec: u32,
+}
+
+fn as_default_push_interval_sec() -> u32 {
+    10
 }
 
 // =========================================================
@@ -246,6 +325,12 @@ pub enum StorageType {
     HDFS = 4,
     MEMORY_HDFS = 5,
     MEMORY_LOCALFILE_HDFS = 7,
+}
+
+impl Default for StorageType {
+    fn default() -> Self {
+        StorageType::MEMORY
+    }
 }
 
 impl StorageType {
@@ -289,6 +374,29 @@ impl Config {
         Config::from(&path)
     }
 
+    pub fn create_mem_localfile_config(
+        grpc_port: i32,
+        capacity: String,
+        local_data_path: String,
+    ) -> Config {
+        let toml_str = format!(
+            r#"
+        store_type = "MEMORY_LOCALFILE"
+        coordinator_quorum = [""]
+        grpc_port = {:?}
+
+        [memory_store]
+        capacity = {:?}
+
+        [localfile_store]
+        data_paths = [{:?}]
+        "#,
+            grpc_port, capacity, local_data_path
+        );
+
+        toml::from_str(toml_str.as_str()).unwrap()
+    }
+
     pub fn create_simple_config() -> Config {
         let toml_str = r#"
         store_type = "MEMORY"
@@ -325,6 +433,13 @@ mod test {
 
         let stype = StorageType::MEMORY_LOCALFILE_HDFS;
         assert_eq!(true, StorageType::contains_hdfs(&stype));
+    }
+
+    #[test]
+    fn config_create() {
+        let config =
+            Config::create_mem_localfile_config(100, "20g".to_string(), "/tmp/a".to_string());
+        println!("{:#?}", config);
     }
 
     #[test]

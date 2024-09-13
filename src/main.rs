@@ -82,7 +82,9 @@ fn main() -> Result<()> {
     let config_path = args_match.value_of("config").unwrap_or("./config.toml");
     let config = Config::from(config_path);
 
-    let _guard = LogService::init(&config.log.clone().unwrap_or(Default::default()));
+    info!("The specified config show as follows: \n {:?}", config);
+
+    let _guard = LogService::init(&config.log.clone());
 
     init_global_variable(&config);
 

@@ -84,7 +84,7 @@ impl HdfsStore {
     pub fn from(conf: HdfsStoreConfig) -> Self {
         HdfsStore {
             partition_file_locks: DashMap::new(),
-            concurrency_access_limiter: Semaphore::new(conf.max_concurrency.unwrap_or(1) as usize),
+            concurrency_access_limiter: Semaphore::new(conf.max_concurrency),
             partition_cached_meta: Default::default(),
             app_remote_clients: Default::default(),
         }
