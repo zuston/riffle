@@ -128,9 +128,9 @@ KRB5_CONFIG=/etc/krb5.conf KRB5CCNAME=/tmp/krb5cc_2002 LOG=info ./uniffle-worker
     ```
 2. Start with profile
     ```shell
-    _RJEM_MALLOC_CONF=prof:true,prof_prefix:jeprof.out ./uniffle-worker
+    _RJEM_MALLOC_CONF=prof:true,prof_prefix:jeprof.out,lg_prof_interval:30 ./uniffle-worker
     ```
-
+   
 ### CPU Profiling
 1. build with jemalloc feature
     ```shell
