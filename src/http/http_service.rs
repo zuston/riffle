@@ -27,6 +27,8 @@ use std::sync::Mutex;
 
 use crate::http::{HTTPServer, Handler};
 use crate::runtime::manager::RuntimeManager;
+use crate::util::is_port_used;
+
 impl ResponseError for WorkerError {
     fn status(&self) -> StatusCode {
         StatusCode::BAD_REQUEST
@@ -62,6 +64,9 @@ impl PoemHTTPServer {
 
 impl HTTPServer for PoemHTTPServer {
     fn start(&self, runtime_manager: RuntimeManager, port: u16) {
+        if is_port_used(port) {
+            panic!("The http service port:{:?} has been used.", port);
+        }
         let mut app = Route::new();
         let handlers = self.handlers.lock().unwrap();
         for handler in handlers.iter() {

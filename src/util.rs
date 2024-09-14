@@ -19,7 +19,7 @@ use bytes::Bytes;
 use crc32fast::Hasher;
 
 use crate::config::Config;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -81,10 +81,34 @@ pub fn now_timestamp_as_sec() -> u64 {
     timestamp
 }
 
+pub fn is_port_used(port: u16) -> bool {
+    match std::net::TcpListener::bind(SocketAddr::new(
+        IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+        port as u16,
+    )) {
+        Ok(_) => false,
+        _ => true,
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use crate::util::{get_crc, now_timestamp_as_sec};
+    use crate::util::{get_crc, is_port_used, now_timestamp_as_sec};
     use bytes::Bytes;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    #[test]
+    fn test_port() {
+        let port = 19999;
+        let socket = std::net::TcpListener::bind(SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+            port as u16,
+        ));
+
+        assert_eq!(true, is_port_used(port));
+        drop(socket);
+        assert_eq!(false, is_port_used(port));
+    }
 
     #[test]
     fn time_test() {
