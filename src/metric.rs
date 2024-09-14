@@ -15,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::app::SHUFFLE_SERVER_IP;
-use crate::config::{Config, MetricsConfig};
+use crate::app::SHUFFLE_SERVER_ID;
+use crate::config::Config;
 use crate::runtime::manager::RuntimeManager;
 use log::{error, info};
 use once_cell::sync::Lazy;
@@ -505,7 +505,7 @@ impl MetricService {
 
                     let pushed_result = prometheus::push_metrics(
                         job_name,
-                        labels! {"worker_id".to_owned() => SHUFFLE_SERVER_IP.get().unwrap().to_string(),},
+                        labels! {"worker_id".to_owned() => SHUFFLE_SERVER_ID.get().unwrap().to_string(),},
                         &push_gateway_endpoint.to_owned().unwrap().to_owned(),
                         metrics,
                         None,
