@@ -83,11 +83,22 @@ impl ShuffleServer for DefaultShuffleServer {
             inner.max_concurrency_per_partition_to_write,
             remote_storage_info,
         );
-        let status = self
-            .app_manager_ref
-            .register(inner.app_id, inner.shuffle_id, app_config_option)
-            .map_or(StatusCode::INTERNAL_ERROR, |_| StatusCode::SUCCESS)
-            .into();
+
+        let status = match self.app_manager_ref.register(
+            inner.app_id.clone(),
+            inner.shuffle_id,
+            app_config_option,
+        ) {
+            Err(e) => {
+                error!(
+                    "Errors on registering for app:{:?}, shuffle:{:?}. error:{:#?}",
+                    &inner.app_id, &inner.shuffle_id, e
+                );
+                StatusCode::INTERNAL_ERROR
+            }
+            _ => StatusCode::SUCCESS,
+        }
+        .into();
         Ok(Response::new(ShuffleRegisterResponse {
             status,
             ret_msg: "".to_string(),
@@ -613,6 +624,10 @@ impl ShuffleServer for DefaultShuffleServer {
 
         let app = self.app_manager_ref.get_app(&app_id);
         if app.is_none() {
+            warn!(
+                "The app of {:?} has not been registered or been removed that should not happen!",
+                &app_id
+            );
             return Ok(Response::new(GetShuffleResultForMultiPartResponse {
                 status: StatusCode::NO_REGISTER.into(),
                 ret_msg: "No such app in this shuffle server".to_string(),

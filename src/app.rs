@@ -749,7 +749,7 @@ impl AppManager {
         app_config_options: AppConfigOptions,
     ) -> Result<()> {
         info!(
-            "Accepted registry. app_id: {}, shuffle_id: {}",
+            "Accepting registry. app_id: {}, shuffle_id: {}",
             app_id.clone(),
             shuffle_id
         );
