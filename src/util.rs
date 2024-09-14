@@ -69,13 +69,13 @@ pub fn get_crc(bytes: &Bytes) -> i64 {
     crc32.finalize() as i64
 }
 
-pub fn current_timestamp_ms() -> u128 {
+pub fn now_timestamp_as_millis() -> u128 {
     let current_time = SystemTime::now();
     let timestamp = current_time.duration_since(UNIX_EPOCH).unwrap().as_millis();
     timestamp
 }
 
-pub fn current_timestamp_sec() -> u64 {
+pub fn now_timestamp_as_sec() -> u64 {
     let current_time = SystemTime::now();
     let timestamp = current_time.duration_since(UNIX_EPOCH).unwrap().as_secs();
     timestamp
@@ -83,12 +83,12 @@ pub fn current_timestamp_sec() -> u64 {
 
 #[cfg(test)]
 mod test {
-    use crate::util::{current_timestamp_sec, get_crc};
+    use crate::util::{get_crc, now_timestamp_as_sec};
     use bytes::Bytes;
 
     #[test]
     fn time_test() {
-        println!("{}", current_timestamp_sec());
+        println!("{}", now_timestamp_as_sec());
     }
 
     #[test]

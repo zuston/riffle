@@ -29,7 +29,7 @@ use crate::store::hybrid::HybridStore;
 use crate::store::{
     Block, RequireBufferResponse, ResponseData, ResponseDataIndex, Store, StoreProvider,
 };
-use crate::util::current_timestamp_sec;
+use crate::util::now_timestamp_as_sec;
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use croaring::treemap::JvmSerializer;
@@ -243,7 +243,7 @@ impl App {
             app_id,
             partitions: DashMap::new(),
             app_config_options: config_options,
-            latest_heartbeat_time: AtomicU64::new(current_timestamp_sec()),
+            latest_heartbeat_time: AtomicU64::new(now_timestamp_as_sec()),
             store,
             bitmap_of_blocks: DashMap::new(),
             huge_partition_marked_threshold,
@@ -254,12 +254,12 @@ impl App {
     }
 
     fn get_latest_heartbeat_time(&self) -> u64 {
-        self.latest_heartbeat_time.load(Ordering::SeqCst)
+        self.latest_heartbeat_time.load(SeqCst)
     }
 
     pub fn heartbeat(&self) -> Result<()> {
-        let timestamp = current_timestamp_sec();
-        self.latest_heartbeat_time.swap(timestamp, Ordering::SeqCst);
+        let timestamp = now_timestamp_as_sec();
+        self.latest_heartbeat_time.store(timestamp, SeqCst);
         Ok(())
     }
 
@@ -579,7 +579,7 @@ pub enum ReadingOptions {
 #[allow(non_camel_case_types)]
 pub enum PurgeEvent {
     // app_id
-    HEART_BEAT_TIMEOUT(String),
+    HEARTBEAT_TIMEOUT(String),
     // app_id + shuffle_id
     APP_PARTIAL_SHUFFLES_PURGE(String, i32),
     // app_id
@@ -627,19 +627,21 @@ impl AppManager {
             info!("Starting app heartbeat checker...");
             loop {
                 // task1: find out heartbeat timeout apps
-                tokio::time::sleep(Duration::from_secs(120)).await;
+                tokio::time::sleep(Duration::from_secs(10)).await;
 
-                let _current_timestamp = current_timestamp_sec();
                 for item in app_manager_ref_cloned.apps.iter() {
                     let (key, app) = item.pair();
                     let last_time = app.get_latest_heartbeat_time();
+                    let current = now_timestamp_as_sec();
 
-                    if current_timestamp_sec() - last_time
+                    if current - last_time
                         > (app_manager_ref_cloned.app_heartbeat_timeout_min * 60) as u64
                     {
+                        info!("Detected app:{:?} heartbeat timeout. now: {:?}, latest heartbeat: {:?}. timeout threshold: {:?}(min)",
+                            key, current, last_time, app_manager_ref_cloned.app_heartbeat_timeout_min);
                         if app_manager_ref_cloned
                             .sender
-                            .send(PurgeEvent::HEART_BEAT_TIMEOUT(key.clone()))
+                            .send(PurgeEvent::HEARTBEAT_TIMEOUT(key.clone()))
                             .await
                             .is_err()
                         {
@@ -684,7 +686,7 @@ impl AppManager {
             while let Ok(event) = app_manager_cloned.receiver.recv().await {
                 GAUGE_APP_NUMBER.dec();
                 let _ = match event {
-                    PurgeEvent::HEART_BEAT_TIMEOUT(app_id) => {
+                    PurgeEvent::HEARTBEAT_TIMEOUT(app_id) => {
                         info!(
                             "The app:[{}]'s data will be purged due to heartbeat timeout",
                             &app_id

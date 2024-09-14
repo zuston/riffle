@@ -33,7 +33,7 @@ use crate::grpc::protobuf::uniffle::{ShuffleData, ShuffleDataBlockSegment};
 use crate::store::hybrid::HybridStore;
 use std::fmt::{Display, Formatter};
 
-use crate::util::current_timestamp_sec;
+use crate::util::now_timestamp_as_sec;
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -216,7 +216,7 @@ impl RequireBufferResponse {
     fn new(ticket_id: i64) -> Self {
         Self {
             ticket_id,
-            allocated_timestamp: current_timestamp_sec(),
+            allocated_timestamp: now_timestamp_as_sec(),
         }
     }
 }

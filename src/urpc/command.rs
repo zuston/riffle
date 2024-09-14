@@ -350,7 +350,7 @@ impl SendDataRequestCommand {
         let timestamp = self.timestamp;
 
         URPC_SEND_DATA_TRANSPORT_TIME
-            .observe(((util::current_timestamp_ms() - timestamp as u128) / 1000) as f64);
+            .observe(((util::now_timestamp_as_millis() - timestamp as u128) / 1000) as f64);
 
         let app = app_manager_ref.get_app(&app_id);
         if app.is_none() {

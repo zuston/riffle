@@ -48,7 +48,7 @@ impl Ticket {
     }
 
     pub fn is_timeout(&self, timeout_sec: i64) -> bool {
-        (crate::util::current_timestamp_sec() - self.created_time) as i64 > timeout_sec
+        (crate::util::now_timestamp_as_sec() - self.created_time) as i64 > timeout_sec
     }
 
     pub fn id(&self) -> i64 {
@@ -215,8 +215,8 @@ mod test {
         assert!(ticket_manager.delete(1000).is_err());
 
         // case1
-        ticket_manager.insert(1, 10, crate::util::current_timestamp_sec() + 1, app_id);
-        ticket_manager.insert(2, 10, crate::util::current_timestamp_sec() + 1, app_id);
+        ticket_manager.insert(1, 10, crate::util::now_timestamp_as_sec() + 1, app_id);
+        ticket_manager.insert(2, 10, crate::util::now_timestamp_as_sec() + 1, app_id);
         assert!(ticket_manager.exist(1));
         assert!(ticket_manager.exist(2));
 
