@@ -17,6 +17,7 @@
 
 use crate::app::SHUFFLE_SERVER_ID;
 use crate::config::Config;
+use crate::mem_allocator::ALLOCATOR;
 use crate::runtime::manager::RuntimeManager;
 use log::{error, info};
 use once_cell::sync::Lazy;
@@ -316,7 +317,19 @@ pub static TOTAL_EVICT_TIMEOUT_TICKETS_NUM: Lazy<IntCounter> = Lazy::new(|| {
     .expect("")
 });
 
+pub static GAUGE_ALLOCATOR_ALLOCATED_SIZE: Lazy<IntGauge> = Lazy::new(|| {
+    IntGauge::new(
+        "allocator_allocated_size",
+        "allocated memory size by allocator",
+    )
+    .unwrap()
+});
+
 fn register_custom_metrics() {
+    REGISTRY
+        .register(Box::new(GAUGE_ALLOCATOR_ALLOCATED_SIZE.clone()))
+        .expect("");
+
     REGISTRY
         .register(Box::new(TOTAL_GRPC_REQUEST.clone()))
         .expect("");
@@ -496,6 +509,10 @@ impl MetricService {
                 info!("Starting prometheus metrics exporter...");
                 loop {
                     tokio::time::sleep(Duration::from_secs(push_interval_sec as u64)).await;
+
+                    // refresh the allocator size metrics
+                    #[cfg(all(unix, feature = "allocator-analysis"))]
+                    GAUGE_ALLOCATOR_ALLOCATED_SIZE.set(ALLOCATOR.allocated() as i64);
 
                     let general_metrics = prometheus::gather();
                     let custom_metrics = REGISTRY.gather();

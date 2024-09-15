@@ -32,16 +32,14 @@ path = "src/lib.rs"
 
 [features]
 # whether to use jemalloc as the global allocator or not
-jemalloc = [
-    "dep:tikv-jemalloc-ctl",
-    "dep:tikv-jemalloc-sys",
-    "dep:tikv-jemallocator",
-]
+jemalloc = ["dep:tikv-jemalloc-ctl", "dep:tikv-jemalloc-sys", "dep:tikv-jemallocator"]
 
 # whether to enable memory profiling or not, once enabled, it implies using jemalloc as the global allocator
-memory-prof = ["jemalloc", "tikv-jemallocator/profiling"]
+memory-prof = ["jemalloc", "tikv-jemallocator/profiling", "allocator-analysis"]
 
 hdfs = ["dep:hdfs-native"]
+
+allocator-analysis = ["dep:cap"]
 
 [dependencies]
 anyhow = "1"
@@ -76,11 +74,7 @@ fs2 = "0.4.3"
 url = "2.4.0"
 await-tree = "0.1.1"
 poem = { version = "1.3.56", features = ["rustls", "test"] }
-pprof = { version = "0.11.1", features = [
-    "flamegraph",
-    "protobuf-codec",
-    "protobuf",
-] }
+pprof = { version = "0.11.1", features = ["flamegraph", "protobuf-codec", "protobuf"] }
 tempfile = "3.7.0"
 once_cell = "1.18.0"
 tower = { version = "0.4", features = ["util", "load-shed"] }
@@ -90,7 +84,6 @@ pin-project-lite = "0.2.8"
 signal-hook = "0.3.17"
 clap = "3.0.14"
 socket2 = { version = "0.4", features = ["all"] }
-cap = "0.1.2"
 spin = "0.9.8"
 opendal = { version = "0.44.0", features = ["services-fs"] }
 hashlink = "0.9.1"
@@ -101,6 +94,10 @@ fastrace-jaeger = { version = "0.6" }
 fxhash = "0.2.1"
 parking_lot = "0.12.1"
 num_enum = "0.7.0"
+
+[dependencies.cap]
+version = "0.1.2"
+optional = true
 
 [dependencies.hdfs-native]
 version = "0.7.0"

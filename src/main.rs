@@ -60,7 +60,7 @@ pub mod tracing;
 pub mod urpc;
 pub mod util;
 
-const MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY: &str = "MAX_MEMORY_ALLOCATION_SIZE";
+const MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY: &str = "MAX_MEMORY_ALLOCATION_LIMIT_SIZE";
 
 fn main() -> Result<()> {
     setup_max_memory_allocation();
@@ -102,8 +102,11 @@ fn main() -> Result<()> {
 }
 
 fn setup_max_memory_allocation() {
-    let _ = std::env::var(MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY).map(|v| {
-        let readable_size = ReadableSize::from_str(v.as_str()).unwrap();
-        ALLOCATOR.set_limit(readable_size.as_bytes() as usize)
-    });
+    #[cfg(all(unix, feature = "allocator-analysis"))]
+    {
+        let _ = std::env::var(MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY).map(|v| {
+            let readable_size = ReadableSize::from_str(v.as_str()).unwrap();
+            ALLOCATOR.set_limit(readable_size.as_bytes() as usize)
+        });
+    }
 }

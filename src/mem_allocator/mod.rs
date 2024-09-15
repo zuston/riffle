@@ -24,10 +24,14 @@ mod imp;
 #[path = "system_std.rs"]
 mod imp;
 
+#[cfg(all(unix, feature = "allocator-analysis"))]
 use cap::Cap;
 
 #[global_allocator]
+#[cfg(all(unix, feature = "allocator-analysis"))]
 pub static ALLOCATOR: Cap<imp::Allocator> = Cap::new(imp::allocator(), usize::max_value());
+#[cfg(not(all(unix, feature = "allocator-analysis")))]
+pub static ALLOCATOR: imp::Allocator = imp::allocator();
 
 pub mod error;
 pub type AllocStats = Vec<(&'static str, usize)>;
