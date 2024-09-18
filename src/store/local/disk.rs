@@ -25,7 +25,7 @@ use anyhow::{anyhow, Result};
 use await_tree::InstrumentAwait;
 use bytes::{Bytes, BytesMut};
 use futures::AsyncWriteExt;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use opendal::services::Fs;
 use opendal::{BlockingOperator, Operator};
 use std::fs::read;
@@ -204,7 +204,7 @@ impl LocalDisk {
 
     pub async fn create_dir(&self, dir: &str) -> Result<()> {
         self.operator.create_dir(dir)?;
-        info!("Created the dir: {}/{}", &self.root, dir);
+        debug!("Created the dir: {}/{}", &self.root, dir);
         Ok(())
     }
 
