@@ -16,17 +16,13 @@
 // under the License.
 
 // Allocators
-#[cfg(all(unix, feature = "jemalloc"))]
+#[cfg(feature = "jemalloc")]
 #[path = "jemalloc.rs"]
 mod imp;
 
-#[cfg(all(unix, feature = "mimalloc"))]
-#[path = "mimalloc.rs"]
+#[cfg(not(any(feature = "jemalloc", feature = "mimalloc")))]
+#[path = "system_std.rs"]
 mod imp;
-
-// #[cfg(not(all(unix, feature = "jemalloc")))]
-// #[path = "system_std.rs"]
-// mod imp;
 
 #[cfg(all(unix, feature = "allocator-analysis"))]
 use cap::Cap;
