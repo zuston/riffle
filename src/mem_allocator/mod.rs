@@ -20,9 +20,13 @@
 #[path = "jemalloc.rs"]
 mod imp;
 
-#[cfg(not(all(unix, feature = "jemalloc")))]
-#[path = "system_std.rs"]
+#[cfg(all(unix, feature = "mimalloc"))]
+#[path = "mimalloc.rs"]
 mod imp;
+
+// #[cfg(not(all(unix, feature = "jemalloc")))]
+// #[path = "system_std.rs"]
+// mod imp;
 
 #[cfg(all(unix, feature = "allocator-analysis"))]
 use cap::Cap;
@@ -46,5 +50,6 @@ pub use default::*;
 // when memory-prof feature is enabled, provide jemalloc profiling functions
 #[cfg(all(unix, feature = "memory-prof"))]
 mod profiling;
+
 #[cfg(all(unix, feature = "memory-prof"))]
 pub use profiling::*;

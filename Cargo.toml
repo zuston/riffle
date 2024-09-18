@@ -41,6 +41,8 @@ hdfs = ["dep:hdfs-native"]
 
 allocator-analysis = ["dep:cap"]
 
+mimalloc = ["dep:mimalloc"]
+
 [dependencies]
 anyhow = "1"
 tokio = { version = "1.28.2", features = ["full"] }
@@ -94,6 +96,10 @@ fastrace-jaeger = { version = "0.6" }
 fxhash = "0.2.1"
 parking_lot = "0.12.1"
 num_enum = "0.7.0"
+
+[dependencies.mimalloc]
+version = "0.1.39"
+optional = true
 
 [dependencies.cap]
 version = "0.1.2"
