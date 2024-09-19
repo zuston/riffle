@@ -520,7 +520,7 @@ impl MetricService {
                     metrics.extend_from_slice(&custom_metrics);
                     metrics.extend_from_slice(&general_metrics);
 
-                    let pushed_result = prometheus::push_metrics(
+                    let pushed_result = prometheus::push_add_metrics(
                         job_name,
                         labels! {"worker_id".to_owned() => SHUFFLE_SERVER_ID.get().unwrap().to_string(),},
                         &push_gateway_endpoint.to_owned().unwrap().to_owned(),
