@@ -212,7 +212,9 @@ impl HybridStore {
             candidate_store = cold;
         }
 
-        match candidate_store.name().await {
+        let storage_type = candidate_store.name().await;
+
+        match &storage_type {
             StorageType::LOCALFILE => {
                 TOTAL_MEMORY_SPILL_TO_LOCALFILE.inc();
                 GAUGE_MEMORY_SPILL_TO_LOCALFILE.inc();
@@ -234,24 +236,12 @@ impl HybridStore {
         // ctx.data_blocks.sort_by_key(|block| block.task_attempt_id);
 
         // when throwing the data lost error, it should fast fail for this partition data.
-        let inserted = candidate_store
+        let _ = candidate_store
             .spill_insert(ctx)
             .instrument_await("inserting into the persistent store, invoking [write]")
-            .await;
-        if let Err(err) = inserted {
-            match err {
-                WorkerError::PARTIAL_DATA_LOST(msg) => {
-                    let err_msg = format!(
-                        "Partial data has been lost. Let's abort this partition data. error: {}",
-                        &msg
-                    );
-                    error!("{}", err_msg)
-                }
-                others => return Err(others),
-            }
-        }
+            .await?;
 
-        match candidate_store.name().await {
+        match &storage_type {
             StorageType::LOCALFILE => {
                 GAUGE_MEMORY_SPILL_TO_LOCALFILE.dec();
             }
