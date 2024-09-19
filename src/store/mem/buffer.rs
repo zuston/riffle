@@ -1,3 +1,4 @@
+use crate::composed_bytes;
 use crate::composed_bytes::ComposedBytes;
 use crate::store::BytesWrapper;
 use crate::store::{Block, DataSegment, PartitionedMemoryData};
@@ -217,9 +218,10 @@ impl MemoryBuffer {
             offset += block.length as i64;
         }
 
+        let composed_bytes = ComposedBytes::from(block_bytes, offset as usize);
         Ok(PartitionedMemoryData {
             shuffle_data_block_segments: segments,
-            data: BytesWrapper::Composed(ComposedBytes::from(block_bytes)),
+            data: BytesWrapper::Composed(composed_bytes),
         })
     }
 

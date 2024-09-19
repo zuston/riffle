@@ -167,7 +167,7 @@ impl BytesWrapper {
     pub fn always_composed(&self) -> ComposedBytes {
         match self {
             BytesWrapper::Composed(bytes) => bytes.clone(),
-            BytesWrapper::Direct(data) => ComposedBytes::from(vec![data.clone()]),
+            BytesWrapper::Direct(data) => ComposedBytes::from(vec![data.clone()], data.len()),
             _ => panic!(),
         }
     }

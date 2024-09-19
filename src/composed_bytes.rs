@@ -15,11 +15,10 @@ impl ComposedBytes {
         }
     }
 
-    pub fn from(all: Vec<Bytes>) -> ComposedBytes {
-        let len = all.iter().map(|x| x.len()).sum();
+    pub fn from(all: Vec<Bytes>, total_size: usize) -> ComposedBytes {
         Self {
             composed: all,
-            total_len: len,
+            total_len: total_size,
         }
     }
 
