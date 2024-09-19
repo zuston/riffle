@@ -217,7 +217,7 @@ impl LocalFileStore {
         let mut index_bytes_holder = BytesMut::new();
         let mut data_bytes_holder = BytesMut::new();
 
-        let mut total_size = 0;
+        let mut total_size = 0u64;
         for block in blocks {
             let block_id = block.block_id;
             let length = block.length;
@@ -225,7 +225,7 @@ impl LocalFileStore {
             let task_attempt_id = block.task_attempt_id;
             let crc = block.crc;
 
-            total_size += length;
+            total_size += length as u64;
 
             index_bytes_holder.put_i64(next_offset);
             index_bytes_holder.put_i32(length);
@@ -252,7 +252,7 @@ impl LocalFileStore {
             ))
             .await?;
 
-        TOTAL_LOCALFILE_USED.inc_by(total_size as u64);
+        TOTAL_LOCALFILE_USED.inc_by(total_size);
 
         locked_obj
             .deref()
