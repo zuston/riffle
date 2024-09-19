@@ -684,14 +684,12 @@ impl AppManager {
         runtime_manager.default_runtime.spawn(async move {
             info!("Starting purge event handler...");
             while let Ok(event) = app_manager_cloned.receiver.recv().await {
-                GAUGE_APP_NUMBER.dec();
                 let _ = match event {
                     PurgeEvent::HEARTBEAT_TIMEOUT(app_id) => {
                         info!(
                             "The app:[{}]'s data will be purged due to heartbeat timeout",
                             &app_id
                         );
-                        let _ = GAUGE_TOPN_APP_RESIDENT_DATA_SIZE.remove_label_values(&[&app_id]);
                         app_manager_cloned.purge_app_data(app_id, None).await
                     }
                     PurgeEvent::APP_PURGE(app_id) => {
@@ -699,7 +697,6 @@ impl AppManager {
                             "The app:[{}] has been finished, its data will be purged.",
                             &app_id
                         );
-                        let _ = GAUGE_TOPN_APP_RESIDENT_DATA_SIZE.remove_label_values(&[&app_id]);
                         app_manager_cloned.purge_app_data(app_id, None).await
                     }
                     PurgeEvent::APP_PARTIAL_SHUFFLES_PURGE(app_id, shuffle_id) => {
@@ -727,6 +724,11 @@ impl AppManager {
     }
 
     async fn purge_app_data(&self, app_id: String, shuffle_id_option: Option<i32>) -> Result<()> {
+        if shuffle_id_option.is_none() {
+            GAUGE_APP_NUMBER.dec();
+            let _ = GAUGE_TOPN_APP_RESIDENT_DATA_SIZE.remove_label_values(&[&app_id]);
+        }
+
         let app = self.get_app(&app_id).ok_or(anyhow!(format!(
             "App:{} don't exist when purging data, this should not happen",
             &app_id
