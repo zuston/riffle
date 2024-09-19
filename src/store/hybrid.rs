@@ -413,13 +413,22 @@ impl Store for HybridStore {
                                 if let Err(err) = store_ref.release_data_in_memory(size, &message).await {
                                     error!("Errors on releasing memory data, that should not happen. err: {:#?}", err);
                                 }
+
+                                store_ref.memory_spill_event_num.dec_by(1);
+                                GAUGE_IN_SPILL_DATA_SIZE.sub(size);
+                                GAUGE_MEMORY_SPILL_OPERATION.dec();
                             }
                             Err(WorkerError::SPILL_EVENT_EXCEED_RETRY_MAX_LIMIT(_)) | Err(WorkerError::PARTIAL_DATA_LOST(_)) => {
                                 warn!("Dropping the spill event for app: {:?}. Attention: this will make data lost!", message.ctx.uid.app_id);
-                                // if let Err(err) = store_ref.release_data_in_memory(size, &message).await {
-                                //     error!("Errors on releasing memory data when dropping the spill event, that should not happen. err: {:#?}", err);
-                                // }
+                                if let Err(err) = store_ref.release_data_in_memory(size, &message).await {
+                                    error!("Errors on releasing memory data when dropping the spill event, that should not happen. err: {:#?}", err);
+                                }
                                 TOTAL_SPILL_EVENTS_DROPPED.inc();
+                                TOTAL_MEMORY_SPILL_OPERATION_FAILED.inc();
+
+                                store_ref.memory_spill_event_num.dec_by(1);
+                                GAUGE_IN_SPILL_DATA_SIZE.sub(size);
+                                GAUGE_MEMORY_SPILL_OPERATION.dec();
                             }
                             Err(error) => {
                                 TOTAL_MEMORY_SPILL_OPERATION_FAILED.inc();
@@ -432,9 +441,6 @@ impl Store for HybridStore {
                                 let _ = store_ref.memory_spill_send.send(message).await;
                             }
                         }
-                        store_ref.memory_spill_event_num.dec_by(1);
-                        GAUGE_IN_SPILL_DATA_SIZE.sub(size);
-                        GAUGE_MEMORY_SPILL_OPERATION.dec();
                         drop(concurrency_guarder);
                     }));
             }
