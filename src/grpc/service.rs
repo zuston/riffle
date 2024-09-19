@@ -20,6 +20,8 @@ use crate::app::{
     ReadingIndexViewContext, ReadingOptions, ReadingViewContext, RemoteStorageConfig,
     ReportBlocksContext, RequireBufferContext, WritingViewContext,
 };
+use crate::constant::StatusCode;
+use crate::error::WorkerError;
 use crate::grpc::protobuf::uniffle::shuffle_server_server::ShuffleServer;
 use crate::grpc::protobuf::uniffle::{
     AppHeartBeatRequest, AppHeartBeatResponse, FinishShuffleRequest, FinishShuffleResponse,
@@ -32,23 +34,21 @@ use crate::grpc::protobuf::uniffle::{
     ShuffleRegisterRequest, ShuffleRegisterResponse, ShuffleUnregisterByAppIdRequest,
     ShuffleUnregisterByAppIdResponse, ShuffleUnregisterRequest, ShuffleUnregisterResponse,
 };
-use crate::store::{BytesWrapper, PartitionedData, ResponseDataIndex};
+use crate::metric::{
+    GRPC_BUFFER_REQUIRE_PROCESS_TIME, GRPC_GET_LOCALFILE_DATA_PROCESS_TIME,
+    GRPC_GET_MEMORY_DATA_PROCESS_TIME, GRPC_GET_MEMORY_DATA_TRANSPORT_TIME,
+    GRPC_SEND_DATA_PROCESS_TIME, GRPC_SEND_DATA_TRANSPORT_TIME,
+};
+use crate::store::{PartitionedData, ResponseDataIndex};
+use crate::util;
 use await_tree::InstrumentAwait;
-use bytes::{Buf, Bytes};
+use bytes::Bytes;
 use croaring::treemap::JvmSerializer;
 use croaring::Treemap;
 use fastrace::future::FutureExt;
 use fastrace::trace;
 use log::{debug, error, info, warn};
 use std::collections::HashMap;
-
-use crate::constant::StatusCode;
-use crate::metric::{
-    GRPC_BUFFER_REQUIRE_PROCESS_TIME, GRPC_GET_LOCALFILE_DATA_PROCESS_TIME,
-    GRPC_GET_MEMORY_DATA_PROCESS_TIME, GRPC_GET_MEMORY_DATA_TRANSPORT_TIME,
-    GRPC_SEND_DATA_PROCESS_TIME, GRPC_SEND_DATA_TRANSPORT_TIME,
-};
-use crate::util;
 use tonic::{Request, Response, Status};
 
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
@@ -719,6 +719,11 @@ impl ShuffleServer for DefaultShuffleServer {
             Ok(required_buffer_res) => (
                 StatusCode::SUCCESS,
                 required_buffer_res.ticket_id,
+                "".to_string(),
+            ),
+            Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION) => (
+                StatusCode::NO_BUFFER_FOR_HUGE_PARTITION,
+                -1i64,
                 "".to_string(),
             ),
             Err(err) => (StatusCode::NO_BUFFER, -1i64, format!("{:?}", err)),
