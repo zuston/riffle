@@ -236,10 +236,10 @@ impl HybridStore {
         // ctx.data_blocks.sort_by_key(|block| block.task_attempt_id);
 
         // when throwing the data lost error, it should fast fail for this partition data.
-        let _ = candidate_store
+        let result = candidate_store
             .spill_insert(ctx)
             .instrument_await("inserting into the persistent store, invoking [write]")
-            .await?;
+            .await;
 
         match &storage_type {
             StorageType::LOCALFILE => {
@@ -250,6 +250,8 @@ impl HybridStore {
             }
             _ => {}
         }
+
+        let _ = result?;
 
         Ok(message)
     }
