@@ -453,6 +453,8 @@ impl Store for LocalFileStore {
                 data.push(block);
             }
         }
+        // for AQE
+        data.sort_by_key(|block| block.task_attempt_id);
         self.data_insert(uid, data).await
     }
 }

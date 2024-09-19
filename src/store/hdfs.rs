@@ -324,6 +324,8 @@ impl Store for HdfsStore {
                 data.push(block);
             }
         }
+        // for AQE
+        data.sort_by_key(|block| block.task_attempt_id);
         self.data_insert(uid, data).await
     }
 }
