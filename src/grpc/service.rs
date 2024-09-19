@@ -738,7 +738,7 @@ impl ShuffleServer for DefaultShuffleServer {
         request: Request<AppHeartBeatRequest>,
     ) -> Result<Response<AppHeartBeatResponse>, Status> {
         let app_id = request.into_inner().app_id;
-        info!("Accepted heartbeat for app: {:#?}", &app_id);
+        info!("Accepted heartbeat for app: {:?}", &app_id);
 
         let app = self.app_manager_ref.get_app(&app_id);
         if app.is_none() {

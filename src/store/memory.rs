@@ -334,7 +334,7 @@ impl Store for MemoryStore {
 
         info!(
             "removed used buffer size:[{}] for [{:?}], [{:?}]",
-            used, app_id, shuffle_id_option
+            used, &app_id, shuffle_id_option
         );
 
         Ok(used)
