@@ -91,8 +91,12 @@ impl MemoryStore {
         let release_allocated_func =
             move |size: i64| budget_clone.dec_allocated(size).map_or(false, |v| v);
 
-        let ticket_manager =
-            TicketManager::new(5 * 60, 10, release_allocated_func, runtime_manager.clone());
+        let ticket_manager = TicketManager::new(
+            conf.buffer_ticket_timeout_sec,
+            conf.buffer_ticket_check_interval_sec,
+            release_allocated_func,
+            runtime_manager.clone(),
+        );
 
         /// the dashmap shard that will effect the lookup performance.
         let shard_amount = conf.dashmap_shard_amount;

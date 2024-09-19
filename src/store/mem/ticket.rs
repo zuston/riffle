@@ -146,23 +146,25 @@ impl TicketManager {
 
             loop {
                 let read_view = ticket_store.clone();
-                let mut timeout_tickets = vec![];
+
+                let mut discard_tickets = vec![];
                 for ticket in read_view.iter() {
                     if ticket.is_timeout(ticket_timeout_sec) {
-                        timeout_tickets.push(ticket.id);
+                        discard_tickets.push(ticket);
                     }
                 }
 
                 let mut total_removed_size = 0i64;
-                for timeout_ticket_id in timeout_tickets.iter() {
+                for ticket in discard_tickets.iter() {
                     total_removed_size += ticket_store
-                        .remove(timeout_ticket_id)
+                        .remove(&ticket.id)
                         .map_or(0, |val| val.1.size);
                 }
                 if total_removed_size != 0 {
                     free_allocated_fn(total_removed_size);
-                    warn!("Removed {:#?} memory allocated timeout tickets, release pre-allocated memory size: {:?}", timeout_tickets, total_removed_size);
-                    TOTAL_EVICT_TIMEOUT_TICKETS_NUM.inc_by(timeout_tickets.len() as u64);
+                    warn!("Removed {:#?} memory allocated timeout tickets, release pre-allocated memory size: {:?}",
+                        discard_tickets.iter().map(|x| &x.owned_by_app_id).collect::<Vec<&String>>(), total_removed_size);
+                    TOTAL_EVICT_TIMEOUT_TICKETS_NUM.inc_by(discard_tickets.len() as u64);
                 }
                 tokio::time::sleep(Duration::from_secs(interval_sec as u64, )).await;
             }
