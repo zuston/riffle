@@ -724,11 +724,6 @@ impl AppManager {
     }
 
     async fn purge_app_data(&self, app_id: String, shuffle_id_option: Option<i32>) -> Result<()> {
-        if shuffle_id_option.is_none() {
-            GAUGE_APP_NUMBER.dec();
-            let _ = GAUGE_TOPN_APP_RESIDENT_DATA_SIZE.remove_label_values(&[&app_id]);
-        }
-
         let app = self.get_app(&app_id).ok_or(anyhow!(format!(
             "App:{} don't exist when purging data, this should not happen",
             &app_id
@@ -737,6 +732,9 @@ impl AppManager {
 
         if shuffle_id_option.is_none() {
             self.apps.remove(&app_id);
+
+            GAUGE_APP_NUMBER.dec();
+            let _ = GAUGE_TOPN_APP_RESIDENT_DATA_SIZE.remove_label_values(&[&app_id]);
         }
 
         Ok(())
