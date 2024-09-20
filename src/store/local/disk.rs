@@ -64,7 +64,7 @@ impl Default for LocalDiskConfig {
 
 pub struct LocalDisk {
     pub(crate) root: String,
-    operator: BlockingOperator,
+    operator: Operator,
     concurrency_limiter: Semaphore,
     is_corrupted: AtomicBool,
     is_healthy: AtomicBool,
@@ -82,7 +82,6 @@ impl LocalDisk {
         let mut builder = Fs::default();
         builder.root(&root);
         let operator: Operator = Operator::new(builder).unwrap().finish();
-        let operator = operator.blocking();
 
         let disk_capacity =
             Self::get_disk_capacity(&root).expect("Errors on getting disk capacity");
@@ -203,14 +202,14 @@ impl LocalDisk {
     }
 
     pub async fn create_dir(&self, dir: &str) -> Result<()> {
-        self.operator.create_dir(dir)?;
+        self.operator.create_dir(dir).await?;
         debug!("Created the dir: {}/{}", &self.root, dir);
         Ok(())
     }
 
     // this will ensure the data flushed into the file
     async fn write(&self, data: Bytes, path: &str) -> Result<()> {
-        self.operator.write(path, data)?;
+        self.operator.write(path, data).await?;
         Ok(())
     }
 
@@ -221,19 +220,19 @@ impl LocalDisk {
             .instrument_await("meet the concurrency limiter")
             .await?;
 
-        let mut writer = self.operator.writer_with(path).append(true).call()?;
+        let mut writer = self.operator.writer_with(path).append(true).await?;
         for x in data.into().always_composed().iter() {
             // we must use the write_all to ensure the buffer consumed by the OS.
             // Please see the detail: https://doc.rust-lang.org/std/io/trait.Write.html#method.write_all
-            writer.write_all(&x)?;
+            writer.write_all(&x).await?;
         }
-        writer.flush()?;
+        writer.flush().await?;
 
         Ok(())
     }
 
     pub async fn get_file_len(&self, path: &str) -> Result<i64> {
-        match self.operator.stat(path) {
+        match self.operator.stat(path).await {
             Ok(meta) => Ok(meta.content_length() as i64),
             Err(_) => Ok(0),
         }
@@ -241,23 +240,23 @@ impl LocalDisk {
 
     pub async fn read(&self, path: &str, offset: i64, length: Option<i64>) -> Result<Bytes> {
         if length.is_none() {
-            return Ok(Bytes::from(self.operator.read(path)?));
+            return Ok(Bytes::from(self.operator.read(path).await?));
         }
         let length = length.unwrap() as usize;
 
-        let mut reader = self.operator.reader(path)?;
-        reader.seek(SeekFrom::Start(offset as u64))?;
+        let mut reader = self.operator.reader(path).await?;
+        reader.seek(SeekFrom::Start(offset as u64)).await?;
 
         let mut bytes_buffer = BytesMut::with_capacity(length);
         unsafe {
             bytes_buffer.set_len(length);
         }
-        reader.read_exact(&mut bytes_buffer)?;
+        reader.read_exact(&mut bytes_buffer).await?;
         Ok(bytes_buffer.freeze())
     }
 
     pub async fn delete(&self, path: &str) -> Result<()> {
-        self.operator.remove_all(path)?;
+        self.operator.remove_all(path).await?;
         Ok(())
     }
 
