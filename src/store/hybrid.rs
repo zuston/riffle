@@ -386,15 +386,17 @@ impl Store for HybridStore {
                     .register(format!("hot->warm flush. uid: {:#?}", &message.ctx.uid))
                     .await;
 
-                TOTAL_MEMORY_SPILL_OPERATION.inc();
-                GAUGE_MEMORY_SPILL_OPERATION.inc();
                 let store_ref = store.clone();
                 store
                     .runtime_manager
                     .write_runtime
                     .spawn(await_root.instrument(async move {
                         let size = message.size;
+
                         GAUGE_IN_SPILL_DATA_SIZE.add(size);
+                        TOTAL_MEMORY_SPILL_OPERATION.inc();
+                        GAUGE_MEMORY_SPILL_OPERATION.inc();
+
                         match store_ref
                             .memory_spill_to_persistent_store(message.clone())
                             .instrument_await("memory_spill_to_persistent_store.")
@@ -407,10 +409,10 @@ impl Store for HybridStore {
                                 }
 
                                 store_ref.memory_spill_event_num.dec_by(1);
-                                GAUGE_IN_SPILL_DATA_SIZE.sub(size);
-                                GAUGE_MEMORY_SPILL_OPERATION.dec();
                             }
-                            Err(WorkerError::SPILL_EVENT_EXCEED_RETRY_MAX_LIMIT(_)) | Err(WorkerError::PARTIAL_DATA_LOST(_)) => {
+                            Err(WorkerError::SPILL_EVENT_EXCEED_RETRY_MAX_LIMIT(_))
+                            | Err(WorkerError::PARTIAL_DATA_LOST(_))
+                            | Err(WorkerError::LOCAL_DISK_UNHEALTHY(_)) => {
                                 warn!("Dropping the spill event for app: {:?}. Attention: this will make data lost!", message.ctx.uid.app_id);
                                 if let Err(err) = store_ref.release_data_in_memory(size, &message).await {
                                     error!("Errors on releasing memory data when dropping the spill event, that should not happen. err: {:#?}", err);
@@ -419,8 +421,6 @@ impl Store for HybridStore {
                                 TOTAL_MEMORY_SPILL_OPERATION_FAILED.inc();
 
                                 store_ref.memory_spill_event_num.dec_by(1);
-                                GAUGE_IN_SPILL_DATA_SIZE.sub(size);
-                                GAUGE_MEMORY_SPILL_OPERATION.dec();
                             }
                             Err(error) => {
                                 TOTAL_MEMORY_SPILL_OPERATION_FAILED.inc();
@@ -433,6 +433,8 @@ impl Store for HybridStore {
                                 let _ = store_ref.memory_spill_send.send(message).await;
                             }
                         }
+                        GAUGE_IN_SPILL_DATA_SIZE.sub(size);
+                        GAUGE_MEMORY_SPILL_OPERATION.dec();
                         drop(concurrency_guarder);
                     }));
             }
