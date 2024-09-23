@@ -94,7 +94,7 @@ rand = "0.8.5"
 fastrace = { version = "0.6" }
 fastrace-jaeger = { version = "0.6" }
 fxhash = "0.2.1"
-parking_lot = "0.12.1"
+parking_lot = { version = "0.12.3", features = ["deadlock_detection"] }
 num_enum = "0.7.0"
 
 [dependencies.mimalloc]
