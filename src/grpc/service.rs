@@ -36,8 +36,9 @@ use crate::grpc::protobuf::uniffle::{
 };
 use crate::metric::{
     GRPC_BUFFER_REQUIRE_PROCESS_TIME, GRPC_GET_LOCALFILE_DATA_PROCESS_TIME,
-    GRPC_GET_MEMORY_DATA_PROCESS_TIME, GRPC_GET_MEMORY_DATA_TRANSPORT_TIME,
-    GRPC_SEND_DATA_PROCESS_TIME, GRPC_SEND_DATA_TRANSPORT_TIME,
+    GRPC_GET_MEMORY_DATA_FREEZE_PROCESS_TIME, GRPC_GET_MEMORY_DATA_PROCESS_TIME,
+    GRPC_GET_MEMORY_DATA_TRANSPORT_TIME, GRPC_SEND_DATA_PROCESS_TIME,
+    GRPC_SEND_DATA_TRANSPORT_TIME,
 };
 use crate::store::{PartitionedData, ResponseDataIndex};
 use crate::util;
@@ -487,8 +488,10 @@ impl ShuffleServer for DefaultShuffleServer {
             }));
         }
 
+        let freeze_timer = GRPC_GET_MEMORY_DATA_FREEZE_PROCESS_TIME.start_timer();
         let data = data_fetched_result.unwrap().from_memory();
         let bytes = data.data.freeze();
+        freeze_timer.observe_duration();
 
         timer.observe_duration();
 

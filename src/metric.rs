@@ -69,6 +69,13 @@ pub static GRPC_GET_MEMORY_DATA_PROCESS_TIME: Lazy<Histogram> = Lazy::new(|| {
     histogram
 });
 
+pub static GRPC_GET_MEMORY_DATA_FREEZE_PROCESS_TIME: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new("grpc_get_memory_data_freeze_process_time", "none")
+        .buckets(Vec::from(DEFAULT_BUCKETS as &'static [f64]));
+    let histogram = Histogram::with_opts(opts).unwrap();
+    histogram
+});
+
 pub static GRPC_GET_LOCALFILE_DATA_TRANSPORT_TIME: Lazy<Histogram> = Lazy::new(|| {
     let opts = HistogramOpts::new("grpc_get_localfile_data_transport_time", "none")
         .buckets(Vec::from(DEFAULT_BUCKETS as &'static [f64]));
