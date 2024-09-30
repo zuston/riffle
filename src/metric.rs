@@ -463,6 +463,9 @@ fn register_custom_metrics() {
         .register(Box::new(GRPC_GET_MEMORY_DATA_PROCESS_TIME.clone()))
         .expect("grpc_get_memory_data_process_time must be registered");
     REGISTRY
+        .register(Box::new(GRPC_GET_MEMORY_DATA_FREEZE_PROCESS_TIME.clone()))
+        .expect("grpc_get_memory_data_freeze_process_time must be registered");
+    REGISTRY
         .register(Box::new(GRPC_GET_LOCALFILE_DATA_TRANSPORT_TIME.clone()))
         .expect("grpc_get_localfile_data_transport_time must be registered");
     REGISTRY
