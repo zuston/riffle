@@ -130,12 +130,12 @@ pub struct RuntimeConfig {
 impl Default for RuntimeConfig {
     fn default() -> Self {
         RuntimeConfig {
-            read_thread_num: 1,
-            write_thread_num: 1,
-            grpc_thread_num: 1,
-            http_thread_num: 1,
-            default_thread_num: 1,
-            dispatch_thread_num: 1,
+            read_thread_num: 100,
+            write_thread_num: 100,
+            grpc_thread_num: 100,
+            http_thread_num: 2,
+            default_thread_num: 10,
+            dispatch_thread_num: 100,
         }
     }
 }

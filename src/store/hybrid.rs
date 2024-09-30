@@ -389,7 +389,7 @@ impl Store for HybridStore {
                 let store_ref = store.clone();
                 store
                     .runtime_manager
-                    .write_runtime
+                    .dispatch_runtime
                     .spawn(await_root.instrument(async move {
                         let size = message.size;
 

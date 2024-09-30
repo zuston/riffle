@@ -192,7 +192,10 @@ impl LocalFileStore {
             Entry::Occupied(v) => v.get().clone(),
         };
 
-        let locked_obj = locked_obj.write().await;
+        let locked_obj = locked_obj
+            .write()
+            .instrument_await("waiting the localfile partition lock...")
+            .await;
         let local_disk = &locked_obj.disk;
         let mut next_offset = locked_obj.pointer.load(Ordering::SeqCst);
 
@@ -210,6 +213,7 @@ impl LocalFileStore {
             if let Some(path) = Path::new(&data_file_path).parent() {
                 local_disk
                     .create_dir(format!("{}/", path.to_str().unwrap()).as_str())
+                    .instrument_await("creating the directory...")
                     .await?;
             }
         }
@@ -240,16 +244,16 @@ impl LocalFileStore {
             next_offset += length as i64;
         }
 
-        local_disk
-            .append(data_bytes_holder.freeze(), &data_file_path)
-            .instrument_await(format!("localfile writing data. path: {}", &data_file_path))
-            .await?;
-        local_disk
-            .append(index_bytes_holder.freeze(), &index_file_path)
-            .instrument_await(format!(
-                "localfile writing index. path: {}",
-                &index_file_path
-            ))
+        let disk = local_disk.clone();
+        let handler = self.runtime_manager.write_runtime.spawn(async move {
+            disk.append(data_bytes_holder.freeze(), &data_file_path)
+                .await?;
+            disk.append(index_bytes_holder.freeze(), &index_file_path)
+                .await?;
+            return anyhow::Ok(());
+        });
+        let _ = handler
+            .instrument_await("localfile appending to file")
             .await?;
 
         TOTAL_LOCALFILE_USED.inc_by(total_size);
