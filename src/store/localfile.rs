@@ -39,6 +39,7 @@ use dashmap::DashMap;
 
 use log::{debug, error, warn};
 
+use crate::composed_bytes::ComposedBytes;
 use crate::runtime::manager::RuntimeManager;
 use dashmap::mapref::entry::Entry;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -219,7 +220,7 @@ impl LocalFileStore {
         }
 
         let mut index_bytes_holder = BytesMut::new();
-        let mut data_bytes_holder = BytesMut::new();
+        let mut data_bytes_holder = Vec::with_capacity(blocks.len());
 
         let mut total_size = 0u64;
         for block in blocks {
@@ -240,15 +241,20 @@ impl LocalFileStore {
 
             let data = &block.data;
 
-            data_bytes_holder.extend_from_slice(&data);
+            data_bytes_holder.push(data.clone());
             next_offset += length as i64;
         }
 
         let disk = local_disk.clone();
         let handler = self.runtime_manager.write_runtime.spawn(async move {
-            disk.append(data_bytes_holder.freeze(), &data_file_path)
-                .await?;
+            disk.append(
+                ComposedBytes::from(data_bytes_holder, total_size as usize),
+                &data_file_path,
+            )
+            .instrument_await("data flushing")
+            .await?;
             disk.append(index_bytes_holder.freeze(), &index_file_path)
+                .instrument_await("index flushing")
                 .await?;
             return anyhow::Ok(());
         });
@@ -459,7 +465,9 @@ impl Store for LocalFileStore {
         }
         // for AQE
         data.sort_by_key(|block| block.task_attempt_id);
-        self.data_insert(uid, data).await
+        self.data_insert(uid, data)
+            .instrument_await("data insert")
+            .await
     }
 }
 
