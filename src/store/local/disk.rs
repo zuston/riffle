@@ -140,7 +140,9 @@ impl LocalDisk {
 
     async fn loop_check_disk(local_disk: Arc<LocalDisk>) {
         loop {
-            tokio::time::sleep(Duration::from_secs(10)).await;
+            tokio::time::sleep(Duration::from_secs(10))
+                .instrument_await("loop check sleep 10s")
+                .await;
 
             if local_disk.is_corrupted().unwrap() {
                 return;
@@ -148,7 +150,9 @@ impl LocalDisk {
 
             let root_ref = &local_disk.root;
 
-            let check_succeed: Result<()> = LocalDisk::write_read_check(local_disk.clone()).await;
+            let check_succeed: Result<()> = LocalDisk::write_read_check(local_disk.clone())
+                .instrument_await("write+read checking")
+                .await;
             if check_succeed.is_err() {
                 local_disk.mark_corrupted();
                 GAUGE_LOCAL_DISK_IS_HEALTHY
