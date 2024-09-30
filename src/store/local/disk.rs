@@ -224,13 +224,21 @@ impl LocalDisk {
             .instrument_await("meet the concurrency limiter")
             .await?;
 
-        let mut writer = self.operator.writer_with(path).append(true).await?;
+        let mut writer = self
+            .operator
+            .writer_with(path)
+            .append(true)
+            .instrument_await("with append options")
+            .await?;
         for x in data.into().always_composed().iter() {
             // we must use the write_all to ensure the buffer consumed by the OS.
             // Please see the detail: https://doc.rust-lang.org/std/io/trait.Write.html#method.write_all
-            writer.write_all(&x).await?;
+            writer
+                .write_all(&x)
+                .instrument_await("writing bytes")
+                .await?;
         }
-        writer.flush().await?;
+        writer.flush().instrument_await("writer flushing").await?;
 
         Ok(())
     }
@@ -249,7 +257,10 @@ impl LocalDisk {
         let length = length.unwrap() as usize;
 
         let mut reader = self.operator.reader(path).await?;
-        reader.seek(SeekFrom::Start(offset as u64)).await?;
+        reader
+            .seek(SeekFrom::Start(offset as u64))
+            .instrument_await("seeking")
+            .await?;
 
         let mut bytes_buffer = BytesMut::with_capacity(length);
         unsafe {
