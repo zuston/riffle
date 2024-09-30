@@ -45,13 +45,16 @@ use std::hash::{Hash, Hasher};
 
 use std::str::FromStr;
 
+use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::grpc::protobuf::uniffle::RemoteStorage;
 use crate::store::mem::capacity::CapacitySnapshot;
+use await_tree::InstrumentAwait;
 use parking_lot::RwLock;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+use tracing::Instrument;
 
 pub static SHUFFLE_SERVER_ID: OnceLock<String> = OnceLock::new();
 pub static SHUFFLE_SERVER_IP: OnceLock<String> = OnceLock::new();
@@ -624,88 +627,110 @@ impl AppManager {
         let app_manager_ref_cloned = app_ref.clone();
 
         runtime_manager.default_runtime.spawn(async move {
-            info!("Starting app heartbeat checker...");
-            loop {
-                // task1: find out heartbeat timeout apps
-                tokio::time::sleep(Duration::from_secs(10)).await;
+            let await_root = AWAIT_TREE_REGISTRY.clone()
+                .register(format!("App heartbeat periodic checker"))
+                .await;
+            await_root.instrument(async move {
+                info!("Starting app heartbeat checker...");
+                loop {
+                    // task1: find out heartbeat timeout apps
+                    tokio::time::sleep(Duration::from_secs(10))
+                        .instrument_await("sleeping for 10s...")
+                        .await;
 
-                for item in app_manager_ref_cloned.apps.iter() {
-                    let (key, app) = item.pair();
-                    let last_time = app.get_latest_heartbeat_time();
-                    let current = now_timestamp_as_sec();
+                    for item in app_manager_ref_cloned.apps.iter() {
+                        let (key, app) = item.pair();
+                        let last_time = app.get_latest_heartbeat_time();
+                        let current = now_timestamp_as_sec();
 
-                    if current - last_time
-                        > (app_manager_ref_cloned.app_heartbeat_timeout_min * 60) as u64
-                    {
-                        info!("Detected app:{:?} heartbeat timeout. now: {:?}, latest heartbeat: {:?}. timeout threshold: {:?}(min)",
-                            key, current, last_time, app_manager_ref_cloned.app_heartbeat_timeout_min);
-                        if app_manager_ref_cloned
-                            .sender
-                            .send(PurgeEvent::HEARTBEAT_TIMEOUT(key.clone()))
-                            .await
-                            .is_err()
+                        if current - last_time
+                            > (app_manager_ref_cloned.app_heartbeat_timeout_min * 60) as u64
                         {
-                            error!(
+                            info!("Detected app:{:?} heartbeat timeout. now: {:?}, latest heartbeat: {:?}. timeout threshold: {:?}(min)",
+                            key, current, last_time, app_manager_ref_cloned.app_heartbeat_timeout_min);
+                            if app_manager_ref_cloned
+                                .sender
+                                .send(PurgeEvent::HEARTBEAT_TIMEOUT(key.clone()))
+                                .await
+                                .is_err()
+                            {
+                                error!(
                                 "Errors on sending purge event when app: {} heartbeat timeout",
                                 key
                             );
+                            }
                         }
                     }
                 }
-            }
+            }).await;
         });
 
         // calculate topN app shuffle data size
         let app_manager_ref = app_ref.clone();
         runtime_manager.default_runtime.spawn(async move {
-            info!("Starting calculating topN app shuffle data size...");
-            loop {
-                tokio::time::sleep(Duration::from_secs(10)).await;
+            let await_root = AWAIT_TREE_REGISTRY
+                .clone()
+                .register(format!("App topN periodic statistics"))
+                .await;
+            await_root
+                .instrument(async move {
+                    info!("Starting calculating topN app shuffle data size...");
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(10))
+                            .instrument_await("sleeping for 10s...")
+                            .await;
 
-                let view = app_manager_ref.apps.clone().into_read_only();
-                let mut apps: Vec<_> = view.values().collect();
-                apps.sort_by_key(|x| 0 - x.total_resident_data_size());
+                        let view = app_manager_ref.apps.clone().into_read_only();
+                        let mut apps: Vec<_> = view.values().collect();
+                        apps.sort_by_key(|x| 0 - x.total_resident_data_size());
 
-                let top_n = 10;
-                let limit = if apps.len() > top_n {
-                    top_n
-                } else {
-                    apps.len()
-                };
-                for idx in 0..limit {
-                    GAUGE_TOPN_APP_RESIDENT_DATA_SIZE
-                        .with_label_values(&[&apps[idx].app_id])
-                        .set(apps[idx].total_resident_data_size() as i64);
-                }
-            }
+                        let top_n = 10;
+                        let limit = if apps.len() > top_n {
+                            top_n
+                        } else {
+                            apps.len()
+                        };
+                        for idx in 0..limit {
+                            GAUGE_TOPN_APP_RESIDENT_DATA_SIZE
+                                .with_label_values(&[&apps[idx].app_id])
+                                .set(apps[idx].total_resident_data_size() as i64);
+                        }
+                    }
+                })
+                .await;
         });
 
         let app_manager_cloned = app_ref.clone();
         runtime_manager.default_runtime.spawn(async move {
-            info!("Starting purge event handler...");
-            while let Ok(event) = app_manager_cloned.receiver.recv().await {
-                let _ = match event {
-                    PurgeEvent::HEARTBEAT_TIMEOUT(app_id) => {
-                        info!(
+            let await_root = AWAIT_TREE_REGISTRY.clone()
+                .register(format!("App periodic purger"))
+                .await;
+            await_root.instrument(async move {
+                info!("Starting purge event handler...");
+                while let Ok(event) = app_manager_cloned.receiver.recv().instrument_await("waiting events coming...").await {
+                    let _ = match event {
+                        PurgeEvent::HEARTBEAT_TIMEOUT(app_id) => {
+                            info!(
                             "The app:[{}]'s data will be purged due to heartbeat timeout",
                             &app_id
                         );
-                        app_manager_cloned.purge_app_data(app_id, None).await
-                    }
-                    PurgeEvent::APP_PURGE(app_id) => {
-                        info!(
+                            app_manager_cloned.purge_app_data(app_id, None).await
+                        }
+                        PurgeEvent::APP_PURGE(app_id) => {
+                            info!(
                             "The app:[{}] has been finished, its data will be purged.",
                             &app_id
                         );
-                        app_manager_cloned.purge_app_data(app_id, None).await
+                            app_manager_cloned.purge_app_data(app_id, None).await
+                        }
+                        PurgeEvent::APP_PARTIAL_SHUFFLES_PURGE(app_id, shuffle_id) => {
+                            info!("The app:[{:?}] with shuffleId: [{:?}] will be purged due to unregister service interface", &app_id, shuffle_id);
+                            app_manager_cloned.purge_app_data(app_id, Some(shuffle_id)).await
+                        }
                     }
-                    PurgeEvent::APP_PARTIAL_SHUFFLES_PURGE(app_id, shuffle_id) => {
-                        info!("The app:[{:?}] with shuffleId: [{:?}] will be purged due to unregister service interface", &app_id, shuffle_id);
-                        app_manager_cloned.purge_app_data(app_id, Some(shuffle_id)).await
-                    }
+                        .map_err(|err| error!("Errors on purging data. error: {:?}", err));
                 }
-                .map_err(|err| error!("Errors on purging data. error: {:?}", err));
-            }
+            }).await;
         });
 
         app_ref
