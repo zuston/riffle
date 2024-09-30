@@ -15,15 +15,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::error::WorkerError;
 use crate::metric::TOTAL_EVICT_TIMEOUT_TICKETS_NUM;
 use crate::runtime::manager::RuntimeManager;
 use anyhow::Result;
+use await_tree::InstrumentAwait;
 use dashmap::DashMap;
 use fastrace::trace;
 use log::warn;
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::Instrument;
 
 #[derive(Clone)]
 pub struct Ticket {
@@ -139,36 +142,52 @@ impl TicketManager {
         mut free_allocated_fn: F,
         runtime_manager: RuntimeManager,
     ) {
+        let await_tree_registry = AWAIT_TREE_REGISTRY.clone();
         runtime_manager.default_runtime.spawn(async move {
-            let ticket_store = ticket_manager.ticket_store;
-            let ticket_timeout_sec = ticket_manager.ticket_timeout_sec;
-            let interval_sec = ticket_manager.ticket_timeout_check_interval_sec;
-
-            loop {
-                let read_view = ticket_store.clone();
-
-                let mut discard_tickets = vec![];
-                for ticket in read_view.iter() {
-                    if ticket.is_timeout(ticket_timeout_sec) {
-                        discard_tickets.push(ticket);
-                    }
-                }
-
-                let mut total_removed_size = 0i64;
-                for ticket in discard_tickets.iter() {
-                    total_removed_size += ticket_store
-                        .remove(&ticket.id)
-                        .map_or(0, |val| val.1.size);
-                }
-                if total_removed_size != 0 {
-                    free_allocated_fn(total_removed_size);
-                    warn!("Removed {:#?} memory allocated timeout tickets, release pre-allocated memory size: {:?}",
-                        discard_tickets.iter().map(|x| &x.owned_by_app_id).collect::<Vec<&String>>(), total_removed_size);
-                    TOTAL_EVICT_TIMEOUT_TICKETS_NUM.inc_by(discard_tickets.len() as u64);
-                }
-                tokio::time::sleep(Duration::from_secs(interval_sec as u64, )).await;
-            }
+            let await_root = await_tree_registry
+                .register("Ticket schedule to check".to_string())
+                .await;
+            await_root
+                .instrument(TicketManager::ticket_check(
+                    ticket_manager,
+                    free_allocated_fn,
+                ))
+                .await;
         });
+    }
+
+    async fn ticket_check<F: FnMut(i64) -> bool + Send + 'static>(
+        ticket_manager: TicketManager,
+        mut free_allocated_fn: F,
+    ) {
+        let ticket_store = ticket_manager.ticket_store;
+        let ticket_timeout_sec = ticket_manager.ticket_timeout_sec;
+        let interval_sec = ticket_manager.ticket_timeout_check_interval_sec;
+
+        loop {
+            let read_view = (*ticket_store).clone().into_read_only();
+
+            let mut discard_tickets = vec![];
+            for ticket in read_view.iter() {
+                if ticket.1.is_timeout(ticket_timeout_sec) {
+                    discard_tickets.push(ticket.1);
+                }
+            }
+
+            let mut total_removed_size = 0i64;
+            for ticket in discard_tickets.iter() {
+                total_removed_size += ticket_store.remove(&ticket.id).map_or(0, |val| val.1.size);
+            }
+            if total_removed_size != 0 {
+                free_allocated_fn(total_removed_size);
+                warn!("Removed {:#?} memory allocated timeout tickets, release pre-allocated memory size: {:?}",
+                        discard_tickets.iter().map(|x| &x.owned_by_app_id).collect::<Vec<&String>>(), total_removed_size);
+                TOTAL_EVICT_TIMEOUT_TICKETS_NUM.inc_by(discard_tickets.len() as u64);
+            }
+            tokio::time::sleep(Duration::from_secs(interval_sec as u64))
+                .instrument_await("scheduling sleep")
+                .await;
+        }
     }
 }
 

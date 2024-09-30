@@ -351,7 +351,10 @@ impl Store for MemoryStore {
         ctx: RequireBufferContext,
     ) -> Result<RequireBufferResponse, WorkerError> {
         let (succeed, ticket_id) = self.budget.require_allocated(ctx.size)?;
-        info!("gotten the requirement: {:?} for uid: {:?}", succeed, &ctx.uid);
+        info!(
+            "gotten the requirement: {:?} for uid: {:?}",
+            succeed, &ctx.uid
+        );
         match succeed {
             true => {
                 let require_buffer_resp = RequireBufferResponse::new(ticket_id);
