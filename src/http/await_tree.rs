@@ -33,9 +33,16 @@ impl Handler for AwaitTreeHandler {
         get(make(|_| async {
             let registry_cloned = AWAIT_TREE_REGISTRY.clone().get_inner();
             let registry = registry_cloned.lock().unwrap();
-            let mut dynamic_string = String::new();
-            for (_, tree) in registry.iter() {
+            let mut sorted_list: Vec<(u64, String)> = vec![];
+            for (v, tree) in registry.iter() {
                 let raw_tree = format!("{}", tree);
+                sorted_list.push((*v, raw_tree));
+            }
+            drop(registry);
+
+            let mut dynamic_string = String::new();
+            sorted_list.sort_by_key(|kv| kv.0);
+            for (_, raw_tree) in sorted_list {
                 dynamic_string.push_str(raw_tree.as_str());
                 dynamic_string.push('\n');
             }
