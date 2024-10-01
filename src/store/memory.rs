@@ -351,7 +351,7 @@ impl Store for MemoryStore {
         ctx: RequireBufferContext,
     ) -> Result<RequireBufferResponse, WorkerError> {
         let (succeed, ticket_id) = self.budget.require_allocated(ctx.size)?;
-        info!(
+        debug!(
             "gotten the requirement: {:?} for uid: {:?}",
             succeed, &ctx.uid
         );
@@ -364,7 +364,7 @@ impl Store for MemoryStore {
                     require_buffer_resp.allocated_timestamp,
                     &ctx.uid.app_id,
                 );
-                info!("Inserted into the ticket for uid: {:?}", &ctx.uid);
+                debug!("Inserted into the ticket for uid: {:?}", &ctx.uid);
                 Ok(require_buffer_resp)
             }
             _ => Err(WorkerError::NO_ENOUGH_MEMORY_TO_BE_ALLOCATED),
