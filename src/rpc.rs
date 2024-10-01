@@ -74,8 +74,13 @@ impl DefaultRpcService {
 
             let app_manager = app_manager_ref.clone();
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port as u16);
-            runtime_manager.urpc_runtime.spawn(async move {
-                urpc_serve(addr, shutdown(rx), app_manager).await;
+
+            std::thread::spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(urpc_serve(addr, shutdown(rx), app_manager));
             });
         }
 
