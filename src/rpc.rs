@@ -101,9 +101,20 @@ impl DefaultRpcService {
                 .max_decoding_message_size(usize::MAX)
                 .max_encoding_message_size(usize::MAX);
             let service_tx = tx.subscribe();
-            runtime_manager
-                .grpc_runtime
-                .spawn(async move { grpc_serve(service, addr, service_tx).await });
+
+            // every std::thread to bound the tokio thread to eliminate thread context switch.
+            // this has been verified by benchmark of terasort 1TB that the long tail latency
+            // will be reduced from 2min -> 4sec
+            // todo:
+            // 1. apply into the urpc service
+            // 2. remove some unnecessary configs
+            std::thread::spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(grpc_serve(service, addr, service_tx));
+            });
         }
 
         Ok(())
