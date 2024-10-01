@@ -18,6 +18,7 @@
 use crate::app::SHUFFLE_SERVER_ID;
 use crate::config::Config;
 use crate::mem_allocator::ALLOCATOR;
+use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
 use log::{error, info};
 use once_cell::sync::Lazy;
@@ -29,6 +30,18 @@ use std::time::Duration;
 
 const DEFAULT_BUCKETS: &[f64; 16] = &[
     0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 40.0, 60.0, 80.0, 100.0,
+];
+
+const SPILL_BATCH_SIZE_BUCKETS: &[f64] = &[
+    ReadableSize::kb(1).as_bytes() as f64,
+    ReadableSize::kb(10).as_bytes() as f64,
+    ReadableSize::kb(100).as_bytes() as f64,
+    ReadableSize::mb(1).as_bytes() as f64,
+    ReadableSize::mb(10).as_bytes() as f64,
+    ReadableSize::mb(100).as_bytes() as f64,
+    ReadableSize::gb(1).as_bytes() as f64,
+    ReadableSize::gb(10).as_bytes() as f64,
+    ReadableSize::gb(100).as_bytes() as f64,
 ];
 
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
@@ -52,6 +65,13 @@ pub static TOTAL_READ_DATA_FROM_LOCALFILE: Lazy<IntCounter> = Lazy::new(|| {
         "Reading Data from localfile",
     )
     .expect("metric should be created")
+});
+
+pub static MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new("memory_spill_batch_size_histogram", "none")
+        .buckets(Vec::from(SPILL_BATCH_SIZE_BUCKETS));
+    let histogram = Histogram::with_opts(opts).unwrap();
+    histogram
 });
 
 pub static GRPC_GET_MEMORY_DATA_TRANSPORT_TIME: Lazy<Histogram> = Lazy::new(|| {
@@ -333,6 +353,10 @@ pub static GAUGE_ALLOCATOR_ALLOCATED_SIZE: Lazy<IntGauge> = Lazy::new(|| {
 });
 
 fn register_custom_metrics() {
+    REGISTRY
+        .register(Box::new(MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM.clone()))
+        .expect("");
+
     REGISTRY
         .register(Box::new(GAUGE_ALLOCATOR_ALLOCATED_SIZE.clone()))
         .expect("");

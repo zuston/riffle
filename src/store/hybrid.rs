@@ -25,8 +25,8 @@ use crate::config::{Config, HybridStoreConfig, StorageType};
 use crate::error::WorkerError;
 use crate::metric::{
     GAUGE_IN_SPILL_DATA_SIZE, GAUGE_MEMORY_SPILL_OPERATION, GAUGE_MEMORY_SPILL_TO_HDFS,
-    GAUGE_MEMORY_SPILL_TO_LOCALFILE, TOTAL_MEMORY_SPILL_OPERATION,
-    TOTAL_MEMORY_SPILL_OPERATION_FAILED, TOTAL_MEMORY_SPILL_TO_HDFS,
+    GAUGE_MEMORY_SPILL_TO_LOCALFILE, MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM,
+    TOTAL_MEMORY_SPILL_OPERATION, TOTAL_MEMORY_SPILL_OPERATION_FAILED, TOTAL_MEMORY_SPILL_TO_HDFS,
     TOTAL_MEMORY_SPILL_TO_LOCALFILE, TOTAL_SPILL_EVENTS_DROPPED,
 };
 use crate::readable_size::ReadableSize;
@@ -347,6 +347,7 @@ impl HybridStore {
                 spill_result.flight_id(),
             )
             .await?;
+            MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM.observe(flight_len as f64);
         }
         debug!(
             "[Spill] Picked up blocks that should be async flushed with {}(bytes) that costs {}(ms).",
