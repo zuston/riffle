@@ -18,6 +18,8 @@
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::metric::{
     GAUGE_LOCAL_DISK_CAPACITY, GAUGE_LOCAL_DISK_IS_HEALTHY, GAUGE_LOCAL_DISK_USED,
+    LOCALFILE_DISK_APPEND_OPERATION_TIME, LOCALFILE_DISK_DELETE_OPERATION_TIME,
+    LOCALFILE_DISK_READ_OPERATION_TIME, LOCALFILE_DISK_STAT_OPERATION_TIME,
 };
 use crate::runtime::manager::RuntimeManager;
 use crate::store::BytesWrapper;
@@ -224,6 +226,10 @@ impl LocalDisk {
             .instrument_await("meet the concurrency limiter")
             .await?;
 
+        let timer = LOCALFILE_DISK_APPEND_OPERATION_TIME
+            .with_label_values(&[self.root.as_str()])
+            .start_timer();
+
         let mut writer = self
             .operator
             .writer_with(path)
@@ -239,18 +245,28 @@ impl LocalDisk {
                 .await?;
         }
         writer.flush().instrument_await("writer flushing").await?;
+        timer.observe_duration();
 
         Ok(())
     }
 
     pub async fn get_file_len(&self, path: &str) -> Result<i64> {
-        match self.operator.stat(path).await {
-            Ok(meta) => Ok(meta.content_length() as i64),
-            Err(_) => Ok(0),
-        }
+        let timer = LOCALFILE_DISK_STAT_OPERATION_TIME
+            .with_label_values(&[self.root.as_str()])
+            .start_timer();
+        let result = match self.operator.stat(path).await {
+            Ok(meta) => meta.content_length() as i64,
+            Err(_) => 0,
+        };
+        timer.observe_duration();
+        Ok(result)
     }
 
     pub async fn read(&self, path: &str, offset: i64, length: Option<i64>) -> Result<Bytes> {
+        let timer = LOCALFILE_DISK_READ_OPERATION_TIME
+            .with_label_values(&[self.root.as_str()])
+            .start_timer();
+
         if length.is_none() {
             return Ok(Bytes::from(self.operator.read(path).await?));
         }
@@ -267,11 +283,17 @@ impl LocalDisk {
             bytes_buffer.set_len(length);
         }
         reader.read_exact(&mut bytes_buffer).await?;
-        Ok(bytes_buffer.freeze())
+        let bytes = bytes_buffer.freeze();
+        timer.observe_duration();
+        Ok(bytes)
     }
 
     pub async fn delete(&self, path: &str) -> Result<()> {
+        let timer = LOCALFILE_DISK_DELETE_OPERATION_TIME
+            .with_label_values(&[self.root.as_str()])
+            .start_timer();
         self.operator.remove_all(path).await?;
+        timer.observe_duration();
         Ok(())
     }
 

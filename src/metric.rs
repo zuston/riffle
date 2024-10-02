@@ -147,6 +147,46 @@ pub static GRPC_LATENCY_TIME_SEC: Lazy<HistogramVec> = Lazy::new(|| {
     grpc_latency
 });
 
+pub static LOCALFILE_DISK_STAT_OPERATION_TIME: Lazy<HistogramVec> = Lazy::new(|| {
+    let opts = histogram_opts!(
+        "localfile_disk_stat_operation_time",
+        "localfile disk stat time",
+        Vec::from(DEFAULT_BUCKETS)
+    );
+    let opts = register_histogram_vec_with_registry!(opts, &["root"], REGISTRY).unwrap();
+    opts
+});
+
+pub static LOCALFILE_DISK_APPEND_OPERATION_TIME: Lazy<HistogramVec> = Lazy::new(|| {
+    let opts = histogram_opts!(
+        "localfile_disk_append_operation_time",
+        "localfile disk append time",
+        Vec::from(DEFAULT_BUCKETS)
+    );
+    let opts = register_histogram_vec_with_registry!(opts, &["root"], REGISTRY).unwrap();
+    opts
+});
+
+pub static LOCALFILE_DISK_READ_OPERATION_TIME: Lazy<HistogramVec> = Lazy::new(|| {
+    let opts = histogram_opts!(
+        "localfile_disk_read_operation_time",
+        "localfile disk read time",
+        Vec::from(DEFAULT_BUCKETS)
+    );
+    let opts = register_histogram_vec_with_registry!(opts, &["root"], REGISTRY).unwrap();
+    opts
+});
+
+pub static LOCALFILE_DISK_DELETE_OPERATION_TIME: Lazy<HistogramVec> = Lazy::new(|| {
+    let opts = histogram_opts!(
+        "localfile_disk_delete_operation_time",
+        "localfile disk delete time",
+        Vec::from(DEFAULT_BUCKETS)
+    );
+    let opts = register_histogram_vec_with_registry!(opts, &["root"], REGISTRY).unwrap();
+    opts
+});
+
 // for urpc metrics
 
 pub static URPC_GET_LOCALFILE_DATA_PROCESS_TIME: Lazy<Histogram> = Lazy::new(|| {
