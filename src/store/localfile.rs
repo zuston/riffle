@@ -388,10 +388,11 @@ impl Store for LocalFileStore {
                 &index_file_path
             ))
             .await?;
-        let len = local_disk
-            .get_file_len(&data_file_path)
+        let file_stat = local_disk
+            .stat(&data_file_path)
             .instrument_await(format!("getting file len from file: {:?}", &data_file_path))
             .await?;
+        let len = file_stat.content_length as i64;
         Ok(Local(LocalDataIndex {
             index_data: index_data_result,
             data_file_len: len,

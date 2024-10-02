@@ -28,7 +28,7 @@ use await_tree::InstrumentAwait;
 use bytes::{Bytes, BytesMut};
 use log::{debug, error, info, warn};
 use opendal::services::Fs;
-use opendal::Operator;
+use opendal::{Metadata, Operator};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -252,16 +252,13 @@ impl LocalDisk {
         Ok(())
     }
 
-    pub async fn get_file_len(&self, path: &str) -> Result<i64> {
+    pub async fn stat(&self, path: &str) -> Result<FileStat> {
         let timer = LOCALFILE_DISK_STAT_OPERATION_TIME
             .with_label_values(&[self.root.as_str()])
             .start_timer();
-        let result = match self.operator.stat(path).await {
-            Ok(meta) => meta.content_length() as i64,
-            Err(_) => 0,
-        };
+        let meta = self.operator.stat(path).await?;
         timer.observe_duration();
-        Ok(result)
+        return Ok(FileStat::from(meta));
     }
 
     pub async fn read(&self, path: &str, offset: i64, length: Option<i64>) -> Result<Bytes> {
@@ -337,11 +334,23 @@ impl LocalDisk {
     }
 }
 
+pub struct FileStat {
+    pub content_length: u64,
+}
+
+impl From<Metadata> for FileStat {
+    fn from(meta: Metadata) -> Self {
+        let content_length = meta.content_length();
+        FileStat { content_length }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::runtime::manager::RuntimeManager;
     use crate::store::local::disk::{LocalDisk, LocalDiskConfig};
     use bytes::Bytes;
+    use opendal::Metadata;
     use std::time::Duration;
 
     #[test]
