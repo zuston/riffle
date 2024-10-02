@@ -26,16 +26,14 @@ use crate::store::BytesWrapper;
 use anyhow::{anyhow, Result};
 use await_tree::InstrumentAwait;
 use bytes::{Bytes, BytesMut};
-use futures::AsyncWriteExt;
 use log::{debug, error, info, warn};
 use opendal::services::Fs;
-use opendal::{BlockingOperator, Operator};
-use std::fs::read;
+use opendal::Operator;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::Semaphore;
 
 pub struct LocalDiskConfig {
@@ -230,12 +228,16 @@ impl LocalDisk {
             .with_label_values(&[self.root.as_str()])
             .start_timer();
 
-        let mut writer = self
+        let writer = self
             .operator
             .writer_with(path)
             .append(true)
             .instrument_await("with append options")
             .await?;
+
+        // todo: the capacity should be optimized.
+        let mut writer = BufWriter::with_capacity(1024 * 1024, writer);
+
         for x in data.into().always_composed().iter() {
             // we must use the write_all to ensure the buffer consumed by the OS.
             // Please see the detail: https://doc.rust-lang.org/std/io/trait.Write.html#method.write_all
@@ -272,7 +274,10 @@ impl LocalDisk {
         }
         let length = length.unwrap() as usize;
 
-        let mut reader = self.operator.reader(path).await?;
+        let reader = self.operator.reader(path).await?;
+
+        // todo: as the 8KB, but this could be optimized
+        let mut reader = BufReader::with_capacity(8 * 1024, reader);
         reader
             .seek(SeekFrom::Start(offset as u64))
             .instrument_await("seeking")
