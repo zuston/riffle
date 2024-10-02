@@ -31,7 +31,7 @@ name = "uniffle_worker"
 path = "src/lib.rs"
 
 [features]
-default = ["jemalloc", "allocator-analysis"]
+#default = ["jemalloc", "allocator-analysis"]
 
 # whether to use jemalloc as the global allocator or not
 jemalloc = ["dep:tikv-jemalloc-ctl", "dep:tikv-jemalloc-sys", "dep:tikv-jemallocator"]
