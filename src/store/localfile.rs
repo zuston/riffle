@@ -97,6 +97,15 @@ impl LocalFileStore {
     pub fn from(localfile_config: LocalfileStoreConfig, runtime_manager: RuntimeManager) -> Self {
         let mut local_disk_instances = vec![];
         for path in localfile_config.data_paths {
+            // clear up all previous disk data
+            if let Err(e) = LocalFileStore::remove_dir_children(path.as_str()) {
+                panic!(
+                    "Errors on clear up children files of path: {:?}. err: {:#?}",
+                    path.as_str(),
+                    e
+                );
+            }
+
             let config = LocalDiskConfig {
                 high_watermark: localfile_config.disk_high_watermark,
                 low_watermark: localfile_config.disk_low_watermark,
@@ -111,6 +120,22 @@ impl LocalFileStore {
             runtime_manager,
             partition_locks: Default::default(),
         }
+    }
+
+    fn remove_dir_children(parent: &str) -> Result<()> {
+        for entry in std::fs::read_dir(parent)? {
+            let entry = entry?;
+            let file_type = entry.file_type()?;
+            if file_type.is_dir() {
+                std::fs::remove_dir_all(entry.path())?;
+                continue;
+            }
+            if file_type.is_file() {
+                std::fs::remove_file(entry.path())?;
+                continue;
+            }
+        }
+        Ok(())
     }
 
     fn gen_relative_path_for_app(app_id: &str) -> String {
