@@ -22,6 +22,7 @@ pub mod local;
 pub mod localfile;
 pub mod mem;
 pub mod memory;
+mod spill;
 
 use crate::app::{
     PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingViewContext,
@@ -41,6 +42,7 @@ use bytes::Bytes;
 use crate::composed_bytes::ComposedBytes;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::mem::buffer::BatchMemoryBlock;
+use crate::store::spill::SpillWritingViewContext;
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -258,21 +260,6 @@ impl StoreProvider {
 }
 
 // ====================
-
-#[derive(Debug, Clone)]
-pub struct SpillWritingViewContext {
-    pub uid: PartitionedUId,
-    pub data_blocks: Arc<BatchMemoryBlock>,
-}
-
-impl SpillWritingViewContext {
-    pub fn new(uid: PartitionedUId, blocks: Arc<BatchMemoryBlock>) -> Self {
-        Self {
-            uid,
-            data_blocks: blocks,
-        }
-    }
-}
 
 // ==================
 pub enum ExecutionTime {

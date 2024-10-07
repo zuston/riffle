@@ -4,14 +4,16 @@ use crate::metric::{
     TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE,
 };
 use crate::runtime::RuntimeRef;
+use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use tracing::Instrument;
 
+#[async_trait]
 pub trait Subscriber {
     type Input;
 
-    fn on_event(&self, event: &Event<Self::Input>);
+    async fn on_event(&self, event: &Event<Self::Input>);
 }
 
 pub struct Event<T> {
@@ -76,9 +78,9 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
     async fn handle(event_bus: EventBus<T>) {
         while let Ok(message) = event_bus.queue_recv.recv().await {
             let subscribers = event_bus.subscribers.lock();
-            for subscriber in subscribers.iter() {
-                subscriber.on_event(&message);
-            }
+            // for subscriber in subscribers.iter() {
+            //     subscriber.on_event(&message).await;
+            // }
             GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE
                 .with_label_values(&[&event_bus.name])
                 .dec();
@@ -110,6 +112,7 @@ mod test {
     use crate::event_bus::{Event, EventBus, Subscriber};
     use crate::metric::{TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE, TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE};
     use crate::runtime::manager::create_runtime;
+    use async_trait::async_trait;
     use std::sync::atomic::{AtomicI64, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
@@ -124,15 +127,19 @@ mod test {
         struct SimpleCallback {
             flag: Arc<AtomicI64>,
         }
+
+        #[async_trait]
         impl Subscriber for SimpleCallback {
             type Input = String;
 
-            fn on_event(&self, event: &Event<Self::Input>) {
+            async fn on_event(&self, event: &Event<Self::Input>) {
                 println!("SimpleCallback has accepted event: {:?}", event.get_data());
                 self.flag.fetch_add(1, Ordering::SeqCst);
             }
         }
-        event_bus.subscribe(SimpleCallback { flag: flag.clone() });
+
+        let flag_cloned = flag.clone();
+        event_bus.subscribe(SimpleCallback { flag: flag_cloned });
 
         let _ = runtime
             .block_on(async move { event_bus.publish("singleEvent".to_string().into()).await });

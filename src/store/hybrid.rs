@@ -35,10 +35,7 @@ use crate::store::hdfs::HdfsStore;
 use crate::store::localfile::LocalFileStore;
 use crate::store::memory::MemoryStore;
 
-use crate::store::{
-    Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex, SpillWritingViewContext,
-    Store,
-};
+use crate::store::{Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex, Store};
 use anyhow::{anyhow, Result};
 
 use async_trait::async_trait;
@@ -55,13 +52,15 @@ use fastrace::trace;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use crate::event_bus::EventBus;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::mem::buffer::BatchMemoryBlock;
 use crate::store::mem::capacity::CapacitySnapshot;
+use crate::store::spill::{SpillMessage, SpillWritingViewContext};
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::Instant;
 
-trait PersistentStore: Store + Persistent + Send + Sync {}
+pub trait PersistentStore: Store + Persistent + Send + Sync {}
 impl PersistentStore for LocalFileStore {}
 
 #[cfg(feature = "hdfs")]
@@ -86,15 +85,8 @@ pub struct HybridStore {
     memory_spill_max_concurrency: i32,
 
     runtime_manager: RuntimeManager,
-}
 
-#[derive(Clone)]
-struct SpillMessage {
-    ctx: SpillWritingViewContext,
-    size: i64,
-    retry_cnt: i32,
-    previous_spilled_storage: Option<Arc<Box<dyn PersistentStore>>>,
-    flight_id: u64,
+    pub event_bus: EventBus<SpillMessage>,
 }
 
 unsafe impl Send for HybridStore {}
@@ -133,6 +125,11 @@ impl HybridStore {
             };
         let memory_spill_max_concurrency = hybrid_conf.memory_spill_max_concurrency;
 
+        let event_bus: EventBus<SpillMessage> = EventBus::new(
+            runtime_manager.dispatch_runtime.clone(),
+            "HybridStoreSpill".to_string(),
+        );
+
         let store = HybridStore {
             hot_store: Arc::new(MemoryStore::from(
                 config.memory_store.unwrap(),
@@ -148,8 +145,13 @@ impl HybridStore {
             memory_spill_to_cold_threshold_size,
             memory_spill_max_concurrency,
             runtime_manager,
+            event_bus,
         };
         store
+    }
+
+    pub fn dec_spill_event_num(&self, delta: u64) {
+        self.memory_spill_event_num.dec_by(delta);
     }
 
     fn is_memory_only(&self) -> bool {
@@ -169,7 +171,7 @@ impl HybridStore {
         false
     }
 
-    async fn memory_spill_to_persistent_store(
+    pub async fn memory_spill_to_persistent_store(
         &self,
         spill_message: SpillMessage,
     ) -> Result<String, WorkerError> {
@@ -312,7 +314,11 @@ impl HybridStore {
         Ok(())
     }
 
-    async fn release_data_in_memory(&self, data_size: i64, message: &SpillMessage) -> Result<()> {
+    pub async fn release_data_in_memory(
+        &self,
+        data_size: i64,
+        message: &SpillMessage,
+    ) -> Result<()> {
         let uid = &message.ctx.uid;
         self.hot_store
             .clear_spilled_memory_buffer(uid.clone(), message.flight_id, data_size as u64)
@@ -368,6 +374,8 @@ impl Store for HybridStore {
         if self.is_memory_only() {
             return;
         }
+
+        // self.event_bus.subscribe();
 
         let await_tree_registry = AWAIT_TREE_REGISTRY.clone();
         let store = self.clone();

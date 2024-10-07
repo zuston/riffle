@@ -24,9 +24,7 @@ use crate::config::{MemoryStoreConfig, StorageType};
 use crate::error::WorkerError;
 use crate::metric::TOTAL_MEMORY_USED;
 use crate::readable_size::ReadableSize;
-use crate::store::{
-    Block, RequireBufferResponse, ResponseData, ResponseDataIndex, SpillWritingViewContext, Store,
-};
+use crate::store::{Block, RequireBufferResponse, ResponseData, ResponseDataIndex, Store};
 use crate::*;
 use async_trait::async_trait;
 use dashmap::DashMap;
@@ -40,6 +38,7 @@ use crate::store::mem::budget::MemoryBudget;
 use crate::store::mem::buffer::MemoryBuffer;
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::mem::ticket::TicketManager;
+use crate::store::spill::SpillWritingViewContext;
 use anyhow::anyhow;
 use croaring::Treemap;
 use fastrace::trace;

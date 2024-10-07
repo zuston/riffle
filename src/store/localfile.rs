@@ -26,7 +26,7 @@ use crate::metric::TOTAL_LOCALFILE_USED;
 use crate::store::ResponseDataIndex::Local;
 use crate::store::{
     Block, LocalDataIndex, PartitionedLocalData, Persistent, RequireBufferResponse, ResponseData,
-    ResponseDataIndex, SpillWritingViewContext, Store,
+    ResponseDataIndex, Store,
 };
 use std::ops::Deref;
 use std::path::Path;
@@ -47,6 +47,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::store::local::disk::{LocalDisk, LocalDiskConfig};
+use crate::store::spill::SpillWritingViewContext;
 
 struct LockedObj {
     disk: Arc<LocalDisk>,
