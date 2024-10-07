@@ -18,8 +18,8 @@
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::metric::{
     GAUGE_LOCAL_DISK_CAPACITY, GAUGE_LOCAL_DISK_IS_HEALTHY, GAUGE_LOCAL_DISK_USED,
-    LOCALFILE_DISK_APPEND_OPERATION_TIME, LOCALFILE_DISK_DELETE_OPERATION_TIME,
-    LOCALFILE_DISK_READ_OPERATION_TIME, LOCALFILE_DISK_STAT_OPERATION_TIME,
+    LOCALFILE_DISK_APPEND_OPERATION_DURATION, LOCALFILE_DISK_DELETE_OPERATION_DURATION,
+    LOCALFILE_DISK_READ_OPERATION_DURATION, LOCALFILE_DISK_STAT_OPERATION_DURATION,
 };
 use crate::runtime::manager::RuntimeManager;
 use crate::store::BytesWrapper;
@@ -224,7 +224,7 @@ impl LocalDisk {
             .instrument_await("meet the concurrency limiter")
             .await?;
 
-        let timer = LOCALFILE_DISK_APPEND_OPERATION_TIME
+        let timer = LOCALFILE_DISK_APPEND_OPERATION_DURATION
             .with_label_values(&[self.root.as_str()])
             .start_timer();
 
@@ -253,7 +253,7 @@ impl LocalDisk {
     }
 
     pub async fn stat(&self, path: &str) -> Result<FileStat> {
-        let timer = LOCALFILE_DISK_STAT_OPERATION_TIME
+        let timer = LOCALFILE_DISK_STAT_OPERATION_DURATION
             .with_label_values(&[self.root.as_str()])
             .start_timer();
         let meta = self.operator.stat(path).await?;
@@ -262,7 +262,7 @@ impl LocalDisk {
     }
 
     pub async fn read(&self, path: &str, offset: i64, length: Option<i64>) -> Result<Bytes> {
-        let timer = LOCALFILE_DISK_READ_OPERATION_TIME
+        let timer = LOCALFILE_DISK_READ_OPERATION_DURATION
             .with_label_values(&[self.root.as_str()])
             .start_timer();
 
@@ -291,7 +291,7 @@ impl LocalDisk {
     }
 
     pub async fn delete(&self, path: &str) -> Result<()> {
-        let timer = LOCALFILE_DISK_DELETE_OPERATION_TIME
+        let timer = LOCALFILE_DISK_DELETE_OPERATION_DURATION
             .with_label_values(&[self.root.as_str()])
             .start_timer();
         self.operator.remove_all(path).await?;

@@ -147,9 +147,9 @@ pub static GRPC_LATENCY_TIME_SEC: Lazy<HistogramVec> = Lazy::new(|| {
     grpc_latency
 });
 
-pub static LOCALFILE_DISK_STAT_OPERATION_TIME: Lazy<HistogramVec> = Lazy::new(|| {
+pub static LOCALFILE_DISK_STAT_OPERATION_DURATION: Lazy<HistogramVec> = Lazy::new(|| {
     let opts = histogram_opts!(
-        "localfile_disk_stat_operation_time",
+        "localfile_disk_stat_operation_duration",
         "localfile disk stat time",
         Vec::from(DEFAULT_BUCKETS)
     );
@@ -157,9 +157,9 @@ pub static LOCALFILE_DISK_STAT_OPERATION_TIME: Lazy<HistogramVec> = Lazy::new(||
     opts
 });
 
-pub static LOCALFILE_DISK_APPEND_OPERATION_TIME: Lazy<HistogramVec> = Lazy::new(|| {
+pub static LOCALFILE_DISK_APPEND_OPERATION_DURATION: Lazy<HistogramVec> = Lazy::new(|| {
     let opts = histogram_opts!(
-        "localfile_disk_append_operation_time",
+        "localfile_disk_append_operation_duration",
         "localfile disk append time",
         Vec::from(DEFAULT_BUCKETS)
     );
@@ -167,9 +167,9 @@ pub static LOCALFILE_DISK_APPEND_OPERATION_TIME: Lazy<HistogramVec> = Lazy::new(
     opts
 });
 
-pub static LOCALFILE_DISK_READ_OPERATION_TIME: Lazy<HistogramVec> = Lazy::new(|| {
+pub static LOCALFILE_DISK_READ_OPERATION_DURATION: Lazy<HistogramVec> = Lazy::new(|| {
     let opts = histogram_opts!(
-        "localfile_disk_read_operation_time",
+        "localfile_disk_read_operation_duration",
         "localfile disk read time",
         Vec::from(DEFAULT_BUCKETS)
     );
@@ -177,9 +177,9 @@ pub static LOCALFILE_DISK_READ_OPERATION_TIME: Lazy<HistogramVec> = Lazy::new(||
     opts
 });
 
-pub static LOCALFILE_DISK_DELETE_OPERATION_TIME: Lazy<HistogramVec> = Lazy::new(|| {
+pub static LOCALFILE_DISK_DELETE_OPERATION_DURATION: Lazy<HistogramVec> = Lazy::new(|| {
     let opts = histogram_opts!(
-        "localfile_disk_delete_operation_time",
+        "localfile_disk_delete_operation_duration",
         "localfile disk delete time",
         Vec::from(DEFAULT_BUCKETS)
     );
