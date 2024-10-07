@@ -23,8 +23,9 @@ use crate::runtime::manager::RuntimeManager;
 use log::{error, info};
 use once_cell::sync::Lazy;
 use prometheus::{
-    histogram_opts, labels, register_histogram_vec_with_registry, register_int_gauge_vec,
-    Histogram, HistogramOpts, HistogramVec, IntCounter, IntGauge, IntGaugeVec, Registry,
+    histogram_opts, labels, register_histogram_vec_with_registry, register_int_counter_vec,
+    register_int_gauge_vec, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec,
+    IntGauge, IntGaugeVec, Registry,
 };
 use std::time::Duration;
 
@@ -393,7 +394,44 @@ pub static GAUGE_ALLOCATOR_ALLOCATED_SIZE: Lazy<IntGauge> = Lazy::new(|| {
     .unwrap()
 });
 
+pub static GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "eventbus_queue_pending_size",
+        "queue pending size of event bus",
+        &["name"]
+    )
+    .unwrap()
+});
+
+pub static TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
+        "eventbus_total_published_event_size",
+        "total published event size of event bus",
+        &["name"]
+    )
+    .unwrap()
+});
+
+pub static TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
+        "eventbus_total_handled_event_size",
+        "total handled event size of event bus",
+        &["name"]
+    )
+    .unwrap()
+});
+
 fn register_custom_metrics() {
+    REGISTRY
+        .register(Box::new(GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE.clone()))
+        .expect("");
+    REGISTRY
+        .register(Box::new(TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE.clone()))
+        .expect("");
+    REGISTRY
+        .register(Box::new(TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE.clone()))
+        .expect("");
+
     REGISTRY
         .register(Box::new(MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM.clone()))
         .expect("");

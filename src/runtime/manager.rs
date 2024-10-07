@@ -38,6 +38,17 @@ pub struct RuntimeManager {
     pub dispatch_runtime: RuntimeRef,
 }
 
+pub fn create_runtime(pool_size: usize, name: &str) -> RuntimeRef {
+    Arc::new(
+        Builder::default()
+            .worker_threads(pool_size as usize)
+            .thread_name(name)
+            .enable_all()
+            .build()
+            .unwrap(),
+    )
+}
+
 impl Default for RuntimeManager {
     fn default() -> Self {
         RuntimeManager::from(Default::default())
@@ -46,17 +57,6 @@ impl Default for RuntimeManager {
 
 impl RuntimeManager {
     pub fn from(config: RuntimeConfig) -> Self {
-        fn create_runtime(pool_size: usize, name: &str) -> RuntimeRef {
-            Arc::new(
-                Builder::default()
-                    .worker_threads(pool_size as usize)
-                    .thread_name(name)
-                    .enable_all()
-                    .build()
-                    .unwrap(),
-            )
-        }
-
         Self {
             read_runtime: create_runtime(config.read_thread_num, "read_thread_pool"),
             write_runtime: create_runtime(config.write_thread_num, "write_thread_pool"),

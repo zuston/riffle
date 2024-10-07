@@ -39,6 +39,8 @@ pub mod tracing;
 pub mod urpc;
 pub mod util;
 
+pub mod event_bus;
+
 use crate::app::{AppManager, AppManagerRef};
 use crate::common::init_global_variable;
 use crate::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
