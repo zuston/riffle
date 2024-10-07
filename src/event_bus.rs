@@ -90,7 +90,7 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
         }
     }
 
-    pub fn subscribe<R: Subscriber<Input = T> + 'static>(&mut self, listener: R) {
+    pub fn subscribe<R: Subscriber<Input = T> + 'static>(&self, listener: R) {
         let mut subscribers = self.subscribers.lock();
         subscribers.push(Box::new(listener));
     }

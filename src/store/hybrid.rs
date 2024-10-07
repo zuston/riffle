@@ -19,15 +19,13 @@ use crate::app::{
     PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
     RegisterAppContext, ReleaseTicketContext, RequireBufferContext, WritingViewContext,
 };
-use crate::await_tree::AWAIT_TREE_REGISTRY;
 
 use crate::config::{Config, HybridStoreConfig, StorageType};
 use crate::error::WorkerError;
 use crate::metric::{
-    GAUGE_IN_SPILL_DATA_SIZE, GAUGE_MEMORY_SPILL_OPERATION, GAUGE_MEMORY_SPILL_TO_HDFS,
-    GAUGE_MEMORY_SPILL_TO_LOCALFILE, MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM,
-    TOTAL_MEMORY_SPILL_OPERATION, TOTAL_MEMORY_SPILL_OPERATION_FAILED, TOTAL_MEMORY_SPILL_TO_HDFS,
-    TOTAL_MEMORY_SPILL_TO_LOCALFILE, TOTAL_SPILL_EVENTS_DROPPED,
+    GAUGE_MEMORY_SPILL_TO_HDFS, GAUGE_MEMORY_SPILL_TO_LOCALFILE,
+    MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM, TOTAL_MEMORY_SPILL_TO_HDFS,
+    TOTAL_MEMORY_SPILL_TO_LOCALFILE,
 };
 use crate::readable_size::ReadableSize;
 #[cfg(feature = "hdfs")]
@@ -56,8 +54,9 @@ use crate::event_bus::EventBus;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::mem::buffer::BatchMemoryBlock;
 use crate::store::mem::capacity::CapacitySnapshot;
+use crate::store::spill::event_handler::SpillEventHandler;
 use crate::store::spill::{SpillMessage, SpillWritingViewContext};
-use tokio::sync::{Mutex, Semaphore};
+use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 pub trait PersistentStore: Store + Persistent + Send + Sync {}
@@ -76,9 +75,8 @@ pub struct HybridStore {
     cold_store: Option<Box<dyn PersistentStore>>,
 
     config: HybridStoreConfig,
+
     memory_spill_lock: Mutex<()>,
-    memory_spill_recv: async_channel::Receiver<SpillMessage>,
-    memory_spill_send: async_channel::Sender<SpillMessage>,
     memory_spill_event_num: AtomicU64,
 
     memory_spill_to_cold_threshold_size: Option<u64>,
@@ -116,7 +114,6 @@ impl HybridStore {
             persistent_stores.push_back(Box::new(hdfs_store));
         }
 
-        let (send, recv) = async_channel::unbounded();
         let hybrid_conf = config.hybrid_store;
         let memory_spill_to_cold_threshold_size =
             match &hybrid_conf.memory_spill_to_cold_threshold_size {
@@ -139,8 +136,6 @@ impl HybridStore {
             cold_store: persistent_stores.pop_front(),
             config: hybrid_conf,
             memory_spill_lock: Mutex::new(()),
-            memory_spill_recv: recv,
-            memory_spill_send: send,
             memory_spill_event_num: AtomicU64::new(0),
             memory_spill_to_cold_threshold_size,
             memory_spill_max_concurrency,
@@ -295,14 +290,17 @@ impl HybridStore {
         let writing_ctx = SpillWritingViewContext::new(uid, blocks);
 
         if self
-            .memory_spill_send
-            .send(SpillMessage {
-                ctx: writing_ctx,
-                size: spill_size,
-                retry_cnt: 0,
-                previous_spilled_storage: None,
-                flight_id,
-            })
+            .event_bus
+            .publish(
+                SpillMessage {
+                    ctx: writing_ctx,
+                    size: spill_size,
+                    retry_cnt: 0,
+                    previous_spilled_storage: None,
+                    flight_id,
+                }
+                .into(),
+            )
             .await
             .is_err()
         {
@@ -375,78 +373,8 @@ impl Store for HybridStore {
             return;
         }
 
-        // self.event_bus.subscribe();
-
-        let await_tree_registry = AWAIT_TREE_REGISTRY.clone();
-        let store = self.clone();
-        let concurrency_limiter =
-            Arc::new(Semaphore::new(store.memory_spill_max_concurrency as usize));
-        self.runtime_manager.dispatch_runtime.spawn(async move {
-            while let Ok(mut message) = store.memory_spill_recv.recv().await {
-                // using acquire_owned(), refer to https://github.com/tokio-rs/tokio/issues/1998
-                let concurrency_guarder = concurrency_limiter
-                    .clone()
-                    .acquire_owned()
-                    .instrument_await("waiting for the spill concurrent lock.")
-                    .await
-                    .unwrap();
-
-                let await_root = await_tree_registry
-                    .register(format!("hot->warm flush. uid: {:#?}", &message.ctx.uid))
-                    .await;
-
-                let store_ref = store.clone();
-                store
-                    .runtime_manager
-                    .dispatch_runtime
-                    .spawn(await_root.instrument(async move {
-                        let size = message.size;
-
-                        GAUGE_IN_SPILL_DATA_SIZE.add(size);
-                        TOTAL_MEMORY_SPILL_OPERATION.inc();
-                        GAUGE_MEMORY_SPILL_OPERATION.inc();
-
-                        match store_ref
-                            .memory_spill_to_persistent_store(message.clone())
-                            .instrument_await("memory_spill_to_persistent_store.")
-                            .await
-                        {
-                            Ok(msg) => {
-                                debug!("{}", msg);
-                                if let Err(err) = store_ref.release_data_in_memory(size, &message).await {
-                                    error!("Errors on releasing memory data, that should not happen. err: {:#?}", err);
-                                }
-
-                                store_ref.memory_spill_event_num.dec_by(1);
-                            }
-                            Err(WorkerError::SPILL_EVENT_EXCEED_RETRY_MAX_LIMIT(_))
-                            | Err(WorkerError::PARTIAL_DATA_LOST(_))
-                            | Err(WorkerError::LOCAL_DISK_UNHEALTHY(_)) => {
-                                warn!("Dropping the spill event for app: {:?}. Attention: this will make data lost!", message.ctx.uid.app_id);
-                                if let Err(err) = store_ref.release_data_in_memory(size, &message).await {
-                                    error!("Errors on releasing memory data when dropping the spill event, that should not happen. err: {:#?}", err);
-                                }
-                                TOTAL_SPILL_EVENTS_DROPPED.inc();
-                                TOTAL_MEMORY_SPILL_OPERATION_FAILED.inc();
-
-                                store_ref.memory_spill_event_num.dec_by(1);
-                            }
-                            Err(error) => {
-                                TOTAL_MEMORY_SPILL_OPERATION_FAILED.inc();
-                                error!(
-                                "Errors on spill memory data to persistent storage. The error: {:#?}",
-                                    error);
-
-                                message.retry_cnt = message.retry_cnt + 1;
-                                // re-push to the queue to execute
-                                let _ = store_ref.memory_spill_send.send(message).await;
-                            }
-                        }
-                        GAUGE_IN_SPILL_DATA_SIZE.sub(size);
-                        GAUGE_MEMORY_SPILL_OPERATION.dec();
-                        drop(concurrency_guarder);
-                    }));
-            }
+        self.event_bus.subscribe(SpillEventHandler {
+            store: self.clone(),
         });
     }
 

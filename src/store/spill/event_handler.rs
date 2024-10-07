@@ -11,8 +11,8 @@ use await_tree::InstrumentAwait;
 use log::{debug, error, warn};
 use std::sync::Arc;
 
-struct SpillEventHandler {
-    store: Arc<HybridStore>,
+pub struct SpillEventHandler {
+    pub store: Arc<HybridStore>,
 }
 
 unsafe impl Send for SpillEventHandler {}
