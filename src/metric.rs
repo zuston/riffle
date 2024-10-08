@@ -193,6 +193,15 @@ pub static LOCALFILE_DISK_DELETE_OPERATION_DURATION: Lazy<HistogramVec> = Lazy::
     opts
 });
 
+pub static TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
+        "localfile_disk_append_operation_counter",
+        "localfile disk append operation counter",
+        &["root"]
+    )
+    .unwrap()
+});
+
 // for urpc metrics
 
 pub static URPC_GET_LOCALFILE_DATA_PROCESS_TIME: Lazy<Histogram> = Lazy::new(|| {

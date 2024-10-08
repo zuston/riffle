@@ -20,6 +20,7 @@ use crate::metric::{
     GAUGE_LOCAL_DISK_CAPACITY, GAUGE_LOCAL_DISK_IS_HEALTHY, GAUGE_LOCAL_DISK_USED,
     LOCALFILE_DISK_APPEND_OPERATION_DURATION, LOCALFILE_DISK_DELETE_OPERATION_DURATION,
     LOCALFILE_DISK_READ_OPERATION_DURATION, LOCALFILE_DISK_STAT_OPERATION_DURATION,
+    TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER,
 };
 use crate::runtime::manager::RuntimeManager;
 use crate::store::BytesWrapper;
@@ -230,6 +231,10 @@ impl LocalDisk {
             .acquire()
             .instrument_await("meet the concurrency limiter")
             .await?;
+
+        TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER
+            .with_label_values(&[self.root.as_str()])
+            .inc();
 
         let timer = LOCALFILE_DISK_APPEND_OPERATION_DURATION
             .with_label_values(&[self.root.as_str()])
