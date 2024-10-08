@@ -365,9 +365,6 @@ impl HybridStore {
 
 #[async_trait]
 impl Store for HybridStore {
-    /// Using the async_channel to keep the immutable self to
-    /// the self as the Arc<xxx> rather than mpsc::channel, which
-    /// uses the recv(&mut self). I don't hope so.
     fn start(self: Arc<HybridStore>) {
         if self.is_memory_only() {
             return;

@@ -403,6 +403,15 @@ pub static GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE: Lazy<IntGaugeVec> = Lazy::new(|| 
     .unwrap()
 });
 
+pub static GAUGE_EVENT_BUS_QUEUE_HANDLING_SIZE: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "eventbus_queue_handling_size",
+        "queue pending size of event bus",
+        &["name"]
+    )
+    .unwrap()
+});
+
 pub static TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE: Lazy<IntCounterVec> = Lazy::new(|| {
     register_int_counter_vec!(
         "eventbus_total_published_event_size",
@@ -421,9 +430,22 @@ pub static TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE: Lazy<IntCounterVec> = Lazy::new(|
     .unwrap()
 });
 
+pub static EVENT_BUS_HANDLE_DURATION: Lazy<HistogramVec> = Lazy::new(|| {
+    let opts = histogram_opts!(
+        "eventbus_handle_operation_duration",
+        "event handling duration of event bus",
+        Vec::from(DEFAULT_BUCKETS)
+    );
+    let opts = register_histogram_vec_with_registry!(opts, &["name"], REGISTRY).unwrap();
+    opts
+});
+
 fn register_custom_metrics() {
     REGISTRY
         .register(Box::new(GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE.clone()))
+        .expect("");
+    REGISTRY
+        .register(Box::new(GAUGE_EVENT_BUS_QUEUE_HANDLING_SIZE.clone()))
         .expect("");
     REGISTRY
         .register(Box::new(TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE.clone()))

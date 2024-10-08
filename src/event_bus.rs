@@ -1,16 +1,18 @@
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::metric::{
+    EVENT_BUS_HANDLE_DURATION, GAUGE_EVENT_BUS_QUEUE_HANDLING_SIZE,
     GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE, TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE,
     TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE,
 };
 use crate::runtime::RuntimeRef;
 use async_trait::async_trait;
-use parking_lot::Mutex;
+use dashmap::DashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tracing::Instrument;
 
 #[async_trait]
-pub trait Subscriber {
+pub trait Subscriber: Send + Sync {
     type Input;
 
     async fn on_event(&self, event: &Event<Self::Input>);
@@ -38,12 +40,21 @@ impl<T: Send + Sync + Clone> From<T> for Event<T> {
 
 #[derive(Clone)]
 pub struct EventBus<T> {
-    subscribers: Arc<Mutex<Vec<Box<dyn Subscriber<Input = T> + 'static>>>>,
+    inner: Arc<Inner<T>>,
+}
 
+struct Inner<T> {
+    subscribers: DashMap<usize, Arc<Box<dyn Subscriber<Input = T> + 'static>>>,
+    key_counter: Arc<AtomicUsize>,
+
+    /// Using the async_channel to keep the immutable self to
+    /// the self as the Arc<xxx> rather than mpsc::channel, which
+    /// uses the recv(&mut self). I don't hope so.
     queue_recv: async_channel::Receiver<Event<T>>,
     queue_send: async_channel::Sender<Event<T>>,
 
     name: String,
+    runtime: RuntimeRef,
 }
 
 unsafe impl<T: Send + Sync + 'static> Send for EventBus<T> {}
@@ -53,10 +64,14 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
     pub fn new(runtime: RuntimeRef, name: String) -> EventBus<T> {
         let (send, recv) = async_channel::unbounded();
         let event_bus = EventBus {
-            subscribers: Arc::new(Mutex::new(vec![])),
-            queue_recv: recv,
-            queue_send: send,
-            name: name.to_string(),
+            inner: Arc::new(Inner {
+                subscribers: Default::default(),
+                key_counter: Default::default(),
+                queue_recv: recv,
+                queue_send: send,
+                name: name.to_string(),
+                runtime: runtime.clone(),
+            }),
         };
 
         let cloned = event_bus.clone();
@@ -76,32 +91,50 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
     }
 
     async fn handle(event_bus: EventBus<T>) {
-        while let Ok(message) = event_bus.queue_recv.recv().await {
-            let subscribers = event_bus.subscribers.lock();
-            // for subscriber in subscribers.iter() {
-            //     subscriber.on_event(&message).await;
-            // }
-            GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE
-                .with_label_values(&[&event_bus.name])
-                .dec();
-            TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE
-                .with_label_values(&[&event_bus.name])
-                .inc();
+        while let Ok(message) = event_bus.inner.queue_recv.recv().await {
+            let bus = event_bus.clone();
+            event_bus.inner.runtime.spawn(async move {
+                let timer = EVENT_BUS_HANDLE_DURATION
+                    .with_label_values(&[&bus.inner.name])
+                    .start_timer();
+                GAUGE_EVENT_BUS_QUEUE_HANDLING_SIZE
+                    .with_label_values(&[&bus.inner.name])
+                    .inc();
+                GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE
+                    .with_label_values(&[&bus.inner.name])
+                    .dec();
+
+                let subscribers = bus.inner.subscribers.clone().into_read_only();
+                for (_, subscriber) in subscribers.iter() {
+                    subscriber.on_event(&message).await;
+                }
+
+                timer.observe_duration();
+                GAUGE_EVENT_BUS_QUEUE_HANDLING_SIZE
+                    .with_label_values(&[&bus.inner.name])
+                    .dec();
+                TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE
+                    .with_label_values(&[&bus.inner.name])
+                    .inc();
+            });
         }
     }
 
-    pub fn subscribe<R: Subscriber<Input = T> + 'static>(&self, listener: R) {
-        let mut subscribers = self.subscribers.lock();
-        subscribers.push(Box::new(listener));
+    pub fn subscribe<R: Subscriber<Input = T> + 'static + Send + Sync>(&self, listener: R) {
+        let idx = self.inner.key_counter.fetch_add(1, Ordering::SeqCst);
+        self.inner
+            .subscribers
+            .insert(idx, Arc::new(Box::new(listener)));
     }
 
     pub async fn publish(&self, event: Event<T>) -> anyhow::Result<()> {
-        self.queue_send.send(event).await?;
+        self.inner.queue_send.send(event).await?;
+
         GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE
-            .with_label_values(&[&self.name])
+            .with_label_values(&[&self.inner.name])
             .inc();
         TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE
-            .with_label_values(&[&self.name])
+            .with_label_values(&[&self.inner.name])
             .inc();
         Ok(())
     }
@@ -141,8 +174,9 @@ mod test {
         let flag_cloned = flag.clone();
         event_bus.subscribe(SimpleCallback { flag: flag_cloned });
 
-        let _ = runtime
-            .block_on(async move { event_bus.publish("singleEvent".to_string().into()).await });
+        let bus = event_bus.clone();
+        let _ =
+            runtime.block_on(async move { bus.publish("singleEvent".to_string().into()).await });
 
         // case1: check the handle logic
         awaitility::at_most(Duration::from_secs(1)).until(|| flag.load(Ordering::SeqCst) == 1);
