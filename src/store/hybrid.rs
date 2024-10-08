@@ -124,6 +124,7 @@ impl HybridStore {
         let event_bus: EventBus<SpillMessage> = EventBus::new(
             runtime_manager.dispatch_runtime.clone(),
             "HybridStoreSpill".to_string(),
+            memory_spill_max_concurrency as usize,
         );
 
         let store = HybridStore {

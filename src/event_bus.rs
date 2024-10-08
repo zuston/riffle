@@ -6,9 +6,11 @@ use crate::metric::{
 };
 use crate::runtime::RuntimeRef;
 use async_trait::async_trait;
+use await_tree::InstrumentAwait;
 use dashmap::DashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use tokio::sync::Semaphore;
 use tracing::Instrument;
 
 #[async_trait]
@@ -55,14 +57,16 @@ struct Inner<T> {
 
     name: String,
     runtime: RuntimeRef,
+    concurrency_limit: Arc<Semaphore>,
 }
 
 unsafe impl<T: Send + Sync + 'static> Send for EventBus<T> {}
 unsafe impl<T: Send + Sync + 'static> Sync for EventBus<T> {}
 
 impl<T: Send + Sync + Clone + 'static> EventBus<T> {
-    pub fn new(runtime: RuntimeRef, name: String) -> EventBus<T> {
+    pub fn new(runtime: RuntimeRef, name: String, concurrency_limit: usize) -> EventBus<T> {
         let (send, recv) = async_channel::unbounded();
+        let concurrency_limiter = Arc::new(Semaphore::new(concurrency_limit));
         let event_bus = EventBus {
             inner: Arc::new(Inner {
                 subscribers: Default::default(),
@@ -71,6 +75,7 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
                 queue_send: send,
                 name: name.to_string(),
                 runtime: runtime.clone(),
+                concurrency_limit: concurrency_limiter,
             }),
         };
 
@@ -92,6 +97,15 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
 
     async fn handle(event_bus: EventBus<T>) {
         while let Ok(message) = event_bus.inner.queue_recv.recv().await {
+            let concurrency_guarder = event_bus
+                .inner
+                .concurrency_limit
+                .clone()
+                .acquire_owned()
+                .instrument_await("waiting for the spill concurrent limit.")
+                .await
+                .unwrap();
+
             let bus = event_bus.clone();
             event_bus.inner.runtime.spawn(async move {
                 let timer = EVENT_BUS_HANDLE_DURATION
@@ -116,6 +130,8 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
                 TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE
                     .with_label_values(&[&bus.inner.name])
                     .inc();
+
+                drop(concurrency_guarder);
             });
         }
     }
@@ -153,7 +169,7 @@ mod test {
     #[test]
     fn test_event_bus() -> anyhow::Result<()> {
         let runtime = create_runtime(1, "test");
-        let mut event_bus = EventBus::new(runtime.clone(), "test".to_string());
+        let mut event_bus = EventBus::new(runtime.clone(), "test".to_string(), 1usize);
 
         let flag = Arc::new(AtomicI64::new(0));
 
