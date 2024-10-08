@@ -83,7 +83,7 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
         runtime.spawn(async move {
             let await_root = AWAIT_TREE_REGISTRY
                 .clone()
-                .register(format!("EventBus - [{:?}]", name))
+                .register(format!("EventBus - [{}]", &name))
                 .await;
             await_root
                 .instrument(async move {
@@ -96,7 +96,13 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
     }
 
     async fn handle(event_bus: EventBus<T>) {
-        while let Ok(message) = event_bus.inner.queue_recv.recv().await {
+        while let Ok(message) = event_bus
+            .inner
+            .queue_recv
+            .recv()
+            .instrument_await("receiving event")
+            .await
+        {
             let concurrency_guarder = event_bus
                 .inner
                 .concurrency_limit
@@ -107,32 +113,40 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
                 .unwrap();
 
             let bus = event_bus.clone();
-            event_bus.inner.runtime.spawn(async move {
-                let timer = EVENT_BUS_HANDLE_DURATION
-                    .with_label_values(&[&bus.inner.name])
-                    .start_timer();
-                GAUGE_EVENT_BUS_QUEUE_HANDLING_SIZE
-                    .with_label_values(&[&bus.inner.name])
-                    .inc();
-                GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE
-                    .with_label_values(&[&bus.inner.name])
-                    .dec();
+            let await_root = AWAIT_TREE_REGISTRY
+                .clone()
+                .register(format!("EventBus - [{}] - Handler", &event_bus.inner.name))
+                .await;
 
-                let subscribers = bus.inner.subscribers.clone().into_read_only();
-                for (_, subscriber) in subscribers.iter() {
-                    subscriber.on_event(&message).await;
-                }
+            event_bus
+                .inner
+                .runtime
+                .spawn(await_root.instrument(async move {
+                    let timer = EVENT_BUS_HANDLE_DURATION
+                        .with_label_values(&[&bus.inner.name])
+                        .start_timer();
+                    GAUGE_EVENT_BUS_QUEUE_HANDLING_SIZE
+                        .with_label_values(&[&bus.inner.name])
+                        .inc();
+                    GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE
+                        .with_label_values(&[&bus.inner.name])
+                        .dec();
 
-                timer.observe_duration();
-                GAUGE_EVENT_BUS_QUEUE_HANDLING_SIZE
-                    .with_label_values(&[&bus.inner.name])
-                    .dec();
-                TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE
-                    .with_label_values(&[&bus.inner.name])
-                    .inc();
+                    let subscribers = bus.inner.subscribers.clone().into_read_only();
+                    for (_, subscriber) in subscribers.iter() {
+                        subscriber.on_event(&message).await;
+                    }
 
-                drop(concurrency_guarder);
-            });
+                    timer.observe_duration();
+                    GAUGE_EVENT_BUS_QUEUE_HANDLING_SIZE
+                        .with_label_values(&[&bus.inner.name])
+                        .dec();
+                    TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE
+                        .with_label_values(&[&bus.inner.name])
+                        .inc();
+
+                    drop(concurrency_guarder);
+                }));
         }
     }
 
