@@ -20,7 +20,7 @@ use crate::metric::{
     GAUGE_LOCAL_DISK_CAPACITY, GAUGE_LOCAL_DISK_IS_HEALTHY, GAUGE_LOCAL_DISK_USED,
     LOCALFILE_DISK_APPEND_OPERATION_DURATION, LOCALFILE_DISK_DELETE_OPERATION_DURATION,
     LOCALFILE_DISK_READ_OPERATION_DURATION, LOCALFILE_DISK_STAT_OPERATION_DURATION,
-    TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER,
+    TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER, TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER,
 };
 use crate::runtime::manager::RuntimeManager;
 use crate::store::BytesWrapper;
@@ -232,6 +232,11 @@ impl LocalDisk {
             .instrument_await("meet the concurrency limiter")
             .await?;
 
+        let data = data.into();
+        let len = data.len();
+        TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER
+            .with_label_values(&[self.root.as_str()])
+            .inc_by(len as u64);
         TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER
             .with_label_values(&[self.root.as_str()])
             .inc();
@@ -250,7 +255,7 @@ impl LocalDisk {
         // todo: the capacity should be optimized.
         let mut writer = BufWriter::with_capacity(self.write_buf_capacity as usize, writer);
 
-        for x in data.into().always_composed().iter() {
+        for x in data.always_composed().iter() {
             // we must use the write_all to ensure the buffer consumed by the OS.
             // Please see the detail: https://doc.rust-lang.org/std/io/trait.Write.html#method.write_all
             writer
