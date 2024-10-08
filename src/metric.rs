@@ -69,6 +69,11 @@ pub static TOTAL_READ_DATA_FROM_LOCALFILE: Lazy<IntCounter> = Lazy::new(|| {
     .expect("metric should be created")
 });
 
+pub static TOTAL_MEMORY_BUFFER_SPILL_BYTE_SIZE: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new("memory_spill_total_bytes", "total bytes of memory spilled")
+        .expect("metric should be created")
+});
+
 pub static MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM: Lazy<Histogram> = Lazy::new(|| {
     let opts = HistogramOpts::new("memory_spill_batch_size_histogram", "none")
         .buckets(Vec::from(SPILL_BATCH_SIZE_BUCKETS));
@@ -441,6 +446,9 @@ pub static EVENT_BUS_HANDLE_DURATION: Lazy<HistogramVec> = Lazy::new(|| {
 });
 
 fn register_custom_metrics() {
+    REGISTRY
+        .register(Box::new(TOTAL_MEMORY_BUFFER_SPILL_BYTE_SIZE.clone()))
+        .expect("");
     REGISTRY
         .register(Box::new(GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE.clone()))
         .expect("");

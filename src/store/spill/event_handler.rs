@@ -70,7 +70,7 @@ impl Subscriber for SpillEventHandler {
                 let mut new_message = message.clone();
                 new_message.retry_cnt = message.retry_cnt + 1;
                 // re-push to the queue to execute
-                let _ = store_ref.event_bus.publish(new_message.into()).await;
+                let _ = store_ref.publish_spill_event(new_message).await;
             }
         }
         GAUGE_IN_SPILL_DATA_SIZE.sub(size);

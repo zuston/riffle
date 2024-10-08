@@ -24,8 +24,8 @@ use crate::config::{Config, HybridStoreConfig, StorageType};
 use crate::error::WorkerError;
 use crate::metric::{
     GAUGE_MEMORY_SPILL_TO_HDFS, GAUGE_MEMORY_SPILL_TO_LOCALFILE,
-    MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM, TOTAL_MEMORY_SPILL_TO_HDFS,
-    TOTAL_MEMORY_SPILL_TO_LOCALFILE,
+    MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM, TOTAL_MEMORY_BUFFER_SPILL_BYTE_SIZE,
+    TOTAL_MEMORY_SPILL_TO_HDFS, TOTAL_MEMORY_SPILL_TO_LOCALFILE,
 };
 use crate::readable_size::ReadableSize;
 #[cfg(feature = "hdfs")]
@@ -52,7 +52,6 @@ use std::sync::Arc;
 
 use crate::event_bus::EventBus;
 use crate::runtime::manager::RuntimeManager;
-use crate::store::mem::buffer::BatchMemoryBlock;
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::spill::event_handler::SpillEventHandler;
 use crate::store::spill::{SpillMessage, SpillWritingViewContext};
@@ -280,34 +279,12 @@ impl HybridStore {
         Ok(self.memory_spill_event_num.get())
     }
 
-    async fn spill_memory_buffer(
-        &self,
-        spill_size: i64,
-        blocks: Arc<BatchMemoryBlock>,
-        uid: PartitionedUId,
-        flight_id: u64,
-    ) -> Result<()> {
-        let writing_ctx = SpillWritingViewContext::new(uid, blocks);
+    pub async fn publish_spill_event(&self, message: SpillMessage) -> Result<()> {
+        MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM.observe(message.size as f64);
+        TOTAL_MEMORY_BUFFER_SPILL_BYTE_SIZE.inc_by(message.size as u64);
 
-        if self
-            .event_bus
-            .publish(
-                SpillMessage {
-                    ctx: writing_ctx,
-                    size: spill_size,
-                    retry_cnt: 0,
-                    previous_spilled_storage: None,
-                    flight_id,
-                }
-                .into(),
-            )
-            .await
-            .is_err()
-        {
-            error!("Errors on sending spill message to queue. This should not happen.");
-        } else {
-            self.memory_spill_event_num.inc_by(1);
-        }
+        self.event_bus.publish(message.into()).await?;
+        self.memory_spill_event_num.inc_by(1);
 
         Ok(())
     }
@@ -344,14 +321,18 @@ impl HybridStore {
             let spill_result = buffer.spill()?;
             let flight_len = spill_result.flight_len();
             flushed_size += flight_len;
-            self.spill_memory_buffer(
-                flight_len as i64,
-                spill_result.blocks(),
-                partition_id,
-                spill_result.flight_id(),
-            )
-            .await?;
-            MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM.observe(flight_len as f64);
+
+            let writing_ctx = SpillWritingViewContext::new(partition_id, spill_result.blocks());
+            let message = SpillMessage {
+                ctx: writing_ctx,
+                size: flight_len as i64,
+                retry_cnt: 0,
+                previous_spilled_storage: None,
+                flight_id: spill_result.flight_id(),
+            };
+            if self.publish_spill_event(message).await.is_err() {
+                error!("Errors on sending spill message to queue. This should not happen.");
+            }
         }
         debug!(
             "[Spill] Picked up blocks that should be async flushed with {}(bytes) that costs {}(ms).",
