@@ -40,6 +40,7 @@ pub struct LocalDiskConfig {
     pub(crate) high_watermark: f32,
     pub(crate) low_watermark: f32,
     pub(crate) max_concurrency: i32,
+    pub(crate) write_buf_capacity: u64,
 }
 
 impl LocalDiskConfig {
@@ -48,6 +49,7 @@ impl LocalDiskConfig {
             high_watermark: 1.0,
             low_watermark: 0.6,
             max_concurrency: 20,
+            write_buf_capacity: 1024 * 1024,
         }
     }
 }
@@ -58,6 +60,7 @@ impl Default for LocalDiskConfig {
             high_watermark: 0.8,
             low_watermark: 0.6,
             max_concurrency: 40,
+            write_buf_capacity: 1024 * 1024,
         }
     }
 }
@@ -71,6 +74,8 @@ pub struct LocalDisk {
     config: LocalDiskConfig,
 
     capacity: u64,
+
+    write_buf_capacity: u64,
 }
 
 impl LocalDisk {
@@ -86,6 +91,7 @@ impl LocalDisk {
         let disk_capacity =
             Self::get_disk_capacity(&root).expect("Errors on getting disk capacity");
 
+        let write_buf_capacity = config.write_buf_capacity;
         let instance = LocalDisk {
             root: root.to_string(),
             operator,
@@ -94,6 +100,7 @@ impl LocalDisk {
             is_healthy: AtomicBool::new(true),
             config,
             capacity: disk_capacity,
+            write_buf_capacity,
         };
         let instance = Arc::new(instance);
 
@@ -236,7 +243,7 @@ impl LocalDisk {
             .await?;
 
         // todo: the capacity should be optimized.
-        let mut writer = BufWriter::with_capacity(1024 * 1024, writer);
+        let mut writer = BufWriter::with_capacity(self.write_buf_capacity as usize, writer);
 
         for x in data.into().always_composed().iter() {
             // we must use the write_all to ensure the buffer consumed by the OS.

@@ -30,6 +30,7 @@ use crate::store::{
 };
 use std::ops::Deref;
 use std::path::Path;
+use std::str::FromStr;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -40,6 +41,7 @@ use dashmap::DashMap;
 use log::{debug, error, warn};
 
 use crate::composed_bytes::ComposedBytes;
+use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
 use dashmap::mapref::entry::Entry;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -111,6 +113,11 @@ impl LocalFileStore {
                 high_watermark: localfile_config.disk_high_watermark,
                 low_watermark: localfile_config.disk_low_watermark,
                 max_concurrency: localfile_config.disk_max_concurrency,
+                write_buf_capacity: ReadableSize::from_str(
+                    localfile_config.disk_write_buf_capacity.as_str(),
+                )
+                .unwrap()
+                .as_bytes(),
             };
 
             local_disk_instances.push(LocalDisk::new(path, config, runtime_manager.clone()));
