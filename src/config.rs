@@ -121,8 +121,6 @@ impl LocalfileStoreConfig {
 pub struct RuntimeConfig {
     pub read_thread_num: usize,
     pub write_thread_num: usize,
-    pub grpc_thread_num: usize,
-    pub urpc_thread_num: usize,
     pub http_thread_num: usize,
     pub default_thread_num: usize,
     pub dispatch_thread_num: usize,
@@ -133,8 +131,6 @@ impl Default for RuntimeConfig {
         RuntimeConfig {
             read_thread_num: 100,
             write_thread_num: 100,
-            grpc_thread_num: 100,
-            urpc_thread_num: 100,
             http_thread_num: 2,
             default_thread_num: 10,
             dispatch_thread_num: 100,

@@ -77,7 +77,7 @@ pub async fn start_uniffle_worker(config: config::Config) -> Result<AppManagerRe
     // implement server startup
     let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone());
     let app_manager_ref_cloned = app_manager_ref.clone();
-    runtime_manager.grpc_runtime.spawn(async move {
+    runtime_manager.default_runtime.spawn(async move {
         let app_manager_ref = app_manager_ref_cloned;
         let rpc_port = config.grpc_port;
         info!("Starting GRpc server with port:[{}] ......", rpc_port);

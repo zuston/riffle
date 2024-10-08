@@ -26,10 +26,6 @@ pub struct RuntimeManager {
     pub read_runtime: RuntimeRef,
     // for writing data
     pub write_runtime: RuntimeRef,
-    // for grpc service
-    pub grpc_runtime: RuntimeRef,
-    // for urpc service
-    pub urpc_runtime: RuntimeRef,
     // for http monitor service
     pub http_runtime: RuntimeRef,
     // the default runtime for not important tasks.
@@ -60,8 +56,6 @@ impl RuntimeManager {
         Self {
             read_runtime: create_runtime(config.read_thread_num, "read_thread_pool"),
             write_runtime: create_runtime(config.write_thread_num, "write_thread_pool"),
-            grpc_runtime: create_runtime(config.grpc_thread_num, "grpc_thread_pool"),
-            urpc_runtime: create_runtime(config.urpc_thread_num, "urpc_thread_pool"),
             http_runtime: create_runtime(config.http_thread_num, "http_thread_pool"),
             default_runtime: create_runtime(config.default_thread_num, "default_thread_pool"),
             dispatch_runtime: create_runtime(config.dispatch_thread_num, "dispatch_thread_pool"),
