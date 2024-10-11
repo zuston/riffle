@@ -234,6 +234,7 @@ impl LocalDisk {
 
         let data = data.into();
         let len = data.len();
+        let data = data.freeze();
 
         let timer = LOCALFILE_DISK_APPEND_OPERATION_DURATION
             .with_label_values(&[self.root.as_str()])
@@ -245,19 +246,11 @@ impl LocalDisk {
             .append(true)
             .instrument_await("with append options")
             .await?;
-
         // todo: the capacity should be optimized.
         let mut writer = BufWriter::with_capacity(self.write_buf_capacity as usize, writer);
-
-        for x in data.always_composed().iter() {
-            // we must use the write_all to ensure the buffer consumed by the OS.
-            // Please see the detail: https://doc.rust-lang.org/std/io/trait.Write.html#method.write_all
-            writer
-                .write_all(&x)
-                .instrument_await("writing bytes")
-                .await?;
-        }
+        writer.write_all(&data).instrument_await("writing").await?;
         writer.flush().instrument_await("writer flushing").await?;
+
         timer.observe_duration();
 
         TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER
