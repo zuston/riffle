@@ -122,7 +122,7 @@ impl MemoryStore {
     pub fn calculate_usage_ratio(&self) -> f32 {
         let snapshot = self.budget.snapshot();
         (snapshot.used() - self.in_flush_buffer_size.load(Ordering::SeqCst) as i64) as f32
-            / snapshot.capacity() as f32
+            / (snapshot.capacity() - snapshot.allocated()) as f32
     }
 
     pub fn inc_inflight(&self, size: u64) {
