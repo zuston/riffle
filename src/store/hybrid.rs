@@ -23,9 +23,9 @@ use crate::app::{
 use crate::config::{Config, HybridStoreConfig, StorageType};
 use crate::error::WorkerError;
 use crate::metric::{
-    GAUGE_MEMORY_SPILL_TO_HDFS, GAUGE_MEMORY_SPILL_TO_LOCALFILE,
-    MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM, TOTAL_MEMORY_BUFFER_SPILL_BYTE_SIZE,
-    TOTAL_MEMORY_SPILL_TO_HDFS, TOTAL_MEMORY_SPILL_TO_LOCALFILE,
+    GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES, GAUGE_MEMORY_SPILL_TO_HDFS, GAUGE_MEMORY_SPILL_TO_LOCALFILE,
+    MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM, TOTAL_MEMORY_SPILL_BYTES, TOTAL_MEMORY_SPILL_TO_HDFS,
+    TOTAL_MEMORY_SPILL_TO_LOCALFILE,
 };
 use crate::readable_size::ReadableSize;
 #[cfg(feature = "hdfs")]
@@ -282,7 +282,8 @@ impl HybridStore {
 
     pub async fn publish_spill_event(&self, message: SpillMessage) -> Result<()> {
         MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM.observe(message.size as f64);
-        TOTAL_MEMORY_BUFFER_SPILL_BYTE_SIZE.inc_by(message.size as u64);
+        TOTAL_MEMORY_SPILL_BYTES.inc_by(message.size as u64);
+        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.add(message.size);
 
         self.event_bus.publish(message.into()).await?;
         self.memory_spill_event_num.inc_by(1);
@@ -301,6 +302,7 @@ impl HybridStore {
             .await?;
         self.hot_store.dec_used(data_size)?;
         self.hot_store.dec_inflight(data_size as u64);
+        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.sub(data_size);
         Ok(())
     }
 
@@ -310,7 +312,7 @@ impl HybridStore {
         let mem_target =
             (self.hot_store.get_capacity()? as f32 * self.config.memory_spill_low_watermark) as i64;
         let buffers = self.hot_store.pickup_spilled_blocks(mem_target)?;
-        debug!(
+        info!(
             "[Spill] Getting all spill blocks. target_size:{}. it costs {}(ms)",
             mem_target,
             timer.elapsed().as_millis()
@@ -335,7 +337,7 @@ impl HybridStore {
                 error!("Errors on sending spill message to queue. This should not happen.");
             }
         }
-        debug!(
+        info!(
             "[Spill] Picked up blocks that should be async flushed with {}(bytes) that costs {}(ms).",
             flushed_size,
             timer.elapsed().as_millis()

@@ -234,12 +234,6 @@ impl LocalDisk {
 
         let data = data.into();
         let len = data.len();
-        TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER
-            .with_label_values(&[self.root.as_str()])
-            .inc_by(len as u64);
-        TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER
-            .with_label_values(&[self.root.as_str()])
-            .inc();
 
         let timer = LOCALFILE_DISK_APPEND_OPERATION_DURATION
             .with_label_values(&[self.root.as_str()])
@@ -265,6 +259,13 @@ impl LocalDisk {
         }
         writer.flush().instrument_await("writer flushing").await?;
         timer.observe_duration();
+
+        TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER
+            .with_label_values(&[self.root.as_str()])
+            .inc_by(len as u64);
+        TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER
+            .with_label_values(&[self.root.as_str()])
+            .inc();
 
         Ok(())
     }

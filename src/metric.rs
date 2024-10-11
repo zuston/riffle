@@ -35,6 +35,9 @@ const DEFAULT_BUCKETS: &[f64] = &[
 ];
 
 const SPILL_BATCH_SIZE_BUCKETS: &[f64] = &[
+    1f64,
+    128f64,
+    512f64,
     ReadableSize::kb(1).as_bytes() as f64,
     ReadableSize::kb(10).as_bytes() as f64,
     ReadableSize::kb(100).as_bytes() as f64,
@@ -69,7 +72,7 @@ pub static TOTAL_READ_DATA_FROM_LOCALFILE: Lazy<IntCounter> = Lazy::new(|| {
     .expect("metric should be created")
 });
 
-pub static TOTAL_MEMORY_BUFFER_SPILL_BYTE_SIZE: Lazy<IntCounter> = Lazy::new(|| {
+pub static TOTAL_MEMORY_SPILL_BYTES: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new("memory_spill_total_bytes", "total bytes of memory spilled")
         .expect("metric should be created")
 });
@@ -79,6 +82,14 @@ pub static MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM: Lazy<Histogram> = Lazy::new
         .buckets(Vec::from(SPILL_BATCH_SIZE_BUCKETS));
     let histogram = Histogram::with_opts(opts).unwrap();
     histogram
+});
+
+pub static GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES: Lazy<IntGauge> = Lazy::new(|| {
+    IntGauge::new(
+        "memory_spill_in_queue_bytes",
+        "in flush queue bytes of memory spill",
+    )
+    .expect("")
 });
 
 pub static GRPC_GET_MEMORY_DATA_TRANSPORT_TIME: Lazy<Histogram> = Lazy::new(|| {
@@ -277,8 +288,12 @@ pub static GAUGE_MEMORY_ALLOCATED: Lazy<IntGauge> = Lazy::new(|| {
 pub static GAUGE_MEMORY_CAPACITY: Lazy<IntGauge> = Lazy::new(|| {
     IntGauge::new("memory_capacity", "memory capacity").expect("metric should be created")
 });
-pub static TOTAL_MEMORY_SPILL_OPERATION: Lazy<IntCounter> = Lazy::new(|| {
-    IntCounter::new("total_memory_spill", "memory capacity").expect("metric should be created")
+pub static TOTAL_MEMORY_SPILL_IN_FLUSHING_OPERATION: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new(
+        "total_memory_spill_in_flushing_operations",
+        "in flushing operations",
+    )
+    .expect("metric should be created")
 });
 pub static TOTAL_MEMORY_SPILL_OPERATION_FAILED: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new("total_memory_spill_failed", "memory capacity")
@@ -295,8 +310,10 @@ pub static TOTAL_MEMORY_SPILL_TO_HDFS: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new("total_memory_spill_to_hdfs", "memory spill to hdfs")
         .expect("metric should be created")
 });
-pub static GAUGE_MEMORY_SPILL_OPERATION: Lazy<IntGauge> =
-    Lazy::new(|| IntGauge::new("memory_spill", "memory spill").expect("metric should be created"));
+pub static GAUGE_MEMORY_SPILL_IN_FLUSHING_OPERATION: Lazy<IntGauge> = Lazy::new(|| {
+    IntGauge::new("memory_spill_in_flushing_operations", "memory spill")
+        .expect("metric should be created")
+});
 pub static GAUGE_MEMORY_SPILL_TO_LOCALFILE: Lazy<IntGauge> = Lazy::new(|| {
     IntGauge::new("memory_spill_to_localfile", "memory spill to localfile")
         .expect("metric should be created")
@@ -373,17 +390,22 @@ pub static GAUGE_RUNTIME_IDLE_THREAD_NUM: Lazy<IntGaugeVec> = Lazy::new(|| {
     .unwrap()
 });
 
-pub static GAUGE_TOPN_APP_RESIDENT_DATA_SIZE: Lazy<IntGaugeVec> = Lazy::new(|| {
+pub static GAUGE_TOPN_APP_RESIDENT_BYTES: Lazy<IntGaugeVec> = Lazy::new(|| {
     register_int_gauge_vec!(
-        "topN_app_resident_data_size",
-        "topN app resident data size",
+        "topN_app_resident_bytes",
+        "topN app resident bytes",
         &["app_id"]
     )
     .unwrap()
 });
 
-pub static GAUGE_IN_SPILL_DATA_SIZE: Lazy<IntGauge> =
-    Lazy::new(|| IntGauge::new("in_spill_data_size", "total data size in spill").unwrap());
+pub static GAUGE_MEMORY_SPILL_IN_FLUSHING_BYTES: Lazy<IntGauge> = Lazy::new(|| {
+    IntGauge::new(
+        "memory_spill_in_flushing_bytes",
+        "in flushing bytes of spill",
+    )
+    .unwrap()
+});
 
 pub static TOTAL_GRPC_REQUEST: Lazy<IntCounter> =
     Lazy::new(|| IntCounter::new("total_grpc_request_number", "total request number").expect(""));
@@ -465,7 +487,10 @@ pub static EVENT_BUS_HANDLE_DURATION: Lazy<HistogramVec> = Lazy::new(|| {
 
 fn register_custom_metrics() {
     REGISTRY
-        .register(Box::new(TOTAL_MEMORY_BUFFER_SPILL_BYTE_SIZE.clone()))
+        .register(Box::new(GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.clone()))
+        .expect("");
+    REGISTRY
+        .register(Box::new(TOTAL_MEMORY_SPILL_BYTES.clone()))
         .expect("");
     REGISTRY
         .register(Box::new(GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE.clone()))
@@ -501,7 +526,7 @@ fn register_custom_metrics() {
         .expect("");
 
     REGISTRY
-        .register(Box::new(GAUGE_TOPN_APP_RESIDENT_DATA_SIZE.clone()))
+        .register(Box::new(GAUGE_TOPN_APP_RESIDENT_BYTES.clone()))
         .expect("");
 
     REGISTRY
@@ -513,7 +538,7 @@ fn register_custom_metrics() {
         .expect("total_read_data must be registered");
 
     REGISTRY
-        .register(Box::new(GAUGE_IN_SPILL_DATA_SIZE.clone()))
+        .register(Box::new(GAUGE_MEMORY_SPILL_IN_FLUSHING_BYTES.clone()))
         .expect("");
 
     REGISTRY
@@ -552,7 +577,7 @@ fn register_custom_metrics() {
         .register(Box::new(TOTAL_HDFS_USED.clone()))
         .expect("total_hdfs_used must be registered");
     REGISTRY
-        .register(Box::new(TOTAL_MEMORY_SPILL_OPERATION.clone()))
+        .register(Box::new(TOTAL_MEMORY_SPILL_IN_FLUSHING_OPERATION.clone()))
         .expect("total_memory_spill_operation must be registered");
     REGISTRY
         .register(Box::new(TOTAL_MEMORY_SPILL_OPERATION_FAILED.clone()))
@@ -592,7 +617,7 @@ fn register_custom_metrics() {
         .register(Box::new(GAUGE_PARTITION_NUMBER.clone()))
         .expect("partition_number must be registered");
     REGISTRY
-        .register(Box::new(GAUGE_MEMORY_SPILL_OPERATION.clone()))
+        .register(Box::new(GAUGE_MEMORY_SPILL_IN_FLUSHING_OPERATION.clone()))
         .expect("memory_spill_operation must be registered");
     REGISTRY
         .register(Box::new(GAUGE_MEMORY_SPILL_TO_LOCALFILE.clone()))

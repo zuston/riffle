@@ -1,8 +1,9 @@
 use crate::error::WorkerError;
 use crate::event_bus::{Event, Subscriber};
 use crate::metric::{
-    GAUGE_IN_SPILL_DATA_SIZE, GAUGE_MEMORY_SPILL_OPERATION, TOTAL_MEMORY_SPILL_OPERATION,
-    TOTAL_MEMORY_SPILL_OPERATION_FAILED, TOTAL_SPILL_EVENTS_DROPPED,
+    GAUGE_MEMORY_SPILL_IN_FLUSHING_BYTES, GAUGE_MEMORY_SPILL_IN_FLUSHING_OPERATION,
+    TOTAL_MEMORY_SPILL_IN_FLUSHING_OPERATION, TOTAL_MEMORY_SPILL_OPERATION_FAILED,
+    TOTAL_SPILL_EVENTS_DROPPED,
 };
 use crate::store::hybrid::HybridStore;
 use crate::store::spill::SpillMessage;
@@ -26,9 +27,9 @@ impl Subscriber for SpillEventHandler {
         let message = event.get_data();
         let size = message.size;
 
-        GAUGE_IN_SPILL_DATA_SIZE.add(size);
-        TOTAL_MEMORY_SPILL_OPERATION.inc();
-        GAUGE_MEMORY_SPILL_OPERATION.inc();
+        GAUGE_MEMORY_SPILL_IN_FLUSHING_BYTES.add(size);
+        TOTAL_MEMORY_SPILL_IN_FLUSHING_OPERATION.inc();
+        GAUGE_MEMORY_SPILL_IN_FLUSHING_OPERATION.inc();
 
         let store_ref = &self.store;
         match store_ref
@@ -73,7 +74,7 @@ impl Subscriber for SpillEventHandler {
                 let _ = store_ref.publish_spill_event(new_message).await;
             }
         }
-        GAUGE_IN_SPILL_DATA_SIZE.sub(size);
-        GAUGE_MEMORY_SPILL_OPERATION.dec();
+        GAUGE_MEMORY_SPILL_IN_FLUSHING_BYTES.sub(size);
+        GAUGE_MEMORY_SPILL_IN_FLUSHING_OPERATION.dec();
     }
 }

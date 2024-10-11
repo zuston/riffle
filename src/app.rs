@@ -18,7 +18,7 @@
 use crate::config::Config;
 use crate::error::WorkerError;
 use crate::metric::{
-    GAUGE_APP_NUMBER, GAUGE_TOPN_APP_RESIDENT_DATA_SIZE, TOTAL_APP_NUMBER,
+    GAUGE_APP_NUMBER, GAUGE_TOPN_APP_RESIDENT_BYTES, TOTAL_APP_NUMBER,
     TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED, TOTAL_READ_DATA, TOTAL_READ_DATA_FROM_LOCALFILE,
     TOTAL_READ_DATA_FROM_MEMORY, TOTAL_RECEIVED_DATA, TOTAL_REQUIRE_BUFFER_FAILED,
 };
@@ -691,7 +691,7 @@ impl AppManager {
                             apps.len()
                         };
                         for idx in 0..limit {
-                            GAUGE_TOPN_APP_RESIDENT_DATA_SIZE
+                            GAUGE_TOPN_APP_RESIDENT_BYTES
                                 .with_label_values(&[&apps[idx].app_id])
                                 .set(apps[idx].total_resident_data_size() as i64);
                         }
@@ -759,7 +759,7 @@ impl AppManager {
             self.apps.remove(&app_id);
 
             GAUGE_APP_NUMBER.dec();
-            let _ = GAUGE_TOPN_APP_RESIDENT_DATA_SIZE.remove_label_values(&[&app_id]);
+            let _ = GAUGE_TOPN_APP_RESIDENT_BYTES.remove_label_values(&[&app_id]);
         }
 
         Ok(())
