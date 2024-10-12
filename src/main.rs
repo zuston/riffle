@@ -30,6 +30,7 @@ use crate::metric::MetricService;
 use crate::readable_size::ReadableSize;
 use crate::rpc::DefaultRpcService;
 use crate::runtime::manager::RuntimeManager;
+use crate::storage::StorageService;
 use crate::tracing::FastraceWrapper;
 use anyhow::Result;
 use clap::{App, Arg};
@@ -45,6 +46,7 @@ pub mod composed_bytes;
 pub mod config;
 pub mod constant;
 mod error;
+pub mod event_bus;
 pub mod grpc;
 pub mod heartbeat;
 mod http;
@@ -55,12 +57,11 @@ mod readable_size;
 pub mod rpc;
 pub mod runtime;
 pub mod signal;
+pub mod storage;
 pub mod store;
 pub mod tracing;
 pub mod urpc;
 pub mod util;
-
-pub mod event_bus;
 const MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY: &str = "MAX_MEMORY_ALLOCATION_LIMIT_SIZE";
 
 fn main() -> Result<()> {
@@ -90,7 +91,9 @@ fn main() -> Result<()> {
     info!("The specified config show as follows: \n {:#?}", config);
 
     let runtime_manager = RuntimeManager::from(config.runtime_config.clone());
-    let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone());
+    let storage = StorageService::init(&runtime_manager, &config);
+    let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone(), &storage);
+    storage.with_app_manager(&app_manager_ref);
 
     MetricService::init(&config, runtime_manager.clone());
     FastraceWrapper::init(config.clone());

@@ -40,6 +40,7 @@ pub mod urpc;
 pub mod util;
 
 pub mod event_bus;
+pub mod storage;
 
 use crate::app::{AppManager, AppManagerRef};
 use crate::common::init_global_variable;
@@ -54,6 +55,7 @@ use crate::grpc::service::DefaultShuffleServer;
 use crate::http::{HTTPServer, HttpMonitorService};
 use crate::metric::MetricService;
 use crate::runtime::manager::RuntimeManager;
+use crate::storage::StorageService;
 use anyhow::Result;
 use bytes::{Buf, Bytes, BytesMut};
 use croaring::treemap::JvmSerializer;
@@ -74,8 +76,8 @@ pub async fn start_uniffle_worker(config: config::Config) -> Result<AppManagerRe
 
     let (tx, rx) = oneshot::channel::<()>();
 
-    // implement server startup
-    let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone());
+    let storage = StorageService::init(&runtime_manager, &config);
+    let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone(), &storage);
     let app_manager_ref_cloned = app_manager_ref.clone();
     runtime_manager.default_runtime.spawn(async move {
         let app_manager_ref = app_manager_ref_cloned;

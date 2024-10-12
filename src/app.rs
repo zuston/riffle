@@ -47,6 +47,7 @@ use std::str::FromStr;
 
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::grpc::protobuf::uniffle::RemoteStorage;
+use crate::storage::HybridStorage;
 use crate::store::mem::capacity::CapacitySnapshot;
 use await_tree::InstrumentAwait;
 use parking_lot::RwLock;
@@ -603,7 +604,7 @@ pub struct AppManager {
 }
 
 impl AppManager {
-    fn new(runtime_manager: RuntimeManager, config: Config) -> Self {
+    fn new(runtime_manager: RuntimeManager, config: Config, storage: HybridStorage) -> Self {
         let (sender, receiver) = async_channel::unbounded();
         let app_heartbeat_timeout_min = config.app_config.app_heartbeat_timeout_min;
         let store = Arc::new(StoreProvider::get(runtime_manager.clone(), config.clone()));
@@ -622,8 +623,13 @@ impl AppManager {
 }
 
 impl AppManager {
-    pub fn get_ref(runtime_manager: RuntimeManager, config: Config) -> AppManagerRef {
-        let app_ref = Arc::new(AppManager::new(runtime_manager.clone(), config));
+    pub fn get_ref(
+        runtime_manager: RuntimeManager,
+        config: Config,
+        storage: &HybridStorage,
+    ) -> AppManagerRef {
+        let storage = storage.clone();
+        let app_ref = Arc::new(AppManager::new(runtime_manager.clone(), config, storage));
         let app_manager_ref_cloned = app_ref.clone();
 
         runtime_manager.default_runtime.spawn(async move {
@@ -847,6 +853,7 @@ mod test {
     use crate::config::{Config, HybridStoreConfig, LocalfileStoreConfig, MemoryStoreConfig};
 
     use crate::runtime::manager::RuntimeManager;
+    use crate::storage::StorageService;
     use crate::store::{Block, ResponseData};
     use croaring::treemap::JvmSerializer;
     use croaring::Treemap;
@@ -876,7 +883,10 @@ mod test {
         let app_id = "app_put_get_purge_test-----id";
 
         let runtime_manager: RuntimeManager = Default::default();
-        let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), mock_config()).clone();
+        let config = mock_config();
+        let storage = StorageService::init(&runtime_manager, &config);
+        let app_manager_ref =
+            AppManager::get_ref(runtime_manager.clone(), config, &storage).clone();
         app_manager_ref
             .register(app_id.clone().into(), 1, Default::default())
             .unwrap();
@@ -953,7 +963,10 @@ mod test {
 
     #[test]
     fn app_manager_test() {
-        let app_manager_ref = AppManager::get_ref(Default::default(), mock_config()).clone();
+        let config = mock_config();
+        let storage = StorageService::init(&runtime_manager, &config);
+        let app_manager_ref = AppManager::get_ref(Default::default(), config, &storage).clone();
+
         app_manager_ref
             .register("app_id".into(), 1, Default::default())
             .unwrap();
@@ -967,7 +980,10 @@ mod test {
         let app_id = "test_get_or_put_block_ids-----id".to_string();
 
         let runtime_manager: RuntimeManager = Default::default();
-        let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), mock_config()).clone();
+        let config = mock_config();
+        let storage = StorageService::init(&runtime_manager, &config);
+        let app_manager_ref =
+            AppManager::get_ref(runtime_manager.clone(), config, &storage).clone();
         app_manager_ref
             .register(app_id.clone().into(), 1, Default::default())
             .unwrap();

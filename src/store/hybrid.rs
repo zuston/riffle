@@ -16,8 +16,9 @@
 // under the License.
 
 use crate::app::{
-    PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
-    RegisterAppContext, ReleaseTicketContext, RequireBufferContext, WritingViewContext,
+    AppManagerRef, PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingOptions,
+    ReadingViewContext, RegisterAppContext, ReleaseTicketContext, RequireBufferContext,
+    WritingViewContext,
 };
 
 use crate::config::{Config, HybridStoreConfig, StorageType};
@@ -40,6 +41,7 @@ use async_trait::async_trait;
 use log::{debug, error, info, warn};
 use prometheus::core::{Atomic, AtomicU64};
 use std::any::Any;
+use std::cell::RefCell;
 
 use std::collections::VecDeque;
 use std::ops::Deref;
@@ -84,6 +86,8 @@ pub struct HybridStore {
     runtime_manager: RuntimeManager,
 
     pub event_bus: EventBus<SpillMessage>,
+
+    app_manager: RefCell<Option<AppManagerRef>>,
 }
 
 unsafe impl Send for HybridStore {}
@@ -141,6 +145,7 @@ impl HybridStore {
             memory_spill_max_concurrency,
             runtime_manager,
             event_bus,
+            app_manager: RefCell::new(None),
         };
         store
     }
@@ -164,6 +169,11 @@ impl HybridStore {
 
         #[cfg(not(feature = "hdfs"))]
         false
+    }
+
+    pub fn with_app_manager(&self, app_manager_ref: &AppManagerRef) {
+        let mut refcell = self.app_manager.borrow_mut();
+        *refcell = Some(app_manager_ref.clone());
     }
 
     pub async fn memory_spill_to_persistent_store(

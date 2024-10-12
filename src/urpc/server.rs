@@ -164,6 +164,7 @@ mod test {
     use crate::config::Config;
     use crate::rpc::DefaultRpcService;
     use crate::runtime::manager::RuntimeManager;
+    use crate::storage::StorageService;
 
     #[tokio::test]
     #[ignore]
@@ -173,7 +174,8 @@ mod test {
         config.urpc_port = Some(21101);
 
         let runtime_manager = RuntimeManager::from(config.clone().runtime_config.clone());
-        let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone());
+        let storage = StorageService::init(&runtime_manager, &config);
+        let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone(), storage);
 
         DefaultRpcService {}.start(&config, runtime_manager.clone(), app_manager_ref.clone())?;
 
