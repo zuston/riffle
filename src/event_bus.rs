@@ -7,8 +7,7 @@ use crate::metric::{
 use crate::runtime::RuntimeRef;
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
-use dashmap::DashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use once_cell::sync::OnceCell;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tracing::Instrument;
@@ -46,8 +45,7 @@ pub struct EventBus<T> {
 }
 
 struct Inner<T> {
-    subscribers: DashMap<usize, Arc<Box<dyn Subscriber<Input = T> + 'static>>>,
-    key_counter: Arc<AtomicUsize>,
+    subscriber: OnceCell<Arc<Box<dyn Subscriber<Input = T> + 'static>>>,
 
     /// Using the async_channel to keep the immutable self to
     /// the self as the Arc<xxx> rather than mpsc::channel, which
@@ -69,8 +67,7 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
         let concurrency_limiter = Arc::new(Semaphore::new(concurrency_limit));
         let event_bus = EventBus {
             inner: Arc::new(Inner {
-                subscribers: Default::default(),
-                key_counter: Default::default(),
+                subscriber: OnceCell::new(),
                 queue_recv: recv,
                 queue_send: send,
                 name: name.to_string(),
@@ -132,10 +129,9 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
                         .with_label_values(&[&bus.inner.name])
                         .dec();
 
-                    let subscribers = bus.inner.subscribers.clone().into_read_only();
-                    for (_, subscriber) in subscribers.iter() {
-                        subscriber.on_event(&message).await;
-                    }
+                    let binding = bus.inner.subscriber.get();
+                    let subscriber = binding.as_ref().unwrap();
+                    subscriber.on_event(&message).await;
 
                     timer.observe_duration();
                     GAUGE_EVENT_BUS_QUEUE_HANDLING_SIZE
@@ -151,10 +147,7 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
     }
 
     pub fn subscribe<R: Subscriber<Input = T> + 'static + Send + Sync>(&self, listener: R) {
-        let idx = self.inner.key_counter.fetch_add(1, Ordering::SeqCst);
-        self.inner
-            .subscribers
-            .insert(idx, Arc::new(Box::new(listener)));
+        let _ = self.inner.subscriber.set(Arc::new(Box::new(listener)));
     }
 
     pub async fn publish(&self, event: Event<T>) -> anyhow::Result<()> {
