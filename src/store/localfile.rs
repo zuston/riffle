@@ -527,7 +527,7 @@ mod test {
 
         let data = b"hello world!hello china!";
         let size = data.len();
-        let writing_ctx = WritingViewContext::from(
+        let writing_ctx = WritingViewContext::create_for_test(
             uid.clone(),
             vec![
                 Block {
@@ -619,7 +619,7 @@ mod test {
 
         let data = b"hello world!hello china!";
         let size = data.len();
-        let writing_ctx = WritingViewContext::from(
+        let writing_ctx = WritingViewContext::create_for_test(
             uid.clone(),
             vec![
                 Block {
@@ -694,7 +694,7 @@ mod test {
 
         let data = b"hello world!hello china!";
         let size = data.len();
-        let writing_ctx = WritingViewContext::from(
+        let writing_ctx = WritingViewContext::create_for_test(
             uid.clone(),
             vec![
                 Block {

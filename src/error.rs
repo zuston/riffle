@@ -32,6 +32,9 @@ pub enum WorkerError {
     #[error("Internal error, it should not happen")]
     INTERNAL_ERROR,
 
+    #[error("App is not found")]
+    APP_IS_NOT_FOUND,
+
     #[error("Partial data has been lost, corrupted path: {0}")]
     PARTIAL_DATA_LOST(String),
 

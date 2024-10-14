@@ -49,7 +49,8 @@ impl Subscriber for SpillEventHandler {
             }
             Err(WorkerError::SPILL_EVENT_EXCEED_RETRY_MAX_LIMIT(_))
             | Err(WorkerError::PARTIAL_DATA_LOST(_))
-            | Err(WorkerError::LOCAL_DISK_UNHEALTHY(_)) => {
+            | Err(WorkerError::LOCAL_DISK_UNHEALTHY(_))
+            | Err(WorkerError::APP_IS_NOT_FOUND) => {
                 warn!(
                     "Dropping the spill event for app: {:?}. Attention: this will make data lost!",
                     message.ctx.uid.app_id

@@ -4,6 +4,7 @@ use crate::store::mem::buffer::BatchMemoryBlock;
 use std::sync::Arc;
 
 pub mod event_handler;
+mod spill_test;
 
 #[derive(Clone)]
 pub struct SpillMessage {

@@ -244,7 +244,7 @@ impl ShuffleServer for DefaultShuffleServer {
                 shuffle_id,
                 partition_id,
             };
-            let ctx = WritingViewContext::from(uid, blocks);
+            let ctx = WritingViewContext::create_for_test(uid, blocks);
             let app_ref = app.clone();
             let inserted = app_ref.insert(ctx).instrument_await(await_tree_msg).await;
 

@@ -639,7 +639,7 @@ mod test {
                 task_attempt_id: 0,
             });
         }
-        WritingViewContext::from(uid, data_blocks)
+        WritingViewContext::create_for_test(uid, data_blocks)
     }
 
     #[test]
@@ -684,7 +684,7 @@ mod test {
             .wait(store.require_buffer(RequireBufferContext::new(uid.clone(), 40)))
             .expect("");
 
-        let writing_ctx = WritingViewContext::from(
+        let writing_ctx = WritingViewContext::create_for_test(
             uid.clone(),
             vec![Block {
                 block_id: 0,
@@ -745,7 +745,7 @@ mod test {
         let store = MemoryStore::new(1024 * 1024 * 1024);
         let runtime = store.runtime_manager.clone();
 
-        let writing_ctx = WritingViewContext::from(
+        let writing_ctx = WritingViewContext::create_for_test(
             Default::default(),
             vec![
                 Block {
@@ -790,7 +790,7 @@ mod test {
         let runtime = store.runtime_manager.clone();
 
         // 1. insert 2 block
-        let writing_ctx = WritingViewContext::from(
+        let writing_ctx = WritingViewContext::create_for_test(
             Default::default(),
             vec![
                 Block {

@@ -275,16 +275,6 @@ impl App {
         Ok(())
     }
 
-    fn is_limit_huge_partition(&self) -> bool {
-        if self.huge_partition_marked_threshold.is_none() {
-            return false;
-        }
-        if self.huge_partition_memory_max_available_size.is_none() {
-            return false;
-        }
-        return true;
-    }
-
     pub async fn insert(&self, ctx: WritingViewContext) -> Result<i32, WorkerError> {
         self.heartbeat()?;
 
@@ -295,19 +285,13 @@ impl App {
             .sum::<i32>() as u64;
         TOTAL_RECEIVED_DATA.inc_by(len);
 
+        // add the partition size into the meta
+        self.inc_partition_size(&ctx.uid, len)?;
+
         self.total_received_data_size.fetch_add(len, SeqCst);
         self.total_resident_data_size.fetch_add(len, SeqCst);
 
-        let context = if self.is_limit_huge_partition() {
-            match self.is_huge_partition(&ctx.uid, Some(len)).await {
-                Ok(true) => WritingViewContext::new(ctx.uid, ctx.data_blocks, true, len),
-                _ => ctx,
-            }
-        } else {
-            WritingViewContext::new(ctx.uid, ctx.data_blocks, false, len)
-        };
-
-        self.store.insert(context).await?;
+        self.store.insert(ctx).await?;
         Ok(len as i32)
     }
 
@@ -342,36 +326,38 @@ impl App {
         self.store.get_index(ctx).await
     }
 
-    async fn is_huge_partition(&self, uid: &PartitionedUId, len: Option<u64>) -> Result<bool> {
-        let huge_partition_threshold = self.huge_partition_marked_threshold.unwrap();
-        let mut meta = self.get_partition_meta(uid);
-
-        if len.is_some() {
-            meta.inc_size(len.unwrap() as i32)?;
+    pub fn is_huge_partition(&self, uid: &PartitionedUId) -> Result<bool> {
+        // is configured with the associated huge_partition config options
+        if self.huge_partition_marked_threshold.is_none() {
+            return Ok(false);
+        }
+        if self.huge_partition_memory_max_available_size.is_none() {
+            return Ok(false);
         }
 
+        let huge_partition_threshold = self.huge_partition_marked_threshold.unwrap();
+        let mut meta = self.get_partition_meta(uid);
         let data_size = meta.get_size()?;
         if data_size > huge_partition_threshold {
             return Ok(true);
         }
-        return Ok(false);
+        Ok(false)
     }
 
     async fn is_backpressure_for_huge_partition(&self, uid: &PartitionedUId) -> Result<bool> {
-        if !self.is_huge_partition(uid, None).await? {
+        if !self.is_huge_partition(uid)? {
             return Ok(false);
         }
         let huge_partition_memory_used = &self.huge_partition_memory_max_available_size;
-        let huge_partition_memory = &huge_partition_memory_used.unwrap();
+        let huge_partition_memory = *(&huge_partition_memory_used.unwrap());
 
-        if self
+        let memory_used = self
             .store
             .get_hot_store_memory_partitioned_buffer_size(uid)
-            .await?
-            > *huge_partition_memory
-        {
+            .await?;
+        if memory_used > huge_partition_memory {
             info!(
-                "[{:?}] with huge partition, it has been writing speed limited",
+                "[{:?}] with huge partition, it has been limited of writing speed.",
                 uid
             );
             TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED.inc();
@@ -395,9 +381,7 @@ impl App {
     ) -> Result<RequireBufferResponse, WorkerError> {
         self.heartbeat()?;
 
-        if self.is_limit_huge_partition()
-            && self.is_backpressure_for_huge_partition(&ctx.uid).await?
-        {
+        if self.is_backpressure_for_huge_partition(&ctx.uid).await? {
             TOTAL_REQUIRE_BUFFER_FAILED.inc();
             return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
         }
@@ -433,6 +417,11 @@ impl App {
     pub fn get_block_ids_bitmap(&self, ctx: GetBlocksContext) -> Result<Treemap> {
         let partitioned_meta = self.get_partition_meta(&ctx.uid);
         partitioned_meta.get_block_ids_bitmap()
+    }
+
+    pub fn inc_partition_size(&self, uid: &PartitionedUId, size: u64) -> Result<()> {
+        let mut partitioned_meta = self.get_partition_meta(&uid);
+        partitioned_meta.inc_size(size as i32)
     }
 
     pub async fn report_block_ids(&self, ctx: ReportBlocksContext) -> Result<()> {
@@ -500,30 +489,22 @@ pub struct GetBlocksContext {
 pub struct WritingViewContext {
     pub uid: PartitionedUId,
     pub data_blocks: Vec<Block>,
-    pub owned_by_huge_partition: bool,
     pub data_size: u64,
 }
 
 impl WritingViewContext {
-    pub fn from(uid: PartitionedUId, data_blocks: Vec<Block>) -> Self {
+    pub fn create_for_test(uid: PartitionedUId, data_blocks: Vec<Block>) -> Self {
         WritingViewContext {
             uid,
             data_blocks,
-            owned_by_huge_partition: false,
             data_size: 0,
         }
     }
 
-    pub fn new(
-        uid: PartitionedUId,
-        data_blocks: Vec<Block>,
-        owned_by_huge_partition: bool,
-        data_size: u64,
-    ) -> Self {
+    pub fn new(uid: PartitionedUId, data_blocks: Vec<Block>, data_size: u64) -> Self {
         WritingViewContext {
             uid,
             data_blocks,
-            owned_by_huge_partition,
             data_size,
         }
     }
@@ -848,10 +829,12 @@ impl PartitionedUId {
 mod test {
     use crate::app::{
         AppManager, GetBlocksContext, PartitionedUId, ReadingOptions, ReadingViewContext,
-        ReportBlocksContext, WritingViewContext,
+        ReportBlocksContext, RequireBufferContext, WritingViewContext,
     };
     use crate::config::{Config, HybridStoreConfig, LocalfileStoreConfig, MemoryStoreConfig};
+    use bytes::Bytes;
 
+    use crate::error::WorkerError;
     use crate::runtime::manager::RuntimeManager;
     use crate::storage::StorageService;
     use crate::store::{Block, ResponseData};
@@ -878,6 +861,95 @@ mod test {
         config
     }
 
+    fn mock_writing_context(
+        app_id: &str,
+        shuffle_id: i32,
+        partition_id: i32,
+        block_batch: i32,
+        block_len: i32,
+    ) -> WritingViewContext {
+        let mut blocks = vec![];
+        for idx in 0..block_batch {
+            let block = Block {
+                block_id: idx as i64,
+                length: block_len,
+                uncompress_length: 0,
+                crc: 0,
+                data: Bytes::copy_from_slice(&vec![0; block_len as usize]),
+                task_attempt_id: 0,
+            };
+            blocks.push(block);
+        }
+        let writing_ctx = WritingViewContext::new(
+            PartitionedUId {
+                app_id: app_id.to_string(),
+                shuffle_id,
+                partition_id,
+            },
+            blocks,
+            (block_len * block_batch) as u64,
+        );
+        writing_ctx
+    }
+
+    #[test]
+    fn app_backpressure_of_huge_partition() {
+        let app_id = "backpressure_of_huge_partition";
+        let runtime_manager: RuntimeManager = Default::default();
+
+        let mut config = mock_config();
+        let _ = std::mem::replace(
+            &mut config.memory_store,
+            Some(MemoryStoreConfig {
+                capacity: "20B".to_string(),
+                buffer_ticket_timeout_sec: 1,
+                buffer_ticket_check_interval_sec: 1,
+                dashmap_shard_amount: 16,
+            }),
+        );
+        let _ = std::mem::replace(
+            &mut config.hybrid_store,
+            HybridStoreConfig {
+                memory_spill_high_watermark: 1.0,
+                memory_spill_low_watermark: 0.0,
+                memory_single_buffer_max_spill_size: None,
+                memory_spill_to_cold_threshold_size: None,
+                memory_spill_max_concurrency: 0,
+            },
+        );
+        let mut app_config = &mut config.app_config;
+        app_config.huge_partition_marked_threshold = Some("10B".to_string());
+        app_config.huge_partition_memory_limit_percent = Some(0.4);
+
+        let storage = StorageService::init(&runtime_manager, &config);
+        let app_manager_ref =
+            AppManager::get_ref(runtime_manager.clone(), config, &storage).clone();
+        app_manager_ref
+            .register(app_id.clone().into(), 1, Default::default())
+            .unwrap();
+
+        let app = app_manager_ref.get_app(app_id.as_ref()).unwrap();
+        let ctx = mock_writing_context(&app_id, 1, 0, 2, 10);
+        let f = app.insert(ctx);
+        if runtime_manager.wait(f).is_err() {
+            panic!()
+        }
+
+        let ctx = RequireBufferContext {
+            uid: PartitionedUId {
+                app_id: app_id.to_string(),
+                shuffle_id: 1,
+                partition_id: 0,
+            },
+            size: 10,
+        };
+        let f = app.require_buffer(ctx);
+        match runtime_manager.wait(f) {
+            Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION) => {}
+            _ => panic!(),
+        }
+    }
+
     #[test]
     fn app_put_get_purge_test() {
         let app_id = "app_put_get_purge_test-----id";
@@ -892,31 +964,7 @@ mod test {
             .unwrap();
 
         if let Some(app) = app_manager_ref.get_app("app_id".into()) {
-            let writing_ctx = WritingViewContext::from(
-                PartitionedUId {
-                    app_id: app_id.clone().into(),
-                    shuffle_id: 1,
-                    partition_id: 0,
-                },
-                vec![
-                    Block {
-                        block_id: 0,
-                        length: 10,
-                        uncompress_length: 20,
-                        crc: 10,
-                        data: Default::default(),
-                        task_attempt_id: 0,
-                    },
-                    Block {
-                        block_id: 1,
-                        length: 20,
-                        uncompress_length: 30,
-                        crc: 0,
-                        data: Default::default(),
-                        task_attempt_id: 0,
-                    },
-                ],
-            );
+            let writing_ctx = mock_writing_context(&app_id, 1, 0, 2, 20);
 
             // case1: put
             let f = app.insert(writing_ctx);
@@ -945,8 +993,8 @@ mod test {
             }
 
             // check the data size
-            assert_eq!(30, app.total_received_data_size());
-            assert_eq!(30, app.total_resident_data_size());
+            assert_eq!(40, app.total_received_data_size());
+            assert_eq!(40, app.total_resident_data_size());
 
             // case3: purge
             runtime_manager
@@ -956,7 +1004,7 @@ mod test {
             assert_eq!(false, app_manager_ref.get_app(app_id).is_none());
 
             // check the data size again after the data has been removed
-            assert_eq!(30, app.total_received_data_size());
+            assert_eq!(40, app.total_received_data_size());
             assert_eq!(0, app.total_resident_data_size());
         }
     }
@@ -964,6 +1012,7 @@ mod test {
     #[test]
     fn app_manager_test() {
         let config = mock_config();
+        let runtime_manager: RuntimeManager = Default::default();
         let storage = StorageService::init(&runtime_manager, &config);
         let app_manager_ref = AppManager::get_ref(Default::default(), config, &storage).clone();
 

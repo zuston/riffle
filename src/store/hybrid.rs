@@ -49,6 +49,7 @@ use std::ops::Deref;
 use await_tree::InstrumentAwait;
 use fastrace::future::FutureExt;
 use fastrace::trace;
+use once_cell::sync::OnceCell;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -87,7 +88,7 @@ pub struct HybridStore {
 
     pub event_bus: EventBus<SpillMessage>,
 
-    app_manager: RefCell<Option<AppManagerRef>>,
+    app_manager: OnceCell<AppManagerRef>,
 }
 
 unsafe impl Send for HybridStore {}
@@ -145,7 +146,7 @@ impl HybridStore {
             memory_spill_max_concurrency,
             runtime_manager,
             event_bus,
-            app_manager: RefCell::new(None),
+            app_manager: OnceCell::new(),
         };
         store
     }
@@ -172,8 +173,7 @@ impl HybridStore {
     }
 
     pub fn with_app_manager(&self, app_manager_ref: &AppManagerRef) {
-        let mut refcell = self.app_manager.borrow_mut();
-        *refcell = Some(app_manager_ref.clone());
+        let _ = self.app_manager.set(app_manager_ref.clone());
     }
 
     pub async fn memory_spill_to_persistent_store(
@@ -196,7 +196,7 @@ impl HybridStore {
             .ok_or(anyhow!("empty warm store. It should not happen"))?;
         let cold = self.cold_store.as_ref().unwrap_or(warm);
 
-        // we should cover the following cases
+        // The following spill policies.
         // 1. local store is unhealthy. spill to hdfs
         // 2. event flushed to localfile failed. and exceed retry max cnt, fallback to hdfs
         // 3. huge partition directly flush to hdfs
@@ -213,6 +213,18 @@ impl HybridStore {
         } else {
             cold
         };
+
+        // huge partition fallback to hdfs
+        let app_manager = self.app_manager.get().unwrap();
+        let app_id = &ctx.uid.app_id;
+        match app_manager.get_app(app_id) {
+            Some(app) => {
+                if app.is_huge_partition(&ctx.uid)? {
+                    candidate_store = cold;
+                }
+            }
+            _ => return Err(WorkerError::APP_IS_NOT_FOUND),
+        }
 
         // fallback assignment. propose hdfs always is active and stable
         if retry_cnt >= 1 {
@@ -492,7 +504,7 @@ impl Store for HybridStore {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use crate::app::ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE;
     use crate::app::{
         PartitionedUId, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
@@ -582,7 +594,7 @@ mod tests {
         store
     }
 
-    async fn write_some_data(
+    pub async fn write_some_data(
         store: Arc<HybridStore>,
         uid: PartitionedUId,
         data_len: i32,
@@ -592,7 +604,7 @@ mod tests {
         let mut block_ids = vec![];
         for i in 0..batch_size {
             block_ids.push(i);
-            let writing_ctx = WritingViewContext::from(
+            let writing_ctx = WritingViewContext::create_for_test(
                 uid.clone(),
                 vec![Block {
                     block_id: i,
@@ -761,13 +773,6 @@ mod tests {
         // when the local disk is corrupted, the data will be aborted.
         // Anyway, this partition's data should be not reserved on the memory to effect other
         // apps
-    }
-
-    #[tokio::test]
-    async fn test_localfile_disk_unhealthy() {
-        // when the local disk is unhealthy, the data should be flushed
-        // to the cold store(like hdfs). If not having cold, it will retry again
-        // then again.
     }
 
     #[test]
