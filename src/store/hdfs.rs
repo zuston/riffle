@@ -43,6 +43,7 @@ use hdfs_native::{Client, WriteOptions};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 
+use crate::runtime::manager::RuntimeManager;
 use tracing::debug;
 use url::Url;
 
@@ -74,6 +75,8 @@ pub struct HdfsStore {
 
     partition_file_locks: DashMap<String, Arc<Mutex<()>>>,
     partition_cached_meta: DashMap<String, PartitionCachedMeta>,
+
+    runtime_manager: RuntimeManager,
 }
 
 unsafe impl Send for HdfsStore {}
@@ -81,12 +84,13 @@ unsafe impl Sync for HdfsStore {}
 impl Persistent for HdfsStore {}
 
 impl HdfsStore {
-    pub fn from(conf: HdfsStoreConfig) -> Self {
+    pub fn from(conf: HdfsStoreConfig, runtime_manager: &RuntimeManager) -> Self {
         HdfsStore {
             partition_file_locks: DashMap::new(),
             concurrency_access_limiter: Semaphore::new(conf.max_concurrency),
             partition_cached_meta: Default::default(),
             app_remote_clients: Default::default(),
+            runtime_manager: runtime_manager.clone(),
         }
     }
 

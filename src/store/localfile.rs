@@ -279,18 +279,21 @@ impl LocalFileStore {
         }
 
         let disk = local_disk.clone();
-        let handler = self.runtime_manager.write_runtime.spawn(async move {
-            disk.append(
-                ComposedBytes::from(data_bytes_holder, total_size as usize),
-                &data_file_path,
-            )
-            .instrument_await("data flushing")
-            .await?;
-            disk.append(index_bytes_holder.freeze(), &index_file_path)
-                .instrument_await("index flushing")
+        let handler = self
+            .runtime_manager
+            .localfile_write_runtime
+            .spawn(async move {
+                disk.append(
+                    ComposedBytes::from(data_bytes_holder, total_size as usize),
+                    &data_file_path,
+                )
+                .instrument_await("data flushing")
                 .await?;
-            return anyhow::Ok(());
-        });
+                disk.append(index_bytes_holder.freeze(), &index_file_path)
+                    .instrument_await("index flushing")
+                    .await?;
+                return anyhow::Ok(());
+            });
         let _ = handler
             .instrument_await("localfile appending to file")
             .await?;

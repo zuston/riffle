@@ -113,7 +113,7 @@ impl HybridStore {
             panic!("The binary is not compiled with feature of hdfs! So the storage type can't involve hdfs.");
 
             #[cfg(feature = "hdfs")]
-            let hdfs_store = HdfsStore::from(config.hdfs_store.unwrap());
+            let hdfs_store = HdfsStore::from(config.hdfs_store.unwrap(), &runtime_manager);
             #[cfg(feature = "hdfs")]
             persistent_stores.push_back(Box::new(hdfs_store));
         }
