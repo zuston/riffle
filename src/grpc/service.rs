@@ -40,6 +40,7 @@ use crate::metric::{
     GRPC_GET_MEMORY_DATA_TRANSPORT_TIME, GRPC_SEND_DATA_PROCESS_TIME,
     GRPC_SEND_DATA_TRANSPORT_TIME,
 };
+use crate::reject::RejectionPolicyGateway;
 use crate::store::{PartitionedData, ResponseDataIndex};
 use crate::util;
 use await_tree::InstrumentAwait;
@@ -61,11 +62,18 @@ pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
 
 pub struct DefaultShuffleServer {
     app_manager_ref: AppManagerRef,
+    rejection_policy_gateway: RejectionPolicyGateway,
 }
 
 impl DefaultShuffleServer {
-    pub fn from(app_manager_ref: AppManagerRef) -> DefaultShuffleServer {
-        DefaultShuffleServer { app_manager_ref }
+    pub fn from(
+        app_manager_ref: AppManagerRef,
+        rejection_policy_gateway: &RejectionPolicyGateway,
+    ) -> DefaultShuffleServer {
+        DefaultShuffleServer {
+            app_manager_ref,
+            rejection_policy_gateway: rejection_policy_gateway.clone(),
+        }
     }
 }
 

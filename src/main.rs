@@ -54,6 +54,7 @@ mod log_service;
 mod mem_allocator;
 mod metric;
 mod readable_size;
+pub mod reject;
 pub mod rpc;
 pub mod runtime;
 pub mod signal;

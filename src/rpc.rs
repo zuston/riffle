@@ -7,6 +7,7 @@ use crate::grpc::layer::tracing::TracingMiddleWareLayer;
 use crate::grpc::protobuf::uniffle::shuffle_server_server::ShuffleServerServer;
 use crate::grpc::service::{DefaultShuffleServer, MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use crate::metric::GRPC_LATENCY_TIME_SEC;
+use crate::reject::RejectionPolicyGateway;
 use crate::runtime::manager::RuntimeManager;
 use crate::signal::details::graceful_wait_for_signal;
 use crate::urpc;
@@ -57,6 +58,7 @@ impl DefaultRpcService {
         runtime_manager: RuntimeManager,
         tx: Sender<()>,
         app_manager_ref: AppManagerRef,
+        rejection_gateway: &RejectionPolicyGateway,
     ) -> Result<()> {
         let urpc_port = config.urpc_port.unwrap();
         info!("Starting urpc server with port:[{}] ......", urpc_port);
@@ -92,6 +94,7 @@ impl DefaultRpcService {
         runtime_manager: RuntimeManager,
         tx: Sender<()>,
         app_manager_ref: AppManagerRef,
+        rejection_gateway: &RejectionPolicyGateway,
     ) -> Result<()> {
         let grpc_port = config.grpc_port;
 
@@ -101,7 +104,8 @@ impl DefaultRpcService {
 
         let core_ids = core_affinity::get_core_ids().unwrap();
         for (_, core_id) in core_ids.into_iter().enumerate() {
-            let shuffle_server = DefaultShuffleServer::from(app_manager_ref.clone());
+            let shuffle_server =
+                DefaultShuffleServer::from(app_manager_ref.clone(), rejection_gateway);
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), grpc_port as u16);
             let service = ShuffleServerServer::new(shuffle_server)
                 .max_decoding_message_size(usize::MAX)
@@ -134,6 +138,8 @@ impl DefaultRpcService {
         runtime_manager: RuntimeManager,
         app_manager_ref: AppManagerRef,
     ) -> Result<()> {
+        let rejection_gateway = RejectionPolicyGateway::new(&app_manager_ref, config);
+
         let (tx, _) = broadcast::channel(1);
 
         let grpc_port = config.grpc_port;
@@ -146,6 +152,7 @@ impl DefaultRpcService {
             runtime_manager.clone(),
             tx.clone(),
             app_manager_ref.clone(),
+            &rejection_gateway,
         )?;
 
         let urpc_port = config.urpc_port;
@@ -159,6 +166,7 @@ impl DefaultRpcService {
                 runtime_manager.clone(),
                 tx.clone(),
                 app_manager_ref.clone(),
+                &rejection_gateway,
             )?;
         }
 

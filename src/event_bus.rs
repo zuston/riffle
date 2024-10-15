@@ -105,7 +105,7 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
                 .concurrency_limit
                 .clone()
                 .acquire_owned()
-                .instrument_await("waiting for the spill concurrent limit.")
+                .instrument_await("waiting for the spill concurrent reject.")
                 .await
                 .unwrap();
 

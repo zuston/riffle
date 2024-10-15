@@ -344,7 +344,7 @@ impl App {
         Ok(false)
     }
 
-    async fn is_backpressure_for_huge_partition(&self, uid: &PartitionedUId) -> Result<bool> {
+    pub async fn is_backpressure_for_huge_partition(&self, uid: &PartitionedUId) -> Result<bool> {
         if !self.is_huge_partition(uid)? {
             return Ok(false);
         }

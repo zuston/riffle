@@ -40,6 +40,7 @@ pub mod urpc;
 pub mod util;
 
 pub mod event_bus;
+mod reject;
 pub mod storage;
 
 use crate::app::{AppManager, AppManagerRef};
@@ -54,6 +55,7 @@ use crate::grpc::protobuf::uniffle::{
 use crate::grpc::service::DefaultShuffleServer;
 use crate::http::{HTTPServer, HttpMonitorService};
 use crate::metric::MetricService;
+use crate::reject::RejectionPolicyGateway;
 use crate::runtime::manager::RuntimeManager;
 use crate::storage::StorageService;
 use anyhow::Result;
@@ -79,11 +81,12 @@ pub async fn start_uniffle_worker(config: config::Config) -> Result<AppManagerRe
     let storage = StorageService::init(&runtime_manager, &config);
     let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone(), &storage);
     let app_manager_ref_cloned = app_manager_ref.clone();
+    let rejection_gateway = RejectionPolicyGateway::new(&app_manager_ref, &config);
     runtime_manager.default_runtime.spawn(async move {
         let app_manager_ref = app_manager_ref_cloned;
         let rpc_port = config.grpc_port;
         info!("Starting GRpc server with port:[{}] ......", rpc_port);
-        let shuffle_server = DefaultShuffleServer::from(app_manager_ref);
+        let shuffle_server = DefaultShuffleServer::from(app_manager_ref, &rejection_gateway);
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), rpc_port as u16);
         let service = ShuffleServerServer::new(shuffle_server)
             .max_decoding_message_size(usize::MAX)
