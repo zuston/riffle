@@ -40,7 +40,7 @@ __Rust-based shuffle-server conf__
 ```
 store_type = "MEMORY_LOCALFILE"
 grpc_port = 21100
-coordinator_quorum = ["master01-bdxs-t1.qiyi.hadoop:21000"]
+coordinator_quorum = ["xxxxx:21000"]
 tags = ["riffle2", "datanode", "GRPC", "ss_v5"]
 
 [memory_store]
@@ -59,7 +59,7 @@ memory_spill_max_concurrency = 1000
 
 [metrics]
 http_port = 19998
-push_gateway_endpoint = "http://prometheus-api.qiyi.domain/elastic-yarn/pushgateway"
+push_gateway_endpoint = "http://xxxxx/prometheus/pushgateway"
 
 [runtime_config]
 read_thread_num = 40
