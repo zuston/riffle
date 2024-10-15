@@ -351,10 +351,7 @@ impl App {
         let huge_partition_memory_used = &self.huge_partition_memory_max_available_size;
         let huge_partition_memory = *(&huge_partition_memory_used.unwrap());
 
-        let memory_used = self
-            .store
-            .get_hot_store_memory_partitioned_buffer_size(uid)
-            .await?;
+        let memory_used = self.store.get_partition_memory_buffer_size(uid).await?;
         if memory_used > huge_partition_memory {
             info!(
                 "[{:?}] with huge partition, it has been limited of writing speed.",

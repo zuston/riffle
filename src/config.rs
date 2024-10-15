@@ -152,7 +152,6 @@ impl Default for RuntimeConfig {
 pub struct HybridStoreConfig {
     #[serde(default = "as_default_memory_spill_high_watermark")]
     pub memory_spill_high_watermark: f32,
-
     #[serde(default = "as_default_memory_spill_low_watermark")]
     pub memory_spill_low_watermark: f32,
 

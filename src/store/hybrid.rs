@@ -55,6 +55,7 @@ use std::sync::Arc;
 
 use crate::event_bus::EventBus;
 use crate::runtime::manager::RuntimeManager;
+use crate::store::mem::buffer::MemoryBuffer;
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::spill::event_handler::SpillEventHandler;
 use crate::store::spill::{SpillMessage, SpillWritingViewContext};
@@ -81,12 +82,14 @@ pub struct HybridStore {
     memory_spill_lock: Mutex<()>,
     memory_spill_event_num: AtomicU64,
 
+    memory_spill_partition_max_threshold: Option<u64>,
+
     memory_spill_to_cold_threshold_size: Option<u64>,
     memory_spill_max_concurrency: i32,
 
     runtime_manager: RuntimeManager,
 
-    pub event_bus: EventBus<SpillMessage>,
+    event_bus: EventBus<SpillMessage>,
 
     app_manager: OnceCell<AppManagerRef>,
 }
@@ -124,6 +127,11 @@ impl HybridStore {
                 Some(v) => Some(ReadableSize::from_str(&v.clone()).unwrap().as_bytes()),
                 _ => None,
             };
+        let memory_spill_buffer_max_threshold =
+            match &hybrid_conf.memory_single_buffer_max_spill_size {
+                Some(v) => Some(ReadableSize::from_str(&v.clone()).unwrap().as_bytes()),
+                _ => None,
+            };
         let memory_spill_max_concurrency = hybrid_conf.memory_spill_max_concurrency;
 
         let event_bus: EventBus<SpillMessage> = EventBus::new(
@@ -142,6 +150,7 @@ impl HybridStore {
             config: hybrid_conf,
             memory_spill_lock: Mutex::new(()),
             memory_spill_event_num: AtomicU64::new(0),
+            memory_spill_partition_max_threshold: memory_spill_buffer_max_threshold,
             memory_spill_to_cold_threshold_size,
             memory_spill_max_concurrency,
             runtime_manager,
@@ -291,10 +300,14 @@ impl HybridStore {
         self.hot_store.memory_snapshot()
     }
 
-    pub async fn get_hot_store_memory_partitioned_buffer_size(
+    pub async fn get_partition_memory_buffer(
         &self,
         uid: &PartitionedUId,
-    ) -> Result<u64> {
+    ) -> Result<Arc<MemoryBuffer>> {
+        Ok(self.hot_store.get_or_create_memory_buffer(uid.clone()))
+    }
+
+    pub async fn get_partition_memory_buffer_size(&self, uid: &PartitionedUId) -> Result<u64> {
         self.hot_store.get_partitioned_buffer_size(uid)
     }
 
@@ -328,8 +341,32 @@ impl HybridStore {
         Ok(())
     }
 
+    async fn single_buffer_spill(&self, uid: &PartitionedUId) -> Result<u64> {
+        let buffer = self.get_partition_memory_buffer(uid).await?;
+        self.buffer_spill_impl(uid, buffer).await
+    }
+
+    async fn buffer_spill_impl(
+        &self,
+        uid: &PartitionedUId,
+        buffer: Arc<MemoryBuffer>,
+    ) -> Result<u64> {
+        let spill_result = buffer.spill()?;
+        let flight_len = spill_result.flight_len();
+        let writing_ctx = SpillWritingViewContext::new(uid.clone(), spill_result.blocks());
+        let message = SpillMessage {
+            ctx: writing_ctx,
+            size: flight_len as i64,
+            retry_cnt: 0,
+            previous_spilled_storage: None,
+            flight_id: spill_result.flight_id(),
+        };
+        self.publish_spill_event(message).await?;
+        Ok(flight_len)
+    }
+
     #[trace]
-    pub async fn watermark_spill(&self) -> Result<()> {
+    async fn watermark_spill(&self) -> Result<()> {
         let timer = Instant::now();
         let mem_target =
             (self.hot_store.get_capacity()? as f32 * self.config.memory_spill_low_watermark) as i64;
@@ -342,22 +379,13 @@ impl HybridStore {
 
         let timer = Instant::now();
         let mut flushed_size = 0u64;
-        for (partition_id, buffer) in buffers {
-            let spill_result = buffer.spill()?;
-            let flight_len = spill_result.flight_len();
-            flushed_size += flight_len;
-
-            let writing_ctx = SpillWritingViewContext::new(partition_id, spill_result.blocks());
-            let message = SpillMessage {
-                ctx: writing_ctx,
-                size: flight_len as i64,
-                retry_cnt: 0,
-                previous_spilled_storage: None,
-                flight_id: spill_result.flight_id(),
-            };
-            if self.publish_spill_event(message).await.is_err() {
-                error!("Errors on sending spill message to queue. This should not happen.");
+        for (uid, buffer) in buffers {
+            let flushed = self.buffer_spill_impl(&uid, buffer).await;
+            if flushed.is_err() {
+                error!("Errors on making buffer spill. err: {:?}", flushed.err());
+                continue;
             }
+            flushed_size += flushed?;
         }
         info!(
             "[Spill] Picked up blocks that should be async flushed with {}(bytes) that costs {}(ms).",
@@ -384,6 +412,7 @@ impl Store for HybridStore {
     #[trace]
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
         let store = self.hot_store.clone();
+        let uid = ctx.uid.clone();
         let insert_result = store.insert(ctx).await;
 
         if self.is_memory_only() {
@@ -391,6 +420,20 @@ impl Store for HybridStore {
         }
 
         if let Ok(_) = self.memory_spill_lock.try_lock() {
+            // single buffer spill
+            if let Some(threshold) = self.memory_spill_partition_max_threshold {
+                let size = self.hot_store.get_partitioned_buffer_size(&uid)?;
+                if size > threshold {
+                    if let Err(err) = self.single_buffer_spill(&uid).await {
+                        warn!(
+                            "Errors on single buffer spill. uid: {:?}. err: {:?}",
+                            &uid, err
+                        );
+                    }
+                }
+            }
+
+            // watermark spill
             let ratio = self.hot_store.calculate_usage_ratio();
             if ratio > self.config.memory_spill_high_watermark {
                 if let Err(err) = self.watermark_spill().await {
