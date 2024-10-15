@@ -823,7 +823,7 @@ impl PartitionedUId {
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use crate::app::{
         AppManager, GetBlocksContext, PartitionedUId, ReadingOptions, ReadingViewContext,
         ReportBlocksContext, RequireBufferContext, WritingViewContext,
@@ -858,7 +858,7 @@ mod test {
         config
     }
 
-    fn mock_writing_context(
+    pub fn mock_writing_context(
         app_id: &str,
         shuffle_id: i32,
         partition_id: i32,

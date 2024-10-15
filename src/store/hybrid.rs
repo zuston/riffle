@@ -74,22 +74,22 @@ pub struct HybridStore {
     // Box<dyn Store> will build fail
     hot_store: Arc<MemoryStore>,
 
-    warm_store: Option<Box<dyn PersistentStore>>,
-    cold_store: Option<Box<dyn PersistentStore>>,
+    pub(crate) warm_store: Option<Box<dyn PersistentStore>>,
+    pub(crate) cold_store: Option<Box<dyn PersistentStore>>,
 
     config: HybridStoreConfig,
 
     memory_spill_lock: Mutex<()>,
     memory_spill_event_num: AtomicU64,
 
-    memory_spill_partition_max_threshold: Option<u64>,
+    pub(crate) memory_spill_partition_max_threshold: Option<u64>,
 
     memory_spill_to_cold_threshold_size: Option<u64>,
     memory_spill_max_concurrency: i32,
 
     runtime_manager: RuntimeManager,
 
-    event_bus: EventBus<SpillMessage>,
+    pub(crate) event_bus: EventBus<SpillMessage>,
 
     app_manager: OnceCell<AppManagerRef>,
 }
@@ -224,15 +224,17 @@ impl HybridStore {
         };
 
         // huge partition fallback to hdfs
-        let app_manager = self.app_manager.get().unwrap();
-        let app_id = &ctx.uid.app_id;
-        match app_manager.get_app(app_id) {
-            Some(app) => {
-                if app.is_huge_partition(&ctx.uid)? {
-                    candidate_store = cold;
+        let app_manager = self.app_manager.get();
+        if let Some(app_manager) = app_manager {
+            let app_id = &ctx.uid.app_id;
+            match app_manager.get_app(app_id) {
+                Some(app) => {
+                    if app.is_huge_partition(&ctx.uid)? {
+                        candidate_store = cold;
+                    }
                 }
+                _ => return Err(WorkerError::APP_IS_NOT_FOUND),
             }
-            _ => return Err(WorkerError::APP_IS_NOT_FOUND),
         }
 
         // fallback assignment. propose hdfs always is active and stable
