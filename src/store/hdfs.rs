@@ -43,8 +43,9 @@ use hdfs_native::{Client, WriteOptions};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 
+use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::runtime::manager::RuntimeManager;
-use tracing::debug;
+use tracing::{debug, Instrument};
 use url::Url;
 
 struct PartitionCachedMeta {
@@ -201,13 +202,28 @@ impl HdfsStore {
             total_flushed += length;
         }
 
-        filesystem
-            .append(&data_file_path, data_bytes_holder.freeze())
-            .instrument_await(format!("hdfs writing data. path: {}", data_file_path))
-            .await?;
-        filesystem
-            .append(&index_file_path, index_bytes_holder.freeze())
-            .instrument_await(format!("hdfs writing index. path: {}", data_file_path))
+        let await_tree = AWAIT_TREE_REGISTRY
+            .register("hdfs flushing".to_string())
+            .await;
+        let data_path = data_file_path.clone();
+        let index_path = index_file_path.clone();
+        let filesystem = filesystem.clone();
+        let handler = self
+            .runtime_manager
+            .hdfs_write_runtime
+            .spawn(await_tree.instrument(async move {
+                filesystem
+                    .append(&data_path, data_bytes_holder.freeze())
+                    .instrument_await(format!("hdfs writing [data]. path: {}", &data_path))
+                    .await?;
+                filesystem
+                    .append(&index_path, index_bytes_holder.freeze())
+                    .instrument_await(format!("hdfs writing [index]. path: {}", &index_path))
+                    .await?;
+                return anyhow::Ok(());
+            }));
+        let _ = handler
+            .instrument_await("wait flushing in another runtime")
             .await?;
 
         let mut partition_cached_meta =
@@ -344,7 +360,11 @@ trait HdfsDelegator {
     async fn delete_dir(&self, dir: &str) -> Result<()>;
 }
 
+#[derive(Clone)]
 struct HdfsNativeClient {
+    inner: Arc<ClientInner>,
+}
+struct ClientInner {
     client: Client,
     root: String,
 }
@@ -364,13 +384,15 @@ impl HdfsNativeClient {
 
         let client = Client::new_with_config(url_header.as_str(), configs)?;
         Ok(Self {
-            client,
-            root: root_path.to_string(),
+            inner: Arc::new(ClientInner {
+                client,
+                root: root_path.to_string(),
+            }),
         })
     }
 
     fn wrap_root(&self, path: &str) -> String {
-        format!("{}/{}", &self.root, path)
+        format!("{}/{}", &self.inner.root, path)
     }
 }
 
@@ -378,7 +400,8 @@ impl HdfsNativeClient {
 impl HdfsDelegator for HdfsNativeClient {
     async fn touch(&self, file_path: &str) -> Result<()> {
         let file_path = &self.wrap_root(file_path);
-        self.client
+        self.inner
+            .client
             .create(file_path, WriteOptions::default())
             .await?
             .close()
@@ -388,7 +411,7 @@ impl HdfsDelegator for HdfsNativeClient {
 
     async fn append(&self, file_path: &str, data: Bytes) -> Result<()> {
         let file_path = &self.wrap_root(file_path);
-        let mut file_writer = self.client.append(file_path).await?;
+        let mut file_writer = self.inner.client.append(file_path).await?;
         file_writer.write(data).await?;
         file_writer.close().await?;
         Ok(())
@@ -396,19 +419,19 @@ impl HdfsDelegator for HdfsNativeClient {
 
     async fn len(&self, file_path: &str) -> Result<u64> {
         let file_path = &self.wrap_root(file_path);
-        let file_info = self.client.get_file_info(file_path).await?;
+        let file_info = self.inner.client.get_file_info(file_path).await?;
         Ok(file_info.length as u64)
     }
 
     async fn create_dir(&self, dir: &str) -> Result<()> {
         let dir = &self.wrap_root(dir);
-        let _ = self.client.mkdirs(dir, 777, true).await?;
+        let _ = self.inner.client.mkdirs(dir, 777, true).await?;
         Ok(())
     }
 
     async fn delete_dir(&self, dir: &str) -> Result<()> {
         let dir = &self.wrap_root(dir);
-        self.client.delete(dir, true).await?;
+        self.inner.client.delete(dir, true).await?;
         Ok(())
     }
 }

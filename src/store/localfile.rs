@@ -40,6 +40,7 @@ use dashmap::DashMap;
 
 use log::{debug, error, warn};
 
+use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::composed_bytes::ComposedBytes;
 use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
@@ -278,24 +279,27 @@ impl LocalFileStore {
             next_offset += length as i64;
         }
 
+        let await_tree = AWAIT_TREE_REGISTRY
+            .register("localfile flushing".to_string())
+            .await;
         let disk = local_disk.clone();
         let handler = self
             .runtime_manager
             .localfile_write_runtime
-            .spawn(async move {
+            .spawn(await_tree.instrument(async move {
                 disk.append(
                     ComposedBytes::from(data_bytes_holder, total_size as usize),
                     &data_file_path,
                 )
-                .instrument_await("data flushing")
+                .instrument_await(format!("data flushing. path: {}", &data_file_path))
                 .await?;
                 disk.append(index_bytes_holder.freeze(), &index_file_path)
-                    .instrument_await("index flushing")
+                    .instrument_await(format!("index flushing. path: {}", &index_file_path))
                     .await?;
                 return anyhow::Ok(());
-            });
+            }));
         let _ = handler
-            .instrument_await("localfile appending to file")
+            .instrument_await("wait flushing in another runtime")
             .await?;
 
         TOTAL_LOCALFILE_USED.inc_by(total_size);
