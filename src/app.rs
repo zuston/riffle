@@ -582,16 +582,14 @@ pub struct AppManager {
 }
 
 impl AppManager {
-    fn new(runtime_manager: RuntimeManager, config: Config, storage: HybridStorage) -> Self {
+    fn new(runtime_manager: RuntimeManager, config: Config, storage: &HybridStorage) -> Self {
         let (sender, receiver) = async_channel::unbounded();
         let app_heartbeat_timeout_min = config.app_config.app_heartbeat_timeout_min;
-        let store = Arc::new(StoreProvider::get(runtime_manager.clone(), config.clone()));
-        store.clone().start();
         let manager = AppManager {
             apps: DashMap::new(),
             receiver,
             sender,
-            store,
+            store: storage.clone(),
             app_heartbeat_timeout_min,
             config,
             runtime_manager: runtime_manager.clone(),
@@ -606,7 +604,6 @@ impl AppManager {
         config: Config,
         storage: &HybridStorage,
     ) -> AppManagerRef {
-        let storage = storage.clone();
         let app_ref = Arc::new(AppManager::new(runtime_manager.clone(), config, storage));
         let app_manager_ref_cloned = app_ref.clone();
 
