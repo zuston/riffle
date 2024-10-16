@@ -391,7 +391,7 @@ impl SendDataRequestCommand {
             let partition_id = block.0;
             let partition_blocks = block.1;
             let uid = PartitionedUId::from(app_id.to_string(), shuffle_id, partition_id);
-            let ctx = WritingViewContext::create_for_test(uid, partition_blocks);
+            let ctx = WritingViewContext::new(uid, partition_blocks);
             match app
                 .insert(ctx)
                 .instrument_await(format!("inserting shuffle data for app:{}", &app_id))

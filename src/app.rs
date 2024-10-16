@@ -278,11 +278,7 @@ impl App {
     pub async fn insert(&self, ctx: WritingViewContext) -> Result<i32, WorkerError> {
         self.heartbeat()?;
 
-        let len: u64 = ctx
-            .data_blocks
-            .iter()
-            .map(|block| block.length)
-            .sum::<i32>() as u64;
+        let len: u64 = ctx.data_size;
         TOTAL_RECEIVED_DATA.inc_by(len);
 
         // add the partition size into the meta
@@ -490,6 +486,7 @@ pub struct WritingViewContext {
 }
 
 impl WritingViewContext {
+    // only for test
     pub fn create_for_test(uid: PartitionedUId, data_blocks: Vec<Block>) -> Self {
         WritingViewContext {
             uid,
@@ -498,11 +495,21 @@ impl WritingViewContext {
         }
     }
 
-    pub fn new(uid: PartitionedUId, data_blocks: Vec<Block>, data_size: u64) -> Self {
+    // only for test
+    pub fn new_with_size(uid: PartitionedUId, data_blocks: Vec<Block>, data_size: u64) -> Self {
         WritingViewContext {
             uid,
             data_blocks,
             data_size,
+        }
+    }
+
+    pub fn new(uid: PartitionedUId, data_blocks: Vec<Block>) -> Self {
+        let len: u64 = data_blocks.iter().map(|block| block.length).sum::<i32>() as u64;
+        WritingViewContext {
+            uid,
+            data_blocks,
+            data_size: len,
         }
     }
 }
@@ -874,7 +881,7 @@ pub(crate) mod test {
             };
             blocks.push(block);
         }
-        let writing_ctx = WritingViewContext::new(
+        let writing_ctx = WritingViewContext::new_with_size(
             PartitionedUId {
                 app_id: app_id.to_string(),
                 shuffle_id,
