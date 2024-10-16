@@ -36,7 +36,10 @@ mod tests {
 
     async fn start_embedded_worker(path: String, port: i32) {
         let config = Config::create_mem_localfile_config(port, "1G".to_string(), path);
-        let _ = start_uniffle_worker(config).await;
+        if let Err(err) = start_uniffle_worker(config).await {
+            println!("err: {:#?}", err);
+            panic!();
+        }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 

@@ -46,28 +46,24 @@ pub mod storage;
 use crate::app::{AppManager, AppManagerRef};
 use crate::common::init_global_variable;
 use crate::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
-use crate::grpc::protobuf::uniffle::shuffle_server_server::ShuffleServerServer;
 use crate::grpc::protobuf::uniffle::{
     GetLocalShuffleDataRequest, GetLocalShuffleIndexRequest, GetMemoryShuffleDataRequest,
     GetShuffleResultRequest, PartitionToBlockIds, ReportShuffleResultRequest, RequireBufferRequest,
     SendShuffleDataRequest, ShuffleBlock, ShuffleData, ShuffleRegisterRequest,
 };
-use crate::grpc::service::DefaultShuffleServer;
 use crate::http::{HTTPServer, HttpMonitorService};
 use crate::metric::MetricService;
-use crate::reject::RejectionPolicyGateway;
+use crate::rpc::DefaultRpcService;
 use crate::runtime::manager::RuntimeManager;
 use crate::storage::StorageService;
 use anyhow::Result;
 use bytes::{Buf, Bytes, BytesMut};
 use croaring::treemap::JvmSerializer;
 use croaring::Treemap;
-use log::info;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::oneshot;
-use tonic::transport::{Channel, Server};
+use tonic::transport::Channel;
 
 pub async fn start_uniffle_worker(config: config::Config) -> Result<AppManagerRef> {
     init_global_variable(&config);
@@ -81,23 +77,9 @@ pub async fn start_uniffle_worker(config: config::Config) -> Result<AppManagerRe
     let storage = StorageService::init(&runtime_manager, &config);
     let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone(), &storage);
     let app_manager_ref_cloned = app_manager_ref.clone();
-    let rejection_gateway = RejectionPolicyGateway::new(&app_manager_ref, &config);
+    let rm_cloned = runtime_manager.clone();
     runtime_manager.default_runtime.spawn(async move {
-        let app_manager_ref = app_manager_ref_cloned;
-        let rpc_port = config.grpc_port;
-        info!("Starting GRpc server with port:[{}] ......", rpc_port);
-        let shuffle_server = DefaultShuffleServer::from(app_manager_ref, &rejection_gateway);
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), rpc_port as u16);
-        let service = ShuffleServerServer::new(shuffle_server)
-            .max_decoding_message_size(usize::MAX)
-            .max_encoding_message_size(usize::MAX);
-        let _ = Server::builder()
-            .add_service(service)
-            .serve_with_shutdown(addr, async {
-                rx.await.expect("graceful_shutdown fail");
-                println!("Successfully received the shutdown signal.");
-            })
-            .await;
+        DefaultRpcService {}.start(&config, rm_cloned, app_manager_ref_cloned)
     });
 
     runtime_manager.default_runtime.spawn(async move {

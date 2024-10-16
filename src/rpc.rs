@@ -42,7 +42,7 @@ pub static URPC_PARALLELISM: Lazy<NonZeroUsize> = Lazy::new(|| {
 });
 
 #[async_trait]
-trait RpcService {
+pub trait RpcService {
     async fn start(
         &self,
         config: Config,

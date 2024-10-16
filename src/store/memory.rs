@@ -43,7 +43,7 @@ use anyhow::anyhow;
 use croaring::Treemap;
 use fastrace::trace;
 use fxhash::{FxBuildHasher, FxHasher};
-use log::{debug, warn};
+use log::{debug, info, warn};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
