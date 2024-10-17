@@ -9,6 +9,17 @@ const LOG_FILE_NAME: &str = "uniffle-worker.log";
 
 pub struct LogService;
 impl LogService {
+    pub fn init_for_test() {
+        let env_filter =
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug"));
+        let formatting_layer = fmt::layer().pretty().with_writer(std::io::stderr);
+
+        Registry::default()
+            .with(env_filter)
+            .with(formatting_layer)
+            .init();
+    }
+
     pub fn init(log: &LogConfig) -> WorkerGuard {
         let file_appender = match log.rotation {
             RotationConfig::Hourly => tracing_appender::rolling::hourly(&log.path, LOG_FILE_NAME),

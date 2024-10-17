@@ -38,10 +38,9 @@ use crate::store::{Persistent, RequireBufferResponse, ResponseData, ResponseData
 use anyhow::{anyhow, Result};
 
 use async_trait::async_trait;
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 use prometheus::core::{Atomic, AtomicU64};
 use std::any::Any;
-use std::cell::RefCell;
 
 use std::collections::VecDeque;
 use std::ops::Deref;
@@ -192,7 +191,7 @@ impl HybridStore {
         let mut ctx: SpillWritingViewContext = spill_message.ctx;
         let retry_cnt = spill_message.retry_cnt;
 
-        if retry_cnt > 3 {
+        if retry_cnt >= 3 {
             let app_id = ctx.uid.app_id;
             return Err(WorkerError::SPILL_EVENT_EXCEED_RETRY_MAX_LIMIT(app_id));
         }

@@ -1,23 +1,37 @@
-#[cfg(feature = "hdfs")]
 #[cfg(test)]
 mod tests {
     use crate::app::test::mock_writing_context;
-    use crate::config::Config;
+    use crate::app::PartitionedUId;
     use crate::config::StorageType::{HDFS, LOCALFILE};
+    use crate::config::{Config, StorageType};
+    use crate::log_service::LogService;
+    use crate::metric::{TOTAL_MEMORY_SPILL_OPERATION_FAILED, TOTAL_SPILL_EVENTS_DROPPED};
     use crate::runtime::manager::RuntimeManager;
     use crate::store::hybrid::{HybridStore, PersistentStore};
     use crate::store::spill::event_handler::SpillEventHandler;
     use crate::store::spill::spill_test::mock::MockStore;
     use crate::store::Store;
+    use log::info;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering::SeqCst;
     use std::sync::Arc;
     use std::time::Duration;
 
-    fn create_3_level_config(grpc_port: i32, capacity: String, local_data_path: String) -> Config {
+    #[test]
+    fn test_enum_display() {
+        let store_type = StorageType::HDFS;
+        assert_eq!("HDFS", format!("{:?}", store_type));
+    }
+
+    fn create_multi_level_config(
+        store_type: StorageType,
+        grpc_port: i32,
+        capacity: String,
+        local_data_path: String,
+    ) -> Config {
         let toml_str = format!(
             r#"
-        store_type = "MEMORY_LOCALFILE_HDFS"
+        store_type = "{:?}"
         coordinator_quorum = [""]
         grpc_port = {:?}
 
@@ -30,20 +44,28 @@ mod tests {
         [hdfs_store]
         max_concurrency = 10
         "#,
-            grpc_port, capacity, local_data_path
+            store_type, grpc_port, capacity, local_data_path
         );
 
         toml::from_str(toml_str.as_str()).unwrap()
     }
 
-    fn create_hybrid_store(config: Config, warm: &MockStore, cold: &MockStore) -> Arc<HybridStore> {
+    fn create_hybrid_store(
+        config: Config,
+        warm: &MockStore,
+        cold: Option<&MockStore>,
+    ) -> Arc<HybridStore> {
         let runtime_manager = RuntimeManager::default();
         let mut hybrid_store = HybridStore::from(config, runtime_manager);
 
         let warm_wrapper: Option<Box<dyn PersistentStore>> = Some(Box::new(warm.clone()));
-        let cold_wrapper: Option<Box<dyn PersistentStore>> = Some(Box::new(cold.clone()));
         let _ = std::mem::replace(&mut hybrid_store.warm_store, warm_wrapper);
-        let _ = std::mem::replace(&mut hybrid_store.cold_store, cold_wrapper);
+
+        if cold.is_some() {
+            let cold = cold.unwrap();
+            let cold_wrapper: Option<Box<dyn PersistentStore>> = Some(Box::new(cold.clone()));
+            let _ = std::mem::replace(&mut hybrid_store.cold_store, cold_wrapper);
+        }
 
         let threshold = 10u64;
         let _ = std::mem::replace(
@@ -60,20 +82,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_flush_after_app_purged() {
+        LogService::init_for_test();
+
+        // when flushing after app is purged, whatever flush fail or succeed.
+        // the buffer could be released by other threads.
+    }
+
+    #[tokio::test]
+    async fn test_flush_failed() {
+        LogService::init_for_test();
+
+        // flush failed will make the held memory be released.
+        // and then record the corresponding metrics.
+        let mark_fail_error = Arc::new(AtomicBool::new(true));
+        let warm_healthy = Arc::new(AtomicBool::new(true));
+        let warm = MockStore::new(LOCALFILE, &warm_healthy, Some(mark_fail_error.clone()));
+
+        let temp_dir = tempdir::TempDir::new("test_local_store").unwrap();
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        info!("init local file path: {}", &temp_path);
+
+        let mut config = create_multi_level_config(
+            StorageType::MEMORY_LOCALFILE,
+            1,
+            "1M".to_string(),
+            temp_path,
+        );
+        config.hybrid_store.memory_spill_high_watermark = 1.0;
+
+        let store = create_hybrid_store(config, &warm, None);
+
+        let app_id = "test_flush_failed-app";
+        let ctx = mock_writing_context(app_id, 1, 0, 1, 20);
+        let _ = store.insert(ctx).await;
+
+        // case1: flush failed with multi retry.
+        awaitility::at_most(Duration::from_secs(1)).until(|| TOTAL_SPILL_EVENTS_DROPPED.get() == 1);
+        assert_eq!(4, TOTAL_MEMORY_SPILL_OPERATION_FAILED.get());
+        assert_eq!(
+            0,
+            store
+                .get_partition_memory_buffer_size(&PartitionedUId::from(app_id.to_string(), 1, 0))
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "hdfs")]
     async fn test_single_buffer_spill() {
         let warm_healthy = Arc::new(AtomicBool::new(true));
-        let warm = MockStore::new(LOCALFILE, &warm_healthy);
+        let warm = MockStore::new(LOCALFILE, &warm_healthy, None);
         let cold_healthy = Arc::new(AtomicBool::new(true));
-        let cold = MockStore::new(HDFS, &cold_healthy);
+        let cold = MockStore::new(HDFS, &cold_healthy, None);
 
         let temp_dir = tempdir::TempDir::new("test_local_store").unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("init local file path: {}", &temp_path);
 
-        let mut config = create_3_level_config(1, "1M".to_string(), temp_path);
+        let mut config = create_multi_level_config(
+            StorageType::MEMORY_LOCALFILE_HDFS,
+            1,
+            "1M".to_string(),
+            temp_path,
+        );
         config.hybrid_store.memory_spill_high_watermark = 1.0;
 
-        let store = create_hybrid_store(config, &warm, &cold);
+        let store = create_hybrid_store(config, &warm, Some(&cold));
 
         let app_id = "single_buffer_spill-app";
         let ctx = mock_writing_context(app_id, 1, 0, 1, 20);
@@ -84,23 +160,29 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "hdfs")]
     async fn test_localfile_disk_unhealthy() {
         // when the local disk is unhealthy, the data should be flushed
         // to the cold store(like hdfs). If not having cold, it will retry again
         // then again.
         let warm_healthy = Arc::new(AtomicBool::new(true));
-        let warm = MockStore::new(LOCALFILE, &warm_healthy);
+        let warm = MockStore::new(LOCALFILE, &warm_healthy, None);
         let cold_healthy = Arc::new(AtomicBool::new(true));
-        let cold = MockStore::new(HDFS, &cold_healthy);
+        let cold = MockStore::new(HDFS, &cold_healthy, None);
 
         let temp_dir = tempdir::TempDir::new("test_local_store").unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("init local file path: {}", &temp_path);
 
-        let mut config = create_3_level_config(1, "1M".to_string(), temp_path);
+        let mut config = create_multi_level_config(
+            StorageType::MEMORY_LOCALFILE_HDFS,
+            1,
+            "1M".to_string(),
+            temp_path,
+        );
         config.hybrid_store.memory_spill_high_watermark = 1.0;
 
-        let store = create_hybrid_store(config, &warm, &cold);
+        let store = create_hybrid_store(config, &warm, Some(&cold));
 
         warm_healthy.store(false, SeqCst);
         let app_id = "test_localfile_disk_unhealthy-app";
@@ -123,6 +205,7 @@ mod mock {
     use crate::store::spill::SpillWritingViewContext;
     use crate::store::{Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex, Store};
     use async_trait::async_trait;
+    use parking_lot::Mutex;
     use std::sync::atomic::Ordering::SeqCst;
     use std::sync::atomic::{AtomicBool, AtomicU64};
     use std::sync::Arc;
@@ -134,17 +217,25 @@ mod mock {
 
     pub struct Inner {
         pub(crate) spill_insert_ops: AtomicU64,
+        pub(crate) spill_insert_fail_ops: AtomicU64,
         pub(crate) store_type: StorageType,
         pub(crate) is_healthy: Arc<AtomicBool>,
+        pub(crate) mark_write_fail_option: Option<Arc<AtomicBool>>,
     }
 
     impl MockStore {
-        pub fn new(stype: StorageType, is_healthy: &Arc<AtomicBool>) -> Self {
+        pub fn new(
+            stype: StorageType,
+            is_healthy: &Arc<AtomicBool>,
+            mark_write_fail: Option<Arc<AtomicBool>>,
+        ) -> Self {
             Self {
                 inner: Arc::new(Inner {
                     spill_insert_ops: Default::default(),
+                    spill_insert_fail_ops: Default::default(),
                     store_type: stype,
                     is_healthy: is_healthy.clone(),
+                    mark_write_fail_option: mark_write_fail,
                 }),
             }
         }
@@ -207,6 +298,19 @@ mod mock {
             ctx: SpillWritingViewContext,
         ) -> anyhow::Result<(), WorkerError> {
             self.inner.spill_insert_ops.fetch_add(1, SeqCst);
+
+            if self.inner.mark_write_fail_option.is_some() {
+                if self
+                    .inner
+                    .mark_write_fail_option
+                    .as_ref()
+                    .unwrap()
+                    .load(SeqCst)
+                {
+                    self.inner.spill_insert_fail_ops.fetch_add(1, SeqCst);
+                    return Err(WorkerError::INTERNAL_ERROR);
+                }
+            }
             Ok(())
         }
     }
