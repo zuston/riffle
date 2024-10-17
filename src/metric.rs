@@ -422,6 +422,14 @@ pub static TOTAL_SPILL_EVENTS_DROPPED: Lazy<IntCounter> = Lazy::new(|| {
     .expect("")
 });
 
+pub static TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new(
+        "total_spill_events_dropped_with_app_not_found",
+        "total spill events dropped number about app not found",
+    )
+    .expect("")
+});
+
 // total timeout tickets
 pub static TOTAL_EVICT_TIMEOUT_TICKETS_NUM: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new(
@@ -523,6 +531,12 @@ fn register_custom_metrics() {
 
     REGISTRY
         .register(Box::new(TOTAL_SPILL_EVENTS_DROPPED.clone()))
+        .expect("");
+
+    REGISTRY
+        .register(Box::new(
+            TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND.clone(),
+        ))
         .expect("");
 
     REGISTRY

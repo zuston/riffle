@@ -189,8 +189,11 @@ impl HybridStore {
         spill_message: SpillMessage,
     ) -> Result<String, WorkerError> {
         let mut ctx: SpillWritingViewContext = spill_message.ctx;
-        let retry_cnt = spill_message.retry_cnt;
+        if !ctx.is_valid() {
+            return Err(WorkerError::APP_IS_NOT_FOUND);
+        }
 
+        let retry_cnt = spill_message.retry_cnt;
         if retry_cnt >= 3 {
             let app_id = ctx.uid.app_id;
             return Err(WorkerError::SPILL_EVENT_EXCEED_RETRY_MAX_LIMIT(app_id));
@@ -301,15 +304,12 @@ impl HybridStore {
         self.hot_store.memory_snapshot()
     }
 
-    pub async fn get_partition_memory_buffer(
-        &self,
-        uid: &PartitionedUId,
-    ) -> Result<Arc<MemoryBuffer>> {
-        Ok(self.hot_store.get_or_create_memory_buffer(uid.clone()))
+    pub async fn get_memory_buffer(&self, uid: &PartitionedUId) -> Result<Arc<MemoryBuffer>> {
+        self.hot_store.get_buffer(uid)
     }
 
-    pub async fn get_partition_memory_buffer_size(&self, uid: &PartitionedUId) -> Result<u64> {
-        self.hot_store.get_partitioned_buffer_size(uid)
+    pub async fn get_memory_buffer_size(&self, uid: &PartitionedUId) -> Result<u64> {
+        self.hot_store.get_buffer_size(uid)
     }
 
     pub fn memory_spill_event_num(&self) -> Result<u64> {
@@ -334,7 +334,7 @@ impl HybridStore {
     ) -> Result<()> {
         let uid = &message.ctx.uid;
         self.hot_store
-            .clear_spilled_memory_buffer(uid.clone(), message.flight_id, data_size as u64)
+            .clear_spilled_buffer(uid.clone(), message.flight_id, data_size as u64)
             .await?;
         self.hot_store.dec_used(data_size)?;
         self.hot_store.dec_inflight(data_size as u64);
@@ -343,7 +343,7 @@ impl HybridStore {
     }
 
     async fn single_buffer_spill(&self, uid: &PartitionedUId) -> Result<u64> {
-        let buffer = self.get_partition_memory_buffer(uid).await?;
+        let buffer = self.get_memory_buffer(uid).await?;
         self.buffer_spill_impl(uid, buffer).await
     }
 
@@ -354,7 +354,18 @@ impl HybridStore {
     ) -> Result<u64> {
         let spill_result = buffer.spill()?;
         let flight_len = spill_result.flight_len();
-        let writing_ctx = SpillWritingViewContext::new(uid.clone(), spill_result.blocks());
+
+        let app_manager_ref = self.app_manager.clone();
+        let app_is_exist_func = move |app_id: &str| -> bool {
+            app_manager_ref
+                .get()
+                .as_ref()
+                .unwrap()
+                .app_is_exist(&app_id)
+        };
+
+        let writing_ctx =
+            SpillWritingViewContext::new(uid.clone(), spill_result.blocks(), app_is_exist_func);
         let message = SpillMessage {
             ctx: writing_ctx,
             size: flight_len as i64,
@@ -371,7 +382,7 @@ impl HybridStore {
         let timer = Instant::now();
         let mem_target =
             (self.hot_store.get_capacity()? as f32 * self.config.memory_spill_low_watermark) as i64;
-        let buffers = self.hot_store.pickup_spilled_blocks(mem_target)?;
+        let buffers = self.hot_store.lookup_spill_buffers(mem_target)?;
         info!(
             "[Spill] Getting all spill blocks. target_size:{}. it costs {}(ms)",
             mem_target,
@@ -423,7 +434,7 @@ impl Store for HybridStore {
         if let Ok(_) = self.memory_spill_lock.try_lock() {
             // single buffer spill
             if let Some(threshold) = self.memory_spill_partition_max_threshold {
-                let size = self.hot_store.get_partitioned_buffer_size(&uid)?;
+                let size = self.hot_store.get_buffer_size(&uid)?;
                 if size > threshold {
                     if let Err(err) = self.single_buffer_spill(&uid).await {
                         warn!(

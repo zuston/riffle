@@ -149,7 +149,7 @@ impl MemoryStore {
         self.budget.move_allocated_to_used(size)
     }
 
-    pub fn pickup_spilled_blocks(
+    pub fn lookup_spill_buffers(
         &self,
         mem_target_len: i64,
     ) -> Result<HashMap<PartitionedUId, Arc<MemoryBuffer>>, anyhow::Error> {
@@ -185,10 +185,13 @@ impl MemoryStore {
                 if spill_staging_size >= required_spilled_size {
                     break 'outer;
                 }
-                spill_staging_size += *size;
                 let partition_uid = (*pid).clone();
-                let buffer = self.get_underlying_partition_buffer(*pid);
-                spill_candidates.insert(partition_uid, buffer);
+                let buffer = self.get_buffer(*pid);
+                if buffer.is_err() {
+                    continue;
+                }
+                spill_staging_size += *size;
+                spill_candidates.insert(partition_uid, buffer?);
             }
         }
 
@@ -199,23 +202,24 @@ impl MemoryStore {
         Ok(spill_candidates)
     }
 
-    pub fn get_partitioned_buffer_size(&self, uid: &PartitionedUId) -> Result<u64> {
-        let buffer = self.get_underlying_partition_buffer(uid);
+    pub fn get_buffer_size(&self, uid: &PartitionedUId) -> Result<u64> {
+        let buffer = self.get_buffer(uid)?;
         Ok(buffer.total_size()? as u64)
     }
 
-    pub async fn clear_spilled_memory_buffer(
+    pub async fn clear_spilled_buffer(
         &self,
         uid: PartitionedUId,
         flight_id: u64,
         flight_len: u64,
     ) -> Result<()> {
-        let buffer = self.get_or_create_memory_buffer(uid);
+        let buffer = self.get_buffer(&uid)?;
         buffer.clear(flight_id, flight_len)?;
         Ok(())
     }
 
-    pub fn get_or_create_memory_buffer(&self, uid: PartitionedUId) -> Arc<MemoryBuffer> {
+    // only invoked when inserting
+    pub fn get_or_create_buffer(&self, uid: PartitionedUId) -> Arc<MemoryBuffer> {
         let buffer = self
             .state
             .entry(uid)
@@ -223,8 +227,15 @@ impl MemoryStore {
         buffer.clone()
     }
 
-    fn get_underlying_partition_buffer(&self, pid: &PartitionedUId) -> Arc<MemoryBuffer> {
-        self.state.get(pid).unwrap().clone()
+    pub fn get_buffer(&self, uid: &PartitionedUId) -> Result<Arc<MemoryBuffer>> {
+        let buffer = self.state.get(uid);
+        if buffer.is_none() {
+            return Err(anyhow!(format!(
+                "No such existing buffer for: {:?}. This may has been deleted.",
+                uid
+            )));
+        }
+        Ok(buffer.unwrap().clone())
     }
 
     pub(crate) fn read_partial_data_with_max_size_limit_and_filter<'a>(
@@ -265,7 +276,7 @@ impl Store for MemoryStore {
         let blocks = ctx.data_blocks;
         let size = ctx.data_size;
 
-        let buffer = self.get_or_create_memory_buffer(uid);
+        let buffer = self.get_or_create_buffer(uid);
         buffer.append(blocks, ctx.data_size)?;
 
         TOTAL_MEMORY_USED.inc_by(size);
@@ -276,7 +287,7 @@ impl Store for MemoryStore {
     #[trace]
     async fn get(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
         let uid = ctx.uid;
-        let buffer = self.get_or_create_memory_buffer(uid);
+        let buffer = self.get_buffer(&uid)?;
         let options = ctx.reading_options;
         let read_data = match options {
             MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(last_block_id, max_size) => buffer.get_v2(

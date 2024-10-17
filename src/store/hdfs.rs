@@ -35,7 +35,7 @@ use await_tree::InstrumentAwait;
 use bytes::{BufMut, Bytes, BytesMut};
 use dashmap::DashMap;
 
-use log::info;
+use log::{info, warn};
 
 use std::path::Path;
 
@@ -152,9 +152,11 @@ impl HdfsStore {
             ))
             .await;
 
-        let filesystem = self.app_remote_clients.get(&uid.app_id).ok_or(
-            WorkerError::HDFS_NATIVE_CLIENT_NOT_FOUND(uid.app_id.to_string()),
-        )?;
+        let filesystem = self
+            .app_remote_clients
+            .get(&uid.app_id)
+            .ok_or(WorkerError::APP_HAS_BEEN_PURGED)?
+            .clone();
 
         let mut next_offset = match self.partition_cached_meta.get(&data_file_path) {
             None => {
@@ -207,7 +209,6 @@ impl HdfsStore {
             .await;
         let data_path = data_file_path.clone();
         let index_path = index_file_path.clone();
-        let filesystem = filesystem.clone();
         let handler = self
             .runtime_manager
             .hdfs_write_runtime
@@ -263,9 +264,28 @@ impl Store for HdfsStore {
 
     async fn purge(&self, ctx: PurgeDataContext) -> Result<i64> {
         let app_id = ctx.app_id;
-        let filesystem = self.app_remote_clients.get(&app_id).ok_or(
-            WorkerError::HDFS_NATIVE_CLIENT_NOT_FOUND(app_id.to_string()),
-        )?;
+
+        let fs_option = if ctx.shuffle_id.is_none() {
+            let fs = self.app_remote_clients.remove(&app_id);
+            if fs.is_none() {
+                None
+            } else {
+                Some(fs.unwrap().1)
+            }
+        } else {
+            let fs = self.app_remote_clients.get(&app_id);
+            if fs.is_none() {
+                None
+            } else {
+                Some(fs.unwrap().clone())
+            }
+        };
+        if fs_option.is_none() {
+            warn!("The app has been purged. app_id: {}", &app_id);
+            return Ok(0);
+        }
+
+        let filesystem = fs_option.unwrap();
 
         let dir = match ctx.shuffle_id {
             Some(shuffle_id) => self.get_shuffle_dir(app_id.as_str(), shuffle_id),
@@ -289,11 +309,6 @@ impl Store for HdfsStore {
 
         info!("The hdfs data for {} has been deleted", &dir);
         filesystem.delete_dir(dir.as_str()).await?;
-        drop(filesystem);
-
-        if ctx.shuffle_id.is_none() {
-            self.app_remote_clients.remove(&app_id);
-        }
 
         Ok(removed_size)
     }

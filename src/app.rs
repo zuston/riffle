@@ -347,7 +347,7 @@ impl App {
         let huge_partition_memory_used = &self.huge_partition_memory_max_available_size;
         let huge_partition_memory = *(&huge_partition_memory_used.unwrap());
 
-        let memory_used = self.store.get_partition_memory_buffer_size(uid).await?;
+        let memory_used = self.store.get_memory_buffer_size(uid).await?;
         if memory_used > huge_partition_memory {
             info!(
                 "[{:?}] with huge partition, it has been limited of writing speed.",
@@ -724,6 +724,10 @@ impl AppManager {
         app_ref
     }
 
+    pub fn app_is_exist(&self, app_id: &str) -> bool {
+        self.apps.contains_key(app_id)
+    }
+
     pub async fn store_is_healthy(&self) -> Result<bool> {
         self.store.is_healthy().await
     }
@@ -741,15 +745,13 @@ impl AppManager {
             "App:{} don't exist when purging data, this should not happen",
             &app_id
         )))?;
-        app.purge(app_id.clone(), shuffle_id_option).await?;
-
         if shuffle_id_option.is_none() {
             self.apps.remove(&app_id);
 
             GAUGE_APP_NUMBER.dec();
             let _ = GAUGE_TOPN_APP_RESIDENT_BYTES.remove_label_values(&[&app_id]);
         }
-
+        app.purge(app_id.clone(), shuffle_id_option).await?;
         Ok(())
     }
 

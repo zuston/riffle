@@ -18,19 +18,29 @@ pub struct SpillMessage {
 unsafe impl Send for SpillMessage {}
 unsafe impl Sync for SpillMessage {}
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SpillWritingViewContext {
     pub uid: PartitionedUId,
     pub data_blocks: Arc<BatchMemoryBlock>,
+    app_is_exist_func: Arc<Box<dyn Fn(&str) -> bool + 'static>>,
 }
 unsafe impl Send for SpillWritingViewContext {}
 unsafe impl Sync for SpillWritingViewContext {}
 
 impl SpillWritingViewContext {
-    pub fn new(uid: PartitionedUId, blocks: Arc<BatchMemoryBlock>) -> Self {
+    pub fn new<F>(uid: PartitionedUId, blocks: Arc<BatchMemoryBlock>, func: F) -> Self
+    where
+        F: Fn(&str) -> bool + 'static,
+    {
         Self {
             uid,
             data_blocks: blocks,
+            app_is_exist_func: Arc::new(Box::new(func)),
         }
+    }
+
+    pub fn is_valid(&self) -> bool {
+        let app_id = &self.uid.app_id;
+        (self.app_is_exist_func)(app_id)
     }
 }

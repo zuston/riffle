@@ -123,7 +123,7 @@ mod tests {
         assert_eq!(
             0,
             store
-                .get_partition_memory_buffer_size(&PartitionedUId::from(app_id.to_string(), 1, 0))
+                .get_memory_buffer_size(&PartitionedUId::from(app_id.to_string(), 1, 0))
                 .await
                 .unwrap()
         );

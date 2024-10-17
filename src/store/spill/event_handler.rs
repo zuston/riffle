@@ -3,7 +3,7 @@ use crate::event_bus::{Event, Subscriber};
 use crate::metric::{
     GAUGE_MEMORY_SPILL_IN_FLUSHING_BYTES, GAUGE_MEMORY_SPILL_IN_FLUSHING_OPERATION,
     TOTAL_MEMORY_SPILL_IN_FLUSHING_OPERATION, TOTAL_MEMORY_SPILL_OPERATION_FAILED,
-    TOTAL_SPILL_EVENTS_DROPPED,
+    TOTAL_SPILL_EVENTS_DROPPED, TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND,
 };
 use crate::store::hybrid::HybridStore;
 use crate::store::spill::SpillMessage;
@@ -50,16 +50,20 @@ impl Subscriber for SpillEventHandler {
             Err(WorkerError::SPILL_EVENT_EXCEED_RETRY_MAX_LIMIT(_))
             | Err(WorkerError::PARTIAL_DATA_LOST(_))
             | Err(WorkerError::LOCAL_DISK_UNHEALTHY(_))
+            | Err(WorkerError::APP_HAS_BEEN_PURGED)
             | Err(WorkerError::APP_IS_NOT_FOUND) => {
-                warn!(
-                    "Dropping the spill event for app: {:?}. Attention: this will make data lost!",
-                    message.ctx.uid.app_id
-                );
-                if let Err(err) = store_ref.release_data_in_memory(size, &message).await {
-                    error!("Errors on releasing memory data when dropping the spill event, that should not happen. err: {:#?}", err);
+                // Ignore all errors when app is not found. Because the pending spill operation may happen after app has been purged.
+                if !message.ctx.is_valid() {
+                    warn!("Dropping the spill event for app: {:?}. Ths app is not found, may be purged. Ignore this", &message.ctx.uid.app_id);
+                    TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND.inc();
+                } else {
+                    warn!("Dropping the spill event for app: {:?}. Attention: this will make data lost!", &message.ctx.uid.app_id);
+                    if let Err(err) = store_ref.release_data_in_memory(size, &message).await {
+                        error!("Errors on releasing memory data when dropping the spill event, that should not happen. err: {:#?}", err);
+                    }
+                    TOTAL_SPILL_EVENTS_DROPPED.inc();
+                    TOTAL_MEMORY_SPILL_OPERATION_FAILED.inc();
                 }
-                TOTAL_SPILL_EVENTS_DROPPED.inc();
-                TOTAL_MEMORY_SPILL_OPERATION_FAILED.inc();
                 store_ref.dec_spill_event_num(1);
             }
             Err(error) => {
