@@ -227,8 +227,10 @@ impl HdfsStore {
             .instrument_await("wait flushing in another runtime")
             .await?;
 
-        let mut partition_cached_meta =
-            self.partition_cached_meta.get_mut(&data_file_path).unwrap();
+        let mut partition_cached_meta = self
+            .partition_cached_meta
+            .get_mut(&data_file_path)
+            .ok_or(WorkerError::APP_HAS_BEEN_PURGED)?;
         partition_cached_meta.reset(next_offset);
 
         TOTAL_HDFS_USED.inc_by(total_flushed as u64);
