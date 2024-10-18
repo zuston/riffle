@@ -333,7 +333,7 @@ pub enum RotationConfig {
 
 // =========================================================
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Copy)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Copy, Eq, Hash)]
 #[allow(non_camel_case_types)]
 pub enum StorageType {
     MEMORY = 1,

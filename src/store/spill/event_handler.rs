@@ -12,6 +12,23 @@ use await_tree::InstrumentAwait;
 use log::{debug, error, warn};
 use std::sync::Arc;
 
+#[derive(Clone)]
+pub struct SelectStorageEventHandler {
+    pub store: Arc<HybridStore>,
+}
+unsafe impl Send for SelectStorageEventHandler {}
+unsafe impl Sync for SelectStorageEventHandler {}
+
+#[async_trait]
+impl Subscriber for SelectStorageEventHandler {
+    type Input = SpillMessage;
+
+    async fn on_event(&self, event: &Event<Self::Input>) -> bool {
+        true
+    }
+}
+
+#[derive(Clone)]
 pub struct SpillEventHandler {
     pub store: Arc<HybridStore>,
 }
@@ -23,7 +40,7 @@ unsafe impl Sync for SpillEventHandler {}
 impl Subscriber for SpillEventHandler {
     type Input = SpillMessage;
 
-    async fn on_event(&self, event: &Event<Self::Input>) {
+    async fn on_event(&self, event: &Event<Self::Input>) -> bool {
         let message = event.get_data();
         let size = message.size;
 
@@ -81,5 +98,6 @@ impl Subscriber for SpillEventHandler {
         }
         GAUGE_MEMORY_SPILL_IN_FLUSHING_BYTES.sub(size);
         GAUGE_MEMORY_SPILL_IN_FLUSHING_OPERATION.dec();
+        true
     }
 }

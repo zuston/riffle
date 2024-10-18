@@ -1,9 +1,12 @@
 use crate::app::PartitionedUId;
+use crate::config::StorageType;
 use crate::store::hybrid::PersistentStore;
 use crate::store::mem::buffer::BatchMemoryBlock;
+use parking_lot::Mutex;
 use std::sync::Arc;
 
 pub mod event_handler;
+mod hierarchy_event_bus;
 mod spill_test;
 
 #[derive(Clone)]
@@ -11,8 +14,29 @@ pub struct SpillMessage {
     pub ctx: SpillWritingViewContext,
     pub size: i64,
     pub retry_cnt: i32,
-    pub previous_spilled_storage: Option<Arc<Box<dyn PersistentStore>>>,
     pub flight_id: u64,
+    pub candidate_store_type: Arc<Mutex<Option<StorageType>>>,
+}
+
+impl SpillMessage {
+    pub fn has_candidate_storage(&self) -> bool {
+        let guard = self.candidate_store_type.lock();
+        guard.is_some()
+    }
+
+    pub fn get_candidate_storage_type(&self) -> Option<StorageType> {
+        let guard = self.candidate_store_type.lock();
+        if guard.is_none() {
+            None
+        } else {
+            Some(guard.unwrap().clone())
+        }
+    }
+
+    pub fn set_candidate_storage_type(&self, storage_type: StorageType) {
+        let mut guard = self.candidate_store_type.lock();
+        *guard = Some(storage_type.clone())
+    }
 }
 
 unsafe impl Send for SpillMessage {}

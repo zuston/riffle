@@ -16,7 +16,7 @@ use tracing::Instrument;
 pub trait Subscriber: Send + Sync {
     type Input;
 
-    async fn on_event(&self, event: &Event<Self::Input>);
+    async fn on_event(&self, event: &Event<Self::Input>) -> bool;
 }
 
 pub struct Event<T> {
@@ -56,13 +56,17 @@ struct Inner<T> {
     name: String,
     runtime: RuntimeRef,
     concurrency_limit: Arc<Semaphore>,
+
+    event_executed_hook: OnceCell<Arc<Box<dyn Fn(Event<T>, bool) + 'static + Send + Sync>>>,
 }
 
 unsafe impl<T: Send + Sync + 'static> Send for EventBus<T> {}
 unsafe impl<T: Send + Sync + 'static> Sync for EventBus<T> {}
 
 impl<T: Send + Sync + Clone + 'static> EventBus<T> {
-    pub fn new(runtime: RuntimeRef, name: String, concurrency_limit: usize) -> EventBus<T> {
+    pub fn new(runtime: &RuntimeRef, name: String, concurrency_limit: usize) -> EventBus<T> {
+        let runtime = runtime.clone();
+
         let (send, recv) = async_channel::unbounded();
         let concurrency_limiter = Arc::new(Semaphore::new(concurrency_limit));
         let event_bus = EventBus {
@@ -73,6 +77,7 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
                 name: name.to_string(),
                 runtime: runtime.clone(),
                 concurrency_limit: concurrency_limiter,
+                event_executed_hook: Default::default(),
             }),
         };
 
@@ -131,7 +136,7 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
 
                     let binding = bus.inner.subscriber.get();
                     let subscriber = binding.as_ref().unwrap();
-                    subscriber.on_event(&message).await;
+                    let is_succeed = subscriber.on_event(&message).await;
 
                     timer.observe_duration();
                     GAUGE_EVENT_BUS_QUEUE_HANDLING_SIZE
@@ -142,6 +147,12 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
                         .inc();
 
                     drop(concurrency_guarder);
+
+                    let hook = bus.inner.event_executed_hook.clone();
+                    if hook.get().is_some() {
+                        let hook = hook.get().unwrap().clone();
+                        hook(message, is_succeed)
+                    }
                 }));
         }
     }
@@ -150,8 +161,24 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
         let _ = self.inner.subscriber.set(Arc::new(Box::new(listener)));
     }
 
+    pub fn with_hook(&self, hook: Box<dyn Fn(Event<T>, bool) + 'static + Send + Sync>) {
+        let _ = self.inner.event_executed_hook.set(Arc::new(hook));
+    }
+
     pub async fn publish(&self, event: Event<T>) -> anyhow::Result<()> {
         self.inner.queue_send.send(event).await?;
+
+        GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE
+            .with_label_values(&[&self.inner.name])
+            .inc();
+        TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE
+            .with_label_values(&[&self.inner.name])
+            .inc();
+        Ok(())
+    }
+
+    pub fn sync_publish(&self, event: Event<T>) -> anyhow::Result<()> {
+        self.inner.queue_send.send_blocking(event)?;
 
         GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE
             .with_label_values(&[&self.inner.name])
@@ -169,14 +196,24 @@ mod test {
     use crate::metric::{TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE, TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE};
     use crate::runtime::manager::create_runtime;
     use async_trait::async_trait;
-    use std::sync::atomic::{AtomicI64, Ordering};
+    use std::sync::atomic::Ordering::{Relaxed, SeqCst};
+    use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
 
     #[test]
     fn test_event_bus() -> anyhow::Result<()> {
         let runtime = create_runtime(1, "test");
-        let mut event_bus = EventBus::new(runtime.clone(), "test".to_string(), 1usize);
+        let mut event_bus = EventBus::new(&runtime, "test".to_string(), 1usize);
+
+        // create the hook
+        let hook_result_ref = Arc::new(AtomicBool::new(true));
+        let cloned = hook_result_ref.clone();
+        let func = move |message: Event<String>, is_succeed: bool| {
+            cloned.store(false, SeqCst);
+        };
+        let func = Box::new(func);
+        event_bus.with_hook(func);
 
         let flag = Arc::new(AtomicI64::new(0));
 
@@ -188,7 +225,7 @@ mod test {
         impl Subscriber for SimpleCallback {
             type Input = String;
 
-            async fn on_event(&self, event: &Event<Self::Input>) {
+            async fn on_event(&self, event: &Event<Self::Input>) -> bool {
                 println!("SimpleCallback has accepted event: {:?}", event.get_data());
                 self.flag.fetch_add(1, Ordering::SeqCst);
             }
@@ -217,6 +254,9 @@ mod test {
                 .with_label_values(&["test"])
                 .get()
         );
+
+        // case3: create the hook
+        assert_eq!(false, hook_result_ref.load(Relaxed));
 
         Ok(())
     }

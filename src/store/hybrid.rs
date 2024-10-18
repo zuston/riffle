@@ -138,7 +138,7 @@ impl HybridStore {
         let memory_spill_max_concurrency = hybrid_conf.memory_spill_max_concurrency;
 
         let event_bus: EventBus<SpillMessage> = EventBus::new(
-            runtime_manager.dispatch_runtime.clone(),
+            &runtime_manager.dispatch_runtime,
             "HybridStoreSpill".to_string(),
             memory_spill_max_concurrency as usize,
         );
@@ -199,6 +199,14 @@ impl HybridStore {
 
     pub fn with_app_manager(&self, app_manager_ref: &AppManagerRef) {
         let _ = self.app_manager.set(app_manager_ref.clone());
+    }
+
+    pub async fn select_storage(&self, spill_message: SpillMessage) -> Result<()> {
+        Ok(())
+    }
+
+    pub async fn flush_storage(&self, spill_message: SpillMessage) -> Result<()> {
+        Ok(())
     }
 
     pub async fn memory_spill_to_persistent_store(
@@ -385,8 +393,8 @@ impl HybridStore {
             ctx: writing_ctx,
             size: flight_len as i64,
             retry_cnt: 0,
-            previous_spilled_storage: None,
             flight_id: spill_result.flight_id(),
+            candidate_store_type: Arc::new(parking_lot::Mutex::new(None)),
         };
         self.publish_spill_event(message).await?;
         Ok(flight_len)
@@ -442,7 +450,6 @@ impl Store for HybridStore {
         });
     }
 
-    #[trace]
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
         let store = self.hot_store.clone();
         let uid = ctx.uid.clone();
