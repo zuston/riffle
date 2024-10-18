@@ -151,7 +151,10 @@ impl MemoryStore {
         for buffer in buffers.iter() {
             let key = buffer.0;
             let memory_buf = buffer.1;
-            let staging_size = memory_buf.staging_size().unwrap();
+            let staging_size = memory_buf.staging_size()?;
+            if staging_size == 0 {
+                continue;
+            }
             let valset = sorted_tree_map
                 .entry(staging_size)
                 .or_insert_with(|| vec![]);
