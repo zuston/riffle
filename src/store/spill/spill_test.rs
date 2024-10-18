@@ -6,8 +6,9 @@ mod tests {
     use crate::config::{Config, StorageType};
     use crate::log_service::LogService;
     use crate::metric::{
-        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES, TOTAL_MEMORY_SPILL_OPERATION_FAILED,
-        TOTAL_SPILL_EVENTS_DROPPED, TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND,
+        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES, TOTAL_MEMORY_SPILL_BYTES,
+        TOTAL_MEMORY_SPILL_OPERATION_FAILED, TOTAL_SPILL_EVENTS_DROPPED,
+        TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND,
     };
     use crate::runtime::manager::RuntimeManager;
     use crate::store::hybrid::{HybridStore, PersistentStore};
@@ -15,10 +16,16 @@ mod tests {
     use crate::store::spill::spill_test::mock::MockStore;
     use crate::store::Store;
     use log::info;
+    use once_cell::sync::Lazy;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering::SeqCst;
     use std::sync::Arc;
     use std::time::Duration;
+
+    static LOG: Lazy<()> = Lazy::new(|| {
+        LogService::init_for_test();
+        ()
+    });
 
     #[test]
     fn test_enum_display() {
@@ -86,7 +93,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_flush_after_app_purged() -> anyhow::Result<()> {
-        LogService::init_for_test();
+        let _ = LOG;
+        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.set(0);
+        TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND.reset();
+        TOTAL_MEMORY_SPILL_BYTES.reset();
+        assert_eq!(GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.get(), 0);
 
         // when flushing after app is purged, whatever flush fail or succeed.
         // the buffer could be released by other threads.
@@ -122,14 +133,15 @@ mod tests {
 
         assert_eq!(store.get_spill_event_num()?, 0);
         assert_eq!(store.get_in_flight_size()?, 0);
-        assert_eq!(GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.get(), 0);
 
         Ok(())
     }
 
     #[tokio::test]
     async fn test_flush_failed() {
-        LogService::init_for_test();
+        let _ = LOG;
+        TOTAL_MEMORY_SPILL_OPERATION_FAILED.reset();
+        TOTAL_SPILL_EVENTS_DROPPED.reset();
 
         // flush failed will make the held memory be released.
         // and then record the corresponding metrics.

@@ -372,11 +372,11 @@ impl HybridStore {
 
         let app_manager_ref = self.app_manager.clone();
         let app_is_exist_func = move |app_id: &str| -> bool {
-            app_manager_ref
-                .get()
-                .as_ref()
-                .unwrap()
-                .app_is_exist(&app_id)
+            let app_ref = app_manager_ref.get();
+            if app_ref.is_none() {
+                return true;
+            }
+            app_ref.as_ref().unwrap().app_is_exist(&app_id)
         };
 
         let writing_ctx =
