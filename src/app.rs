@@ -733,11 +733,11 @@ impl AppManager {
     }
 
     pub async fn store_memory_snapshot(&self) -> Result<CapacitySnapshot> {
-        self.store.mem_snapshot().await
+        self.store.mem_snapshot()
     }
 
     pub fn store_memory_spill_event_num(&self) -> Result<u64> {
-        self.store.memory_spill_event_num()
+        self.store.get_spill_event_num()
     }
 
     async fn purge_app_data(&self, app_id: String, shuffle_id_option: Option<i32>) -> Result<()> {

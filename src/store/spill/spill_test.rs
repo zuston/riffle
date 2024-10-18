@@ -1,11 +1,14 @@
 #[cfg(test)]
 mod tests {
     use crate::app::test::mock_writing_context;
-    use crate::app::PartitionedUId;
+    use crate::app::{AppManager, PartitionedUId};
     use crate::config::StorageType::{HDFS, LOCALFILE};
     use crate::config::{Config, StorageType};
     use crate::log_service::LogService;
-    use crate::metric::{TOTAL_MEMORY_SPILL_OPERATION_FAILED, TOTAL_SPILL_EVENTS_DROPPED};
+    use crate::metric::{
+        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES, TOTAL_MEMORY_SPILL_OPERATION_FAILED,
+        TOTAL_SPILL_EVENTS_DROPPED, TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND,
+    };
     use crate::runtime::manager::RuntimeManager;
     use crate::store::hybrid::{HybridStore, PersistentStore};
     use crate::store::spill::event_handler::SpillEventHandler;
@@ -51,12 +54,12 @@ mod tests {
     }
 
     fn create_hybrid_store(
-        config: Config,
+        config: &Config,
         warm: &MockStore,
         cold: Option<&MockStore>,
     ) -> Arc<HybridStore> {
         let runtime_manager = RuntimeManager::default();
-        let mut hybrid_store = HybridStore::from(config, runtime_manager);
+        let mut hybrid_store = HybridStore::from(config.clone(), runtime_manager);
 
         let warm_wrapper: Option<Box<dyn PersistentStore>> = Some(Box::new(warm.clone()));
         let _ = std::mem::replace(&mut hybrid_store.warm_store, warm_wrapper);
@@ -82,11 +85,46 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_flush_after_app_purged() {
+    async fn test_flush_after_app_purged() -> anyhow::Result<()> {
         LogService::init_for_test();
 
         // when flushing after app is purged, whatever flush fail or succeed.
         // the buffer could be released by other threads.
+
+        let warm_healthy = Arc::new(AtomicBool::new(true));
+        let warm = MockStore::new(LOCALFILE, &warm_healthy, None);
+
+        let temp_dir = tempdir::TempDir::new("test_flush_after_app_purged").unwrap();
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        info!("init local file path: {}", &temp_path);
+
+        let mut config = create_multi_level_config(
+            StorageType::MEMORY_LOCALFILE,
+            1,
+            "1M".to_string(),
+            temp_path,
+        );
+        config.hybrid_store.memory_spill_high_watermark = 1.0;
+
+        let store = create_hybrid_store(&config, &warm, None);
+        let runtime = store.runtime_manager.clone();
+        let app_manager_ref = AppManager::get_ref(runtime, config, &store);
+        store.with_app_manager(&app_manager_ref);
+
+        // case1: the app don't exist in the app manager, so the spill will fail.
+        let app_id = "test_flush_after_app_purged-app";
+        let ctx = mock_writing_context(app_id, 1, 0, 1, 20);
+        let _ = store.insert(ctx).await;
+
+        awaitility::at_most(Duration::from_secs(1))
+            .until(|| TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND.get() == 1);
+        TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND.reset();
+
+        assert_eq!(store.get_spill_event_num()?, 0);
+        assert_eq!(store.get_in_flight_size()?, 0);
+        assert_eq!(GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.get(), 0);
+
+        Ok(())
     }
 
     #[tokio::test]
@@ -111,7 +149,7 @@ mod tests {
         );
         config.hybrid_store.memory_spill_high_watermark = 1.0;
 
-        let store = create_hybrid_store(config, &warm, None);
+        let store = create_hybrid_store(&config, &warm, None);
 
         let app_id = "test_flush_failed-app";
         let ctx = mock_writing_context(app_id, 1, 0, 1, 20);
@@ -127,6 +165,9 @@ mod tests {
                 .await
                 .unwrap()
         );
+
+        TOTAL_MEMORY_SPILL_OPERATION_FAILED.reset();
+        TOTAL_SPILL_EVENTS_DROPPED.reset();
     }
 
     #[tokio::test]
@@ -149,7 +190,7 @@ mod tests {
         );
         config.hybrid_store.memory_spill_high_watermark = 1.0;
 
-        let store = create_hybrid_store(config, &warm, Some(&cold));
+        let store = create_hybrid_store(&config, &warm, Some(&cold));
 
         let app_id = "single_buffer_spill-app";
         let ctx = mock_writing_context(app_id, 1, 0, 1, 20);
@@ -182,7 +223,7 @@ mod tests {
         );
         config.hybrid_store.memory_spill_high_watermark = 1.0;
 
-        let store = create_hybrid_store(config, &warm, Some(&cold));
+        let store = create_hybrid_store(&config, &warm, Some(&cold));
 
         warm_healthy.store(false, SeqCst);
         let app_id = "test_localfile_disk_unhealthy-app";

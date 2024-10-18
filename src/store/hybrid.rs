@@ -39,7 +39,7 @@ use anyhow::{anyhow, Result};
 
 use async_trait::async_trait;
 use log::{error, info, warn};
-use prometheus::core::{Atomic, AtomicU64};
+use prometheus::core::Atomic;
 use std::any::Any;
 
 use std::collections::VecDeque;
@@ -50,7 +50,10 @@ use fastrace::future::FutureExt;
 use fastrace::trace;
 use once_cell::sync::OnceCell;
 use std::str::FromStr;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering::{Relaxed, SeqCst};
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use crate::event_bus::EventBus;
 use crate::runtime::manager::RuntimeManager;
@@ -58,7 +61,6 @@ use crate::store::mem::buffer::MemoryBuffer;
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::spill::event_handler::SpillEventHandler;
 use crate::store::spill::{SpillMessage, SpillWritingViewContext};
-use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 pub trait PersistentStore: Store + Persistent + Send + Sync {}
@@ -80,13 +82,15 @@ pub struct HybridStore {
 
     memory_spill_lock: Mutex<()>,
     memory_spill_event_num: AtomicU64,
+    // one in_flight bytes lifecycle is bound to the events.
+    in_flight_bytes_size: AtomicU64,
 
     pub(crate) memory_spill_partition_max_threshold: Option<u64>,
 
     memory_spill_to_cold_threshold_size: Option<u64>,
     memory_spill_max_concurrency: i32,
 
-    runtime_manager: RuntimeManager,
+    pub(crate) runtime_manager: RuntimeManager,
 
     pub(crate) event_bus: EventBus<SpillMessage>,
 
@@ -148,19 +152,32 @@ impl HybridStore {
             cold_store: persistent_stores.pop_front(),
             config: hybrid_conf,
             memory_spill_lock: Mutex::new(()),
-            memory_spill_event_num: AtomicU64::new(0),
+            memory_spill_event_num: Default::default(),
             memory_spill_partition_max_threshold: memory_spill_buffer_max_threshold,
             memory_spill_to_cold_threshold_size,
             memory_spill_max_concurrency,
             runtime_manager,
             event_bus,
             app_manager: OnceCell::new(),
+            in_flight_bytes_size: Default::default(),
         };
         store
     }
 
-    pub fn dec_spill_event_num(&self, delta: u64) {
-        self.memory_spill_event_num.dec_by(delta);
+    fn start_spill_event(&self, bytes_size: u64) {
+        self.memory_spill_event_num.fetch_add(1, SeqCst);
+        self.in_flight_bytes_size.fetch_add(bytes_size, SeqCst);
+
+        MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM.observe(bytes_size as f64);
+        TOTAL_MEMORY_SPILL_BYTES.inc_by(bytes_size);
+        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.add(bytes_size as i64);
+    }
+
+    pub fn finish_spill_event(&self, bytes_size: u64) {
+        self.memory_spill_event_num.fetch_sub(1, SeqCst);
+        self.in_flight_bytes_size.fetch_sub(bytes_size, SeqCst);
+
+        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.sub(bytes_size as i64);
     }
 
     fn is_memory_only(&self) -> bool {
@@ -288,6 +305,7 @@ impl HybridStore {
         Ok(message)
     }
 
+    // only for tests
     pub fn inc_used(&self, size: i64) -> Result<bool> {
         self.hot_store.inc_used(size)
     }
@@ -300,7 +318,7 @@ impl HybridStore {
         self.hot_store.dec_allocated(size)
     }
 
-    pub async fn mem_snapshot(&self) -> Result<CapacitySnapshot> {
+    pub fn mem_snapshot(&self) -> Result<CapacitySnapshot> {
         self.hot_store.memory_snapshot()
     }
 
@@ -312,22 +330,22 @@ impl HybridStore {
         self.hot_store.get_buffer_size(uid)
     }
 
-    pub fn memory_spill_event_num(&self) -> Result<u64> {
-        Ok(self.memory_spill_event_num.get())
+    pub fn get_spill_event_num(&self) -> Result<u64> {
+        Ok(self.memory_spill_event_num.load(Relaxed))
+    }
+
+    pub(crate) fn get_in_flight_size(&self) -> Result<u64> {
+        Ok(self.in_flight_bytes_size.load(Relaxed))
     }
 
     pub async fn publish_spill_event(&self, message: SpillMessage) -> Result<()> {
-        MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM.observe(message.size as f64);
-        TOTAL_MEMORY_SPILL_BYTES.inc_by(message.size as u64);
-        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.add(message.size);
-
+        let size = message.size;
         self.event_bus.publish(message.into()).await?;
-        self.memory_spill_event_num.inc_by(1);
-
+        self.start_spill_event(size as u64);
         Ok(())
     }
 
-    pub async fn release_data_in_memory(
+    pub async fn release_memory_buffer(
         &self,
         data_size: i64,
         message: &SpillMessage,
@@ -336,9 +354,6 @@ impl HybridStore {
         self.hot_store
             .clear_spilled_buffer(uid.clone(), message.flight_id, data_size as u64)
             .await?;
-        self.hot_store.dec_used(data_size)?;
-        self.hot_store.dec_inflight(data_size as u64);
-        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.sub(data_size);
         Ok(())
     }
 
@@ -377,6 +392,13 @@ impl HybridStore {
         Ok(flight_len)
     }
 
+    fn get_memory_used_ratio(&self) -> Result<f32> {
+        let snapshot = self.mem_snapshot()?;
+        let ratio = (snapshot.used() - self.in_flight_bytes_size.load(SeqCst) as i64) as f32
+            / (snapshot.capacity() - snapshot.allocated()) as f32;
+        Ok(ratio)
+    }
+
     #[trace]
     async fn watermark_spill(&self) -> Result<()> {
         let timer = Instant::now();
@@ -384,7 +406,7 @@ impl HybridStore {
             (self.hot_store.get_capacity()? as f32 * self.config.memory_spill_low_watermark) as i64;
         let buffers = self.hot_store.lookup_spill_buffers(mem_target)?;
         info!(
-            "[Spill] Getting all spill blocks. target_size:{}. it costs {}(ms)",
+            "[Spill] Looked up all spill blocks. target_size:{}. it costs {}(ms)",
             mem_target,
             timer.elapsed().as_millis()
         );
@@ -404,7 +426,6 @@ impl HybridStore {
             flushed_size,
             timer.elapsed().as_millis()
         );
-        self.hot_store.inc_inflight(flushed_size);
         Ok(())
     }
 }
@@ -446,7 +467,7 @@ impl Store for HybridStore {
             }
 
             // watermark spill
-            let ratio = self.hot_store.calculate_usage_ratio();
+            let ratio = self.get_memory_used_ratio()?;
             if ratio > self.config.memory_spill_high_watermark {
                 if let Err(err) = self.watermark_spill().await {
                     warn!("Errors on watermark spill. {:?}", err)

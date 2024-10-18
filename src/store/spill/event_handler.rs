@@ -39,13 +39,13 @@ impl Subscriber for SpillEventHandler {
         {
             Ok(msg) => {
                 debug!("{}", msg);
-                if let Err(err) = store_ref.release_data_in_memory(size, &message).await {
+                if let Err(err) = store_ref.release_memory_buffer(size, &message).await {
                     error!(
                         "Errors on releasing memory data, that should not happen. err: {:#?}",
                         err
                     );
                 }
-                store_ref.dec_spill_event_num(1);
+                store_ref.finish_spill_event(message.size as u64);
             }
             Err(WorkerError::SPILL_EVENT_EXCEED_RETRY_MAX_LIMIT(_))
             | Err(WorkerError::PARTIAL_DATA_LOST(_))
@@ -58,13 +58,13 @@ impl Subscriber for SpillEventHandler {
                     TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND.inc();
                 } else {
                     warn!("Dropping the spill event for app: {:?}. Attention: this will make data lost!", &message.ctx.uid.app_id);
-                    if let Err(err) = store_ref.release_data_in_memory(size, &message).await {
+                    if let Err(err) = store_ref.release_memory_buffer(size, &message).await {
                         error!("Errors on releasing memory data when dropping the spill event, that should not happen. err: {:#?}", err);
                     }
                     TOTAL_SPILL_EVENTS_DROPPED.inc();
                     TOTAL_MEMORY_SPILL_OPERATION_FAILED.inc();
                 }
-                store_ref.dec_spill_event_num(1);
+                store_ref.finish_spill_event(message.size as u64);
             }
             Err(error) => {
                 TOTAL_MEMORY_SPILL_OPERATION_FAILED.inc();

@@ -44,15 +44,12 @@ use croaring::Treemap;
 use fastrace::trace;
 use fxhash::{FxBuildHasher, FxHasher};
 use log::{debug, info, warn};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 pub struct MemoryStore {
+    memory_capacity: i64,
     state: DashMap<PartitionedUId, Arc<MemoryBuffer>, BuildHasherDefault<FxHasher>>,
     budget: MemoryBudget,
-    // key: app_id, value: allocated memory size
-    memory_capacity: i64,
-    in_flush_buffer_size: AtomicU64,
     runtime_manager: RuntimeManager,
     ticket_manager: TicketManager,
 }
@@ -77,7 +74,6 @@ impl MemoryStore {
             state: DashMap::with_hasher(FxBuildHasher::default()),
             memory_capacity: max_memory_size,
             ticket_manager,
-            in_flush_buffer_size: Default::default(),
             runtime_manager,
         }
     }
@@ -106,7 +102,6 @@ impl MemoryStore {
             budget: MemoryBudget::new(capacity.as_bytes() as i64),
             memory_capacity: capacity.as_bytes() as i64,
             ticket_manager,
-            in_flush_buffer_size: Default::default(),
             runtime_manager,
         }
     }
@@ -119,25 +114,12 @@ impl MemoryStore {
         Ok(self.memory_capacity)
     }
 
-    pub fn calculate_usage_ratio(&self) -> f32 {
-        let snapshot = self.budget.snapshot();
-        (snapshot.used() - self.in_flush_buffer_size.load(Ordering::SeqCst) as i64) as f32
-            / (snapshot.capacity() - snapshot.allocated()) as f32
-    }
-
-    pub fn inc_inflight(&self, size: u64) {
-        self.in_flush_buffer_size.fetch_add(size, Ordering::SeqCst);
-    }
-
-    pub fn dec_inflight(&self, size: u64) {
-        self.in_flush_buffer_size.fetch_sub(size, Ordering::SeqCst);
-    }
-
+    // only for tests
     pub fn inc_used(&self, size: i64) -> Result<bool> {
         self.budget.inc_used(size)
     }
 
-    pub fn dec_used(&self, size: i64) -> Result<bool> {
+    fn dec_used(&self, size: i64) -> Result<bool> {
         self.budget.dec_used(size)
     }
 
@@ -196,7 +178,7 @@ impl MemoryStore {
         }
 
         debug!(
-            "[Spill] expected spill size: {}, real: {}",
+            "[Spill] expected spill size: {}, picked up real spill size: {}",
             &required_spilled_size, &spill_staging_size
         );
         Ok(spill_candidates)
@@ -215,6 +197,7 @@ impl MemoryStore {
     ) -> Result<()> {
         let buffer = self.get_buffer(&uid)?;
         buffer.clear(flight_id, flight_len)?;
+        self.dec_used(flight_len as i64)?;
         Ok(())
     }
 
