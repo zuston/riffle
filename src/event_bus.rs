@@ -228,6 +228,7 @@ mod test {
             async fn on_event(&self, event: &Event<Self::Input>) -> bool {
                 println!("SimpleCallback has accepted event: {:?}", event.get_data());
                 self.flag.fetch_add(1, Ordering::SeqCst);
+                true
             }
         }
 

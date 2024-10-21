@@ -55,11 +55,12 @@ use std::sync::atomic::Ordering::{Relaxed, SeqCst};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::event_bus::EventBus;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::mem::buffer::MemoryBuffer;
 use crate::store::mem::capacity::CapacitySnapshot;
-use crate::store::spill::event_handler::SpillEventHandler;
+use crate::store::spill::hierarchy_event_bus::HierarchyEventBus;
+use crate::store::spill::storage_flush_handler::StorageFlushHandler;
+use crate::store::spill::storage_select_handler::StorageSelectHandler;
 use crate::store::spill::{SpillMessage, SpillWritingViewContext};
 use tokio::time::Instant;
 
@@ -73,7 +74,7 @@ const DEFAULT_MEMORY_SPILL_MAX_CONCURRENCY: i32 = 20;
 
 pub struct HybridStore {
     // Box<dyn Store> will build fail
-    hot_store: Arc<MemoryStore>,
+    pub(crate) hot_store: Arc<MemoryStore>,
 
     pub(crate) warm_store: Option<Box<dyn PersistentStore>>,
     pub(crate) cold_store: Option<Box<dyn PersistentStore>>,
@@ -92,7 +93,7 @@ pub struct HybridStore {
 
     pub(crate) runtime_manager: RuntimeManager,
 
-    pub(crate) event_bus: EventBus<SpillMessage>,
+    pub(crate) event_bus: HierarchyEventBus<SpillMessage>,
 
     app_manager: OnceCell<AppManagerRef>,
 }
@@ -137,11 +138,7 @@ impl HybridStore {
             };
         let memory_spill_max_concurrency = hybrid_conf.memory_spill_max_concurrency;
 
-        let event_bus: EventBus<SpillMessage> = EventBus::new(
-            &runtime_manager.dispatch_runtime,
-            "HybridStoreSpill".to_string(),
-            memory_spill_max_concurrency as usize,
-        );
+        let event_bus = HierarchyEventBus::new(&runtime_manager);
 
         let store = HybridStore {
             hot_store: Arc::new(MemoryStore::from(
@@ -201,29 +198,80 @@ impl HybridStore {
         let _ = self.app_manager.set(app_manager_ref.clone());
     }
 
-    pub async fn select_storage(&self, spill_message: SpillMessage) -> Result<()> {
-        Ok(())
-    }
-
-    pub async fn flush_storage(&self, spill_message: SpillMessage) -> Result<()> {
-        Ok(())
-    }
-
-    pub async fn memory_spill_to_persistent_store(
+    pub async fn flush_storage_for_buffer(
         &self,
-        spill_message: SpillMessage,
-    ) -> Result<String, WorkerError> {
-        let mut ctx: SpillWritingViewContext = spill_message.ctx;
+        spill_message: &SpillMessage,
+    ) -> Result<(), WorkerError> {
+        let ctx = &spill_message.ctx;
         if !ctx.is_valid() {
             return Err(WorkerError::APP_IS_NOT_FOUND);
         }
 
-        let retry_cnt = spill_message.retry_cnt;
+        let retry_cnt = spill_message.get_retry_counter();
         if retry_cnt >= 3 {
-            let app_id = ctx.uid.app_id;
-            return Err(WorkerError::SPILL_EVENT_EXCEED_RETRY_MAX_LIMIT(app_id));
+            let app_id = &spill_message.ctx.uid.app_id;
+            return Err(WorkerError::SPILL_EVENT_EXCEED_RETRY_MAX_LIMIT(
+                app_id.to_string(),
+            ));
         }
 
+        let storage_type = spill_message.get_candidate_storage_type();
+        if storage_type.is_none() {
+            return Err(WorkerError::NO_CANDIDATE_STORE);
+        }
+        let storage_type = storage_type.unwrap();
+
+        let candidate_store = match &storage_type {
+            StorageType::LOCALFILE => {
+                TOTAL_MEMORY_SPILL_TO_LOCALFILE.inc();
+                GAUGE_MEMORY_SPILL_TO_LOCALFILE.inc();
+                self.warm_store
+                    .as_ref()
+                    .ok_or(anyhow!("empty warm store. It should not happen"))
+            }
+            StorageType::HDFS => {
+                TOTAL_MEMORY_SPILL_TO_HDFS.inc();
+                GAUGE_MEMORY_SPILL_TO_HDFS.inc();
+                self.cold_store
+                    .as_ref()
+                    .ok_or(anyhow!("empty cold store. It should not happen"))
+            }
+            _ => self
+                .warm_store
+                .as_ref()
+                .ok_or(anyhow!("empty warm store. It should not happen")),
+        }?;
+
+        let ctx = spill_message.ctx.clone();
+        // when throwing the data lost error, it should fast fail for this partition data.
+        let result = candidate_store
+            .spill_insert(ctx)
+            .instrument_await("inserting into the persistent store, invoking [write]")
+            .await;
+
+        match &storage_type {
+            StorageType::LOCALFILE => {
+                GAUGE_MEMORY_SPILL_TO_LOCALFILE.dec();
+            }
+            StorageType::HDFS => {
+                GAUGE_MEMORY_SPILL_TO_HDFS.dec();
+            }
+            _ => {}
+        }
+
+        let _ = result?;
+
+        Ok(())
+    }
+
+    pub async fn select_storage_for_buffer(
+        &self,
+        spill_message: &SpillMessage,
+    ) -> Result<StorageType, WorkerError> {
+        let ctx = &spill_message.ctx;
+        if !ctx.is_valid() {
+            return Err(WorkerError::APP_IS_NOT_FOUND);
+        }
         let spill_size = spill_message.size;
 
         let warm = self
@@ -265,52 +313,12 @@ impl HybridStore {
         }
 
         // fallback assignment. propose hdfs always is active and stable
-        if retry_cnt >= 1 {
+        if spill_message.get_retry_counter() >= 1 {
             candidate_store = cold;
         }
 
         let storage_type = candidate_store.name().await;
-
-        match &storage_type {
-            StorageType::LOCALFILE => {
-                TOTAL_MEMORY_SPILL_TO_LOCALFILE.inc();
-                GAUGE_MEMORY_SPILL_TO_LOCALFILE.inc();
-            }
-            StorageType::HDFS => {
-                TOTAL_MEMORY_SPILL_TO_HDFS.inc();
-                GAUGE_MEMORY_SPILL_TO_HDFS.inc();
-            }
-            _ => {}
-        }
-
-        let message = format!(
-            "partition uid: {:?}, memory spilled size: {}",
-            &ctx.uid, &spill_size
-        );
-
-        // Resort the blocks by task_attempt_id to support LOCAL ORDER by default.
-        // This is for spark AQE.
-        // ctx.data_blocks.sort_by_key(|block| block.task_attempt_id);
-
-        // when throwing the data lost error, it should fast fail for this partition data.
-        let result = candidate_store
-            .spill_insert(ctx)
-            .instrument_await("inserting into the persistent store, invoking [write]")
-            .await;
-
-        match &storage_type {
-            StorageType::LOCALFILE => {
-                GAUGE_MEMORY_SPILL_TO_LOCALFILE.dec();
-            }
-            StorageType::HDFS => {
-                GAUGE_MEMORY_SPILL_TO_HDFS.dec();
-            }
-            _ => {}
-        }
-
-        let _ = result?;
-
-        Ok(message)
+        Ok(storage_type)
     }
 
     // only for tests
@@ -392,7 +400,7 @@ impl HybridStore {
         let message = SpillMessage {
             ctx: writing_ctx,
             size: flight_len as i64,
-            retry_cnt: 0,
+            retry_cnt: Default::default(),
             flight_id: spill_result.flight_id(),
             candidate_store_type: Arc::new(parking_lot::Mutex::new(None)),
         };
@@ -445,9 +453,10 @@ impl Store for HybridStore {
             return;
         }
 
-        self.event_bus.subscribe(SpillEventHandler {
-            store: self.clone(),
-        });
+        self.event_bus.subscribe(
+            StorageSelectHandler::new(&self),
+            StorageFlushHandler::new(&self),
+        );
     }
 
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {

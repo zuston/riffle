@@ -12,8 +12,9 @@ mod tests {
     };
     use crate::runtime::manager::RuntimeManager;
     use crate::store::hybrid::{HybridStore, PersistentStore};
-    use crate::store::spill::event_handler::SpillEventHandler;
     use crate::store::spill::spill_test::mock::MockStore;
+    use crate::store::spill::storage_flush_handler::StorageFlushHandler;
+    use crate::store::spill::storage_select_handler::StorageSelectHandler;
     use crate::store::Store;
     use log::info;
     use once_cell::sync::Lazy;
@@ -84,9 +85,10 @@ mod tests {
         );
 
         let store = Arc::new(hybrid_store);
-        store.event_bus.subscribe(SpillEventHandler {
-            store: store.clone(),
-        });
+        store.event_bus.subscribe(
+            StorageSelectHandler::new(&store),
+            StorageFlushHandler::new(&store),
+        );
 
         store.clone()
     }
@@ -134,6 +136,10 @@ mod tests {
         assert_eq!(store.get_spill_event_num()?, 0);
         assert_eq!(store.get_in_flight_size()?, 0);
 
+        let snapshot = store.hot_store.memory_snapshot().unwrap();
+        assert_eq!(0, snapshot.used());
+        assert_eq!(0, snapshot.allocated());
+
         Ok(())
     }
 
@@ -168,7 +174,7 @@ mod tests {
         let _ = store.insert(ctx).await;
 
         // case1: flush failed with multi retry.
-        awaitility::at_most(Duration::from_secs(1)).until(|| TOTAL_SPILL_EVENTS_DROPPED.get() == 1);
+        awaitility::at_most(Duration::from_secs(2)).until(|| TOTAL_SPILL_EVENTS_DROPPED.get() == 1);
         assert_eq!(4, TOTAL_MEMORY_SPILL_OPERATION_FAILED.get());
         assert_eq!(
             0,
@@ -178,6 +184,10 @@ mod tests {
                 .unwrap()
         );
 
+        let snapshot = store.hot_store.memory_snapshot().unwrap();
+        assert_eq!(0, snapshot.used());
+        assert_eq!(0, snapshot.allocated());
+
         TOTAL_MEMORY_SPILL_OPERATION_FAILED.reset();
         TOTAL_SPILL_EVENTS_DROPPED.reset();
     }
@@ -185,6 +195,8 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "hdfs")]
     async fn test_single_buffer_spill() {
+        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.set(0);
+
         let warm_healthy = Arc::new(AtomicBool::new(true));
         let warm = MockStore::new(LOCALFILE, &warm_healthy, None);
         let cold_healthy = Arc::new(AtomicBool::new(true));
@@ -210,11 +222,28 @@ mod tests {
 
         awaitility::at_most(Duration::from_secs(1))
             .until(|| warm.inner.spill_insert_ops.load(SeqCst) == 1);
+
+        // check the success spill event in memory size
+        assert_eq!(0, store.get_in_flight_size().unwrap());
+        assert_eq!(
+            0,
+            store
+                .get_memory_buffer_size(&PartitionedUId::from(app_id.to_string(), 1, 0))
+                .await
+                .unwrap()
+        );
+        assert_eq!(0, store.get_spill_event_num().unwrap());
+        assert_eq!(0, GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.get());
+        let snapshot = store.hot_store.memory_snapshot().unwrap();
+        assert_eq!(0, snapshot.used());
+        assert_eq!(0, snapshot.allocated());
     }
 
     #[tokio::test]
     #[cfg(feature = "hdfs")]
     async fn test_localfile_disk_unhealthy() {
+        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.set(0);
+
         // when the local disk is unhealthy, the data should be flushed
         // to the cold store(like hdfs). If not having cold, it will retry again
         // then again.
@@ -244,6 +273,21 @@ mod tests {
 
         awaitility::at_most(Duration::from_secs(1))
             .until(|| cold.inner.spill_insert_ops.load(SeqCst) == 1);
+
+        // check the success spill event in memory size
+        assert_eq!(0, store.get_in_flight_size().unwrap());
+        assert_eq!(
+            0,
+            store
+                .get_memory_buffer_size(&PartitionedUId::from(app_id.to_string(), 1, 0))
+                .await
+                .unwrap()
+        );
+        assert_eq!(0, store.get_spill_event_num().unwrap());
+        assert_eq!(0, GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.get());
+        let snapshot = store.hot_store.memory_snapshot().unwrap();
+        assert_eq!(0, snapshot.used());
+        assert_eq!(0, snapshot.allocated());
     }
 }
 

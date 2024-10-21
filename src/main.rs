@@ -17,8 +17,6 @@
 
 #![feature(impl_trait_in_assoc_type)]
 
-extern crate core;
-
 use crate::app::AppManager;
 use crate::common::init_global_variable;
 use crate::config::Config;

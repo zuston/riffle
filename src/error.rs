@@ -35,6 +35,9 @@ pub enum WorkerError {
     #[error("App is not found")]
     APP_IS_NOT_FOUND,
 
+    #[error("No candidate storage selected for this spill event")]
+    NO_CANDIDATE_STORE,
+
     #[error("Partial data has been lost, corrupted path: {0}")]
     PARTIAL_DATA_LOST(String),
 
