@@ -204,27 +204,13 @@ impl HdfsStore {
             total_flushed += length;
         }
 
-        let await_tree = AWAIT_TREE_REGISTRY
-            .register("hdfs flushing".to_string())
-            .await;
-        let data_path = data_file_path.clone();
-        let index_path = index_file_path.clone();
-        let handler = self
-            .runtime_manager
-            .hdfs_write_runtime
-            .spawn(await_tree.instrument(async move {
-                filesystem
-                    .append(&data_path, data_bytes_holder.freeze())
-                    .instrument_await(format!("hdfs writing [data]. path: {}", &data_path))
-                    .await?;
-                filesystem
-                    .append(&index_path, index_bytes_holder.freeze())
-                    .instrument_await(format!("hdfs writing [index]. path: {}", &index_path))
-                    .await?;
-                return anyhow::Ok(());
-            }));
-        let _ = handler
-            .instrument_await("wait flushing in another runtime")
+        filesystem
+            .append(&data_file_path, data_bytes_holder.freeze())
+            .instrument_await(format!("hdfs writing [data]. path: {}", &data_file_path))
+            .await?;
+        filesystem
+            .append(&index_file_path, index_bytes_holder.freeze())
+            .instrument_await(format!("hdfs writing [index]. path: {}", &index_file_path))
             .await?;
 
         let mut partition_cached_meta = self

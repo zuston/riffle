@@ -917,7 +917,8 @@ pub(crate) mod test {
                 memory_spill_low_watermark: 0.0,
                 memory_single_buffer_max_spill_size: None,
                 memory_spill_to_cold_threshold_size: None,
-                memory_spill_max_concurrency: 0,
+                memory_spill_to_localfile_concurrency: 100,
+                memory_spill_to_hdfs_concurrency: 100,
             },
         );
         let mut app_config = &mut config.app_config;

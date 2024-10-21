@@ -1,5 +1,5 @@
-use crate::config::StorageType;
 use crate::config::StorageType::{HDFS, LOCALFILE};
+use crate::config::{Config, StorageType};
 use crate::event_bus::{Event, EventBus, Subscriber};
 use crate::runtime::manager::RuntimeManager;
 use crate::store::spill::SpillMessage;
@@ -21,21 +21,22 @@ pub struct HierarchyEventBus<T> {
 }
 
 impl HierarchyEventBus<SpillMessage> {
-    pub fn new(runtime_manager: &RuntimeManager) -> Self {
+    pub fn new(runtime_manager: &RuntimeManager, config: &Config) -> Self {
         let parent: EventBus<SpillMessage> = EventBus::new(
             &runtime_manager.dispatch_runtime,
             "Hierarchy-Parent".to_string(),
-            10000,
+            config.hybrid_store.memory_spill_to_localfile_concurrency as usize
+                + config.hybrid_store.memory_spill_to_hdfs_concurrency as usize,
         );
         let child_localfile: EventBus<SpillMessage> = EventBus::new(
             &runtime_manager.localfile_write_runtime,
             "Hierarchy-Child-localfile".to_string(),
-            10000,
+            config.hybrid_store.memory_spill_to_localfile_concurrency as usize,
         );
         let child_hdfs: EventBus<SpillMessage> = EventBus::new(
             &runtime_manager.hdfs_write_runtime,
             "Hierarchy-Child-hdfs".to_string(),
-            10000,
+            config.hybrid_store.memory_spill_to_hdfs_concurrency as usize,
         );
 
         // dispatch event into the concrete handler when the selection is finished
@@ -113,6 +114,7 @@ impl HierarchyEventBus<SpillMessage> {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::Config;
     use crate::config::StorageType::LOCALFILE;
     use crate::event_bus::{Event, Subscriber};
     use crate::runtime::manager::RuntimeManager;
@@ -172,7 +174,8 @@ mod tests {
     #[test]
     fn test_event_bus() -> Result<()> {
         let runtime_manager = RuntimeManager::default();
-        let event_bus = HierarchyEventBus::new(&runtime_manager);
+        let config = Config::create_simple_config();
+        let event_bus = HierarchyEventBus::new(&runtime_manager, &config);
 
         let select_handler_ops = Arc::new(AtomicU64::new(0));
         let select_handler_result = Arc::new(AtomicBool::new(true));

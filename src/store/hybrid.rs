@@ -87,9 +87,7 @@ pub struct HybridStore {
     in_flight_bytes_size: AtomicU64,
 
     pub(crate) memory_spill_partition_max_threshold: Option<u64>,
-
     memory_spill_to_cold_threshold_size: Option<u64>,
-    memory_spill_max_concurrency: i32,
 
     pub(crate) runtime_manager: RuntimeManager,
 
@@ -103,6 +101,7 @@ unsafe impl Sync for HybridStore {}
 
 impl HybridStore {
     pub fn from(config: Config, runtime_manager: RuntimeManager) -> Self {
+        let event_bus = HierarchyEventBus::new(&runtime_manager, &config);
         let store_type = &config.store_type;
         if !StorageType::contains_memory(&store_type) {
             panic!("Storage type must contains memory.");
@@ -136,9 +135,6 @@ impl HybridStore {
                 Some(v) => Some(ReadableSize::from_str(&v.clone()).unwrap().as_bytes()),
                 _ => None,
             };
-        let memory_spill_max_concurrency = hybrid_conf.memory_spill_max_concurrency;
-
-        let event_bus = HierarchyEventBus::new(&runtime_manager);
 
         let store = HybridStore {
             hot_store: Arc::new(MemoryStore::from(
@@ -152,7 +148,6 @@ impl HybridStore {
             memory_spill_event_num: Default::default(),
             memory_spill_partition_max_threshold: memory_spill_buffer_max_threshold,
             memory_spill_to_cold_threshold_size,
-            memory_spill_max_concurrency,
             runtime_manager,
             event_bus,
             app_manager: OnceCell::new(),

@@ -158,18 +158,23 @@ pub struct HybridStoreConfig {
     pub memory_single_buffer_max_spill_size: Option<String>,
     pub memory_spill_to_cold_threshold_size: Option<String>,
 
-    #[serde(default = "as_default_memory_spill_max_concurrency")]
-    pub memory_spill_max_concurrency: i32,
+    #[serde(default = "as_default_memory_spill_to_localfile_concurrency")]
+    pub memory_spill_to_localfile_concurrency: i32,
+    #[serde(default = "as_default_memory_spill_to_hdfs_concurrency")]
+    pub memory_spill_to_hdfs_concurrency: i32,
 }
 
+fn as_default_memory_spill_to_localfile_concurrency() -> i32 {
+    4000
+}
+fn as_default_memory_spill_to_hdfs_concurrency() -> i32 {
+    500
+}
 fn as_default_memory_spill_high_watermark() -> f32 {
     0.8
 }
 fn as_default_memory_spill_low_watermark() -> f32 {
     0.2
-}
-fn as_default_memory_spill_max_concurrency() -> i32 {
-    10000
 }
 
 impl HybridStoreConfig {
@@ -183,7 +188,8 @@ impl HybridStoreConfig {
             memory_spill_low_watermark,
             memory_single_buffer_max_spill_size,
             memory_spill_to_cold_threshold_size: None,
-            memory_spill_max_concurrency: 100,
+            memory_spill_to_localfile_concurrency: 100,
+            memory_spill_to_hdfs_concurrency: 100,
         }
     }
 }
@@ -195,7 +201,8 @@ impl Default for HybridStoreConfig {
             memory_spill_low_watermark: as_default_memory_spill_low_watermark(),
             memory_single_buffer_max_spill_size: None,
             memory_spill_to_cold_threshold_size: None,
-            memory_spill_max_concurrency: as_default_memory_spill_max_concurrency(),
+            memory_spill_to_localfile_concurrency: 100,
+            memory_spill_to_hdfs_concurrency: 100,
         }
     }
 }
