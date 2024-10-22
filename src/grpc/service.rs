@@ -36,9 +36,9 @@ use crate::grpc::protobuf::uniffle::{
 };
 use crate::metric::{
     GRPC_BUFFER_REQUIRE_PROCESS_TIME, GRPC_GET_LOCALFILE_DATA_PROCESS_TIME,
-    GRPC_GET_MEMORY_DATA_FREEZE_PROCESS_TIME, GRPC_GET_MEMORY_DATA_PROCESS_TIME,
-    GRPC_GET_MEMORY_DATA_TRANSPORT_TIME, GRPC_SEND_DATA_PROCESS_TIME,
-    GRPC_SEND_DATA_TRANSPORT_TIME,
+    GRPC_GET_LOCALFILE_DATA_TRANSPORT_TIME, GRPC_GET_MEMORY_DATA_FREEZE_PROCESS_TIME,
+    GRPC_GET_MEMORY_DATA_PROCESS_TIME, GRPC_GET_MEMORY_DATA_TRANSPORT_TIME,
+    GRPC_SEND_DATA_PROCESS_TIME, GRPC_SEND_DATA_TRANSPORT_TIME,
 };
 use crate::reject::RejectionPolicyGateway;
 use crate::store::{PartitionedData, ResponseDataIndex};
@@ -185,8 +185,12 @@ impl ShuffleServer for DefaultShuffleServer {
     ) -> Result<Response<SendShuffleDataResponse>, Status> {
         let timer = GRPC_SEND_DATA_PROCESS_TIME.start_timer();
         let req = request.into_inner();
-        GRPC_SEND_DATA_TRANSPORT_TIME
-            .observe(((util::now_timestamp_as_millis() - req.timestamp as u128) / 1000) as f64);
+
+        let now = util::now_timestamp_as_millis();
+        let created = req.timestamp as u128;
+        if now > created {
+            GRPC_SEND_DATA_TRANSPORT_TIME.observe(((now - created) / 1000) as f64);
+        }
 
         let app_id = req.app_id;
         let shuffle_id: i32 = req.shuffle_id;
@@ -373,8 +377,11 @@ impl ShuffleServer for DefaultShuffleServer {
         let shuffle_id: i32 = req.shuffle_id;
         let partition_id = req.partition_id;
 
-        GRPC_GET_MEMORY_DATA_TRANSPORT_TIME
-            .observe(((util::now_timestamp_as_millis() - req.timestamp as u128) / 1000) as f64);
+        let now = util::now_timestamp_as_millis();
+        let created = req.timestamp as u128;
+        if now > created {
+            GRPC_GET_LOCALFILE_DATA_TRANSPORT_TIME.observe(((now - created) / 1000) as f64);
+        }
 
         let app = self.app_manager_ref.get_app(&app_id);
         if app.is_none() {
@@ -436,8 +443,11 @@ impl ShuffleServer for DefaultShuffleServer {
         let shuffle_id: i32 = req.shuffle_id;
         let partition_id = req.partition_id;
 
-        GRPC_GET_MEMORY_DATA_TRANSPORT_TIME
-            .observe(((util::now_timestamp_as_millis() - req.timestamp as u128) / 1000) as f64);
+        let now = util::now_timestamp_as_millis();
+        let created = req.timestamp as u128;
+        if now > created {
+            GRPC_GET_MEMORY_DATA_TRANSPORT_TIME.observe(((now - created) / 1000) as f64);
+        }
 
         let app = self.app_manager_ref.get_app(&app_id);
         if app.is_none() {
