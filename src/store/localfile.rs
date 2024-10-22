@@ -446,17 +446,17 @@ impl Store for LocalFileStore {
                         &index_file_path
                     ))
                     .await;
-                let file_stat = disk
-                    .stat(&data_file_path)
-                    .instrument_await(format!("getting file len from file: {:?}", &data_file_path))
-                    .await;
-                (index_data_result, file_stat)
+                // let file_stat = disk
+                //     .stat(&data_file_path)
+                //     .instrument_await(format!("getting file len from file: {:?}", &data_file_path))
+                //     .await;
+                (index_data_result, -1)
             }));
         let result = handler
             .instrument_await("waiting the child read index handler to finish.")
             .await?;
         let data = result.0?;
-        let len = result.1?.content_length as i64;
+        let len = result.1;
         Ok(Local(LocalDataIndex {
             index_data: data,
             data_file_len: len,

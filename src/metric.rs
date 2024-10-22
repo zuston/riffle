@@ -72,6 +72,14 @@ pub static TOTAL_READ_DATA_FROM_LOCALFILE: Lazy<IntCounter> = Lazy::new(|| {
     .expect("metric should be created")
 });
 
+pub static TOTAL_READ_INDEX_FROM_LOCALFILE: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new(
+        "total_read_index_from_localfile",
+        "Reading index from localfile",
+    )
+    .expect("metric should be created")
+});
+
 pub static TOTAL_MEMORY_SPILL_BYTES: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new("memory_spill_total_bytes", "total bytes of memory spilled")
         .expect("metric should be created")
@@ -563,6 +571,10 @@ fn register_custom_metrics() {
 
     REGISTRY
         .register(Box::new(TOTAL_READ_DATA_FROM_LOCALFILE.clone()))
+        .expect("total_read_data must be registered");
+
+    REGISTRY
+        .register(Box::new(TOTAL_READ_INDEX_FROM_LOCALFILE.clone()))
         .expect("total_read_data must be registered");
 
     REGISTRY

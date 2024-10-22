@@ -20,7 +20,8 @@ use crate::error::WorkerError;
 use crate::metric::{
     GAUGE_APP_NUMBER, GAUGE_TOPN_APP_RESIDENT_BYTES, TOTAL_APP_NUMBER,
     TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED, TOTAL_READ_DATA, TOTAL_READ_DATA_FROM_LOCALFILE,
-    TOTAL_READ_DATA_FROM_MEMORY, TOTAL_RECEIVED_DATA, TOTAL_REQUIRE_BUFFER_FAILED,
+    TOTAL_READ_DATA_FROM_MEMORY, TOTAL_READ_INDEX_FROM_LOCALFILE, TOTAL_RECEIVED_DATA,
+    TOTAL_REQUIRE_BUFFER_FAILED,
 };
 
 use crate::readable_size::ReadableSize;
@@ -319,7 +320,18 @@ impl App {
     ) -> Result<ResponseDataIndex, WorkerError> {
         self.heartbeat()?;
 
-        self.store.get_index(ctx).await
+        let response = self.store.get_index(ctx).await;
+        response.map(|data| {
+            match &data {
+                ResponseDataIndex::Local(local_data) => {
+                    let len = local_data.index_data.len();
+                    TOTAL_READ_INDEX_FROM_LOCALFILE.inc_by(len as u64);
+                    TOTAL_READ_DATA.inc_by(len as u64);
+                }
+                _ => {}
+            };
+            data
+        })
     }
 
     pub fn is_huge_partition(&self, uid: &PartitionedUId) -> Result<bool> {
