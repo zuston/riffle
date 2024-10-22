@@ -48,6 +48,7 @@ use dashmap::mapref::entry::Entry;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::Instrument;
 
 use crate::store::local::disk::{LocalDisk, LocalDiskConfig};
 use crate::store::spill::SpillWritingViewContext;
@@ -371,13 +372,25 @@ impl Store for LocalFileStore {
             ));
         }
 
-        let data = local_disk
-            .read(&data_file_path, offset, Some(len))
-            .instrument_await(format!(
-                "getting data from localfile: {:?}",
-                &data_file_path
-            ))
-            .await?;
+        let child_await_tree = AWAIT_TREE_REGISTRY
+            .register("[child] getting data from localfile".to_string())
+            .await;
+        let disk = local_disk.clone();
+        let handler = self
+            .runtime_manager
+            .read_runtime
+            .spawn(child_await_tree.instrument(async move {
+                disk.read(&data_file_path, offset, Some(len))
+                    .instrument_await(format!(
+                        "getting data from localfile: {:?}",
+                        &data_file_path
+                    ))
+                    .await
+            }));
+        let data = handler
+            .instrument_await("waiting the child read data handler to finish.")
+            .await??;
+
         Ok(ResponseData::Local(PartitionedLocalData { data }))
     }
 
@@ -418,20 +431,34 @@ impl Store for LocalFileStore {
             ));
         }
 
-        let index_data_result = local_disk
-            .read(&index_file_path, 0, None)
-            .instrument_await(format!(
-                "reading index data from file: {:?}",
-                &index_file_path
-            ))
+        let disk = local_disk.clone();
+        let child_await_tree = AWAIT_TREE_REGISTRY
+            .register("[child] getting index from localfile".to_string())
+            .await;
+        let handler = self
+            .runtime_manager
+            .read_runtime
+            .spawn(child_await_tree.instrument(async move {
+                let index_data_result = disk
+                    .read(&index_file_path, 0, None)
+                    .instrument_await(format!(
+                        "reading index data from file: {:?}",
+                        &index_file_path
+                    ))
+                    .await;
+                let file_stat = disk
+                    .stat(&data_file_path)
+                    .instrument_await(format!("getting file len from file: {:?}", &data_file_path))
+                    .await;
+                (index_data_result, file_stat)
+            }));
+        let result = handler
+            .instrument_await("waiting the child read index handler to finish.")
             .await?;
-        let file_stat = local_disk
-            .stat(&data_file_path)
-            .instrument_await(format!("getting file len from file: {:?}", &data_file_path))
-            .await?;
-        let len = file_stat.content_length as i64;
+        let data = result.0?;
+        let len = result.1?.content_length as i64;
         Ok(Local(LocalDataIndex {
-            index_data: index_data_result,
+            index_data: data,
             data_file_len: len,
         }))
     }
