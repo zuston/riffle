@@ -21,6 +21,7 @@ use crate::metric::{
     LOCALFILE_DISK_APPEND_OPERATION_DURATION, LOCALFILE_DISK_DELETE_OPERATION_DURATION,
     LOCALFILE_DISK_READ_OPERATION_DURATION, LOCALFILE_DISK_STAT_OPERATION_DURATION,
     TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER, TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER,
+    TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER, TOTAL_LOCAL_DISK_READ_OPERATION_COUNTER,
 };
 use crate::runtime::manager::RuntimeManager;
 use crate::store::BytesWrapper;
@@ -42,6 +43,7 @@ pub struct LocalDiskConfig {
     pub(crate) low_watermark: f32,
     pub(crate) max_concurrency: i32,
     pub(crate) write_buf_capacity: u64,
+    pub(crate) read_buf_capacity: u64,
 }
 
 impl LocalDiskConfig {
@@ -51,6 +53,7 @@ impl LocalDiskConfig {
             low_watermark: 0.6,
             max_concurrency: 20,
             write_buf_capacity: 1024 * 1024,
+            read_buf_capacity: 1024 * 1024,
         }
     }
 }
@@ -62,6 +65,7 @@ impl Default for LocalDiskConfig {
             low_watermark: 0.6,
             max_concurrency: 40,
             write_buf_capacity: 1024 * 1024,
+            read_buf_capacity: 1024 * 1024,
         }
     }
 }
@@ -77,6 +81,7 @@ pub struct LocalDisk {
     capacity: u64,
 
     write_buf_capacity: u64,
+    read_buf_capacity: u64,
 }
 
 impl LocalDisk {
@@ -93,6 +98,7 @@ impl LocalDisk {
             Self::get_disk_capacity(&root).expect("Errors on getting disk capacity");
 
         let write_buf_capacity = config.write_buf_capacity;
+        let read_buf_capacity = config.read_buf_capacity;
         let instance = LocalDisk {
             root: root.to_string(),
             operator,
@@ -102,6 +108,7 @@ impl LocalDisk {
             config,
             capacity: disk_capacity,
             write_buf_capacity,
+            read_buf_capacity,
         };
         let instance = Arc::new(instance);
 
@@ -276,28 +283,38 @@ impl LocalDisk {
         let timer = LOCALFILE_DISK_READ_OPERATION_DURATION
             .with_label_values(&[self.root.as_str()])
             .start_timer();
-
         if length.is_none() {
             return Ok(Bytes::from(self.operator.read(path).await?));
         }
         let length = length.unwrap() as usize;
-
-        let reader = self.operator.reader(path).await?;
-
-        // todo: as the 8KB, but this could be optimized
-        let mut reader = BufReader::with_capacity(8 * 1024, reader);
+        let reader = self
+            .operator
+            .reader(path)
+            .instrument_await("creating reader")
+            .await?;
+        let mut reader = BufReader::with_capacity(self.read_buf_capacity as usize, reader);
         reader
             .seek(SeekFrom::Start(offset as u64))
             .instrument_await("seeking")
             .await?;
-
         let mut bytes_buffer = BytesMut::with_capacity(length);
         unsafe {
             bytes_buffer.set_len(length);
         }
-        reader.read_exact(&mut bytes_buffer).await?;
+        reader
+            .read_exact(&mut bytes_buffer)
+            .instrument_await("dumping buffer into the bytes mut")
+            .await?;
         let bytes = bytes_buffer.freeze();
         timer.observe_duration();
+
+        TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER
+            .with_label_values(&[self.root.as_str()])
+            .inc_by(bytes.len() as u64);
+        TOTAL_LOCAL_DISK_READ_OPERATION_COUNTER
+            .with_label_values(&[self.root.as_str()])
+            .inc();
+
         Ok(bytes)
     }
 

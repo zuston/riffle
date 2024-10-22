@@ -222,6 +222,24 @@ pub static TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER: Lazy<IntCounterVec> 
     .unwrap()
 });
 
+pub static TOTAL_LOCAL_DISK_READ_OPERATION_COUNTER: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
+        "localfile_disk_read_operation_counter",
+        "localfile disk read operation counter",
+        &["root"]
+    )
+    .unwrap()
+});
+
+pub static TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
+        "localfile_disk_read_operation_bytes_counter",
+        "localfile disk read operation bytes counter",
+        &["root"]
+    )
+    .unwrap()
+});
+
 // for urpc metrics
 
 pub static URPC_GET_LOCALFILE_DATA_PROCESS_TIME: Lazy<Histogram> = Lazy::new(|| {

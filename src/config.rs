@@ -90,6 +90,8 @@ pub struct LocalfileStoreConfig {
     pub disk_max_concurrency: i32,
     #[serde(default = "as_default_disk_write_buf_capacity")]
     pub disk_write_buf_capacity: String,
+    #[serde(default = "as_default_disk_read_buf_capacity")]
+    pub disk_read_buf_capacity: String,
 }
 fn as_default_disk_max_concurrency() -> i32 {
     2000
@@ -106,6 +108,9 @@ fn as_default_healthy_check_min_disks() -> i32 {
 fn as_default_disk_write_buf_capacity() -> String {
     "1M".to_string()
 }
+fn as_default_disk_read_buf_capacity() -> String {
+    "1M".to_string()
+}
 
 impl LocalfileStoreConfig {
     pub fn new(data_paths: Vec<String>) -> Self {
@@ -116,6 +121,7 @@ impl LocalfileStoreConfig {
             disk_low_watermark: as_default_disk_low_watermark(),
             disk_max_concurrency: as_default_disk_max_concurrency(),
             disk_write_buf_capacity: as_default_disk_write_buf_capacity(),
+            disk_read_buf_capacity: as_default_disk_read_buf_capacity(),
         }
     }
 }

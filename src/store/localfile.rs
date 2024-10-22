@@ -119,6 +119,11 @@ impl LocalFileStore {
                 )
                 .unwrap()
                 .as_bytes(),
+                read_buf_capacity: ReadableSize::from_str(
+                    localfile_config.disk_read_buf_capacity.as_str(),
+                )
+                .unwrap()
+                .as_bytes(),
             };
 
             local_disk_instances.push(LocalDisk::new(path, config, runtime_manager.clone()));
@@ -354,7 +359,10 @@ impl Store for LocalFileStore {
             })
             .clone();
 
-        let locked_object = locked_object.read().await;
+        let locked_object = locked_object
+            .read()
+            .instrument_await("waiting the partition file lock")
+            .await;
         let local_disk = &locked_object.disk;
 
         if local_disk.is_corrupted()? {
