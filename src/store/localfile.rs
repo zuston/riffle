@@ -45,6 +45,7 @@ use crate::composed_bytes::ComposedBytes;
 use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
 use dashmap::mapref::entry::Entry;
+use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -430,7 +431,7 @@ impl Store for LocalFileStore {
                 local_disk.root.to_string(),
             ));
         }
-
+        let next_offset = locked_object.pointer.load(SeqCst);
         let disk = local_disk.clone();
         let child_await_tree = AWAIT_TREE_REGISTRY
             .register("[child] getting index from localfile".to_string())
@@ -450,7 +451,7 @@ impl Store for LocalFileStore {
                 //     .stat(&data_file_path)
                 //     .instrument_await(format!("getting file len from file: {:?}", &data_file_path))
                 //     .await;
-                (index_data_result, -1)
+                (index_data_result, next_offset)
             }));
         let result = handler
             .instrument_await("waiting the child read index handler to finish.")

@@ -286,36 +286,45 @@ impl LocalDisk {
         if length.is_none() {
             return Ok(Bytes::from(self.operator.read(path).await?));
         }
-        let length = length.unwrap() as usize;
         let reader = self
             .operator
             .reader(path)
             .instrument_await("creating reader")
             .await?;
         let mut reader = BufReader::with_capacity(self.read_buf_capacity as usize, reader);
-        reader
-            .seek(SeekFrom::Start(offset as u64))
-            .instrument_await("seeking")
-            .await?;
-        let mut bytes_buffer = BytesMut::with_capacity(length);
-        unsafe {
-            bytes_buffer.set_len(length);
-        }
-        reader
-            .read_exact(&mut bytes_buffer)
-            .instrument_await("dumping buffer into the bytes mut")
-            .await?;
-        let bytes = bytes_buffer.freeze();
-        timer.observe_duration();
 
+        let data = if length.is_some() {
+            let length = length.unwrap() as usize;
+            reader
+                .seek(SeekFrom::Start(offset as u64))
+                .instrument_await("seeking")
+                .await?;
+            let mut bytes_buffer = BytesMut::with_capacity(length);
+            unsafe {
+                bytes_buffer.set_len(length);
+            }
+            reader
+                .read_exact(&mut bytes_buffer)
+                .instrument_await("random reading...")
+                .await?;
+            let bytes = bytes_buffer.freeze();
+            bytes
+        } else {
+            let mut data = vec![];
+            reader
+                .read_to_end(&mut data)
+                .instrument_await("whole file reading...")
+                .await?;
+            Bytes::copy_from_slice(&*data)
+        };
+        timer.observe_duration();
         TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER
             .with_label_values(&[self.root.as_str()])
-            .inc_by(bytes.len() as u64);
+            .inc_by(data.len() as u64);
         TOTAL_LOCAL_DISK_READ_OPERATION_COUNTER
             .with_label_values(&[self.root.as_str()])
             .inc();
-
-        Ok(bytes)
+        Ok(data)
     }
 
     pub async fn delete(&self, path: &str) -> Result<()> {
