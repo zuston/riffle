@@ -55,6 +55,7 @@ mod readable_size;
 pub mod reject;
 pub mod rpc;
 pub mod runtime;
+pub mod semaphore_with_index;
 pub mod signal;
 pub mod storage;
 pub mod store;

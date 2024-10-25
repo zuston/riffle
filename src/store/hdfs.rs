@@ -43,8 +43,8 @@ use hdfs_native::{Client, WriteOptions};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 
-use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::runtime::manager::RuntimeManager;
+use crate::semaphore_with_index::SemaphoreWithIndex;
 use tracing::{debug, Instrument};
 use url::Url;
 
@@ -74,10 +74,12 @@ pub struct HdfsStore {
     // key: app_id, value: hdfs_native_client
     app_remote_clients: DashMap<String, HdfsNativeClient>,
 
-    partition_file_locks: DashMap<String, Arc<Mutex<()>>>,
+    partition_file_locks: DashMap<String, Arc<SemaphoreWithIndex>>,
     partition_cached_meta: DashMap<String, PartitionCachedMeta>,
 
     runtime_manager: RuntimeManager,
+
+    partition_write_concurrency: usize,
 }
 
 unsafe impl Send for HdfsStore {}
@@ -88,10 +90,13 @@ impl HdfsStore {
     pub fn from(conf: HdfsStoreConfig, runtime_manager: &RuntimeManager) -> Self {
         HdfsStore {
             partition_file_locks: DashMap::new(),
+
             concurrency_access_limiter: Semaphore::new(conf.max_concurrency),
             partition_cached_meta: Default::default(),
             app_remote_clients: Default::default(),
             runtime_manager: runtime_manager.clone(),
+
+            partition_write_concurrency: conf.partition_write_max_concurrency,
         }
     }
 
@@ -104,21 +109,15 @@ impl HdfsStore {
         format!("{}/{}/", app_id, shuffle_id)
     }
 
-    fn get_file_path_by_uid(&self, uid: &PartitionedUId) -> (String, String) {
+    fn get_file_path_prefix_by_uid(&self, uid: &PartitionedUId) -> (String, String) {
         let app_id = &uid.app_id;
         let shuffle_id = &uid.shuffle_id;
         let p_id = &uid.partition_id;
 
         let worker_id = crate::app::SHUFFLE_SERVER_ID.get().unwrap();
         (
-            format!(
-                "{}/{}/{}-{}/{}.data",
-                app_id, shuffle_id, p_id, p_id, worker_id
-            ),
-            format!(
-                "{}/{}/{}-{}/{}.index",
-                app_id, shuffle_id, p_id, p_id, worker_id
-            ),
+            format!("{}/{}/{}-{}/{}", app_id, shuffle_id, p_id, p_id, worker_id),
+            format!("{}/{}/{}-{}/{}", app_id, shuffle_id, p_id, p_id, worker_id),
         )
     }
 
@@ -127,30 +126,32 @@ impl HdfsStore {
         uid: PartitionedUId,
         data_blocks: Vec<&Block>,
     ) -> Result<(), WorkerError> {
-        let (data_file_path, index_file_path) = self.get_file_path_by_uid(&uid);
-
         let concurrency_guarder = self
             .concurrency_access_limiter
             .acquire()
-            .instrument_await(format!(
-                "hdfs concurrency limiter. path: {}",
-                data_file_path
-            ))
+            .instrument_await(format!("hdfs concurrency limiter. uid: {:?}", &uid))
             .await
             .map_err(|e| WorkerError::from(e))?;
+
+        let (data_file_path, index_file_path) = self.get_file_path_prefix_by_uid(&uid);
 
         let lock_cloned = self
             .partition_file_locks
             .entry(data_file_path.clone())
-            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .or_insert_with(|| Arc::new(SemaphoreWithIndex::new(self.partition_write_concurrency)))
             .clone();
-        let _lock_guard = lock_cloned
-            .lock()
+        let permit = lock_cloned
+            .acquire()
             .instrument_await(format!(
                 "hdfs partition file lock. path: {}",
                 data_file_path
             ))
-            .await;
+            .await?;
+        let index = permit.get_index();
+        let (data_file_path, index_file_path) = (
+            format!("{}_{}.data", data_file_path, index),
+            format!("{}_{}.index", index_file_path, index),
+        );
 
         let filesystem = self
             .app_remote_clients

@@ -41,6 +41,7 @@ pub mod util;
 
 pub mod event_bus;
 mod reject;
+pub mod semaphore_with_index;
 pub mod storage;
 
 use crate::app::{AppManager, AppManagerRef};

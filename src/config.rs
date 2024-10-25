@@ -70,9 +70,14 @@ impl MemoryStoreConfig {
 pub struct HdfsStoreConfig {
     #[serde(default = "as_default_max_concurrency")]
     pub max_concurrency: usize,
+    #[serde(default = "as_default_partition_write_max_concurrency")]
+    pub partition_write_max_concurrency: usize,
 }
 fn as_default_max_concurrency() -> usize {
     100
+}
+fn as_default_partition_write_max_concurrency() -> usize {
+    20
 }
 
 // =========================================================
