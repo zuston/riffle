@@ -731,9 +731,10 @@ mod test {
         let snapshot = store.budget.snapshot();
         assert_eq!(snapshot.used(), 0);
         assert_eq!(snapshot.capacity(), 1024);
-        let data = runtime.wait(store.get(reading_ctx.clone())).expect("");
-        assert_eq!(0, data.from_memory().shuffle_data_block_segments.len());
-
+        let data = runtime.wait(store.get(reading_ctx.clone()));
+        if let Ok(_) = data {
+            panic!();
+        }
         Ok(())
     }
 

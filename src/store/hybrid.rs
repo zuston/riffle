@@ -606,9 +606,11 @@ pub(crate) mod tests {
     use std::any::Any;
     use std::collections::VecDeque;
 
+    use std::sync::atomic::Ordering::SeqCst;
     use std::sync::Arc;
     use std::thread;
 
+    use serde::de::Unexpected::Seq;
     use std::time::Duration;
 
     #[test]
@@ -688,7 +690,7 @@ pub(crate) mod tests {
         let mut block_ids = vec![];
         for i in 0..batch_size {
             block_ids.push(i);
-            let writing_ctx = WritingViewContext::create_for_test(
+            let writing_ctx = WritingViewContext::new_with_size(
                 uid.clone(),
                 vec![Block {
                     block_id: i,
@@ -698,6 +700,7 @@ pub(crate) mod tests {
                     data: Bytes::copy_from_slice(data),
                     task_attempt_id: 0,
                 }],
+                data_len as u64,
             );
             let _ = store.inc_used(data_len as i64);
             let _ = store.insert(writing_ctx).await;
@@ -783,7 +786,7 @@ pub(crate) mod tests {
         let data = b"hello world!";
         let data_len = data.len();
 
-        let store = start_store(None, ((data_len * 1) as i64).to_string());
+        let store = start_store(Some("1B".to_string()), ((data_len * 1) as i64).to_string());
         store.clone().start();
 
         let uid = PartitionedUId {
@@ -792,7 +795,8 @@ pub(crate) mod tests {
             partition_id: 0,
         };
         write_some_data(store.clone(), uid.clone(), data_len as i32, data, 4).await;
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        awaitility::at_most(Duration::from_secs(2))
+            .until(|| store.in_flight_bytes_size.load(SeqCst) == 0);
 
         // case1: all data has been flushed to localfile. the data in memory should be empty
         let last_block_id = -1;
