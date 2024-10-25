@@ -215,27 +215,24 @@ impl HybridStore {
             return Err(WorkerError::NO_CANDIDATE_STORE);
         }
         let storage_type = storage_type.unwrap();
-
+        let warm = self
+            .warm_store
+            .as_ref()
+            .ok_or(anyhow!("empty warm store. It should not happen"))?;
+        let cold = self.cold_store.as_ref().unwrap_or(warm);
         let candidate_store = match &storage_type {
             StorageType::LOCALFILE => {
                 TOTAL_MEMORY_SPILL_TO_LOCALFILE.inc();
                 GAUGE_MEMORY_SPILL_TO_LOCALFILE.inc();
-                self.warm_store
-                    .as_ref()
-                    .ok_or(anyhow!("empty warm store. It should not happen"))
+                warm
             }
             StorageType::HDFS => {
                 TOTAL_MEMORY_SPILL_TO_HDFS.inc();
                 GAUGE_MEMORY_SPILL_TO_HDFS.inc();
-                self.cold_store
-                    .as_ref()
-                    .ok_or(anyhow!("empty cold store. It should not happen"))
+                cold
             }
-            _ => self
-                .warm_store
-                .as_ref()
-                .ok_or(anyhow!("empty warm store. It should not happen")),
-        }?;
+            _ => warm,
+        };
 
         let ctx = spill_message.ctx.clone();
         // when throwing the data lost error, it should fast fail for this partition data.
