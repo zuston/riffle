@@ -48,6 +48,7 @@ pub mod event_bus;
 pub mod grpc;
 pub mod heartbeat;
 mod http;
+pub mod kerberos;
 mod log_service;
 mod mem_allocator;
 mod metric;

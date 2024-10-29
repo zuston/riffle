@@ -72,12 +72,20 @@ pub struct HdfsStoreConfig {
     pub max_concurrency: usize,
     #[serde(default = "as_default_partition_write_max_concurrency")]
     pub partition_write_max_concurrency: usize,
+
+    pub kerberos_security_config: Option<KerberosSecurityConfig>,
 }
 fn as_default_max_concurrency() -> usize {
     100
 }
 fn as_default_partition_write_max_concurrency() -> usize {
     20
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+pub struct KerberosSecurityConfig {
+    pub keytab_path: String,
+    pub principal: String,
 }
 
 // =========================================================
@@ -493,6 +501,13 @@ mod test {
         memory_spill_high_watermark = 0.8
         memory_spill_low_watermark = 0.2
         memory_single_buffer_max_spill_size = "256M"
+
+        [hdfs_store]
+        max_concurrency = 10
+
+        [hdfs_store.kerberos_security_config]
+        keytab_path = "/tmp/a.keytab"
+        principal = "a@xxx"
         "#;
 
         let decoded: Config = toml::from_str(toml_str).unwrap();
@@ -511,5 +526,10 @@ mod test {
             decoded.app_config.app_heartbeat_timeout_min,
             as_default_app_heartbeat_timeout_min(),
         );
+
+        // check kerberos config
+        let hdfs = decoded.hdfs_store.unwrap();
+        let kerberos_config = hdfs.kerberos_security_config.unwrap();
+        assert_eq!(kerberos_config.principal, "a@xxx");
     }
 }

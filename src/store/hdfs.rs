@@ -35,7 +35,7 @@ use await_tree::InstrumentAwait;
 use bytes::{BufMut, Bytes, BytesMut};
 use dashmap::DashMap;
 
-use log::{info, warn};
+use log::{error, info, warn};
 
 use std::path::Path;
 
@@ -43,6 +43,7 @@ use hdfs_native::{Client, WriteOptions};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 
+use crate::kerberos::KerberosTask;
 use crate::runtime::manager::RuntimeManager;
 use crate::semaphore_with_index::SemaphoreWithIndex;
 use tracing::{debug, Instrument};
@@ -88,6 +89,13 @@ impl Persistent for HdfsStore {}
 
 impl HdfsStore {
     pub fn from(conf: HdfsStoreConfig, runtime_manager: &RuntimeManager) -> Self {
+        if let Some(kerberos_config) = &conf.kerberos_security_config {
+            if let Err(e) = KerberosTask::init(&runtime_manager, kerberos_config) {
+                error!("{:?}", e);
+                panic!();
+            }
+        }
+
         HdfsStore {
             partition_file_locks: DashMap::new(),
 
