@@ -44,6 +44,7 @@ use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::composed_bytes::ComposedBytes;
 use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
+use crate::util::get_crc;
 use dashmap::mapref::entry::Entry;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -261,7 +262,7 @@ impl LocalFileStore {
         }
 
         let mut index_bytes_holder = BytesMut::new();
-        let mut data_bytes_holder = Vec::with_capacity(blocks.len());
+        let mut data_bytes_holder = BytesMut::new();
 
         let mut total_size = 0u64;
         for block in blocks {
@@ -282,15 +283,22 @@ impl LocalFileStore {
 
             let data = &block.data;
 
-            data_bytes_holder.push(data.clone());
+            let actual = get_crc(data);
+            if crc != actual {
+                error!("Found not correct crc value while writing. expected: {}, actual: {} for uid: {:?}", crc, actual, &uid);
+            }
+
+            data_bytes_holder.extend_from_slice(data);
             next_offset += length as i64;
         }
 
+        let data = data_bytes_holder.freeze();
+        if data.len() != total_size as usize {
+            error!("Found not correct data len. expected: {}. actual: {} for uid: {:?}", total_size, data.len(), &uid);
+        }
+
         local_disk
-            .append(
-                ComposedBytes::from(data_bytes_holder, total_size as usize),
-                &data_file_path,
-            )
+            .append(data, &data_file_path)
             .instrument_await(format!("data flushing. path: {}", &data_file_path))
             .await?;
         local_disk
