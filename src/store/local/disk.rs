@@ -30,13 +30,14 @@ use await_tree::InstrumentAwait;
 use bytes::{Bytes, BytesMut};
 use log::{debug, error, info, warn};
 use opendal::services::Fs;
-use opendal::{Metadata, Operator};
+use opendal::Operator;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::Semaphore;
+use crate::store::local::FileStat;
 
 pub struct LocalDiskConfig {
     pub(crate) high_watermark: f32,
@@ -368,17 +369,6 @@ impl LocalDisk {
 
     fn get_disk_available(root: &str) -> Result<u64> {
         Ok(fs2::available_space(root)?)
-    }
-}
-
-pub struct FileStat {
-    pub content_length: u64,
-}
-
-impl From<Metadata> for FileStat {
-    fn from(meta: Metadata) -> Self {
-        let content_length = meta.content_length();
-        FileStat { content_length }
     }
 }
 
