@@ -53,6 +53,7 @@ trait LocalDiskStorage: LocalIO {
     async fn is_healthy(&self) -> Result<bool>;
     async fn is_corrupted(&self) -> Result<bool>;
 
+    async fn mark_healthy(&self) -> Result<()>;
     async fn mark_unhealthy(&self) -> Result<()>;
     async fn mark_corrupted(&self) -> Result<()>;
 }

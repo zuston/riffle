@@ -28,7 +28,7 @@ impl SyncLocalIO {
     ) -> Self {
         Self {
             inner: Arc::new(Inner {
-                root: root.to_string(),
+                root: root.to_owned(),
                 buf_writer_capacity,
                 buf_reader_capacity,
             }),

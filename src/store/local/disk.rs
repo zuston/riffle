@@ -24,6 +24,7 @@ use crate::metric::{
     TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER, TOTAL_LOCAL_DISK_READ_OPERATION_COUNTER,
 };
 use crate::runtime::manager::RuntimeManager;
+use crate::store::local::FileStat;
 use crate::store::BytesWrapper;
 use anyhow::{anyhow, Result};
 use await_tree::InstrumentAwait;
@@ -37,7 +38,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::Semaphore;
-use crate::store::local::FileStat;
 
 pub struct LocalDiskConfig {
     pub(crate) high_watermark: f32,
