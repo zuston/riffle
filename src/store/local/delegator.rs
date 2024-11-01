@@ -12,11 +12,13 @@ use crate::store::local::sync_io::SyncLocalIO;
 use crate::store::local::{FileStat, LocalDiskStorage, LocalIO};
 use anyhow::Result;
 use async_trait::async_trait;
+use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use log::{error, warn};
+use once_cell::sync::OnceCell;
 use std::str::FromStr;
-use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::SeqCst;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, Instrument};
@@ -38,6 +40,12 @@ struct Inner {
     low_watermark: f32,
 
     concurrency: usize,
+
+    healthy_check_interval_sec: u64,
+
+    // only for the test case
+    capacity_ref: OnceCell<Arc<AtomicU64>>,
+    available_ref: OnceCell<Arc<AtomicU64>>,
 }
 
 impl LocalDiskDelegator {
@@ -67,6 +75,9 @@ impl LocalDiskDelegator {
                 high_watermark,
                 low_watermark,
                 concurrency,
+                healthy_check_interval_sec: config.disk_healthy_check_interval_sec,
+                capacity_ref: Default::default(),
+                available_ref: Default::default(),
             }),
         };
 
@@ -75,18 +86,28 @@ impl LocalDiskDelegator {
         let span = format!("disk[{}] checker", root);
         runtime.spawn(async move {
             let await_tree = AWAIT_TREE_REGISTRY.register(span).await;
-            await_tree.instrument(async move {
-                info!("starting the disk[{}] checker", &io_delegator.inner.root);
-                if let Err(e) = io_delegator.schedule_check().await {
-                    error!(
-                        "disk[{}] checker exit. err: {:?}",
-                        &io_delegator.inner.root, e
-                    )
-                }
-            });
+            await_tree
+                .instrument(async move {
+                    info!("starting the disk[{}] checker", &io_delegator.inner.root);
+                    if let Err(e) = io_delegator.schedule_check().await {
+                        error!(
+                            "disk[{}] checker exit. err: {:?}",
+                            &io_delegator.inner.root, e
+                        )
+                    }
+                })
+                .await;
         });
 
         delegator
+    }
+
+    pub fn with_capacity(&self, capacity_ref: Arc<AtomicU64>) {
+        let _ = self.inner.capacity_ref.set(capacity_ref);
+    }
+
+    pub fn with_available(&self, available_ref: Arc<AtomicU64>) {
+        let _ = self.inner.available_ref.set(available_ref);
     }
 
     pub fn root(&self) -> String {
@@ -95,18 +116,28 @@ impl LocalDiskDelegator {
 
     async fn schedule_check(&self) -> Result<()> {
         loop {
-            tokio::time::sleep(Duration::from_secs(60)).await;
+            tokio::time::sleep(Duration::from_secs(self.inner.healthy_check_interval_sec))
+                .instrument_await("sleeping")
+                .await;
             if self.is_corrupted()? {
                 continue;
             }
 
-            if let Err(e) = self.capacity_check().await {
+            if let Err(e) = self
+                .capacity_check()
+                .instrument_await("capacity checking")
+                .await
+            {
                 error!(
                     "Errors on checking the disk:{} capacity. err: {:#?}",
                     &self.inner.root, e
                 );
             }
-            if let Err(e) = self.write_read_check().await {
+            if let Err(e) = self
+                .write_read_check()
+                .instrument_await("write+read checking")
+                .await
+            {
                 error!(
                     "Errors on checking the disk:{} write+read. err: {:#?}",
                     &self.inner.root, e
@@ -117,8 +148,8 @@ impl LocalDiskDelegator {
     }
 
     async fn capacity_check(&self) -> Result<()> {
-        let capacity = Self::get_disk_capacity(&self.inner.root)?;
-        let available = Self::get_disk_available(&self.inner.root)?;
+        let capacity = self.get_disk_capacity()?;
+        let available = self.get_disk_available()?;
         let used = capacity - available;
 
         GAUGE_LOCAL_DISK_USED
@@ -166,12 +197,18 @@ impl LocalDiskDelegator {
         Ok(())
     }
 
-    fn get_disk_capacity(root: &str) -> Result<u64> {
-        Ok(fs2::total_space(root)?)
+    fn get_disk_capacity(&self) -> Result<u64> {
+        if let Some(capacity) = self.inner.capacity_ref.get() {
+            return Ok(capacity.load(SeqCst));
+        }
+        Ok(fs2::total_space(&self.inner.root)?)
     }
 
-    fn get_disk_available(root: &str) -> Result<u64> {
-        Ok(fs2::available_space(root)?)
+    fn get_disk_available(&self) -> Result<u64> {
+        if let Some(available) = self.inner.available_ref.get() {
+            return Ok(available.load(SeqCst));
+        }
+        Ok(fs2::available_space(&self.inner.root)?)
     }
 }
 
@@ -266,9 +303,46 @@ impl LocalDiskStorage for LocalDiskDelegator {
 
 #[cfg(test)]
 mod test {
+    use crate::config::LocalfileStoreConfig;
+    use crate::runtime::manager::RuntimeManager;
+    use crate::store::local::delegator::LocalDiskDelegator;
+    use crate::store::local::LocalDiskStorage;
+    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::Ordering::SeqCst;
+    use std::sync::Arc;
+    use std::time::Duration;
 
-    #[tokio::test]
-    async fn test() -> anyhow::Result<()> {
+    #[test]
+    fn test_capacity_check() -> anyhow::Result<()> {
+        let temp_dir = tempdir::TempDir::new("test_sync_io").unwrap();
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        println!("created the temp file path: {}", &temp_path);
+
+        let mut config = LocalfileStoreConfig::new(vec![temp_path.clone()]);
+        config.disk_healthy_check_interval_sec = 2;
+
+        let runtime_manager = RuntimeManager::default();
+        let delegator = LocalDiskDelegator::new(&runtime_manager, &temp_path, &config);
+
+        let capacity = Arc::new(AtomicU64::new(100));
+        let available = Arc::new(AtomicU64::new(90));
+
+        delegator.with_capacity(capacity.clone());
+        delegator.with_available(available.clone());
+
+        // case1
+        assert!(delegator.is_healthy()?);
+
+        // case2
+        available.store(10, SeqCst);
+        awaitility::at_most(Duration::from_secs(5))
+            .until(|| delegator.is_healthy().unwrap() == false);
+
+        // case3
+        available.store(90, SeqCst);
+        awaitility::at_most(Duration::from_secs(5))
+            .until(|| delegator.is_healthy().unwrap() == true);
+
         Ok(())
     }
 }

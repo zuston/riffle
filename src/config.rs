@@ -105,6 +105,11 @@ pub struct LocalfileStoreConfig {
     pub disk_write_buf_capacity: String,
     #[serde(default = "as_default_disk_read_buf_capacity")]
     pub disk_read_buf_capacity: String,
+    #[serde(default = "as_default_disk_healthy_check_interval_sec")]
+    pub disk_healthy_check_interval_sec: u64,
+}
+fn as_default_disk_healthy_check_interval_sec() -> u64 {
+    60
 }
 fn as_default_disk_max_concurrency() -> i32 {
     2000
@@ -135,6 +140,7 @@ impl LocalfileStoreConfig {
             disk_max_concurrency: as_default_disk_max_concurrency(),
             disk_write_buf_capacity: as_default_disk_write_buf_capacity(),
             disk_read_buf_capacity: as_default_disk_read_buf_capacity(),
+            disk_healthy_check_interval_sec: as_default_disk_healthy_check_interval_sec(),
         }
     }
 }
