@@ -21,7 +21,7 @@ use bytes::Bytes;
 use opendal::Metadata;
 
 pub mod async_io;
-mod delegator;
+pub mod delegator;
 pub mod disk;
 pub mod sync_io;
 
@@ -39,7 +39,7 @@ impl From<Metadata> for FileStat {
 }
 
 #[async_trait]
-trait LocalIO: Clone {
+pub trait LocalIO: Clone {
     async fn create_dir(&self, dir: &str) -> Result<()>;
     async fn append(&self, path: &str, data: Bytes) -> Result<()>;
     async fn read(&self, path: &str, offset: i64, length: Option<i64>) -> Result<Bytes>;
@@ -48,12 +48,11 @@ trait LocalIO: Clone {
     async fn file_stat(&self, path: &str) -> Result<FileStat>;
 }
 
-#[async_trait]
-trait LocalDiskStorage: LocalIO {
-    async fn is_healthy(&self) -> Result<bool>;
-    async fn is_corrupted(&self) -> Result<bool>;
+pub trait LocalDiskStorage: LocalIO {
+    fn is_healthy(&self) -> Result<bool>;
+    fn is_corrupted(&self) -> Result<bool>;
 
-    async fn mark_healthy(&self) -> Result<()>;
-    async fn mark_unhealthy(&self) -> Result<()>;
-    async fn mark_corrupted(&self) -> Result<()>;
+    fn mark_healthy(&self) -> Result<()>;
+    fn mark_unhealthy(&self) -> Result<()>;
+    fn mark_corrupted(&self) -> Result<()>;
 }

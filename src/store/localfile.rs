@@ -44,6 +44,7 @@ use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::composed_bytes::ComposedBytes;
 use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
+use crate::store::local::delegator::LocalDiskDelegator;
 use crate::util::get_crc;
 use dashmap::mapref::entry::Entry;
 use std::sync::atomic::Ordering::SeqCst;
@@ -53,24 +54,25 @@ use tokio::sync::RwLock;
 use tracing::Instrument;
 
 use crate::store::local::disk::{LocalDisk, LocalDiskConfig};
+use crate::store::local::{LocalDiskStorage, LocalIO};
 use crate::store::spill::SpillWritingViewContext;
 
 struct LockedObj {
-    disk: Arc<LocalDisk>,
+    disk: LocalDiskDelegator,
     pointer: AtomicI64,
 }
 
-impl From<Arc<LocalDisk>> for LockedObj {
-    fn from(value: Arc<LocalDisk>) -> Self {
+impl From<LocalDiskDelegator> for LockedObj {
+    fn from(value: LocalDiskDelegator) -> Self {
         Self {
-            disk: value.clone(),
+            disk: value,
             pointer: Default::default(),
         }
     }
 }
 
 pub struct LocalFileStore {
-    local_disks: Vec<Arc<LocalDisk>>,
+    local_disks: Vec<LocalDiskDelegator>,
     healthy_check_min_disks: i32,
     runtime_manager: RuntimeManager,
     partition_locks: DashMap<String, Arc<RwLock<LockedObj>>>,
@@ -86,12 +88,9 @@ impl LocalFileStore {
     pub fn new(local_disks: Vec<String>) -> Self {
         let mut local_disk_instances = vec![];
         let runtime_manager: RuntimeManager = Default::default();
-        for path in local_disks {
-            local_disk_instances.push(LocalDisk::new(
-                path,
-                LocalDiskConfig::default(),
-                runtime_manager.clone(),
-            ));
+        let config = LocalfileStoreConfig::new(local_disks.clone());
+        for path in &local_disks {
+            local_disk_instances.push(LocalDiskDelegator::new(&runtime_manager, &path, &config));
         }
         LocalFileStore {
             local_disks: local_disk_instances,
@@ -103,7 +102,7 @@ impl LocalFileStore {
 
     pub fn from(localfile_config: LocalfileStoreConfig, runtime_manager: RuntimeManager) -> Self {
         let mut local_disk_instances = vec![];
-        for path in localfile_config.data_paths {
+        for path in &localfile_config.data_paths {
             // clear up all previous disk data
             if let Err(e) = LocalFileStore::remove_dir_children(path.as_str()) {
                 panic!(
@@ -112,24 +111,11 @@ impl LocalFileStore {
                     e
                 );
             }
-
-            let config = LocalDiskConfig {
-                high_watermark: localfile_config.disk_high_watermark,
-                low_watermark: localfile_config.disk_low_watermark,
-                max_concurrency: localfile_config.disk_max_concurrency,
-                write_buf_capacity: ReadableSize::from_str(
-                    localfile_config.disk_write_buf_capacity.as_str(),
-                )
-                .unwrap()
-                .as_bytes(),
-                read_buf_capacity: ReadableSize::from_str(
-                    localfile_config.disk_read_buf_capacity.as_str(),
-                )
-                .unwrap()
-                .as_bytes(),
-            };
-
-            local_disk_instances.push(LocalDisk::new(path, config, runtime_manager.clone()));
+            local_disk_instances.push(LocalDiskDelegator::new(
+                &runtime_manager,
+                &path,
+                &localfile_config,
+            ));
         }
         LocalFileStore {
             local_disks: local_disk_instances,
@@ -191,12 +177,12 @@ impl LocalFileStore {
         Ok(available > self.healthy_check_min_disks)
     }
 
-    fn select_disk(&self, uid: &PartitionedUId) -> Result<Arc<LocalDisk>, WorkerError> {
+    fn select_disk(&self, uid: &PartitionedUId) -> Result<LocalDiskDelegator, WorkerError> {
         let hash_value = PartitionedUId::get_hash(uid);
 
         let mut candidates = vec![];
         for local_disk in &self.local_disks {
-            if !local_disk.is_corrupted().unwrap() && local_disk.is_healthy().unwrap() {
+            if !local_disk.is_corrupted()? && local_disk.is_healthy()? {
                 candidates.push(local_disk);
             }
         }
@@ -243,13 +229,11 @@ impl LocalFileStore {
         let mut next_offset = locked_obj.pointer.load(Ordering::SeqCst);
 
         if local_disk.is_corrupted()? {
-            return Err(WorkerError::PARTIAL_DATA_LOST(local_disk.root.to_string()));
+            return Err(WorkerError::PARTIAL_DATA_LOST(local_disk.root()));
         }
 
         if !local_disk.is_healthy()? {
-            return Err(WorkerError::LOCAL_DISK_UNHEALTHY(
-                local_disk.root.to_string(),
-            ));
+            return Err(WorkerError::LOCAL_DISK_UNHEALTHY(local_disk.root()));
         }
 
         if !parent_dir_is_created {
@@ -303,11 +287,11 @@ impl LocalFileStore {
         }
 
         local_disk
-            .append(data, &data_file_path)
+            .append(&data_file_path, data)
             .instrument_await(format!("data flushing. path: {}", &data_file_path))
             .await?;
         local_disk
-            .append(index_bytes_holder.freeze(), &index_file_path)
+            .append(&index_file_path, index_bytes_holder.freeze())
             .instrument_await(format!("index flushing. path: {}", &index_file_path))
             .await?;
 
@@ -382,7 +366,7 @@ impl Store for LocalFileStore {
 
         if local_disk.is_corrupted()? {
             return Err(WorkerError::LOCAL_DISK_OWNED_BY_PARTITION_CORRUPTED(
-                local_disk.root.to_string(),
+                local_disk.root(),
             ));
         }
 
@@ -441,7 +425,7 @@ impl Store for LocalFileStore {
         let local_disk = &locked_object.disk;
         if local_disk.is_corrupted()? {
             return Err(WorkerError::LOCAL_DISK_OWNED_BY_PARTITION_CORRUPTED(
-                local_disk.root.to_string(),
+                local_disk.root(),
             ));
         }
         let next_offset = locked_object.pointer.load(SeqCst);
@@ -559,6 +543,7 @@ mod test {
     use crate::store::localfile::LocalFileStore;
 
     use crate::error::WorkerError;
+    use crate::store::local::LocalDiskStorage;
     use crate::store::{Block, ResponseData, ResponseDataIndex, Store};
     use bytes::{Buf, Bytes, BytesMut};
     use log::{error, info};

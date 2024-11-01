@@ -22,8 +22,12 @@ use std::time::Duration;
 use tracing::{info, Instrument};
 
 #[derive(Clone)]
-struct LocalDiskDelegator {
-    pub(crate) root: String,
+pub struct LocalDiskDelegator {
+    inner: Arc<Inner>,
+}
+
+struct Inner {
+    root: String,
 
     io_handler: SyncLocalIO,
 
@@ -55,13 +59,15 @@ impl LocalDiskDelegator {
         );
 
         let delegator = Self {
-            root: root.to_owned(),
-            io_handler,
-            is_healthy: Arc::new(AtomicBool::new(true)),
-            is_corrupted: Arc::new(AtomicBool::new(false)),
-            high_watermark,
-            low_watermark,
-            concurrency,
+            inner: Arc::new(Inner {
+                root: root.to_owned(),
+                io_handler,
+                is_healthy: Arc::new(AtomicBool::new(true)),
+                is_corrupted: Arc::new(AtomicBool::new(false)),
+                high_watermark,
+                low_watermark,
+                concurrency,
+            }),
         };
 
         let runtime = runtime_manager.clone().default_runtime.clone();
@@ -70,9 +76,12 @@ impl LocalDiskDelegator {
         runtime.spawn(async move {
             let await_tree = AWAIT_TREE_REGISTRY.register(span).await;
             await_tree.instrument(async move {
-                info!("starting the disk[{}] checker", &io_delegator.root);
+                info!("starting the disk[{}] checker", &io_delegator.inner.root);
                 if let Err(e) = io_delegator.schedule_check().await {
-                    error!("disk[{}] checker exit. err: {:?}", &io_delegator.root, e)
+                    error!(
+                        "disk[{}] checker exit. err: {:?}",
+                        &io_delegator.inner.root, e
+                    )
                 }
             });
         });
@@ -80,54 +89,58 @@ impl LocalDiskDelegator {
         delegator
     }
 
+    pub fn root(&self) -> String {
+        self.inner.root.to_owned()
+    }
+
     async fn schedule_check(&self) -> Result<()> {
         loop {
             tokio::time::sleep(Duration::from_secs(60)).await;
-            if self.is_corrupted().await? {
+            if self.is_corrupted()? {
                 continue;
             }
 
             if let Err(e) = self.capacity_check().await {
                 error!(
                     "Errors on checking the disk:{} capacity. err: {:#?}",
-                    &self.root, e
+                    &self.inner.root, e
                 );
             }
             if let Err(e) = self.write_read_check().await {
                 error!(
                     "Errors on checking the disk:{} write+read. err: {:#?}",
-                    &self.root, e
+                    &self.inner.root, e
                 );
-                self.mark_corrupted().await?;
+                self.mark_corrupted()?;
             }
         }
     }
 
     async fn capacity_check(&self) -> Result<()> {
-        let capacity = Self::get_disk_capacity(&self.root)?;
-        let available = Self::get_disk_available(&self.root)?;
+        let capacity = Self::get_disk_capacity(&self.inner.root)?;
+        let available = Self::get_disk_available(&self.inner.root)?;
         let used = capacity - available;
 
         GAUGE_LOCAL_DISK_USED
-            .with_label_values(&[&self.root])
+            .with_label_values(&[&self.inner.root])
             .set(used as i64);
 
         let used_ratio = used as f64 / capacity as f64;
-        let healthy_stat = self.is_healthy().await?;
+        let healthy_stat = self.is_healthy()?;
 
-        if healthy_stat && used_ratio > self.high_watermark as f64 {
-            warn!("Disk={} has been unhealthy", &self.root);
-            self.mark_unhealthy().await?;
+        if healthy_stat && used_ratio > self.inner.high_watermark as f64 {
+            warn!("Disk={} has been unhealthy", &self.inner.root);
+            self.mark_unhealthy()?;
             GAUGE_LOCAL_DISK_IS_HEALTHY
-                .with_label_values(&[&self.root])
+                .with_label_values(&[&self.inner.root])
                 .set(1i64);
         }
 
-        if !healthy_stat && used_ratio < self.low_watermark as f64 {
-            warn!("Disk={} has been healthy.", &self.root);
-            self.mark_healthy().await?;
+        if !healthy_stat && used_ratio < self.inner.low_watermark as f64 {
+            warn!("Disk={} has been healthy.", &self.inner.root);
+            self.mark_healthy()?;
             GAUGE_LOCAL_DISK_IS_HEALTHY
-                .with_label_values(&[&self.root])
+                .with_label_values(&[&self.inner.root])
                 .set(0i64);
         }
 
@@ -145,9 +158,9 @@ impl LocalDiskDelegator {
         if written_data != read_data {
             error!(
                 "The local disk has been corrupted. path: {}. expected: {:?}, actual: {:?}",
-                &self.root, &written_data, &read_data
+                &self.inner.root, &written_data, &read_data
             );
-            self.mark_corrupted().await?;
+            self.mark_corrupted()?;
         }
 
         Ok(())
@@ -165,52 +178,52 @@ impl LocalDiskDelegator {
 #[async_trait]
 impl LocalIO for LocalDiskDelegator {
     async fn create_dir(&self, dir: &str) -> Result<()> {
-        self.io_handler.create_dir(dir).await
+        self.inner.io_handler.create_dir(dir).await
     }
 
     async fn append(&self, path: &str, data: Bytes) -> Result<()> {
         // todo: add the concurrency limitation. do we need? may be not.
 
         let timer = LOCALFILE_DISK_APPEND_OPERATION_DURATION
-            .with_label_values(&[&self.root])
+            .with_label_values(&[&self.inner.root])
             .start_timer();
         let len = data.len();
 
-        self.io_handler.append(path, data).await?;
+        self.inner.io_handler.append(path, data).await?;
 
         timer.observe_duration();
         TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER
-            .with_label_values(&[&self.root])
+            .with_label_values(&[&self.inner.root])
             .inc_by(len as u64);
         TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER
-            .with_label_values(&[&self.root])
+            .with_label_values(&[&self.inner.root])
             .inc();
         Ok(())
     }
 
     async fn read(&self, path: &str, offset: i64, length: Option<i64>) -> Result<Bytes> {
         let timer = LOCALFILE_DISK_READ_OPERATION_DURATION
-            .with_label_values(&[&self.root])
+            .with_label_values(&[&self.inner.root])
             .start_timer();
 
-        let data = self.io_handler.read(path, offset, length).await?;
+        let data = self.inner.io_handler.read(path, offset, length).await?;
 
         timer.observe_duration();
         TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER
-            .with_label_values(&[&self.root])
+            .with_label_values(&[&self.inner.root])
             .inc_by(data.len() as u64);
         TOTAL_LOCAL_DISK_READ_OPERATION_COUNTER
-            .with_label_values(&[&self.root])
+            .with_label_values(&[&self.inner.root])
             .inc();
         Ok(data)
     }
 
     async fn delete(&self, path: &str) -> Result<()> {
         let timer = LOCALFILE_DISK_DELETE_OPERATION_DURATION
-            .with_label_values(&[&self.root])
+            .with_label_values(&[&self.inner.root])
             .start_timer();
 
-        self.io_handler.delete(path).await?;
+        self.inner.io_handler.delete(path).await?;
 
         timer.observe_duration();
 
@@ -218,36 +231,35 @@ impl LocalIO for LocalDiskDelegator {
     }
 
     async fn write(&self, path: &str, data: Bytes) -> Result<()> {
-        self.io_handler.write(path, data).await
+        self.inner.io_handler.write(path, data).await
     }
 
     async fn file_stat(&self, path: &str) -> Result<FileStat> {
-        self.io_handler.file_stat(path).await
+        self.inner.io_handler.file_stat(path).await
     }
 }
 
-#[async_trait]
 impl LocalDiskStorage for LocalDiskDelegator {
-    async fn is_healthy(&self) -> Result<bool> {
-        Ok(self.is_healthy.load(SeqCst))
+    fn is_healthy(&self) -> Result<bool> {
+        Ok(self.inner.is_healthy.load(SeqCst))
     }
 
-    async fn is_corrupted(&self) -> Result<bool> {
-        Ok(self.is_corrupted.load(SeqCst))
+    fn is_corrupted(&self) -> Result<bool> {
+        Ok(self.inner.is_corrupted.load(SeqCst))
     }
 
-    async fn mark_healthy(&self) -> Result<()> {
-        self.is_healthy.store(true, SeqCst);
+    fn mark_healthy(&self) -> Result<()> {
+        self.inner.is_healthy.store(true, SeqCst);
         Ok(())
     }
 
-    async fn mark_unhealthy(&self) -> Result<()> {
-        self.is_healthy.store(false, SeqCst);
+    fn mark_unhealthy(&self) -> Result<()> {
+        self.inner.is_healthy.store(false, SeqCst);
         Ok(())
     }
 
-    async fn mark_corrupted(&self) -> Result<()> {
-        self.is_corrupted.store(true, SeqCst);
+    fn mark_corrupted(&self) -> Result<()> {
+        self.inner.is_corrupted.store(true, SeqCst);
         Ok(())
     }
 }
