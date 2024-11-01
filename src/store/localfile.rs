@@ -223,10 +223,10 @@ impl LocalFileStore {
         let (data_file_path, index_file_path) =
             LocalFileStore::gen_relative_path_for_partition(&uid);
 
-        let mut parent_dir_is_created = false;
+        let mut parent_dir_is_created = true;
         let locked_obj = match self.partition_locks.entry(data_file_path.clone()) {
             Entry::Vacant(e) => {
-                parent_dir_is_created = true;
+                parent_dir_is_created = false;
                 let disk = self.select_disk(&uid)?;
                 let locked_obj = Arc::new(RwLock::new(LockedObj::from(disk)));
                 let obj = e.insert_entry(locked_obj.clone());
@@ -288,13 +288,18 @@ impl LocalFileStore {
                 error!("Found not correct crc value while writing. expected: {}, actual: {} for uid: {:?}", crc, actual, &uid);
             }
 
-            data_bytes_holder.extend_from_slice(data);
+            data_bytes_holder.put(data.clone());
             next_offset += length as i64;
         }
 
         let data = data_bytes_holder.freeze();
         if data.len() != total_size as usize {
-            error!("Found not correct data len. expected: {}. actual: {} for uid: {:?}", total_size, data.len(), &uid);
+            error!(
+                "Found not correct data len. expected: {}. actual: {} for uid: {:?}",
+                total_size,
+                data.len(),
+                &uid
+            );
         }
 
         local_disk
