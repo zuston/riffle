@@ -53,7 +53,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::Instrument;
 
-use crate::store::local::disk::{LocalDisk, LocalDiskConfig};
 use crate::store::local::{LocalDiskStorage, LocalIO};
 use crate::store::spill::SpillWritingViewContext;
 

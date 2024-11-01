@@ -22,20 +22,10 @@ use opendal::Metadata;
 
 pub mod async_io;
 pub mod delegator;
-pub mod disk;
 pub mod sync_io;
 
 pub struct FileStat {
     pub content_length: u64,
-}
-
-impl From<Metadata> for FileStat {
-    fn from(meta: Metadata) -> Self {
-        let content_length = meta.content_length();
-        Self {
-            content_length: content_length,
-        }
-    }
 }
 
 #[async_trait]
