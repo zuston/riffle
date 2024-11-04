@@ -95,8 +95,8 @@ mod test {
     fn test_kerberos() {
         let runtime_manager = RuntimeManager::default();
         let config = KerberosSecurityConfig {
-            keytab_path: "/tmp/hue.keytab".to_string(),
-            principal: "hue@HADOOP.QIYI.COM".to_string(),
+            keytab_path: "/tmp/x.keytab".to_string(),
+            principal: "x@x.x.COM".to_string(),
         };
         let _ = KerberosTask::init(&runtime_manager, &config);
     }
