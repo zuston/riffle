@@ -240,7 +240,7 @@ impl HdfsStore {
         info!("Writing path: {}", &data_file_path);
         match self
             .write_data_and_index(
-                filesystem,
+                &filesystem,
                 &data_file_path,
                 data_bytes_holder,
                 &index_file_path,
@@ -251,6 +251,14 @@ impl HdfsStore {
             Err(e) => {
                 partition_cached_meta.reset_offset(0);
                 partition_cached_meta.inc_retry_time();
+                let retry_time = partition_cached_meta.retry_time;
+                drop(partition_cached_meta);
+
+                let data_file_path = format!("{}_{}.data", &data_file_path_prefix, retry_time);
+                let index_file_path = format!("{}_{}.index", &index_file_path_prefix, retry_time);
+                filesystem.touch(&data_file_path).await?;
+                filesystem.touch(&index_file_path).await?;
+
                 error!("Errors on appending data into path: {}", &data_file_path);
                 return Err(Other(e.into()));
             }
@@ -265,7 +273,7 @@ impl HdfsStore {
 
     async fn write_data_and_index(
         &self,
-        filesystem: Arc<Box<dyn HdfsDelegator>>,
+        filesystem: &Arc<Box<dyn HdfsDelegator>>,
         data_file_path: &String,
         data_bytes_holder: BytesMut,
         index_file_path: &String,
