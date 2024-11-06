@@ -24,7 +24,7 @@ impl<'a> SemaphorePermitWithIndex<'a> {
 impl<'a> Drop for SemaphorePermitWithIndex<'a> {
     fn drop(&mut self) {
         let mut index_container = self.index_ref.lock();
-        index_container.push_back(self.index);
+        index_container.push_front(self.index);
     }
 }
 
@@ -59,7 +59,6 @@ impl SemaphoreWithIndex {
 #[cfg(test)]
 mod test {
     use crate::semaphore_with_index::SemaphoreWithIndex;
-    use std::sync::atomic::Ordering::SeqCst;
 
     #[tokio::test]
     async fn test() -> anyhow::Result<()> {

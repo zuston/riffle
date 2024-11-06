@@ -66,7 +66,7 @@ impl MemoryStoreConfig {
 
 // =========================================================
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct HdfsStoreConfig {
     #[serde(default = "as_default_max_concurrency")]
     pub max_concurrency: usize,
@@ -80,6 +80,16 @@ fn as_default_max_concurrency() -> usize {
 }
 fn as_default_partition_write_max_concurrency() -> usize {
     20
+}
+
+impl Default for HdfsStoreConfig {
+    fn default() -> Self {
+        Self {
+            max_concurrency: as_default_max_concurrency(),
+            partition_write_max_concurrency: as_default_partition_write_max_concurrency(),
+            kerberos_security_config: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]

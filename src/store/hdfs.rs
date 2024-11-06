@@ -41,8 +41,9 @@ use std::path::Path;
 
 use hdfs_native::{Client, WriteOptions};
 use std::sync::Arc;
-use tokio::sync::{Mutex, Semaphore};
+use tokio::sync::Semaphore;
 
+use crate::error::WorkerError::Other;
 use crate::kerberos::KerberosTask;
 use crate::runtime::manager::RuntimeManager;
 use crate::semaphore_with_index::SemaphoreWithIndex;
@@ -52,11 +53,16 @@ use url::Url;
 struct PartitionCachedMeta {
     is_file_created: bool,
     data_len: i64,
+    retry_time: usize,
 }
 
 impl PartitionCachedMeta {
-    pub fn reset(&mut self, len: i64) {
+    pub fn reset_offset(&mut self, len: i64) {
         self.data_len = len;
+    }
+
+    pub fn inc_retry_time(&mut self) {
+        self.retry_time += 1;
     }
 }
 
@@ -65,6 +71,7 @@ impl Default for PartitionCachedMeta {
         Self {
             is_file_created: true,
             data_len: 0,
+            retry_time: 0,
         }
     }
 }
@@ -73,9 +80,12 @@ pub struct HdfsStore {
     concurrency_access_limiter: Semaphore,
 
     // key: app_id, value: hdfs_native_client
-    app_remote_clients: DashMap<String, HdfsNativeClient>,
+    pub(crate) app_remote_clients: DashMap<String, Arc<Box<dyn HdfsDelegator>>>,
 
+    // key: data_file_path
     partition_file_locks: DashMap<String, Arc<SemaphoreWithIndex>>,
+
+    // key: data_file_path with the concurrency index
     partition_cached_meta: DashMap<String, PartitionCachedMeta>,
 
     runtime_manager: RuntimeManager,
@@ -134,7 +144,7 @@ impl HdfsStore {
         uid: PartitionedUId,
         data_blocks: Vec<&Block>,
     ) -> Result<(), WorkerError> {
-        let concurrency_guarder = self
+        let _ = self
             .concurrency_access_limiter
             .acquire()
             .instrument_await(format!("hdfs concurrency limiter. uid: {:?}", &uid))
@@ -156,9 +166,10 @@ impl HdfsStore {
             ))
             .await?;
         let index = permit.get_index();
-        let (data_file_path, index_file_path) = (
-            format!("{}_{}.data", data_file_path, index),
-            format!("{}_{}.index", index_file_path, index),
+
+        let (data_file_path_prefix, index_file_path_prefix) = (
+            format!("{}_{}", data_file_path, index),
+            format!("{}_{}", index_file_path, index),
         );
 
         let filesystem = self
@@ -167,25 +178,33 @@ impl HdfsStore {
             .ok_or(WorkerError::APP_HAS_BEEN_PURGED)?
             .clone();
 
-        let mut next_offset = match self.partition_cached_meta.get(&data_file_path) {
-            None => {
-                // setup the parent folder
-                let parent_dir = Path::new(data_file_path.as_str()).parent().unwrap();
-                let parent_path_str = format!("{}/", parent_dir.to_str().unwrap());
-                debug!("creating dir: {}", parent_path_str.as_str());
+        let (mut next_offset, retry_time) =
+            match self.partition_cached_meta.get(&data_file_path_prefix) {
+                None => {
+                    // setup the parent folder
+                    let parent_dir = Path::new(data_file_path_prefix.as_str()).parent().unwrap();
+                    let parent_path_str = format!("{}/", parent_dir.to_str().unwrap());
+                    debug!("creating dir: {}", parent_path_str.as_str());
 
-                filesystem.create_dir(parent_path_str.as_str()).await?;
+                    &filesystem.create_dir(parent_path_str.as_str()).await?;
 
-                // setup the file
-                filesystem.touch(&data_file_path).await?;
-                filesystem.touch(&index_file_path).await?;
+                    let data_file_complete_path = format!("{}_{}.data", &data_file_path_prefix, 0);
+                    let index_file_complete_path =
+                        format!("{}_{}.index", &index_file_path_prefix, 0);
 
-                self.partition_cached_meta
-                    .insert(data_file_path.to_string(), Default::default());
-                0
-            }
-            Some(meta) => meta.data_len,
-        };
+                    // setup the file
+                    &filesystem.touch(&data_file_complete_path).await?;
+                    &filesystem.touch(&index_file_complete_path).await?;
+
+                    self.partition_cached_meta
+                        .insert(data_file_path_prefix.to_owned(), Default::default());
+                    (0, 0)
+                }
+                Some(meta) => (meta.data_len, meta.retry_time),
+            };
+
+        let data_file_path = format!("{}_{}.data", &data_file_path_prefix, retry_time);
+        let index_file_path = format!("{}_{}.index", &index_file_path_prefix, retry_time);
 
         let mut index_bytes_holder = BytesMut::new();
         let mut data_bytes_holder = BytesMut::new();
@@ -213,6 +232,45 @@ impl HdfsStore {
             total_flushed += length;
         }
 
+        let mut partition_cached_meta = self
+            .partition_cached_meta
+            .get_mut(&data_file_path_prefix)
+            .ok_or(WorkerError::APP_HAS_BEEN_PURGED)?;
+
+        info!("Writing path: {}", &data_file_path);
+        match self
+            .write_data_and_index(
+                filesystem,
+                &data_file_path,
+                data_bytes_holder,
+                &index_file_path,
+                index_bytes_holder,
+            )
+            .await
+        {
+            Err(e) => {
+                partition_cached_meta.reset_offset(0);
+                partition_cached_meta.inc_retry_time();
+                error!("Errors on appending data into path: {}", &data_file_path);
+                return Err(Other(e.into()));
+            }
+            _ => {
+                partition_cached_meta.reset_offset(next_offset);
+                info!("Finish path: {}", &data_file_path);
+            }
+        }
+        TOTAL_HDFS_USED.inc_by(total_flushed as u64);
+        Ok(())
+    }
+
+    async fn write_data_and_index(
+        &self,
+        filesystem: Arc<Box<dyn HdfsDelegator>>,
+        data_file_path: &String,
+        data_bytes_holder: BytesMut,
+        index_file_path: &String,
+        index_bytes_holder: BytesMut,
+    ) -> Result<(), WorkerError> {
         filesystem
             .append(&data_file_path, data_bytes_holder.freeze())
             .instrument_await(format!("hdfs writing [data]. path: {}", &data_file_path))
@@ -221,17 +279,6 @@ impl HdfsStore {
             .append(&index_file_path, index_bytes_holder.freeze())
             .instrument_await(format!("hdfs writing [index]. path: {}", &index_file_path))
             .await?;
-
-        let mut partition_cached_meta = self
-            .partition_cached_meta
-            .get_mut(&data_file_path)
-            .ok_or(WorkerError::APP_HAS_BEEN_PURGED)?;
-        partition_cached_meta.reset(next_offset);
-
-        TOTAL_HDFS_USED.inc_by(total_flushed as u64);
-
-        drop(concurrency_guarder);
-
         Ok(())
     }
 }
@@ -299,8 +346,11 @@ impl Store for HdfsStore {
         let mut removed_size = 0i64;
         for deleted_key in keys_to_delete {
             self.partition_file_locks.remove(&deleted_key);
-            if let Some(meta) = self.partition_cached_meta.remove(&deleted_key) {
-                removed_size += meta.1.data_len;
+            for idx in 0..self.partition_write_concurrency {
+                let prefix = format!("{}_{}", &deleted_key, idx);
+                if let Some(meta) = self.partition_cached_meta.remove(&prefix) {
+                    removed_size += meta.1.data_len;
+                }
             }
         }
 
@@ -339,7 +389,7 @@ impl Store for HdfsStore {
         let app_id = ctx.app_id.clone();
         self.app_remote_clients
             .entry(app_id)
-            .or_insert_with(|| client);
+            .or_insert_with(|| Arc::new(Box::new(client)));
         Ok(())
     }
 
@@ -358,12 +408,14 @@ impl Store for HdfsStore {
         }
         // for AQE
         data.sort_by_key(|block| block.task_attempt_id);
-        self.data_insert(uid, data).await
+        self.data_insert(uid, data)
+            .instrument_await("data insert")
+            .await
     }
 }
 
 #[async_trait]
-trait HdfsDelegator {
+pub(crate) trait HdfsDelegator: Send + Sync {
     async fn touch(&self, file_path: &str) -> Result<()>;
     async fn append(&self, file_path: &str, data: Bytes) -> Result<()>;
     async fn len(&self, file_path: &str) -> Result<u64>;
@@ -380,6 +432,9 @@ struct ClientInner {
     client: Client,
     root: String,
 }
+
+unsafe impl Send for HdfsNativeClient {}
+unsafe impl Sync for HdfsNativeClient {}
 
 impl HdfsNativeClient {
     fn new(root: String, configs: HashMap<String, String>) -> Result<Self> {
@@ -450,7 +505,20 @@ impl HdfsDelegator for HdfsNativeClient {
 
 #[cfg(test)]
 mod tests {
+    use crate::app::{PartitionedUId, SHUFFLE_SERVER_ID};
+    use crate::app::{PurgeDataContext, WritingViewContext};
+    use crate::config::HdfsStoreConfig;
+    use crate::runtime::manager::RuntimeManager;
+    use crate::store::hdfs::{HdfsDelegator, HdfsStore};
+    use crate::store::{Block, Store};
+    use anyhow::anyhow;
+    use async_trait::async_trait;
+    use bytes::Bytes;
     use std::path::Path;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering::SeqCst;
+    use std::sync::Arc;
+    use std::time::Duration;
     use url::Url;
 
     #[test]
@@ -467,6 +535,140 @@ mod tests {
         let file_path = "app/0/1.data";
         let parent_path = Path::new(file_path).parent().unwrap();
         println!("{}", parent_path.to_str().unwrap());
+
+        Ok(())
+    }
+
+    struct FakedHdfsClient {
+        mark_failure: Arc<AtomicBool>,
+    }
+    unsafe impl Send for FakedHdfsClient {}
+    unsafe impl Sync for FakedHdfsClient {}
+    #[async_trait]
+    impl HdfsDelegator for FakedHdfsClient {
+        async fn touch(&self, file_path: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn append(&self, file_path: &str, data: Bytes) -> anyhow::Result<()> {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            if self.mark_failure.load(SeqCst) {
+                return Err(anyhow!(""));
+            }
+            Ok(())
+        }
+
+        async fn len(&self, file_path: &str) -> anyhow::Result<u64> {
+            Ok(1)
+        }
+
+        async fn create_dir(&self, dir: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn delete_dir(&self, dir: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn append_test() -> anyhow::Result<()> {
+        SHUFFLE_SERVER_ID.get_or_init(|| "10.0.0.1".to_owned());
+        let app_id = "append_app_id";
+
+        let config = HdfsStoreConfig::default();
+        let runtime_manager = RuntimeManager::default();
+        let hdfs_store = HdfsStore::from(config, &runtime_manager);
+
+        let mark_failure_tag = Arc::new(AtomicBool::new(false));
+        let client: Arc<Box<dyn HdfsDelegator>> = Arc::new(Box::new(FakedHdfsClient {
+            mark_failure: mark_failure_tag.clone(),
+        }));
+        hdfs_store
+            .app_remote_clients
+            .insert(app_id.to_owned(), client);
+
+        let uid = PartitionedUId::from(app_id.to_owned(), 1, 1);
+        let writing_ctx = WritingViewContext::create_for_test(
+            uid,
+            vec![
+                Block {
+                    block_id: 0,
+                    length: 10i32,
+                    uncompress_length: 200,
+                    crc: 0,
+                    data: Bytes::copy_from_slice(&vec![0; 10]),
+                    task_attempt_id: 0,
+                },
+                Block {
+                    block_id: 1,
+                    length: 10i32,
+                    uncompress_length: 200,
+                    crc: 0,
+                    data: Bytes::copy_from_slice(&vec![0; 10]),
+                    task_attempt_id: 0,
+                },
+            ],
+        );
+
+        let hdfs_store = Arc::new(hdfs_store);
+
+        // case1
+        let hdfs = hdfs_store.clone();
+        let ctx = writing_ctx.clone();
+        let result = runtime_manager.default_runtime.block_on(hdfs.insert(ctx));
+        let prefix = format!(
+            "{}/{}/{}-{}/{}_0",
+            app_id,
+            1,
+            1,
+            1,
+            SHUFFLE_SERVER_ID.get().unwrap()
+        );
+        let meta = hdfs_store.partition_cached_meta.get(&prefix).unwrap();
+        assert_eq!(0, meta.retry_time);
+        assert_eq!(true, meta.is_file_created);
+        assert_eq!(20, meta.data_len);
+        drop(meta);
+
+        // case2
+        mark_failure_tag.store(true, SeqCst);
+        let hdfs = hdfs_store.clone();
+        let ctx = writing_ctx.clone();
+        let result = runtime_manager.default_runtime.block_on(hdfs.insert(ctx));
+        if let Ok(_) = result {
+            panic!();
+        }
+        let meta = hdfs_store.partition_cached_meta.get(&prefix).unwrap();
+        assert_eq!(1, meta.retry_time);
+        assert_eq!(true, meta.is_file_created);
+        assert_eq!(0, meta.data_len);
+        drop(meta);
+
+        // case3
+        mark_failure_tag.store(false, SeqCst);
+        let hdfs = hdfs_store.clone();
+        let ctx = writing_ctx.clone();
+        let result = runtime_manager.default_runtime.block_on(hdfs.insert(ctx));
+        if let Err(_) = result {
+            panic!();
+        }
+        let meta = hdfs_store.partition_cached_meta.get(&prefix).unwrap();
+        assert_eq!(1, meta.retry_time);
+        assert_eq!(true, meta.is_file_created);
+        assert_eq!(20, meta.data_len);
+        drop(meta);
+
+        // case4: purge test
+        runtime_manager
+            .default_runtime
+            .block_on(hdfs_store.purge(PurgeDataContext {
+                app_id: app_id.to_owned(),
+                shuffle_id: None,
+            }))?;
+        assert_eq!(0, hdfs_store.app_remote_clients.len());
+        assert_eq!(0, hdfs_store.partition_cached_meta.len());
+        assert_eq!(0, hdfs_store.partition_file_locks.len());
 
         Ok(())
     }
