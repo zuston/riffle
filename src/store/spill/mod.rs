@@ -142,7 +142,7 @@ async fn handle_spill_success(message: &SpillMessage, store_ref: Arc<HybridStore
         .release_memory_buffer(message.size, &message)
         .await
     {
-        error!(
+        debug!(
             "Errors on releasing memory data, that should not happen. err: {:#?}",
             err
         );

@@ -50,13 +50,13 @@ use crate::semaphore_with_index::SemaphoreWithIndex;
 use tracing::{debug, Instrument};
 use url::Url;
 
-struct PartitionCachedMeta {
+struct WritingHandler {
     is_file_created: bool,
     data_len: i64,
     retry_time: usize,
 }
 
-impl PartitionCachedMeta {
+impl WritingHandler {
     pub fn reset_offset(&mut self, len: i64) {
         self.data_len = len;
     }
@@ -66,7 +66,7 @@ impl PartitionCachedMeta {
     }
 }
 
-impl Default for PartitionCachedMeta {
+impl Default for WritingHandler {
     fn default() -> Self {
         Self {
             is_file_created: true,
@@ -86,7 +86,7 @@ pub struct HdfsStore {
     partition_file_locks: DashMap<String, Arc<SemaphoreWithIndex>>,
 
     // key: data_file_path with the concurrency index
-    partition_cached_meta: DashMap<String, PartitionCachedMeta>,
+    partition_cached_meta: DashMap<String, WritingHandler>,
 
     runtime_manager: RuntimeManager,
 
@@ -232,11 +232,6 @@ impl HdfsStore {
             total_flushed += length;
         }
 
-        let mut partition_cached_meta = self
-            .partition_cached_meta
-            .get_mut(&data_file_path_prefix)
-            .ok_or(WorkerError::APP_HAS_BEEN_PURGED)?;
-
         info!("Writing path: {}", &data_file_path);
         match self
             .write_data_and_index(
@@ -249,6 +244,11 @@ impl HdfsStore {
             .await
         {
             Err(e) => {
+                let mut partition_cached_meta = self
+                    .partition_cached_meta
+                    .get_mut(&data_file_path_prefix)
+                    .ok_or(WorkerError::APP_HAS_BEEN_PURGED)?;
+
                 partition_cached_meta.reset_offset(0);
                 partition_cached_meta.inc_retry_time();
                 let retry_time = partition_cached_meta.retry_time;
@@ -263,6 +263,11 @@ impl HdfsStore {
                 return Err(Other(e.into()));
             }
             _ => {
+                let mut partition_cached_meta = self
+                    .partition_cached_meta
+                    .get_mut(&data_file_path_prefix)
+                    .ok_or(WorkerError::APP_HAS_BEEN_PURGED)?;
+
                 partition_cached_meta.reset_offset(next_offset);
                 info!("Finish path: {}", &data_file_path);
             }
