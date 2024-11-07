@@ -7,7 +7,7 @@ use crate::metric::{
 };
 use crate::store::hybrid::{HybridStore, PersistentStore};
 use crate::store::mem::buffer::BatchMemoryBlock;
-use log::{error, warn};
+use log::{debug, error, warn};
 use parking_lot::Mutex;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering::SeqCst;
@@ -91,7 +91,7 @@ async fn handle_spill_failure_whatever_error(message: &SpillMessage, store_ref: 
     let ctx = &message.ctx;
     let is_valid_app = ctx.is_valid();
     if !is_valid_app {
-        warn!("Dropping the spill event for app: {:?}. Ths app is not found, may be purged. Ignore this", &message.ctx.uid.app_id);
+        debug!("Dropping the spill event for app: {:?}. Ths app is not found, may be purged. Ignore this", &message.ctx.uid.app_id);
         TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND.inc();
     } else {
         warn!(
