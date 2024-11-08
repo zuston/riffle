@@ -3,6 +3,7 @@ use crate::config::Config;
 use crate::grpc::protobuf::uniffle::coordinator_server_client::CoordinatorServerClient;
 use crate::grpc::protobuf::uniffle::{ShuffleServerHeartBeatRequest, ShuffleServerId};
 use crate::health_service::HealthService;
+use crate::metric::SERVICE_IS_HEALTHY;
 use crate::runtime::manager::RuntimeManager;
 use log::info;
 use std::time::Duration;
@@ -58,6 +59,8 @@ impl HeartbeatTask {
                 all_tags.extend_from_slice(&*tags);
 
                 let healthy = health_service.is_healthy().await.unwrap_or(false);
+                SERVICE_IS_HEALTHY.set(if healthy { 0 } else { 1 });
+
                 let memory_snapshot = app_manager
                     .store_memory_snapshot()
                     .await

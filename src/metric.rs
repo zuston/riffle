@@ -398,6 +398,9 @@ pub static GAUGE_LOCAL_DISK_IS_HEALTHY: Lazy<IntGaugeVec> = Lazy::new(|| {
     .unwrap()
 });
 
+pub static SERVICE_IS_HEALTHY: Lazy<IntGauge> =
+    Lazy::new(|| IntGauge::new("service_is_healthy", "service_is_healthy").expect(""));
+
 pub static GAUGE_RUNTIME_ALIVE_THREAD_NUM: Lazy<IntGaugeVec> = Lazy::new(|| {
     register_int_gauge_vec!(
         "runtime_thread_alive_gauge",
@@ -520,6 +523,9 @@ pub static EVENT_BUS_HANDLE_DURATION: Lazy<HistogramVec> = Lazy::new(|| {
 });
 
 fn register_custom_metrics() {
+    REGISTRY
+        .register(Box::new(SERVICE_IS_HEALTHY.clone()))
+        .expect("");
     REGISTRY
         .register(Box::new(GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.clone()))
         .expect("");
