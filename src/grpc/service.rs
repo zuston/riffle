@@ -49,7 +49,6 @@ use croaring::treemap::JvmSerializer;
 use croaring::Treemap;
 use fastrace::future::FutureExt;
 use fastrace::trace;
-use futures::future::err;
 use log::{debug, error, info, warn};
 use std::collections::HashMap;
 use tonic::{Request, Response, Status};
@@ -728,43 +727,35 @@ impl ShuffleServer for DefaultShuffleServer {
             // ignore this.
             partition_id: 1,
         };
+        let app = app
+            .unwrap()
+            .require_buffer(RequireBufferContext {
+                uid: partition_id.clone(),
+                size: req.require_size as i64,
+            })
+            .instrument_await(format!("require buffer. uid: {:?}", &partition_id))
+            .await;
 
-        let response = if let Err(error) = self
-            .rejection_policy_gateway
-            .should_allow(&partition_id)
-            .await
-        {
-            let code = match error {
-                WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION => {
-                    StatusCode::NO_BUFFER_FOR_HUGE_PARTITION
-                }
-                _ => StatusCode::INTERNAL_ERROR,
-            };
-            (code, -1, format!("{:?}", error))
-        } else {
-            let app = app
-                .unwrap()
-                .require_buffer(RequireBufferContext {
-                    uid: partition_id.clone(),
-                    size: req.require_size as i64,
-                })
-                .instrument_await(format!("require buffer. uid: {:?}", &partition_id))
-                .await;
-            match app {
-                Ok(required_buffer_res) => (
-                    StatusCode::SUCCESS,
-                    required_buffer_res.ticket_id,
-                    "".to_owned(),
-                ),
-                Err(err) => (StatusCode::NO_BUFFER, -1i64, format!("{:?}", err)),
-            }
+        let res = match app {
+            Ok(required_buffer_res) => (
+                StatusCode::SUCCESS,
+                required_buffer_res.ticket_id,
+                "".to_string(),
+            ),
+            Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION) => (
+                StatusCode::NO_BUFFER_FOR_HUGE_PARTITION,
+                -1i64,
+                "".to_string(),
+            ),
+            Err(err) => (StatusCode::NO_BUFFER, -1i64, format!("{:?}", err)),
         };
+
         timer.observe_duration();
 
         Ok(Response::new(RequireBufferResponse {
-            require_buffer_id: response.1,
-            status: response.0.into(),
-            ret_msg: response.2,
+            require_buffer_id: res.1,
+            status: res.0.into(),
+            ret_msg: res.2,
         }))
     }
 

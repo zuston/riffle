@@ -386,6 +386,11 @@ impl App {
     ) -> Result<RequireBufferResponse, WorkerError> {
         self.heartbeat()?;
 
+        if self.is_backpressure_for_huge_partition(&ctx.uid).await? {
+            TOTAL_REQUIRE_BUFFER_FAILED.inc();
+            return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
+        }
+
         self.store.require_buffer(ctx).await.map_err(|err| {
             TOTAL_REQUIRE_BUFFER_FAILED.inc();
             err
