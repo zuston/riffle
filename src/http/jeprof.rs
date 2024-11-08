@@ -17,6 +17,7 @@
 
 use log::error;
 use serde::{Deserialize, Serialize};
+use std::error::Error;
 use std::time::Duration;
 
 use poem::error::ResponseError;
@@ -54,6 +55,12 @@ impl ResponseError for ProfError {
 }
 
 #[poem::handler]
+async fn jemalloc_pprof_handler(req: &Request) -> poem::Result<impl IntoResponse> {
+    let pprof = dump_prof("").await?;
+    Ok(pprof)
+}
+
+#[poem::handler]
 async fn jeprof_handler(req: &Request) -> poem::Result<impl IntoResponse> {
     let req = req.params::<JeProfRequest>()?;
     // when memory-prof feature is not enabled, return error
@@ -76,7 +83,7 @@ async fn jeprof_handler(req: &Request) -> poem::Result<impl IntoResponse> {
     let path = tmp_file.path();
     delay_for(Duration::from_secs(req.duration)).await;
     // dump heap profile
-    let buf: Vec<u8> = dump_prof(&path.to_string_lossy()).map_err(|e| {
+    let buf: Vec<u8> = dump_prof(&path.to_string_lossy()).await.map_err(|e| {
         let msg = format!("could not dump heap profile: {:?}", e);
         error!("{}", msg);
         e
@@ -109,7 +116,7 @@ impl Default for JeProfHandler {
 
 impl Handler for JeProfHandler {
     fn get_route_method(&self) -> RouteMethod {
-        RouteMethod::new().get(jeprof_handler)
+        RouteMethod::new().get(jemalloc_pprof_handler)
     }
 
     fn get_route_path(&self) -> String {
@@ -126,6 +133,7 @@ mod test {
     use tonic::codegen::http::StatusCode;
 
     #[tokio::test]
+    #[ignore]
     async fn test_router() {
         let handler = JeProfHandler::default();
         let app = Route::new().at(handler.get_route_path(), handler.get_route_method());

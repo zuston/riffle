@@ -128,7 +128,8 @@ KRB5_CONFIG=/etc/krb5.conf KRB5CCNAME=/tmp/krb5cc_2002 LOG=info ./uniffle-worker
     ```
 2. Start with profile
     ```shell
-    _RJEM_MALLOC_CONF=prof:true,prof_prefix:jeprof.out,lg_prof_interval:30 ./uniffle-worker
+    curl localhost:20010/debug/heap/profile > heap.pb.gz
+    go tool pprof -http="0.0.0.0:8081" heap.pb.gz
     ```
    
 ### CPU Profiling

@@ -62,5 +62,6 @@ fn new_server() -> Box<PoemHTTPServer> {
     server.register_handler(MetricsHTTPHandler::default());
     server.register_handler(AwaitTreeHandler::default());
     server.register_handler(JeProfHandler::default());
+
     Box::new(server)
 }

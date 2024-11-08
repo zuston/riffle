@@ -21,7 +21,7 @@ pub fn is_prof_enabled() -> bool {
     false
 }
 
-pub fn dump_prof(_path: &str) -> ProfResult<Vec<u8>> {
+pub async fn dump_prof(_path: &str) -> ProfResult<Vec<u8>> {
     Err(ProfError::MemProfilingNotEnabled)
 }
 

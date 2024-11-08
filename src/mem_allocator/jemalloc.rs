@@ -15,6 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#[allow(non_upper_case_globals)]
+#[export_name = "malloc_conf"]
+pub static malloc_conf: &[u8] = b"prof:true,prof_active:true,lg_prof_sample:19\0";
+
 pub type Allocator = tikv_jemallocator::Jemalloc;
 pub const fn allocator() -> Allocator {
     tikv_jemallocator::Jemalloc
