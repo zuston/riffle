@@ -20,6 +20,7 @@
 use crate::app::AppManager;
 use crate::common::init_global_variable;
 use crate::config::Config;
+use crate::health_service::HealthService;
 use crate::heartbeat::HeartbeatTask;
 use crate::http::{HTTPServer, HttpMonitorService};
 use crate::log_service::LogService;
@@ -46,6 +47,7 @@ pub mod constant;
 mod error;
 pub mod event_bus;
 pub mod grpc;
+pub mod health_service;
 pub mod heartbeat;
 mod http;
 pub mod kerberos;
@@ -96,9 +98,12 @@ fn main() -> Result<()> {
     let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone(), &storage);
     storage.with_app_manager(&app_manager_ref);
 
+    let health_service =
+        HealthService::new(&app_manager_ref, &storage, &config.health_service_config);
+
     MetricService::init(&config, runtime_manager.clone());
     FastraceWrapper::init(config.clone());
-    HeartbeatTask::init(&config, runtime_manager.clone(), app_manager_ref.clone());
+    HeartbeatTask::init(&config, &runtime_manager, &app_manager_ref, &health_service);
     HttpMonitorService::init(&config, runtime_manager.clone());
 
     DefaultRpcService {}.start(&config, runtime_manager, app_manager_ref)?;

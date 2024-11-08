@@ -183,6 +183,13 @@ impl Default for RuntimeConfig {
 
 // =========================================================
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+pub struct HealthServiceConfig {
+    pub alive_app_number_max_limit: Option<usize>,
+}
+
+// =========================================================
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct HybridStoreConfig {
     #[serde(default = "as_default_memory_spill_high_watermark")]
@@ -280,9 +287,15 @@ pub struct Config {
     pub http_monitor_service_port: u16,
 
     pub tracing: Option<TracingConfig>,
+
+    #[serde(default = "as_default_health_service_config")]
+    pub health_service_config: HealthServiceConfig,
 }
 
 // ====
+fn as_default_health_service_config() -> HealthServiceConfig {
+    Default::default()
+}
 fn as_default_hybrid_store_config() -> HybridStoreConfig {
     HybridStoreConfig::default()
 }

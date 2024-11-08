@@ -536,7 +536,7 @@ impl Store for HybridStore {
         let cold = check_healthy(self.cold_store.as_ref())
             .await
             .unwrap_or(false);
-        Ok(self.hot_store.is_healthy().await? && (warm || cold))
+        Ok(self.hot_store.is_healthy().await? && warm && cold)
     }
 
     #[trace]

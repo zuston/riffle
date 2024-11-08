@@ -766,6 +766,10 @@ impl AppManager {
         self.apps.get(app_id).map(|v| v.value().clone())
     }
 
+    pub fn get_alive_app_number(&self) -> usize {
+        self.apps.len()
+    }
+
     pub fn register(
         &self,
         app_id: String,

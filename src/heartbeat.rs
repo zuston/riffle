@@ -2,8 +2,8 @@ use crate::app::{AppManagerRef, SHUFFLE_SERVER_ID, SHUFFLE_SERVER_IP};
 use crate::config::Config;
 use crate::grpc::protobuf::uniffle::coordinator_server_client::CoordinatorServerClient;
 use crate::grpc::protobuf::uniffle::{ShuffleServerHeartBeatRequest, ShuffleServerId};
+use crate::health_service::HealthService;
 use crate::runtime::manager::RuntimeManager;
-use crate::util::get_local_ip;
 use log::info;
 use std::time::Duration;
 use tonic::transport::Channel;
@@ -13,7 +13,16 @@ const DEFAULT_SHUFFLE_SERVER_TAG: &str = "ss_v4";
 pub struct HeartbeatTask;
 
 impl HeartbeatTask {
-    pub fn init(config: &Config, runtime_manager: RuntimeManager, app_manager: AppManagerRef) {
+    pub fn init(
+        config: &Config,
+        runtime_manager: &RuntimeManager,
+        app_manager: &AppManagerRef,
+        health_service: &HealthService,
+    ) {
+        let runtime_manager = runtime_manager.clone();
+        let app_manager = app_manager.clone();
+        let health_service = health_service.clone();
+
         let coordinator_quorum = config.coordinator_quorum.clone();
         let tags = config.tags.clone().unwrap_or(vec![]);
 
@@ -48,7 +57,7 @@ impl HeartbeatTask {
                 all_tags.push(DEFAULT_SHUFFLE_SERVER_TAG.to_string());
                 all_tags.extend_from_slice(&*tags);
 
-                let healthy = app_manager.store_is_healthy().await.unwrap_or(false);
+                let healthy = health_service.is_healthy().await.unwrap_or(false);
                 let memory_snapshot = app_manager
                     .store_memory_snapshot()
                     .await
