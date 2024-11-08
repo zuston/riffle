@@ -60,6 +60,7 @@ impl DefaultRpcService {
         app_manager_ref: AppManagerRef,
         rejection_gateway: &RejectionPolicyGateway,
     ) -> Result<()> {
+        // todo: Integrate rejection policy into the rpc layer.
         let urpc_port = config.urpc_port.unwrap();
         info!("Starting urpc server with port:[{}] ......", urpc_port);
 
