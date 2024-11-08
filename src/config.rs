@@ -104,7 +104,7 @@ pub struct KerberosSecurityConfig {
 pub struct LocalfileStoreConfig {
     pub data_paths: Vec<String>,
     #[serde(default = "as_default_healthy_check_min_disks")]
-    pub healthy_check_min_disks: i32,
+    pub min_number_of_available_disks: i32,
     #[serde(default = "as_default_disk_high_watermark")]
     pub disk_high_watermark: f32,
     #[serde(default = "as_default_disk_low_watermark")]
@@ -144,7 +144,7 @@ impl LocalfileStoreConfig {
     pub fn new(data_paths: Vec<String>) -> Self {
         LocalfileStoreConfig {
             data_paths,
-            healthy_check_min_disks: as_default_healthy_check_min_disks(),
+            min_number_of_available_disks: as_default_healthy_check_min_disks(),
             disk_high_watermark: as_default_disk_high_watermark(),
             disk_low_watermark: as_default_disk_low_watermark(),
             disk_max_concurrency: as_default_disk_max_concurrency(),

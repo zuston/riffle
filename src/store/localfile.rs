@@ -72,7 +72,7 @@ impl From<LocalDiskDelegator> for LockedObj {
 
 pub struct LocalFileStore {
     local_disks: Vec<LocalDiskDelegator>,
-    healthy_check_min_disks: i32,
+    min_number_of_available_disks: i32,
     runtime_manager: RuntimeManager,
     partition_locks: DashMap<String, Arc<RwLock<LockedObj>>>,
 }
@@ -93,7 +93,7 @@ impl LocalFileStore {
         }
         LocalFileStore {
             local_disks: local_disk_instances,
-            healthy_check_min_disks: 1,
+            min_number_of_available_disks: 1,
             runtime_manager,
             partition_locks: Default::default(),
         }
@@ -118,7 +118,7 @@ impl LocalFileStore {
         }
         LocalFileStore {
             local_disks: local_disk_instances,
-            healthy_check_min_disks: localfile_config.healthy_check_min_disks,
+            min_number_of_available_disks: localfile_config.min_number_of_available_disks,
             runtime_manager,
             partition_locks: Default::default(),
         }
@@ -171,9 +171,9 @@ impl LocalFileStore {
 
         debug!(
             "disk: available={}, healthy_check_min={}",
-            available, self.healthy_check_min_disks
+            available, self.min_number_of_available_disks
         );
-        Ok(available > self.healthy_check_min_disks)
+        Ok(available >= self.min_number_of_available_disks)
     }
 
     fn select_disk(&self, uid: &PartitionedUId) -> Result<LocalDiskDelegator, WorkerError> {
