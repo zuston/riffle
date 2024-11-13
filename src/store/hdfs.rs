@@ -232,7 +232,7 @@ impl HdfsStore {
             total_flushed += length;
         }
 
-        info!("Writing path: {}", &data_file_path);
+        debug!("Writing path: {}", &data_file_path);
         match self
             .write_data_and_index(
                 &filesystem,
@@ -269,7 +269,7 @@ impl HdfsStore {
                     .ok_or(WorkerError::APP_HAS_BEEN_PURGED)?;
 
                 partition_cached_meta.reset_offset(next_offset);
-                info!("Finish path: {}", &data_file_path);
+                debug!("Finish path: {}", &data_file_path);
             }
         }
         TOTAL_HDFS_USED.inc_by(total_flushed as u64);
@@ -284,13 +284,23 @@ impl HdfsStore {
         index_file_path: &String,
         index_bytes_holder: BytesMut,
     ) -> Result<(), WorkerError> {
+        let data_bytes = data_bytes_holder.freeze();
+        let data_len = data_bytes.len();
         filesystem
-            .append(&data_file_path, data_bytes_holder.freeze())
-            .instrument_await(format!("hdfs writing [data]. path: {}", &data_file_path))
+            .append(&data_file_path, data_bytes)
+            .instrument_await(format!(
+                "hdfs writing [data] with {} bytes. path: {}",
+                data_len, &data_file_path
+            ))
             .await?;
+        let index_bytes = index_bytes_holder.freeze();
+        let index_len = index_bytes.len();
         filesystem
-            .append(&index_file_path, index_bytes_holder.freeze())
-            .instrument_await(format!("hdfs writing [index]. path: {}", &index_file_path))
+            .append(&index_file_path, index_bytes)
+            .instrument_await(format!(
+                "hdfs writing [index] with {} bytes. path: {}",
+                index_len, &index_file_path
+            ))
             .await?;
         Ok(())
     }
@@ -367,8 +377,8 @@ impl Store for HdfsStore {
             }
         }
 
-        info!("The hdfs data for {} has been deleted", &dir);
         filesystem.delete_dir(dir.as_str()).await?;
+        info!("The hdfs data for {} has been deleted", &dir);
 
         Ok(removed_size)
     }
@@ -490,6 +500,7 @@ impl HdfsDelegator for HdfsNativeClient {
     }
 
     async fn append(&self, file_path: &str, data: Bytes) -> Result<()> {
+        debug!("appending to {} with {} bytes", file_path, data.len());
         let file_path = &self.wrap_root(file_path);
         let mut file_writer = self
             .inner

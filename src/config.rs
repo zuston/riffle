@@ -76,7 +76,7 @@ pub struct HdfsStoreConfig {
     pub kerberos_security_config: Option<KerberosSecurityConfig>,
 }
 fn as_default_max_concurrency() -> usize {
-    100
+    50
 }
 fn as_default_partition_write_max_concurrency() -> usize {
     20
