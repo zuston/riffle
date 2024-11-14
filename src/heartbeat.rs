@@ -30,6 +30,8 @@ impl HeartbeatTask {
         let grpc_port = config.grpc_port;
         let urpc_port = config.urpc_port.unwrap_or(0);
 
+        let interval_seconds = config.heartbeat_interval_seconds;
+
         runtime_manager.default_runtime.spawn(async move {
             let ip = SHUFFLE_SERVER_IP.get().unwrap().to_string();
             info!("machine ip: {}", &ip);
@@ -52,7 +54,7 @@ impl HeartbeatTask {
 
             loop {
                 // todo: add interval as config var
-                tokio::time::sleep(Duration::from_secs(10)).await;
+                tokio::time::sleep(Duration::from_secs(interval_seconds as u64)).await;
 
                 let mut all_tags = vec![];
                 all_tags.push(DEFAULT_SHUFFLE_SERVER_TAG.to_string());

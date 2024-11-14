@@ -290,9 +290,15 @@ pub struct Config {
 
     #[serde(default = "as_default_health_service_config")]
     pub health_service_config: HealthServiceConfig,
+
+    #[serde(default = "as_default_heartbeat_interval_seconds")]
+    pub heartbeat_interval_seconds: u32,
 }
 
 // ====
+fn as_default_heartbeat_interval_seconds() -> u32 {
+    2
+}
 fn as_default_health_service_config() -> HealthServiceConfig {
     Default::default()
 }
