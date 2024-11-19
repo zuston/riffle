@@ -90,7 +90,7 @@ impl HdfsDelegator for HdrsClient {
     async fn delete_dir(&self, dir: &str) -> Result<()> {
         let path = self.wrap_root(dir);
         let client = &self.inner.client;
-        client.remove_dir(path.as_str())?;
+        client.remove_dir_all(path.as_str())?;
         Ok(())
     }
 }
