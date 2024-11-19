@@ -66,8 +66,7 @@ impl HdfsDelegator for HdrsClient {
         let client = &self.inner.client;
         let mut file = client
             .open_file()
-            .create(true)
-            .write(true)
+            .append(true)
             .open(path.as_str())?;
         file.write_all(&data)?;
         file.flush()?;
