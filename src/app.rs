@@ -18,10 +18,10 @@
 use crate::config::Config;
 use crate::error::WorkerError;
 use crate::metric::{
-    GAUGE_APP_NUMBER, GAUGE_TOPN_APP_RESIDENT_BYTES, TOTAL_APP_NUMBER,
-    TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED, TOTAL_READ_DATA, TOTAL_READ_DATA_FROM_LOCALFILE,
-    TOTAL_READ_DATA_FROM_MEMORY, TOTAL_READ_INDEX_FROM_LOCALFILE, TOTAL_RECEIVED_DATA,
-    TOTAL_REQUIRE_BUFFER_FAILED,
+    GAUGE_APP_NUMBER, GAUGE_PARTITION_NUMBER, GAUGE_TOPN_APP_RESIDENT_BYTES, TOTAL_APP_NUMBER,
+    TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED, TOTAL_PARTITION_NUMBER, TOTAL_READ_DATA,
+    TOTAL_READ_DATA_FROM_LOCALFILE, TOTAL_READ_DATA_FROM_MEMORY, TOTAL_READ_INDEX_FROM_LOCALFILE,
+    TOTAL_RECEIVED_DATA, TOTAL_REQUIRE_BUFFER_FAILED,
 };
 
 use crate::readable_size::ReadableSize;
@@ -52,6 +52,7 @@ use crate::storage::HybridStorage;
 use crate::store::mem::capacity::CapacitySnapshot;
 use await_tree::InstrumentAwait;
 use parking_lot::RwLock;
+use prometheus::proto::MetricType::GAUGE;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -409,7 +410,11 @@ impl App {
         let partitioned_meta = self
             .bitmap_of_blocks
             .entry((shuffle_id, partition_id))
-            .or_insert_with(|| PartitionedMeta::new());
+            .or_insert_with(|| {
+                TOTAL_PARTITION_NUMBER.inc();
+                GAUGE_PARTITION_NUMBER.inc();
+                PartitionedMeta::new()
+            });
         partitioned_meta.clone()
     }
 
@@ -446,6 +451,9 @@ impl App {
             .await?;
         self.total_resident_data_size
             .fetch_sub(removed_size as u64, SeqCst);
+        if shuffle_id.is_none() {
+            GAUGE_PARTITION_NUMBER.sub(self.bitmap_of_blocks.len() as i64);
+        }
         Ok(())
     }
 

@@ -64,10 +64,7 @@ impl HdfsDelegator for HdrsClient {
     async fn append(&self, file_path: &str, data: Bytes) -> Result<()> {
         let path = self.wrap_root(file_path);
         let client = &self.inner.client;
-        let mut file = client
-            .open_file()
-            .append(true)
-            .open(path.as_str())?;
+        let mut file = client.open_file().append(true).open(path.as_str())?;
         file.write_all(&data)?;
         file.flush()?;
         Ok(())
