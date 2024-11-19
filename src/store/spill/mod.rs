@@ -2,7 +2,8 @@ use crate::app::PartitionedUId;
 use crate::config::StorageType;
 use crate::error::WorkerError;
 use crate::metric::{
-    TOTAL_MEMORY_SPILL_OPERATION_FAILED, TOTAL_SPILL_EVENTS_DROPPED,
+    TOTAL_MEMORY_SPILL_OPERATION_FAILED, TOTAL_MEMORY_SPILL_TO_HDFS_OPERATION_FAILED,
+    TOTAL_MEMORY_SPILL_TO_LOCALFILE_OPERATION_FAILED, TOTAL_SPILL_EVENTS_DROPPED,
     TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND,
 };
 use crate::store::hybrid::{HybridStore, PersistentStore};
@@ -127,6 +128,15 @@ async fn handle_spill_failure(
         }
         error => {
             TOTAL_MEMORY_SPILL_OPERATION_FAILED.inc();
+            if let Some(stype) = message.get_candidate_storage_type() {
+                match stype {
+                    StorageType::LOCALFILE => {
+                        TOTAL_MEMORY_SPILL_TO_LOCALFILE_OPERATION_FAILED.inc()
+                    }
+                    StorageType::HDFS => TOTAL_MEMORY_SPILL_TO_HDFS_OPERATION_FAILED.inc(),
+                    _ => {}
+                }
+            }
             error!(
                 "Errors on spill memory data to persistent storage. The error: {:#?}",
                 error

@@ -322,8 +322,13 @@ pub static TOTAL_MEMORY_SPILL_IN_FLUSHING_OPERATION: Lazy<IntCounter> = Lazy::ne
     .expect("metric should be created")
 });
 pub static TOTAL_MEMORY_SPILL_OPERATION_FAILED: Lazy<IntCounter> = Lazy::new(|| {
-    IntCounter::new("total_memory_spill_failed", "memory capacity")
-        .expect("metric should be created")
+    IntCounter::new("total_memory_spill_failed", "total_memory_spill_failed").expect("metric should be created")
+});
+pub static TOTAL_MEMORY_SPILL_TO_LOCALFILE_OPERATION_FAILED: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new("total_memory_to_localfile_spill_failed", "total_memory_to_localfile_spill_failed").expect("metric should be created")
+});
+pub static TOTAL_MEMORY_SPILL_TO_HDFS_OPERATION_FAILED: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new("total_memory_to_hdfs_spill_failed", "total_memory_to_hdfs_spill_failed").expect("metric should be created")
 });
 pub static TOTAL_MEMORY_SPILL_TO_LOCALFILE: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new(
@@ -631,7 +636,17 @@ fn register_custom_metrics() {
         .expect("total_memory_spill_operation must be registered");
     REGISTRY
         .register(Box::new(TOTAL_MEMORY_SPILL_OPERATION_FAILED.clone()))
-        .expect("total_memory_spill_operation_failed must be registered");
+        .expect("total_memory_spill_failed must be registered");
+    REGISTRY
+        .register(Box::new(
+            TOTAL_MEMORY_SPILL_TO_LOCALFILE_OPERATION_FAILED.clone(),
+        ))
+        .expect("total_memory_to_localfile_spill_failed must be registered");
+    REGISTRY
+        .register(Box::new(
+            TOTAL_MEMORY_SPILL_TO_HDFS_OPERATION_FAILED.clone(),
+        ))
+        .expect("total_memory_to_hdfs_spill_failed must be registered");
     REGISTRY
         .register(Box::new(TOTAL_APP_NUMBER.clone()))
         .expect("total_app_number must be registered");
