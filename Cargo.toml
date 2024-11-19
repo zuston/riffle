@@ -45,6 +45,8 @@ memory-prof = ["jemalloc", "tikv-jemallocator/profiling", "allocator-analysis"]
 
 hdfs = ["dep:hdfs-native"]
 
+hdrs = ["hdfs", "dep:hdrs"]
+
 allocator-analysis = ["dep:cap"]
 
 mimalloc = ["dep:mimalloc"]
@@ -115,6 +117,11 @@ optional = true
 version = "0.7.0"
 optional = true
 features = ["kerberos"]
+
+[dependencies.hdrs]
+git = "https://github.com/zuston/hdrs"
+branch = "extended"
+optional = true
 
 # jemalloc related optional dependencies
 [dependencies.tikv-jemalloc-ctl]

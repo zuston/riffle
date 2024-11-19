@@ -1,7 +1,12 @@
 #[cfg(feature = "hdfs")]
 mod hdfs_native;
+#[cfg(feature = "hdrs")]
+mod hdrs;
+
 #[cfg(feature = "hdfs")]
 use crate::store::hadoop::hdfs_native::HdfsNativeClient;
+#[cfg(feature = "hdrs")]
+use crate::store::hadoop::hdrs::HdrsClient;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -23,7 +28,9 @@ pub fn getHdfsDelegator(
     root: &str,
     configs: HashMap<String, String>,
 ) -> Result<Box<dyn HdfsDelegator>> {
-    let client = HdfsNativeClient::new(root.to_owned(), configs)?;
-    let client: Box<dyn HdfsDelegator> = Box::new(client);
-    return Ok(client);
+    #[cfg(not(feature = "hdrs"))]
+    return Ok(Box::new(HdfsNativeClient::new(root.to_owned(), configs)?));
+
+    #[cfg(feature = "hdrs")]
+    return Ok(Box::new(HdrsClient::new(root.to_owned(), configs)?));
 }
