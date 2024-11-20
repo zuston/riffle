@@ -15,6 +15,7 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 
 pub mod hierarchy_event_bus;
+mod metrics;
 mod spill_test;
 pub mod storage_flush_handler;
 pub mod storage_select_handler;

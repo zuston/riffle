@@ -314,12 +314,13 @@ pub static GAUGE_MEMORY_ALLOCATED: Lazy<IntGauge> = Lazy::new(|| {
 pub static GAUGE_MEMORY_CAPACITY: Lazy<IntGauge> = Lazy::new(|| {
     IntGauge::new("memory_capacity", "memory capacity").expect("metric should be created")
 });
-pub static TOTAL_MEMORY_SPILL_IN_FLUSHING_OPERATION: Lazy<IntCounter> = Lazy::new(|| {
-    IntCounter::new(
+pub static TOTAL_MEMORY_SPILL_IN_FLUSHING_OPERATION: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
         "total_memory_spill_in_flushing_operations",
         "in flushing operations",
+        &["storage_type"]
     )
-    .expect("metric should be created")
+    .unwrap()
 });
 pub static TOTAL_MEMORY_SPILL_OPERATION_FAILED: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new("total_memory_spill_failed", "total_memory_spill_failed")
@@ -350,9 +351,13 @@ pub static TOTAL_MEMORY_SPILL_TO_HDFS: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new("total_memory_spill_to_hdfs", "memory spill to hdfs")
         .expect("metric should be created")
 });
-pub static GAUGE_MEMORY_SPILL_IN_FLUSHING_OPERATION: Lazy<IntGauge> = Lazy::new(|| {
-    IntGauge::new("memory_spill_in_flushing_operations", "memory spill")
-        .expect("metric should be created")
+pub static GAUGE_MEMORY_SPILL_IN_FLUSHING_OPERATION: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "memory_spill_in_flushing_operations",
+        "memory spill",
+        &["storage_type"]
+    )
+    .unwrap()
 });
 pub static GAUGE_MEMORY_SPILL_TO_LOCALFILE: Lazy<IntGauge> = Lazy::new(|| {
     IntGauge::new("memory_spill_to_localfile", "memory spill to localfile")
@@ -450,10 +455,25 @@ pub static GAUGE_TOPN_APP_RESIDENT_BYTES: Lazy<IntGaugeVec> = Lazy::new(|| {
     .unwrap()
 });
 
-pub static GAUGE_MEMORY_SPILL_IN_FLUSHING_BYTES: Lazy<IntGauge> = Lazy::new(|| {
-    IntGauge::new(
+pub static GAUGE_MEMORY_SPILL_IN_FLUSHING_BYTES: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
         "memory_spill_in_flushing_bytes",
         "in flushing bytes of spill",
+        &["storage_type"]
+    )
+    .unwrap()
+});
+pub static GAUGE_MEMORY_SPILL_LOCALFILE_IN_FLUSHING_BYTES: Lazy<IntGauge> = Lazy::new(|| {
+    IntGauge::new(
+        "memory_spill_localfile_in_flushing_bytes",
+        "in flushing bytes of spill of localfile",
+    )
+    .unwrap()
+});
+pub static GAUGE_MEMORY_SPILL_HDFS_IN_FLUSHING_BYTES: Lazy<IntGauge> = Lazy::new(|| {
+    IntGauge::new(
+        "memory_spill_hdfs_in_flushing_bytes",
+        "in flushing bytes of spill of localfile",
     )
     .unwrap()
 });
@@ -610,10 +630,6 @@ fn register_custom_metrics() {
         .expect("total_read_data must be registered");
 
     REGISTRY
-        .register(Box::new(GAUGE_MEMORY_SPILL_IN_FLUSHING_BYTES.clone()))
-        .expect("");
-
-    REGISTRY
         .register(Box::new(GAUGE_LOCAL_DISK_CAPACITY.clone()))
         .expect("");
 
@@ -648,9 +664,6 @@ fn register_custom_metrics() {
     REGISTRY
         .register(Box::new(TOTAL_HDFS_USED.clone()))
         .expect("total_hdfs_used must be registered");
-    REGISTRY
-        .register(Box::new(TOTAL_MEMORY_SPILL_IN_FLUSHING_OPERATION.clone()))
-        .expect("total_memory_spill_operation must be registered");
     REGISTRY
         .register(Box::new(TOTAL_MEMORY_SPILL_OPERATION_FAILED.clone()))
         .expect("total_memory_spill_failed must be registered");
@@ -701,9 +714,6 @@ fn register_custom_metrics() {
     REGISTRY
         .register(Box::new(GAUGE_HUGE_PARTITION_NUMBER.clone()))
         .expect("huge_partition_number must be registered");
-    REGISTRY
-        .register(Box::new(GAUGE_MEMORY_SPILL_IN_FLUSHING_OPERATION.clone()))
-        .expect("memory_spill_operation must be registered");
     REGISTRY
         .register(Box::new(GAUGE_MEMORY_SPILL_TO_LOCALFILE.clone()))
         .expect("memory_spill_to_localfile must be registered");
