@@ -93,6 +93,8 @@ pub struct HybridStore {
     pub(crate) event_bus: HierarchyEventBus<SpillMessage>,
 
     app_manager: OnceCell<AppManagerRef>,
+
+    huge_partition_memory_spill_to_hdfs_threshold_size: u64,
 }
 
 unsafe impl Send for HybridStore {}
@@ -134,6 +136,13 @@ impl HybridStore {
                 Some(v) => Some(ReadableSize::from_str(&v.clone()).unwrap().as_bytes()),
                 _ => None,
             };
+        let huge_partition_memory_spill_to_hdfs_threshold_size = ReadableSize::from_str(
+            &hybrid_conf
+                .huge_partition_memory_spill_to_hdfs_threshold_size
+                .clone(),
+        )
+        .unwrap()
+        .as_bytes();
 
         let store = HybridStore {
             hot_store: Arc::new(MemoryStore::from(
@@ -151,6 +160,7 @@ impl HybridStore {
             event_bus,
             app_manager: OnceCell::new(),
             in_flight_bytes_size: Default::default(),
+            huge_partition_memory_spill_to_hdfs_threshold_size,
         };
         store
     }
@@ -272,30 +282,32 @@ impl HybridStore {
         let cold = self.cold_store.as_ref().unwrap_or(warm);
 
         // The following spill policies.
-        // 1. local store is unhealthy. spill to hdfs
+        // 1. local store is unhealthy. spill to hdfs (This is disabled by default, which will slow down the performance)
         // 2. event flushed to localfile failed. and exceed retry max cnt, fallback to hdfs
         // 3. huge partition directly flush to hdfs
 
         // normal assignment
         let mut candidate_store = if warm.is_healthy().await? {
             let cold_spilled_size = self.memory_spill_to_cold_threshold_size.unwrap_or(u64::MAX);
-            // if cold_spilled_size < spill_size as u64 || ctx.owned_by_huge_partition {
             if cold_spilled_size < spill_size as u64 {
                 cold
             } else {
                 warm
             }
         } else {
-            cold
+            warm
         };
 
-        // huge partition fallback to hdfs
+        // huge partition fallback to hdfs if size > threshold
         let app_manager = self.app_manager.get();
         if let Some(app_manager) = app_manager {
             let app_id = &ctx.uid.app_id;
             match app_manager.get_app(app_id) {
                 Some(app) => {
-                    if app.is_huge_partition(&ctx.uid)? {
+                    if app.is_huge_partition(&ctx.uid)?
+                        && spill_size as u64
+                            > self.huge_partition_memory_spill_to_hdfs_threshold_size
+                    {
                         candidate_store = cold;
                     }
                 }

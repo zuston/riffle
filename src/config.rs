@@ -204,6 +204,9 @@ pub struct HybridStoreConfig {
     pub memory_spill_to_localfile_concurrency: i32,
     #[serde(default = "as_default_memory_spill_to_hdfs_concurrency")]
     pub memory_spill_to_hdfs_concurrency: i32,
+
+    #[serde(default = "as_default_huge_partition_memory_spill_to_hdfs_threshold_size")]
+    pub huge_partition_memory_spill_to_hdfs_threshold_size: String,
 }
 
 fn as_default_memory_spill_to_localfile_concurrency() -> i32 {
@@ -217,6 +220,9 @@ fn as_default_memory_spill_high_watermark() -> f32 {
 }
 fn as_default_memory_spill_low_watermark() -> f32 {
     0.2
+}
+fn as_default_huge_partition_memory_spill_to_hdfs_threshold_size() -> String {
+    "64M".to_string()
 }
 
 impl HybridStoreConfig {
@@ -232,6 +238,8 @@ impl HybridStoreConfig {
             memory_spill_to_cold_threshold_size: None,
             memory_spill_to_localfile_concurrency: 100,
             memory_spill_to_hdfs_concurrency: 100,
+            huge_partition_memory_spill_to_hdfs_threshold_size:
+                as_default_huge_partition_memory_spill_to_hdfs_threshold_size(),
         }
     }
 }
@@ -245,6 +253,8 @@ impl Default for HybridStoreConfig {
             memory_spill_to_cold_threshold_size: None,
             memory_spill_to_localfile_concurrency: 100,
             memory_spill_to_hdfs_concurrency: 100,
+            huge_partition_memory_spill_to_hdfs_threshold_size:
+                as_default_huge_partition_memory_spill_to_hdfs_threshold_size(),
         }
     }
 }
