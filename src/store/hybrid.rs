@@ -47,7 +47,6 @@ use std::ops::Deref;
 
 use await_tree::InstrumentAwait;
 use fastrace::future::FutureExt;
-use fastrace::trace;
 use once_cell::sync::OnceCell;
 use std::str::FromStr;
 use std::sync::atomic::AtomicU64;
@@ -407,7 +406,6 @@ impl HybridStore {
         Ok(ratio)
     }
 
-    #[trace]
     async fn watermark_spill(&self) -> Result<()> {
         let timer = Instant::now();
         let mem_target =
@@ -419,6 +417,7 @@ impl HybridStore {
             timer.elapsed().as_millis()
         );
 
+        let partition_num = buffers.len();
         let timer = Instant::now();
         let mut flushed_size = 0u64;
         for (uid, buffer) in buffers {
@@ -430,7 +429,8 @@ impl HybridStore {
             flushed_size += flushed?;
         }
         info!(
-            "[Spill] Picked up blocks that should be async flushed with {}(bytes) that costs {}(ms).",
+            "[Spill] Picked up {} partition blocks that should be async flushed with {}(bytes) that costs {}(ms).",
+            partition_num,
             flushed_size,
             timer.elapsed().as_millis()
         );
@@ -486,7 +486,6 @@ impl Store for HybridStore {
         insert_result
     }
 
-    #[trace]
     async fn get(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
         match ctx.reading_options {
             ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(_, _) => {
@@ -496,7 +495,6 @@ impl Store for HybridStore {
         }
     }
 
-    #[trace]
     async fn get_index(
         &self,
         ctx: ReadingIndexViewContext,
@@ -504,7 +502,6 @@ impl Store for HybridStore {
         self.warm_store.as_ref().unwrap().get_index(ctx).await
     }
 
-    #[trace]
     async fn purge(&self, ctx: PurgeDataContext) -> Result<i64> {
         let app_id = &ctx.app_id;
         let mut removed_size = 0i64;
@@ -522,7 +519,6 @@ impl Store for HybridStore {
         Ok(removed_size)
     }
 
-    #[trace]
     async fn is_healthy(&self) -> Result<bool> {
         async fn check_healthy(store: Option<&Box<dyn PersistentStore>>) -> Result<bool> {
             match store {
@@ -539,7 +535,6 @@ impl Store for HybridStore {
         Ok(self.hot_store.is_healthy().await? && warm && cold)
     }
 
-    #[trace]
     async fn require_buffer(
         &self,
         ctx: RequireBufferContext,
@@ -551,12 +546,10 @@ impl Store for HybridStore {
             .await
     }
 
-    #[trace]
     async fn release_ticket(&self, ctx: ReleaseTicketContext) -> Result<i64, WorkerError> {
         self.hot_store.release_ticket(ctx).await
     }
 
-    #[trace]
     async fn register_app(&self, ctx: RegisterAppContext) -> Result<()> {
         self.hot_store.register_app(ctx.clone()).await?;
         if self.warm_store.is_some() {
@@ -576,12 +569,10 @@ impl Store for HybridStore {
         Ok(())
     }
 
-    #[trace]
     async fn name(&self) -> StorageType {
         unimplemented!()
     }
 
-    #[trace]
     async fn spill_insert(&self, _ctx: SpillWritingViewContext) -> Result<(), WorkerError> {
         todo!()
     }
