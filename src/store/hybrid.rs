@@ -420,31 +420,42 @@ impl HybridStore {
 
     async fn watermark_spill(&self) -> Result<()> {
         let timer = Instant::now();
-        let mem_target =
+        let expected_mem_used =
             (self.hot_store.get_capacity()? as f32 * self.config.memory_spill_low_watermark) as i64;
-        let buffers = self.hot_store.lookup_spill_buffers(mem_target)?;
+        let buffers = self.hot_store.lookup_spill_buffers(expected_mem_used)?;
         info!(
-            "[Spill] Looked up all spill blocks. target_size:{}. it costs {}(ms)",
-            mem_target,
+            "[Spill] Looked up all spill blocks. expected memory used:{}. it costs {}(ms)",
+            expected_mem_used,
             timer.elapsed().as_millis()
         );
 
         let partition_num = buffers.len();
         let timer = Instant::now();
         let mut flushed_size = 0u64;
+        let mut flushed_max = 0u64;
+        let mut flushed_min = u64::MAX;
         for (uid, buffer) in buffers {
             let flushed = self.buffer_spill_impl(&uid, buffer).await;
             if flushed.is_err() {
                 error!("Errors on making buffer spill. err: {:?}", flushed.err());
                 continue;
             }
-            flushed_size += flushed?;
+            let flushed = flushed?;
+            if flushed > flushed_max {
+                flushed_max = flushed;
+            }
+            if flushed < flushed_min {
+                flushed_min = flushed;
+            }
+            flushed_size += flushed;
         }
         info!(
-            "[Spill] Picked up {} partition blocks that should be async flushed with {}(bytes) that costs {}(ms).",
+            "[Spill] Picked up {} partition blocks that should be async flushed with {}(bytes) that costs {}(ms). Spill events distribution: max={}(b), min={}(b)",
             partition_num,
             flushed_size,
-            timer.elapsed().as_millis()
+            timer.elapsed().as_millis(),
+            flushed_max,
+            flushed_min,
         );
         Ok(())
     }

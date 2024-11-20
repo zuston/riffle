@@ -133,13 +133,13 @@ impl MemoryStore {
 
     pub fn lookup_spill_buffers(
         &self,
-        mem_target_len: i64,
+        expected_mem_used: i64,
     ) -> Result<HashMap<PartitionedUId, Arc<MemoryBuffer>>, anyhow::Error> {
         // 1. sort by the staging size.
         // 2. get the spill buffers until reaching the single max batch size
 
         let snapshot = self.budget.snapshot();
-        let required_spilled_size = snapshot.used() - mem_target_len;
+        let required_spilled_size = snapshot.used() - expected_mem_used;
         if required_spilled_size <= 0 {
             warn!("This should not happen that nothing should be picked up! snapshot used: {}, require spill: {}", snapshot.used(), required_spilled_size);
             return Err(anyhow!(""));
