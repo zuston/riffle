@@ -368,10 +368,18 @@ pub static TOTAL_PARTITION_NUMBER: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new("total_partition_number", "total_partition_number")
         .expect("metrics should be created")
 });
+pub static TOTAL_HUGE_PARTITION_NUMBER: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new("total_huge_partition_number", "total_huge_partition_number")
+        .expect("metrics should be created")
+});
 pub static GAUGE_APP_NUMBER: Lazy<IntGauge> =
     Lazy::new(|| IntGauge::new("app_number", "app_number").expect("metrics should be created"));
 pub static GAUGE_PARTITION_NUMBER: Lazy<IntGauge> = Lazy::new(|| {
     IntGauge::new("partition_number", "partition_number").expect("metrics should be created")
+});
+pub static GAUGE_HUGE_PARTITION_NUMBER: Lazy<IntGauge> = Lazy::new(|| {
+    IntGauge::new("huge_partition_number", "huge_partition_number")
+        .expect("metrics should be created")
 });
 pub static TOTAL_REQUIRE_BUFFER_FAILED: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new("total_require_buffer_failed", "total_require_buffer_failed")
@@ -690,6 +698,9 @@ fn register_custom_metrics() {
     REGISTRY
         .register(Box::new(GAUGE_PARTITION_NUMBER.clone()))
         .expect("partition_number must be registered");
+    REGISTRY
+        .register(Box::new(GAUGE_HUGE_PARTITION_NUMBER.clone()))
+        .expect("huge_partition_number must be registered");
     REGISTRY
         .register(Box::new(GAUGE_MEMORY_SPILL_IN_FLUSHING_OPERATION.clone()))
         .expect("memory_spill_operation must be registered");

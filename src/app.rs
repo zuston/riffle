@@ -19,17 +19,16 @@ use crate::config::Config;
 use crate::error::WorkerError;
 use crate::metric::{
     GAUGE_APP_NUMBER, GAUGE_PARTITION_NUMBER, GAUGE_TOPN_APP_RESIDENT_BYTES, TOTAL_APP_NUMBER,
-    TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED, TOTAL_PARTITION_NUMBER, TOTAL_READ_DATA,
-    TOTAL_READ_DATA_FROM_LOCALFILE, TOTAL_READ_DATA_FROM_MEMORY, TOTAL_READ_INDEX_FROM_LOCALFILE,
-    TOTAL_RECEIVED_DATA, TOTAL_REQUIRE_BUFFER_FAILED,
+    TOTAL_HUGE_PARTITION_NUMBER, TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED,
+    TOTAL_PARTITION_NUMBER, TOTAL_READ_DATA, TOTAL_READ_DATA_FROM_LOCALFILE,
+    TOTAL_READ_DATA_FROM_MEMORY, TOTAL_READ_INDEX_FROM_LOCALFILE, TOTAL_RECEIVED_DATA,
+    TOTAL_REQUIRE_BUFFER_FAILED,
 };
 
 use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::hybrid::HybridStore;
-use crate::store::{
-    Block, RequireBufferResponse, ResponseData, ResponseDataIndex, Store, StoreProvider,
-};
+use crate::store::{Block, RequireBufferResponse, ResponseData, ResponseDataIndex, Store};
 use crate::util::now_timestamp_as_sec;
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
@@ -256,6 +255,13 @@ impl App {
                 _ => None,
             };
 
+        if huge_partition_backpressure_size.is_some() && huge_partition_marked_threshold.is_some() {
+            info!(
+                "Huge partition limitation is enabled for app: {}",
+                app_id.as_str()
+            );
+        }
+
         App {
             app_id,
             partitions: DashMap::new(),
@@ -363,6 +369,7 @@ impl App {
             let data_size = meta.get_size()?;
             if data_size > huge_partition_threshold {
                 meta.mark_as_huge_partition();
+                TOTAL_HUGE_PARTITION_NUMBER.inc();
                 warn!("Partition is marked as huge partition. uid: {:?}", uid);
                 Ok(true)
             } else {
