@@ -968,6 +968,7 @@ pub(crate) mod test {
                 memory_spill_to_cold_threshold_size: None,
                 memory_spill_to_localfile_concurrency: 100,
                 memory_spill_to_hdfs_concurrency: 100,
+                huge_partition_memory_spill_to_hdfs_threshold_size: "64M".to_string(),
             },
         );
         let mut app_config = &mut config.app_config;
