@@ -37,7 +37,7 @@ use croaring::treemap::JvmSerializer;
 use croaring::Treemap;
 
 use dashmap::DashMap;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
@@ -151,6 +151,7 @@ struct PartitionedMeta {
 struct PartitionedMetaInner {
     blocks_bitmap: Treemap,
     total_size: u64,
+    is_huge_partition: bool,
 }
 
 impl PartitionedMeta {
@@ -159,6 +160,7 @@ impl PartitionedMeta {
             inner: Arc::new(RwLock::new(PartitionedMetaInner {
                 blocks_bitmap: Treemap::default(),
                 total_size: 0,
+                is_huge_partition: false,
             })),
         }
     }
@@ -191,6 +193,15 @@ impl PartitionedMeta {
             meta.blocks_bitmap.add(id as u64);
         }
         Ok(())
+    }
+
+    fn is_huge_partition(&self) -> bool {
+        self.inner.read().is_huge_partition
+    }
+
+    fn mark_as_huge_partition(&mut self) {
+        let mut meta = self.inner.write();
+        meta.is_huge_partition = true
     }
 }
 
@@ -346,11 +357,18 @@ impl App {
 
         let huge_partition_threshold = self.huge_partition_marked_threshold.unwrap();
         let mut meta = self.get_partition_meta(uid);
-        let data_size = meta.get_size()?;
-        if data_size > huge_partition_threshold {
-            return Ok(true);
+        if meta.is_huge_partition() {
+            Ok(true)
+        } else {
+            let data_size = meta.get_size()?;
+            if data_size > huge_partition_threshold {
+                meta.mark_as_huge_partition();
+                warn!("Partition is marked as huge partition. uid: {:?}", uid);
+                Ok(true)
+            } else {
+                Ok(false)
+            }
         }
-        Ok(false)
     }
 
     pub async fn is_backpressure_for_huge_partition(&self, uid: &PartitionedUId) -> Result<bool> {
