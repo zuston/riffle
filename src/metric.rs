@@ -455,6 +455,15 @@ pub static GAUGE_TOPN_APP_RESIDENT_BYTES: Lazy<IntGaugeVec> = Lazy::new(|| {
     .unwrap()
 });
 
+pub static MEMORY_SPILL_IN_FLUSHING_BYTES_HISTOGRAM: Lazy<HistogramVec> = Lazy::new(|| {
+    let opts = histogram_opts!(
+        "memory_spill_in_flushing_bytes_histogram",
+        "memory_spill_in_flushing_bytes_histogram",
+        Vec::from(SPILL_BATCH_SIZE_BUCKETS)
+    );
+    let opts = register_histogram_vec_with_registry!(opts, &["storage_type"], REGISTRY).unwrap();
+    opts
+});
 pub static GAUGE_MEMORY_SPILL_IN_FLUSHING_BYTES: Lazy<IntGaugeVec> = Lazy::new(|| {
     register_int_gauge_vec!(
         "memory_spill_in_flushing_bytes",

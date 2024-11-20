@@ -1,7 +1,7 @@
 use crate::config::StorageType;
 use crate::metric::{
     GAUGE_MEMORY_SPILL_IN_FLUSHING_BYTES, GAUGE_MEMORY_SPILL_IN_FLUSHING_OPERATION,
-    TOTAL_MEMORY_SPILL_IN_FLUSHING_OPERATION,
+    MEMORY_SPILL_IN_FLUSHING_BYTES_HISTOGRAM, TOTAL_MEMORY_SPILL_IN_FLUSHING_OPERATION,
 };
 
 const ALL_STORAGE_TYPE: &str = "ALL";
@@ -21,6 +21,9 @@ impl FlushingMetricsMonitor {
         GAUGE_MEMORY_SPILL_IN_FLUSHING_OPERATION
             .with_label_values(&[&ALL_STORAGE_TYPE])
             .inc();
+        MEMORY_SPILL_IN_FLUSHING_BYTES_HISTOGRAM
+            .with_label_values(&[&ALL_STORAGE_TYPE])
+            .observe(size as f64);
 
         if let Some(stype) = &candidate_type {
             let stype = format!("{:?}", stype);
@@ -33,6 +36,9 @@ impl FlushingMetricsMonitor {
             GAUGE_MEMORY_SPILL_IN_FLUSHING_OPERATION
                 .with_label_values(&[&stype])
                 .inc();
+            MEMORY_SPILL_IN_FLUSHING_BYTES_HISTOGRAM
+                .with_label_values(&[&stype])
+                .observe(size as f64);
         }
 
         Self {
