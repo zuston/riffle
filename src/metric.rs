@@ -566,6 +566,16 @@ pub static EVENT_BUS_HANDLE_DURATION: Lazy<HistogramVec> = Lazy::new(|| {
 
 fn register_custom_metrics() {
     REGISTRY
+        .register(Box::new(GAUGE_MEMORY_SPILL_IN_FLUSHING_BYTES.clone()))
+        .expect("");
+    REGISTRY
+        .register(Box::new(TOTAL_MEMORY_SPILL_IN_FLUSHING_OPERATION.clone()))
+        .expect("total_memory_spill_operation must be registered");
+    REGISTRY
+        .register(Box::new(GAUGE_MEMORY_SPILL_IN_FLUSHING_OPERATION.clone()))
+        .expect("memory_spill_operation must be registered");
+
+    REGISTRY
         .register(Box::new(SERVICE_IS_HEALTHY.clone()))
         .expect("");
     REGISTRY
