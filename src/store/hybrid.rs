@@ -486,7 +486,7 @@ impl Store for HybridStore {
         if let Ok(_) = self.memory_spill_lock.try_lock() {
             // single buffer spill
             if let Some(threshold) = self.memory_spill_partition_max_threshold {
-                let size = self.hot_store.get_buffer_size(&uid)?;
+                let size = self.hot_store.get_buffer_staging_size(&uid)?;
                 if size > threshold {
                     if let Err(err) = self.single_buffer_spill(&uid).await {
                         warn!(

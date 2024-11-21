@@ -192,6 +192,11 @@ impl MemoryStore {
         Ok(buffer.total_size()? as u64)
     }
 
+    pub fn get_buffer_staging_size(&self, uid: &PartitionedUId) -> Result<u64> {
+        let buffer = self.get_buffer(uid)?;
+        Ok(buffer.staging_size()? as u64)
+    }
+
     pub async fn clear_spilled_buffer(
         &self,
         uid: PartitionedUId,
