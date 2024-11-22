@@ -365,8 +365,8 @@ impl Store for HdfsStore {
             .collect();
 
         let mut removed_size = 0i64;
-        for deleted_key in keys_to_delete {
-            self.partition_file_locks.remove(&deleted_key);
+        for deleted_key in &keys_to_delete {
+            self.partition_file_locks.remove(deleted_key);
             for idx in 0..self.partition_write_concurrency {
                 let prefix = format!("{}_{}", &deleted_key, idx);
                 if let Some(meta) = self.partition_cached_meta.remove(&prefix) {
@@ -375,8 +375,10 @@ impl Store for HdfsStore {
             }
         }
 
-        filesystem.delete_dir(dir.as_str()).await?;
-        info!("The hdfs data for {} has been deleted", &dir);
+        if !keys_to_delete.is_empty() {
+            filesystem.delete_dir(dir.as_str()).await?;
+            info!("The hdfs data of path[{}] has been deleted", &dir);
+        }
 
         Ok(removed_size)
     }
