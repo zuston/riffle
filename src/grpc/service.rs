@@ -178,7 +178,6 @@ impl ShuffleServer for DefaultShuffleServer {
         }))
     }
 
-    #[trace]
     async fn send_shuffle_data(
         &self,
         request: Request<SendShuffleDataRequest>,
@@ -186,18 +185,25 @@ impl ShuffleServer for DefaultShuffleServer {
         let timer = GRPC_SEND_DATA_PROCESS_TIME.start_timer();
         let req = request.into_inner();
 
-        let now = util::now_timestamp_as_millis();
-        let created = req.timestamp as u128;
-        if now > created {
-            GRPC_SEND_DATA_TRANSPORT_TIME.observe(((now - created) / 1000) as f64);
-        }
-
         let app_id = req.app_id;
         let shuffle_id: i32 = req.shuffle_id;
         let ticket_id = req.require_buffer_id;
 
-        let app_option = self.app_manager_ref.get_app(&app_id);
+        let now = util::now_timestamp_as_millis();
+        let created = req.timestamp as u128;
+        if now > created {
+            let transport_seconds = (now - created) / 1000;
+            GRPC_SEND_DATA_TRANSPORT_TIME.observe(transport_seconds as f64);
+            if transport_seconds > 60 {
+                warn!(
+                    "Potential long tail latency of transport time {}(seconds) when \
+                sending shuffleData for app:{}, shuffleId:{}. This should not happen",
+                    transport_seconds, &app_id, shuffle_id
+                );
+            }
+        }
 
+        let app_option = self.app_manager_ref.get_app(&app_id);
         if app_option.is_none() {
             warn!(
                 "Reject the NO_REGISTER app: {}. This should not happen",
@@ -446,7 +452,13 @@ impl ShuffleServer for DefaultShuffleServer {
         let now = util::now_timestamp_as_millis();
         let created = req.timestamp as u128;
         if now > created {
-            GRPC_GET_MEMORY_DATA_TRANSPORT_TIME.observe(((now - created) / 1000) as f64);
+            let transport_seconds = (now - created) / 1000;
+            GRPC_GET_MEMORY_DATA_TRANSPORT_TIME.observe(transport_seconds as f64);
+            if transport_seconds > 60 {
+                warn!("Potential long tail latency of transport time {}(seconds) when getting \
+                memory shuffleData for app:{}, shuffleId:{}, partitionId:{}. This should not happen",
+                    transport_seconds, &app_id, shuffle_id, partition_id);
+            }
         }
 
         let app = self.app_manager_ref.get_app(&app_id);
