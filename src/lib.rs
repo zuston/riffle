@@ -259,6 +259,7 @@ pub async fn write_read_for_one_time(mut client: ShuffleServerClient<Channel>) -
                 offset: 0,
                 length: len,
                 timestamp: 0,
+                storage_id: 0,
             })
             .await?;
         accepted_data_bytes.extend_from_slice(&partitioned_local_data.into_inner().data);
