@@ -211,7 +211,6 @@ message SendShuffleDataRequest {
   repeated ShuffleData shuffleData = 4;
   int64 timestamp = 5;
   int32 stageAttemptNumber = 6;
-  bytes contiguousShuffleData = 7;
 }
 
 message SendShuffleDataResponse {
