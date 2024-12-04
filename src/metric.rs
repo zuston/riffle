@@ -703,6 +703,9 @@ fn register_custom_metrics() {
         .register(Box::new(TOTAL_PARTITION_NUMBER.clone()))
         .expect("total_partition_number must be registered");
     REGISTRY
+        .register(Box::new(TOTAL_HUGE_PARTITION_NUMBER.clone()))
+        .expect("total_partition_number must be registered");
+    REGISTRY
         .register(Box::new(TOTAL_REQUIRE_BUFFER_FAILED.clone()))
         .expect("total_require_buffer_failed must be registered");
     REGISTRY
