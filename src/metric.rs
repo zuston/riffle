@@ -382,9 +382,13 @@ pub static GAUGE_APP_NUMBER: Lazy<IntGauge> =
 pub static GAUGE_PARTITION_NUMBER: Lazy<IntGauge> = Lazy::new(|| {
     IntGauge::new("partition_number", "partition_number").expect("metrics should be created")
 });
-pub static GAUGE_HUGE_PARTITION_NUMBER: Lazy<IntGauge> = Lazy::new(|| {
-    IntGauge::new("huge_partition_number", "huge_partition_number")
-        .expect("metrics should be created")
+pub static GAUGE_HUGE_PARTITION_NUMBER: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "huge_partition_number",
+        "huge_partition_number",
+        &["app_id"]
+    )
+    .unwrap()
 });
 pub static TOTAL_REQUIRE_BUFFER_FAILED: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new("total_require_buffer_failed", "total_require_buffer_failed")

@@ -16,3 +16,5 @@ impl Into<i32> for StatusCode {
         self as i32
     }
 }
+
+pub const ALL_LABEL: &str = "ALL";

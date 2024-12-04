@@ -18,11 +18,11 @@
 use crate::config::Config;
 use crate::error::WorkerError;
 use crate::metric::{
-    GAUGE_APP_NUMBER, GAUGE_PARTITION_NUMBER, GAUGE_TOPN_APP_RESIDENT_BYTES, TOTAL_APP_NUMBER,
-    TOTAL_HUGE_PARTITION_NUMBER, TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED,
-    TOTAL_PARTITION_NUMBER, TOTAL_READ_DATA, TOTAL_READ_DATA_FROM_LOCALFILE,
-    TOTAL_READ_DATA_FROM_MEMORY, TOTAL_READ_INDEX_FROM_LOCALFILE, TOTAL_RECEIVED_DATA,
-    TOTAL_REQUIRE_BUFFER_FAILED,
+    GAUGE_APP_NUMBER, GAUGE_HUGE_PARTITION_NUMBER, GAUGE_PARTITION_NUMBER,
+    GAUGE_TOPN_APP_RESIDENT_BYTES, TOTAL_APP_NUMBER, TOTAL_HUGE_PARTITION_NUMBER,
+    TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED, TOTAL_PARTITION_NUMBER, TOTAL_READ_DATA,
+    TOTAL_READ_DATA_FROM_LOCALFILE, TOTAL_READ_DATA_FROM_MEMORY, TOTAL_READ_INDEX_FROM_LOCALFILE,
+    TOTAL_RECEIVED_DATA, TOTAL_REQUIRE_BUFFER_FAILED,
 };
 
 use crate::readable_size::ReadableSize;
@@ -46,10 +46,12 @@ use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
 use crate::await_tree::AWAIT_TREE_REGISTRY;
+use crate::constant::ALL_LABEL;
 use crate::grpc::protobuf::uniffle::RemoteStorage;
 use crate::storage::HybridStorage;
 use crate::store::mem::capacity::CapacitySnapshot;
 use await_tree::InstrumentAwait;
+use crossbeam::epoch::Atomic;
 use parking_lot::RwLock;
 use prometheus::proto::MetricType::GAUGE;
 use std::sync::atomic::Ordering::SeqCst;
@@ -140,6 +142,8 @@ pub struct App {
 
     total_received_data_size: AtomicU64,
     total_resident_data_size: AtomicU64,
+
+    huge_partition_number: AtomicU64,
 }
 
 #[derive(Clone)]
@@ -273,6 +277,7 @@ impl App {
             huge_partition_memory_max_available_size: huge_partition_backpressure_size,
             total_received_data_size: Default::default(),
             total_resident_data_size: Default::default(),
+            huge_partition_number: Default::default(),
         }
     }
 
@@ -369,12 +374,36 @@ impl App {
             let data_size = meta.get_size()?;
             if data_size > huge_partition_threshold {
                 meta.mark_as_huge_partition();
-                TOTAL_HUGE_PARTITION_NUMBER.inc();
+                self.add_huge_partition_metric();
                 warn!("Partition is marked as huge partition. uid: {:?}", uid);
                 Ok(true)
             } else {
                 Ok(false)
             }
+        }
+    }
+
+    fn add_huge_partition_metric(&self) {
+        self.huge_partition_number.fetch_add(1, Ordering::SeqCst);
+        TOTAL_HUGE_PARTITION_NUMBER.inc();
+        GAUGE_HUGE_PARTITION_NUMBER
+            .with_label_values(&[ALL_LABEL])
+            .inc();
+        GAUGE_HUGE_PARTITION_NUMBER
+            .with_label_values(&[self.app_id.as_str()])
+            .inc();
+    }
+
+    fn sub_huge_partition_metric(&self) {
+        GAUGE_HUGE_PARTITION_NUMBER
+            .with_label_values(&vec![ALL_LABEL])
+            .sub(self.huge_partition_number.load(Ordering::Relaxed) as i64);
+
+        if let Err(e) = GAUGE_HUGE_PARTITION_NUMBER.remove_label_values(&[&self.app_id]) {
+            error!(
+                "Errors on unregistering metric of huge partition number for app:{}. error: {}",
+                &self.app_id, e
+            )
         }
     }
 
@@ -476,8 +505,11 @@ impl App {
             .await?;
         self.total_resident_data_size
             .fetch_sub(removed_size as u64, SeqCst);
+
+        // app level deletion
         if shuffle_id.is_none() {
             GAUGE_PARTITION_NUMBER.sub(self.bitmap_of_blocks.len() as i64);
+            self.sub_huge_partition_metric();
         }
         Ok(())
     }
