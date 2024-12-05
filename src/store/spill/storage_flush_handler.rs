@@ -25,8 +25,10 @@ impl Subscriber for StorageFlushHandler {
 
     async fn on_event(&self, event: &Event<Self::Input>) -> bool {
         let message = event.get_data();
+        let app_id = &message.ctx.uid.app_id;
 
-        let _ = FlushingMetricsMonitor::new(message.size, message.get_candidate_storage_type());
+        let _ =
+            FlushingMetricsMonitor::new(app_id, message.size, message.get_candidate_storage_type());
 
         let result = self.store.flush_storage_for_buffer(message).await;
         let result = if result.is_ok() {

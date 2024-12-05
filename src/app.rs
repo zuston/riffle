@@ -15,14 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::config::Config;
+use crate::config::{Config, StorageType};
 use crate::error::WorkerError;
 use crate::metric::{
     GAUGE_APP_NUMBER, GAUGE_HUGE_PARTITION_NUMBER, GAUGE_PARTITION_NUMBER,
-    GAUGE_TOPN_APP_RESIDENT_BYTES, TOTAL_APP_NUMBER, TOTAL_HUGE_PARTITION_NUMBER,
-    TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED, TOTAL_PARTITION_NUMBER, TOTAL_READ_DATA,
-    TOTAL_READ_DATA_FROM_LOCALFILE, TOTAL_READ_DATA_FROM_MEMORY, TOTAL_READ_INDEX_FROM_LOCALFILE,
-    TOTAL_RECEIVED_DATA, TOTAL_REQUIRE_BUFFER_FAILED,
+    GAUGE_TOPN_APP_RESIDENT_BYTES, TOTAL_APP_FLUSHED_BYTES, TOTAL_APP_NUMBER,
+    TOTAL_HUGE_PARTITION_NUMBER, TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED,
+    TOTAL_PARTITION_NUMBER, TOTAL_READ_DATA, TOTAL_READ_DATA_FROM_LOCALFILE,
+    TOTAL_READ_DATA_FROM_MEMORY, TOTAL_READ_INDEX_FROM_LOCALFILE, TOTAL_RECEIVED_DATA,
+    TOTAL_REQUIRE_BUFFER_FAILED,
 };
 
 use crate::readable_size::ReadableSize;
@@ -827,6 +828,15 @@ impl AppManager {
 
             GAUGE_APP_NUMBER.dec();
             let _ = GAUGE_TOPN_APP_RESIDENT_BYTES.remove_label_values(&[&app_id]);
+
+            let _ = TOTAL_APP_FLUSHED_BYTES.remove_label_values(&[
+                app_id.as_str(),
+                format!("{:?}", StorageType::LOCALFILE).as_str(),
+            ]);
+            let _ = TOTAL_APP_FLUSHED_BYTES.remove_label_values(&[
+                app_id.as_str(),
+                format!("{:?}", StorageType::HDFS).as_str(),
+            ]);
         }
         app.purge(app_id.clone(), shuffle_id_option).await?;
         Ok(())

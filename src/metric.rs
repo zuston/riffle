@@ -468,6 +468,15 @@ pub static GAUGE_TOPN_APP_RESIDENT_BYTES: Lazy<IntGaugeVec> = Lazy::new(|| {
     .unwrap()
 });
 
+pub static TOTAL_APP_FLUSHED_BYTES: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
+        "app_flushed_bytes",
+        "total app used bytes in persistent storage",
+        &["app_id", "storage_type"]
+    )
+    .unwrap()
+});
+
 pub static MEMORY_SPILL_IN_FLUSHING_BYTES_HISTOGRAM: Lazy<HistogramVec> = Lazy::new(|| {
     let opts = histogram_opts!(
         "memory_spill_in_flushing_bytes_histogram",
@@ -647,6 +656,10 @@ fn register_custom_metrics() {
 
     REGISTRY
         .register(Box::new(GAUGE_TOPN_APP_RESIDENT_BYTES.clone()))
+        .expect("");
+
+    REGISTRY
+        .register(Box::new(TOTAL_APP_FLUSHED_BYTES.clone()))
         .expect("");
 
     REGISTRY
