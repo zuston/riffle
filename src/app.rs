@@ -289,6 +289,18 @@ impl App {
         }
     }
 
+    pub fn huge_partition_number(&self) -> u64 {
+        self.huge_partition_number.load(SeqCst)
+    }
+
+    pub fn partition_number(&self) -> usize {
+        let mut cnt = 0usize;
+        for entry in &self.partitions {
+            cnt += entry.value().len();
+        }
+        cnt
+    }
+
     fn get_latest_heartbeat_time(&self) -> u64 {
         self.latest_heartbeat_time.load(SeqCst)
     }
