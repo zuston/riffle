@@ -18,3 +18,5 @@ impl Into<i32> for StatusCode {
 }
 
 pub const ALL_LABEL: &str = "ALL";
+
+pub const INVALID_BLOCK_ID: i64 = -1;

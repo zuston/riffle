@@ -1,5 +1,6 @@
 use crate::composed_bytes;
 use crate::composed_bytes::ComposedBytes;
+use crate::constant::INVALID_BLOCK_ID;
 use crate::store::BytesWrapper;
 use crate::store::{Block, DataSegment, PartitionedMemoryData};
 use anyhow::Result;
@@ -123,7 +124,6 @@ impl MemoryBuffer {
         Ok(())
     }
 
-    #[trace]
     pub fn get_v2(
         &self,
         last_block_id: i64,
@@ -131,7 +131,7 @@ impl MemoryBuffer {
         task_ids: Option<Treemap>,
     ) -> Result<PartitionedMemoryData> {
         /// read sequence
-        /// 1. from flight (expect: last_block_id not found or last_block_id == 0)
+        /// 1. from flight (expect: last_block_id not found or last_block_id == -1)
         /// 2. from staging
         let buffer = self.buffer.read();
 
@@ -143,7 +143,7 @@ impl MemoryBuffer {
         while !exit {
             exit = true;
             {
-                if last_block_id == 0 {
+                if last_block_id == INVALID_BLOCK_ID {
                     flight_found = true;
                 }
                 for (_, batch_block) in buffer.flight.iter() {
@@ -225,7 +225,6 @@ impl MemoryBuffer {
         })
     }
 
-    #[trace]
     pub fn get(
         &self,
         last_block_id: i64,
@@ -245,7 +244,7 @@ impl MemoryBuffer {
         while !exit {
             exit = true;
             {
-                if last_block_id == 0 {
+                if last_block_id == INVALID_BLOCK_ID {
                     flight_found = true;
                 }
                 for (_, batch_block) in buffer.flight.iter() {
@@ -376,6 +375,45 @@ mod test {
         return blocks;
     }
 
+    fn create_block(block_len: i32, block_id: i64) -> Block {
+        Block {
+            block_id,
+            length: block_len,
+            uncompress_length: 0,
+            crc: 0,
+            data: Default::default(),
+            task_attempt_id: 0,
+        }
+    }
+
+    #[test]
+    fn test_with_block_id_zero() -> anyhow::Result<()> {
+        let mut buffer = MemoryBuffer::new();
+        let block_1 = create_block(10, 100);
+        let block_2 = create_block(10, 0);
+
+        buffer.direct_push(vec![block_1, block_2])?;
+
+        let mut cnt = 0;
+        let mut last_block_id = -1;
+        loop {
+            if cnt > 1 {
+                panic!();
+            }
+            let mem_data = &buffer.get_v2(last_block_id, 19, None)?;
+            let segs = &mem_data.shuffle_data_block_segments;
+            if segs.len() > 0 {
+                let last = segs.get(segs.len() - 1).unwrap();
+                last_block_id = last.block_id;
+                cnt += 1;
+            } else {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
     #[test]
     fn test_put_get() -> anyhow::Result<()> {
         let mut buffer = MemoryBuffer::new();
@@ -416,7 +454,7 @@ mod test {
         assert_eq!(10 * 10, buffer.staging_size()?);
 
         /// case5: read from the flight. expected blockId: 0 -> 9
-        let read_result = buffer.get(0, 10 * 10, None)?;
+        let read_result = buffer.get(-1, 10 * 10, None)?;
         assert_eq!(10 * 10, read_result.read_len);
         assert_eq!(10, read_result.blocks.len());
         assert_eq!(9, read_result.blocks.last().unwrap().block_id);
