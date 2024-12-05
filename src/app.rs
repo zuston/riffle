@@ -51,8 +51,10 @@ use crate::constant::ALL_LABEL;
 use crate::grpc::protobuf::uniffle::RemoteStorage;
 use crate::storage::HybridStorage;
 use crate::store::mem::capacity::CapacitySnapshot;
+use crate::util;
 use await_tree::InstrumentAwait;
 use crossbeam::epoch::Atomic;
+use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
 use prometheus::proto::MetricType::GAUGE;
 use std::sync::atomic::Ordering::SeqCst;
@@ -63,6 +65,8 @@ use tracing::Instrument;
 
 pub static SHUFFLE_SERVER_ID: OnceLock<String> = OnceLock::new();
 pub static SHUFFLE_SERVER_IP: OnceLock<String> = OnceLock::new();
+
+pub static APP_MANAGER_REF: OnceCell<AppManagerRef> = OnceCell::new();
 
 #[derive(Debug, Clone)]
 pub enum DataDistribution {
@@ -145,6 +149,8 @@ pub struct App {
     total_resident_data_size: AtomicU64,
 
     huge_partition_number: AtomicU64,
+
+    pub(crate) registry_timestamp: u64,
 }
 
 #[derive(Clone)]
@@ -279,6 +285,7 @@ impl App {
             total_received_data_size: Default::default(),
             total_resident_data_size: Default::default(),
             huge_partition_number: Default::default(),
+            registry_timestamp: now_timestamp_as_sec(),
         }
     }
 
@@ -657,7 +664,7 @@ pub type AppManagerRef = Arc<AppManager>;
 
 pub struct AppManager {
     // key: app_id
-    apps: DashMap<String, Arc<App>>,
+    pub(crate) apps: DashMap<String, Arc<App>>,
     receiver: async_channel::Receiver<PurgeEvent>,
     sender: async_channel::Sender<PurgeEvent>,
     store: Arc<HybridStore>,

@@ -17,7 +17,7 @@
 
 #![feature(impl_trait_in_assoc_type)]
 
-use crate::app::AppManager;
+use crate::app::{AppManager, APP_MANAGER_REF};
 use crate::common::init_global_variable;
 use crate::config::Config;
 use crate::health_service::HealthService;
@@ -97,6 +97,8 @@ fn main() -> Result<()> {
     let storage = StorageService::init(&runtime_manager, &config);
     let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone(), &storage);
     storage.with_app_manager(&app_manager_ref);
+
+    let _ = APP_MANAGER_REF.set(app_manager_ref.clone());
 
     let health_service =
         HealthService::new(&app_manager_ref, &storage, &config.health_service_config);

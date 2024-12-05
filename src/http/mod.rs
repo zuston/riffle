@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+mod app;
 mod await_tree;
 mod http_service;
 mod jeprof;
@@ -29,6 +30,8 @@ use crate::http::metrics::MetricsHTTPHandler;
 use crate::http::pprof::PProfHandler;
 use crate::runtime::manager::RuntimeManager;
 
+use crate::app::AppManagerRef;
+use crate::http::app::Application;
 use log::info;
 use poem::RouteMethod;
 
@@ -62,6 +65,7 @@ fn new_server() -> Box<PoemHTTPServer> {
     server.register_handler(MetricsHTTPHandler::default());
     server.register_handler(AwaitTreeHandler::default());
     server.register_handler(JeProfHandler::default());
+    server.register_handler(Application::default());
 
     Box::new(server)
 }

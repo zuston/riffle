@@ -73,12 +73,14 @@ pub async fn start_uniffle_worker(config: config::Config) -> Result<AppManagerRe
     let runtime_manager = RuntimeManager::from(config.runtime_config.clone());
 
     MetricService::init(&config, runtime_manager.clone());
-    HttpMonitorService::init(&config, runtime_manager.clone());
 
     let (tx, rx) = oneshot::channel::<()>();
 
     let storage = StorageService::init(&runtime_manager, &config);
     let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone(), &storage);
+
+    HttpMonitorService::init(&config, runtime_manager.clone());
+
     let app_manager_ref_cloned = app_manager_ref.clone();
     let rm_cloned = runtime_manager.clone();
     runtime_manager.default_runtime.spawn(async move {
