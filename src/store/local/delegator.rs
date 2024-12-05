@@ -2,10 +2,10 @@ use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::config::LocalfileStoreConfig;
 use crate::metric::{
     GAUGE_LOCAL_DISK_CAPACITY, GAUGE_LOCAL_DISK_IS_HEALTHY, GAUGE_LOCAL_DISK_USED,
-    LOCALFILE_DISK_APPEND_OPERATION_DURATION, LOCALFILE_DISK_DELETE_OPERATION_DURATION,
-    LOCALFILE_DISK_READ_OPERATION_DURATION, TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER,
-    TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER, TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER,
-    TOTAL_LOCAL_DISK_READ_OPERATION_COUNTER,
+    GAUGE_LOCAL_DISK_USED_RATIO, LOCALFILE_DISK_APPEND_OPERATION_DURATION,
+    LOCALFILE_DISK_DELETE_OPERATION_DURATION, LOCALFILE_DISK_READ_OPERATION_DURATION,
+    TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER, TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER,
+    TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER, TOTAL_LOCAL_DISK_READ_OPERATION_COUNTER,
 };
 use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
@@ -159,6 +159,9 @@ impl LocalDiskDelegator {
         GAUGE_LOCAL_DISK_USED
             .with_label_values(&[&self.inner.root])
             .set(used as i64);
+        GAUGE_LOCAL_DISK_USED_RATIO
+            .with_label_values(&[&self.inner.root])
+            .set((used / capacity) as f64);
 
         let used_ratio = used as f64 / capacity as f64;
         let healthy_stat = self.is_healthy()?;

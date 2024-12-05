@@ -23,9 +23,9 @@ use crate::runtime::manager::RuntimeManager;
 use log::{error, info};
 use once_cell::sync::Lazy;
 use prometheus::{
-    histogram_opts, labels, register_histogram_vec_with_registry, register_int_counter_vec,
-    register_int_gauge_vec, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec,
-    IntGauge, IntGaugeVec, Registry,
+    histogram_opts, labels, register_gauge_vec, register_histogram_vec_with_registry,
+    register_int_counter_vec, register_int_gauge_vec, GaugeVec, Histogram, HistogramOpts,
+    HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
 use std::time::Duration;
 
@@ -420,6 +420,15 @@ pub static GAUGE_LOCAL_DISK_USED: Lazy<IntGaugeVec> = Lazy::new(|| {
     .unwrap()
 });
 
+pub static GAUGE_LOCAL_DISK_USED_RATIO: Lazy<GaugeVec> = Lazy::new(|| {
+    register_gauge_vec!(
+        "local_disk_used_ratio",
+        "local disk used ratio for root path",
+        &["root"]
+    )
+    .unwrap()
+});
+
 pub static GAUGE_LOCAL_DISK_IS_HEALTHY: Lazy<IntGaugeVec> = Lazy::new(|| {
     register_int_gauge_vec!(
         "local_disk_is_healthy",
@@ -658,6 +667,10 @@ fn register_custom_metrics() {
 
     REGISTRY
         .register(Box::new(GAUGE_LOCAL_DISK_USED.clone()))
+        .expect("");
+
+    REGISTRY
+        .register(Box::new(GAUGE_LOCAL_DISK_USED_RATIO.clone()))
         .expect("");
 
     REGISTRY
