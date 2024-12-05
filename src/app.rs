@@ -757,8 +757,12 @@ impl AppManager {
                             apps.len()
                         };
                         for idx in 0..limit {
+                            let app = apps[idx];
+                            if app.total_resident_data_size() <= 0 {
+                                break;
+                            }
                             GAUGE_TOPN_APP_RESIDENT_BYTES
-                                .with_label_values(&[&apps[idx].app_id])
+                                .with_label_values(&[&app.app_id])
                                 .set(apps[idx].total_resident_data_size() as i64);
                         }
                     }
