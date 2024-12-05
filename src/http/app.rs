@@ -62,7 +62,7 @@ fn table() -> Html<String> {
         let app = entry.value();
         let timestamp = app.registry_timestamp;
         let resident_bytes = app.total_resident_data_size();
-        let duration = util::now_timestamp_as_sec() - timestamp;
+        let duration = util::now_timestamp_as_sec() * 1000 - timestamp;
         let duration_min = milliseconds_to_minutes(duration);
 
         let date = Utc
