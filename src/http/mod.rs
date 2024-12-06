@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-mod app;
+mod apps;
 mod await_tree;
 mod http_service;
 mod jeprof;
@@ -31,7 +31,7 @@ use crate::http::pprof::PProfHandler;
 use crate::runtime::manager::RuntimeManager;
 
 use crate::app::AppManagerRef;
-use crate::http::app::Application;
+use crate::http::apps::Application;
 use log::info;
 use poem::RouteMethod;
 

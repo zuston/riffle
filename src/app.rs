@@ -30,7 +30,7 @@ use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::hybrid::HybridStore;
 use crate::store::{Block, RequireBufferResponse, ResponseData, ResponseDataIndex, Store};
-use crate::util::now_timestamp_as_sec;
+use crate::util::{now_timestamp_as_millis, now_timestamp_as_sec};
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use croaring::treemap::JvmSerializer;
@@ -135,8 +135,6 @@ impl From<RemoteStorage> for RemoteStorageConfig {
 
 pub struct App {
     app_id: String,
-    // key: shuffleId, value: partitionIds
-    partitions: DashMap<i32, HashSet<i32>>,
     app_config_options: AppConfigOptions,
     latest_heartbeat_time: AtomicU64,
     store: Arc<HybridStore>,
@@ -150,7 +148,7 @@ pub struct App {
 
     huge_partition_number: AtomicU64,
 
-    pub(crate) registry_timestamp: u64,
+    pub(crate) registry_timestamp: u128,
 }
 
 #[derive(Clone)]
@@ -275,7 +273,6 @@ impl App {
 
         App {
             app_id,
-            partitions: DashMap::new(),
             app_config_options: config_options,
             latest_heartbeat_time: AtomicU64::new(now_timestamp_as_sec()),
             store,
@@ -285,7 +282,7 @@ impl App {
             total_received_data_size: Default::default(),
             total_resident_data_size: Default::default(),
             huge_partition_number: Default::default(),
-            registry_timestamp: now_timestamp_as_sec(),
+            registry_timestamp: now_timestamp_as_millis(),
         }
     }
 
@@ -294,11 +291,7 @@ impl App {
     }
 
     pub fn partition_number(&self) -> usize {
-        let mut cnt = 0usize;
-        for entry in &self.partitions {
-            cnt += entry.value().len();
-        }
-        cnt
+        self.bitmap_of_blocks.len()
     }
 
     fn get_latest_heartbeat_time(&self) -> u64 {
@@ -313,9 +306,6 @@ impl App {
 
     pub fn register_shuffle(&self, shuffle_id: i32) -> Result<()> {
         self.heartbeat()?;
-        self.partitions
-            .entry(shuffle_id)
-            .or_insert_with(|| HashSet::new());
         Ok(())
     }
 

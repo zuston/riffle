@@ -1,7 +1,7 @@
 use crate::app::APP_MANAGER_REF;
 use crate::http::Handler;
 use crate::util;
-use chrono::{TimeZone, Utc};
+use chrono::{Local, TimeZone, Utc};
 use poem::web::Html;
 use poem::{handler, RouteMethod};
 
@@ -63,11 +63,12 @@ fn table() -> Html<String> {
         let app = entry.value();
         let timestamp = app.registry_timestamp;
         let resident_bytes = app.total_resident_data_size();
-        let duration = util::now_timestamp_as_sec() * 1000 - timestamp;
+
+        let duration = util::now_timestamp_as_millis() - timestamp as u128;
         let duration_min = milliseconds_to_minutes(duration);
 
-        let date = Utc
-            .timestamp(timestamp as i64, 0)
+        let date = Local
+            .timestamp((timestamp / 1000) as i64, 0)
             .format("%Y-%m-%d %H:%M:%S")
             .to_string();
 
@@ -93,8 +94,8 @@ fn table() -> Html<String> {
     Html(html_content.to_string())
 }
 
-fn milliseconds_to_minutes(milliseconds: u64) -> f64 {
-    milliseconds as f64 / 60000.0
+fn milliseconds_to_minutes(milliseconds: u128) -> f64 {
+    (milliseconds / 1000 / 60) as f64
 }
 
 fn bytes_to_gb(bytes: u64) -> f64 {
