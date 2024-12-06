@@ -405,15 +405,18 @@ impl App {
     }
 
     fn sub_huge_partition_metric(&self) {
-        GAUGE_HUGE_PARTITION_NUMBER
-            .with_label_values(&vec![ALL_LABEL])
-            .sub(self.huge_partition_number.load(Ordering::Relaxed) as i64);
+        let number = self.huge_partition_number.load(SeqCst);
+        if number > 0 {
+            GAUGE_HUGE_PARTITION_NUMBER
+                .with_label_values(&vec![ALL_LABEL])
+                .sub(self.huge_partition_number.load(Ordering::Relaxed) as i64);
 
-        if let Err(e) = GAUGE_HUGE_PARTITION_NUMBER.remove_label_values(&[&self.app_id]) {
-            error!(
-                "Errors on unregistering metric of huge partition number for app:{}. error: {}",
-                &self.app_id, e
-            )
+            if let Err(e) = GAUGE_HUGE_PARTITION_NUMBER.remove_label_values(&[&self.app_id]) {
+                error!(
+                    "Errors on unregistering metric of huge partition number for app:{}. error: {}",
+                    &self.app_id, e
+                )
+            }
         }
     }
 
