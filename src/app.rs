@@ -409,7 +409,7 @@ impl App {
         if number > 0 {
             GAUGE_HUGE_PARTITION_NUMBER
                 .with_label_values(&vec![ALL_LABEL])
-                .sub(self.huge_partition_number.load(Ordering::Relaxed) as i64);
+                .sub(number as i64);
 
             if let Err(e) = GAUGE_HUGE_PARTITION_NUMBER.remove_label_values(&[&self.app_id]) {
                 error!(
@@ -771,7 +771,7 @@ impl AppManager {
                         for idx in 0..limit {
                             let app = apps[idx];
                             if app.total_resident_data_size() <= 0 {
-                                break;
+                                continue;
                             }
                             GAUGE_TOPN_APP_RESIDENT_BYTES
                                 .with_label_values(&[&app.app_id])
