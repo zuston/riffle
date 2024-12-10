@@ -266,10 +266,10 @@ impl LocalFileStore {
 
             let data = &block.data;
 
-            let actual = get_crc(data);
-            if crc != actual {
-                error!("Found not correct crc value while writing. expected: {}, actual: {} for uid: {:?}", crc, actual, &uid);
-            }
+            // let actual = get_crc(data);
+            // if crc != actual {
+            //     error!("Found not correct crc value while writing. expected: {}, actual: {} for uid: {:?}", crc, actual, &uid);
+            // }
 
             data_bytes_holder.put(data.clone());
             next_offset += length as i64;
