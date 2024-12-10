@@ -184,15 +184,39 @@ impl HdfsStore {
                     let parent_path_str = format!("{}/", parent_dir.to_str().unwrap());
                     debug!("creating dir: {}", parent_path_str.as_str());
 
-                    &filesystem.create_dir(parent_path_str.as_str()).await?;
+                    &filesystem
+                        .create_dir(parent_path_str.as_str())
+                        .await
+                        .map_err(|e| {
+                            error!("Errors on creating dir of {}", parent_path_str.as_str());
+                            e
+                        })?;
 
                     let data_file_complete_path = format!("{}_{}.data", &data_file_path_prefix, 0);
                     let index_file_complete_path =
                         format!("{}_{}.index", &index_file_path_prefix, 0);
 
                     // setup the file
-                    &filesystem.touch(&data_file_complete_path).await?;
-                    &filesystem.touch(&index_file_complete_path).await?;
+                    &filesystem
+                        .touch(&data_file_complete_path)
+                        .await
+                        .map_err(|e| {
+                            error!(
+                                "Errors on touching file of {}",
+                                data_file_complete_path.as_str()
+                            );
+                            e
+                        })?;
+                    &filesystem
+                        .touch(&index_file_complete_path)
+                        .await
+                        .map_err(|e| {
+                            error!(
+                                "Errors on touching file of {}",
+                                index_file_complete_path.as_str()
+                            );
+                            e
+                        })?;
 
                     self.partition_cached_meta
                         .insert(data_file_path_prefix.to_owned(), Default::default());
@@ -290,7 +314,11 @@ impl HdfsStore {
                 "hdfs writing [data] with {} bytes. path: {}",
                 data_len, &data_file_path
             ))
-            .await?;
+            .await
+            .map_err(|e| {
+                error!("Errors on appending data into path: {}", &data_file_path);
+                e
+            })?;
         let index_bytes = index_bytes_holder.freeze();
         let index_len = index_bytes.len();
         filesystem
@@ -299,7 +327,11 @@ impl HdfsStore {
                 "hdfs writing [index] with {} bytes. path: {}",
                 index_len, &index_file_path
             ))
-            .await?;
+            .await
+            .map_err(|e| {
+                error!("Errors on appending index into path: {}", &index_file_path);
+                e
+            })?;
         Ok(())
     }
 }

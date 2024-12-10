@@ -85,6 +85,9 @@ pub enum WorkerError {
 
     #[error("urpc stream message type not found")]
     STREAM_MESSAGE_TYPE_NOT_FOUND,
+
+    #[error("{0}. error: {1}")]
+    HDFS_IO_ERROR(String, anyhow::Error),
 }
 
 impl From<AcquireError> for WorkerError {
@@ -114,12 +117,21 @@ impl From<FromUtf8Error> for WorkerError {
 #[cfg(test)]
 mod tests {
 
-    use anyhow::Result;
+    use crate::error::WorkerError::HDFS_IO_ERROR;
+    use anyhow::{Error, Result};
 
     #[test]
     pub fn error_test() -> Result<()> {
         // bail macro means it will return directly.
         // bail!(WorkerError::APP_PURGE_EVENT_SEND_ERROR("error_test_app_id".into(), None));
+        Ok(())
+    }
+
+    #[test]
+    pub fn hdfs_io_test() -> Result<()> {
+        let e = Error::from(std::io::Error::new(std::io::ErrorKind::Other, "oh no!"));
+        let raw = format!("{}", HDFS_IO_ERROR("".to_string(), e));
+        assert_eq!(". error: oh no!", raw);
         Ok(())
     }
 }
