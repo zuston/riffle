@@ -119,6 +119,80 @@ cargo build --features hdfs --release
 KRB5_CONFIG=/etc/krb5.conf KRB5CCNAME=/tmp/krb5cc_2002 LOG=info ./uniffle-worker
 ```
 
+## All config options
+
+```toml
+store_type = "MEMORY_LOCALFILE_HDFS"
+grpc_port = 19999
+coordinator_quorum = ["host1:port", "host2:port"]
+urpc_port = 20000
+http_monitor_service_port = 20010
+heartbeat_interval_seconds = 2
+tags = ["GRPC", "ss_v5", "GRPC_NETTY"]
+
+[memory_store]
+capacity = "1G"
+buffer_ticket_timeout_sec = 300
+buffer_ticket_check_interval_sec = 10
+dashmap_shard_amount = 128
+
+[localfile_store]
+data_paths = ["/var/data/path1", "/var/data/path2"]
+min_number_of_available_disks = 1
+disk_high_watermark = 0.8
+disk_low_watermark = 0.7
+disk_max_concurrency = 2000
+disk_write_buf_capacity = "1M"
+disk_read_buf_capacity = "1M"
+disk_healthy_check_interval_sec = 60
+
+[hdfs_store]
+max_concurrency = 50
+partition_write_max_concurrency = 20
+
+[hdfs_store.kerberos_security_config]
+keytab_path = "/path/to/keytab"
+principal = "principal@REALM"
+
+[hybrid_store]
+memory_spill_high_watermark = 0.8
+memory_spill_low_watermark = 0.2
+memory_single_buffer_max_spill_size = "1G"
+memory_spill_to_cold_threshold_size = "128M"
+memory_spill_to_localfile_concurrency = 4000
+memory_spill_to_hdfs_concurrency = 500
+huge_partition_memory_spill_to_hdfs_threshold_size = "64M"
+
+[runtime_config]
+read_thread_num = 100
+localfile_write_thread_num = 100
+hdfs_write_thread_num = 20
+http_thread_num = 2
+default_thread_num = 10
+dispatch_thread_num = 100
+
+[metrics]
+push_gateway_endpoint = "http://example.com/metrics"
+push_interval_sec = 10
+labels = { env = "production", service = "my_service" }
+
+[log]
+path = "/var/log/my_service.log"
+rotation = "Daily"
+
+[app_config]
+app_heartbeat_timeout_min = 5
+huge_partition_marked_threshold = "1G"
+huge_partition_memory_limit_percent = 0.75
+
+[tracing]
+jaeger_reporter_endpoint = "http://jaeger:14268"
+jaeger_service_name = "my_service"
+
+[health_service_config]
+alive_app_number_max_limit = 100
+```
+
 ## Profiling
 
 ### Heap profiling
