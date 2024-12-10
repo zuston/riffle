@@ -27,6 +27,7 @@ use prometheus::{
     register_int_counter_vec, register_int_gauge_vec, GaugeVec, Histogram, HistogramOpts,
     HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
+use std::collections::HashMap;
 use std::time::Duration;
 
 const DEFAULT_BUCKETS: &[f64] = &[
@@ -853,9 +854,19 @@ impl MetricService {
                     metrics.extend_from_slice(&custom_metrics);
                     metrics.extend_from_slice(&general_metrics);
 
+                    let mut all_labels = HashMap::new();
+                    all_labels.insert(
+                        "worker_id".to_owned(),
+                        SHUFFLE_SERVER_ID.get().unwrap().to_string(),
+                    );
+                    if let Some(labels) = &cfg.labels {
+                        let labels = labels.clone();
+                        all_labels.extend(labels);
+                    }
+
                     let pushed_result = prometheus::push_add_metrics(
                         job_name,
-                        labels! {"worker_id".to_owned() => SHUFFLE_SERVER_ID.get().unwrap().to_string(),},
+                        all_labels,
                         &push_gateway_endpoint.to_owned().unwrap().to_owned(),
                         metrics,
                         None,

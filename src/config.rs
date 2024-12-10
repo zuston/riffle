@@ -16,6 +16,7 @@
 // under the License.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -368,6 +369,8 @@ pub struct MetricsConfig {
 
     #[serde(default = "as_default_push_interval_sec")]
     pub push_interval_sec: u32,
+
+    pub labels: Option<HashMap<String, String>>,
 }
 
 fn as_default_push_interval_sec() -> u32 {
@@ -553,6 +556,10 @@ mod test {
         [hdfs_store.kerberos_security_config]
         keytab_path = "/tmp/a.keytab"
         principal = "a@xxx"
+
+        [metrics]
+        push_gateway_endpoint = "http://localhost:5000"
+        labels = { l1 = "k1", l2 = "k2" }
         "#;
 
         let decoded: Config = toml::from_str(toml_str).unwrap();
@@ -576,5 +583,9 @@ mod test {
         let hdfs = decoded.hdfs_store.unwrap();
         let kerberos_config = hdfs.kerberos_security_config.unwrap();
         assert_eq!(kerberos_config.principal, "a@xxx");
+
+        // check labels of metrics
+        let metrics_labels = decoded.metrics.unwrap().labels;
+        assert_eq!(2, metrics_labels.unwrap().len());
     }
 }
