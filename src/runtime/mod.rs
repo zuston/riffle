@@ -134,6 +134,7 @@ impl Builder {
     /// This can be any number above 0
     pub fn worker_threads(&mut self, val: usize) -> &mut Self {
         self.builder.worker_threads(val);
+        self.builder.max_blocking_threads(val);
         self
     }
 

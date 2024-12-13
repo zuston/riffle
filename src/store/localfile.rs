@@ -369,24 +369,13 @@ impl Store for LocalFileStore {
             ));
         }
 
-        let child_await_tree = AWAIT_TREE_REGISTRY
-            .register("[child] getting data from localfile".to_string())
-            .await;
-        let disk = local_disk.clone();
-        let handler = self
-            .runtime_manager
-            .read_runtime
-            .spawn(child_await_tree.instrument(async move {
-                disk.read(&data_file_path, offset, Some(len))
-                    .instrument_await(format!(
-                        "getting data from localfile: {:?}",
-                        &data_file_path
-                    ))
-                    .await
-            }));
-        let data = handler
-            .instrument_await("waiting the child read data handler to finish.")
-            .await??;
+        let data = local_disk
+            .read(&data_file_path, offset, Some(len))
+            .instrument_await(format!(
+                "getting data from localfile: {:?}",
+                &data_file_path
+            ))
+            .await?;
 
         Ok(ResponseData::Local(PartitionedLocalData { data }))
     }
@@ -427,33 +416,14 @@ impl Store for LocalFileStore {
                 local_disk.root(),
             ));
         }
-        let next_offset = locked_object.pointer.load(SeqCst);
-        let disk = local_disk.clone();
-        let child_await_tree = AWAIT_TREE_REGISTRY
-            .register("[child] getting index from localfile".to_string())
-            .await;
-        let handler = self
-            .runtime_manager
-            .read_runtime
-            .spawn(child_await_tree.instrument(async move {
-                let index_data_result = disk
-                    .read(&index_file_path, 0, None)
-                    .instrument_await(format!(
-                        "reading index data from file: {:?}",
-                        &index_file_path
-                    ))
-                    .await;
-                // let file_stat = disk
-                //     .stat(&data_file_path)
-                //     .instrument_await(format!("getting file len from file: {:?}", &data_file_path))
-                //     .await;
-                (index_data_result, next_offset)
-            }));
-        let result = handler
-            .instrument_await("waiting the child read index handler to finish.")
+        let len = locked_object.pointer.load(SeqCst);
+        let data = local_disk
+            .read(&index_file_path, 0, None)
+            .instrument_await(format!(
+                "reading index data from file: {:?}",
+                &index_file_path
+            ))
             .await?;
-        let data = result.0?;
-        let len = result.1;
         Ok(Local(LocalDataIndex {
             index_data: data,
             data_file_len: len,

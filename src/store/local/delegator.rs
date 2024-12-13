@@ -62,6 +62,8 @@ impl LocalDiskDelegator {
         let read_capacity = ReadableSize::from_str(&config.disk_read_buf_capacity).unwrap();
 
         let io_handler = SyncLocalIO::new(
+            &runtime_manager.read_runtime,
+            &runtime_manager.localfile_write_runtime,
             root,
             Some(write_capacity.as_bytes() as usize),
             Some(read_capacity.as_bytes() as usize),
