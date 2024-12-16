@@ -1,4 +1,5 @@
 use crate::store::hadoop::HdfsDelegator;
+use crate::store::BytesWrapper;
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -61,11 +62,11 @@ impl HdfsDelegator for HdrsClient {
         Ok(())
     }
 
-    async fn append(&self, file_path: &str, data: Bytes) -> Result<()> {
+    async fn append(&self, file_path: &str, data: BytesWrapper) -> Result<()> {
         let path = self.wrap_root(file_path);
         let client = &self.inner.client;
         let mut file = client.open_file().append(true).open(path.as_str())?;
-        file.write_all(&data)?;
+        file.write_all(&data.freeze())?;
         file.flush()?;
         Ok(())
     }

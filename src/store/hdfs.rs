@@ -24,7 +24,7 @@ use crate::error::WorkerError;
 
 use crate::metric::TOTAL_HDFS_USED;
 use crate::store::{
-    Block, Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex,
+    Block, BytesWrapper, Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex,
     SpillWritingViewContext, Store,
 };
 use anyhow::{anyhow, Result};
@@ -228,40 +228,15 @@ impl HdfsStore {
         let data_file_path = format!("{}_{}.data", &data_file_path_prefix, retry_time);
         let index_file_path = format!("{}_{}.index", &index_file_path_prefix, retry_time);
 
-        let mut index_bytes_holder = BytesMut::new();
-        let mut data_bytes_holder = BytesMut::new();
-
-        let mut total_flushed = 0;
-        for data_block in data_blocks {
-            let block_id = data_block.block_id;
-            let crc = data_block.crc;
-            let length = data_block.length;
-            let task_attempt_id = data_block.task_attempt_id;
-            let uncompress_len = data_block.uncompress_length;
-
-            index_bytes_holder.put_i64(next_offset);
-            index_bytes_holder.put_i32(length);
-            index_bytes_holder.put_i32(uncompress_len);
-            index_bytes_holder.put_i64(crc);
-            index_bytes_holder.put_i64(block_id);
-            index_bytes_holder.put_i64(task_attempt_id);
-
-            let data = &data_block.data;
-            data_bytes_holder.extend_from_slice(&data);
-
-            next_offset += length as i64;
-
-            total_flushed += length;
-        }
-
+        let shuffle_file_format = self.generate_shuffle_file_format(data_blocks, next_offset)?;
         debug!("Writing path: {}", &data_file_path);
         match self
             .write_data_and_index(
                 &filesystem,
                 &data_file_path,
-                data_bytes_holder,
+                shuffle_file_format.data,
                 &index_file_path,
-                index_bytes_holder,
+                shuffle_file_format.index,
             )
             .await
         {
@@ -290,11 +265,11 @@ impl HdfsStore {
                     .get_mut(&data_file_path_prefix)
                     .ok_or(WorkerError::APP_HAS_BEEN_PURGED)?;
 
-                partition_cached_meta.reset_offset(next_offset);
+                partition_cached_meta.reset_offset(shuffle_file_format.offset);
                 debug!("Finish path: {}", &data_file_path);
             }
         }
-        TOTAL_HDFS_USED.inc_by(total_flushed as u64);
+        TOTAL_HDFS_USED.inc_by(shuffle_file_format.len as u64);
         Ok(())
     }
 
@@ -302,14 +277,13 @@ impl HdfsStore {
         &self,
         filesystem: &Arc<Box<dyn HdfsDelegator>>,
         data_file_path: &String,
-        data_bytes_holder: BytesMut,
+        data_bytes_holder: BytesWrapper,
         index_file_path: &String,
-        index_bytes_holder: BytesMut,
+        index_bytes_holder: BytesWrapper,
     ) -> Result<(), WorkerError> {
-        let data_bytes = data_bytes_holder.freeze();
-        let data_len = data_bytes.len();
+        let data_len = data_bytes_holder.len();
         filesystem
-            .append(&data_file_path, data_bytes)
+            .append(&data_file_path, data_bytes_holder)
             .instrument_await(format!(
                 "hdfs writing [data] with {} bytes. path: {}",
                 data_len, &data_file_path
@@ -319,10 +293,9 @@ impl HdfsStore {
                 error!("Errors on appending data into path: {}", &data_file_path);
                 e
             })?;
-        let index_bytes = index_bytes_holder.freeze();
-        let index_len = index_bytes.len();
+        let index_len = index_bytes_holder.len();
         filesystem
-            .append(&index_file_path, index_bytes)
+            .append(&index_file_path, index_bytes_holder)
             .instrument_await(format!(
                 "hdfs writing [index] with {} bytes. path: {}",
                 index_len, &index_file_path

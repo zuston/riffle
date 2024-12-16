@@ -1,4 +1,5 @@
 use crate::store::hadoop::HdfsDelegator;
+use crate::store::BytesWrapper;
 use anyhow::Result;
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
@@ -62,7 +63,7 @@ impl HdfsDelegator for HdfsNativeClient {
         Ok(())
     }
 
-    async fn append(&self, file_path: &str, data: Bytes) -> Result<()> {
+    async fn append(&self, file_path: &str, data: BytesWrapper) -> Result<()> {
         debug!("appending to {} with {} bytes", file_path, data.len());
         let file_path = &self.wrap_root(file_path);
         let mut file_writer = self
@@ -72,7 +73,7 @@ impl HdfsDelegator for HdfsNativeClient {
             .instrument_await("appending...")
             .await?;
         file_writer
-            .write(data)
+            .write(data.freeze())
             .instrument_await("writing..")
             .await?;
         file_writer.close().instrument_await("closing...").await?;
