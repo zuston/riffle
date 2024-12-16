@@ -259,7 +259,7 @@ impl LocalFileStore {
         locked_obj
             .deref()
             .pointer
-            .store(next_offset, Ordering::SeqCst);
+            .store(shuffle_file_format.offset, Ordering::SeqCst);
 
         Ok(())
     }
