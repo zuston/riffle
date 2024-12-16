@@ -244,57 +244,17 @@ impl LocalFileStore {
             }
         }
 
-        let mut index_bytes_holder = BytesMut::new();
-        let mut data_bytes_holder = BytesMut::new();
-
-        let mut total_size = 0u64;
-        for block in blocks {
-            let block_id = block.block_id;
-            let length = block.length;
-            let uncompress_len = block.uncompress_length;
-            let task_attempt_id = block.task_attempt_id;
-            let crc = block.crc;
-
-            total_size += length as u64;
-
-            index_bytes_holder.put_i64(next_offset);
-            index_bytes_holder.put_i32(length);
-            index_bytes_holder.put_i32(uncompress_len);
-            index_bytes_holder.put_i64(crc);
-            index_bytes_holder.put_i64(block_id);
-            index_bytes_holder.put_i64(task_attempt_id);
-
-            let data = &block.data;
-
-            // let actual = get_crc(data);
-            // if crc != actual {
-            //     error!("Found not correct crc value while writing. expected: {}, actual: {} for uid: {:?}", crc, actual, &uid);
-            // }
-
-            data_bytes_holder.put(data.clone());
-            next_offset += length as i64;
-        }
-
-        let data = data_bytes_holder.freeze();
-        if data.len() != total_size as usize {
-            error!(
-                "Found not correct data len. expected: {}. actual: {} for uid: {:?}",
-                total_size,
-                data.len(),
-                &uid
-            );
-        }
-
+        let shuffle_file_format = self.generate_shuffle_file_format(blocks, next_offset)?;
         local_disk
-            .append(&data_file_path, data)
+            .append(&data_file_path, shuffle_file_format.data)
             .instrument_await(format!("data flushing. path: {}", &data_file_path))
             .await?;
         local_disk
-            .append(&index_file_path, index_bytes_holder.freeze())
+            .append(&index_file_path, shuffle_file_format.index)
             .instrument_await(format!("index flushing. path: {}", &index_file_path))
             .await?;
 
-        TOTAL_LOCALFILE_USED.inc_by(total_size);
+        TOTAL_LOCALFILE_USED.inc_by(shuffle_file_format.len as u64);
 
         locked_obj
             .deref()

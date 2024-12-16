@@ -1,13 +1,14 @@
 use crate::runtime::RuntimeRef;
 use crate::store::local::{FileStat, LocalIO};
+use crate::store::BytesWrapper;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use bytes::Bytes;
-use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Arc;
+use std::{fs, io};
 
 #[derive(Clone)]
 pub struct SyncLocalIO {
@@ -60,9 +61,9 @@ impl LocalIO for SyncLocalIO {
         Ok(())
     }
 
-    async fn append(&self, path: &str, data: Bytes) -> anyhow::Result<()> {
+    async fn append(&self, path: &str, data: BytesWrapper) -> anyhow::Result<()> {
         let path = self.with_root(path);
-        let buf = self.inner.buf_writer_capacity.clone();
+        let buffer_capacity = self.inner.buf_writer_capacity.clone();
 
         let r = self
             .inner
@@ -70,18 +71,19 @@ impl LocalIO for SyncLocalIO {
             .spawn_blocking(move || {
                 let path = Path::new(&path);
                 let mut file = OpenOptions::new().append(true).create(true).open(path)?;
+                let mut buf_writer = match buffer_capacity {
+                    Some(capacity) => BufWriter::with_capacity(capacity, file),
+                    _ => BufWriter::new(file),
+                };
 
-                match buf {
-                    Some(capacity) => {
-                        let mut buf_writer = BufWriter::with_capacity(capacity, file);
-                        buf_writer.write_all(&data)?;
-                        buf_writer.flush()
-                    }
-                    _ => {
-                        file.write_all(&data)?;
-                        file.flush()
+                match data {
+                    BytesWrapper::Direct(bytes) => buf_writer.write_all(&bytes)?,
+                    BytesWrapper::Composed(composed) => {
+                        buf_writer.write_all(&composed.freeze())?;
                     }
                 }
+                buf_writer.flush()?;
+                Ok::<(), io::Error>(())
             })
             .await
             .map_err(|e| anyhow!(e))??;
@@ -207,9 +209,12 @@ mod test {
         );
 
         // append
-        base_runtime_ref.block_on(io_handler.append(data_file_name, Bytes::from(vec![0; 1000])))?;
-        base_runtime_ref.block_on(io_handler.append(data_file_name, Bytes::from(vec![0; 1000])))?;
-        base_runtime_ref.block_on(io_handler.append(data_file_name, Bytes::from(vec![0; 1000])))?;
+        base_runtime_ref
+            .block_on(io_handler.append(data_file_name, Bytes::from(vec![0; 1000]).into()))?;
+        base_runtime_ref
+            .block_on(io_handler.append(data_file_name, Bytes::from(vec![0; 1000]).into()))?;
+        base_runtime_ref
+            .block_on(io_handler.append(data_file_name, Bytes::from(vec![0; 1000]).into()))?;
 
         // stat
         let stat = base_runtime_ref.block_on(io_handler.file_stat(data_file_name))?;

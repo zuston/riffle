@@ -11,6 +11,7 @@ use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::local::sync_io::SyncLocalIO;
 use crate::store::local::{FileStat, LocalDiskStorage, LocalIO};
+use crate::store::BytesWrapper;
 use anyhow::Result;
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
@@ -227,7 +228,7 @@ impl LocalIO for LocalDiskDelegator {
         self.inner.io_handler.create_dir(dir).await
     }
 
-    async fn append(&self, path: &str, data: Bytes) -> Result<()> {
+    async fn append(&self, path: &str, data: BytesWrapper) -> Result<()> {
         // todo: add the concurrency limitation. do we need? may be not.
 
         let timer = LOCALFILE_DISK_APPEND_OPERATION_DURATION

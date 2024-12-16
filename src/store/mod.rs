@@ -26,8 +26,8 @@ pub mod memory;
 mod spill;
 
 use crate::app::{
-    PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingViewContext,
-    RegisterAppContext, ReleaseTicketContext, RequireBufferContext, WritingViewContext,
+    PurgeDataContext, ReadingIndexViewContext, ReadingViewContext, RegisterAppContext,
+    ReleaseTicketContext, RequireBufferContext, WritingViewContext,
 };
 use crate::config::{Config, StorageType};
 use crate::error::WorkerError;
@@ -38,12 +38,12 @@ use std::fmt::{Display, Formatter};
 use crate::util::now_timestamp_as_sec;
 use anyhow::Result;
 use async_trait::async_trait;
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 
 use crate::composed_bytes::ComposedBytes;
 use crate::runtime::manager::RuntimeManager;
-use crate::store::mem::buffer::BatchMemoryBlock;
 use crate::store::spill::SpillWritingViewContext;
+use crate::store::BytesWrapper::{Composed, Direct};
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -248,6 +248,53 @@ pub trait Store {
     async fn name(&self) -> StorageType;
 
     async fn spill_insert(&self, ctx: SpillWritingViewContext) -> Result<(), WorkerError>;
+
+    fn generate_shuffle_file_format(
+        &self,
+        blocks: Vec<&Block>,
+        offset: i64,
+    ) -> Result<ShuffleFileFormat> {
+        let mut offset = offset;
+
+        let mut index_bytes_holder = BytesMut::new();
+        let mut data_chain = Vec::with_capacity(blocks.len());
+
+        let mut total_size = 0;
+        for block in blocks {
+            let block_id = block.block_id;
+            let length = block.length;
+            let uncompress_len = block.uncompress_length;
+            let task_attempt_id = block.task_attempt_id;
+            let crc = block.crc;
+
+            total_size += length as usize;
+
+            index_bytes_holder.put_i64(offset);
+            index_bytes_holder.put_i32(length);
+            index_bytes_holder.put_i32(uncompress_len);
+            index_bytes_holder.put_i64(crc);
+            index_bytes_holder.put_i64(block_id);
+            index_bytes_holder.put_i64(task_attempt_id);
+
+            let data = &block.data;
+            data_chain.push(data.clone());
+            offset += length as i64;
+        }
+
+        Ok(ShuffleFileFormat {
+            data: Composed(ComposedBytes::from(data_chain, total_size)),
+            index: Direct(index_bytes_holder.into()),
+            len: total_size,
+            offset,
+        })
+    }
+}
+
+pub struct ShuffleFileFormat {
+    data: BytesWrapper,
+    index: BytesWrapper,
+    len: usize,
+    offset: i64,
 }
 
 pub trait Persistent {}
