@@ -22,21 +22,30 @@ pub struct HierarchyEventBus<T> {
 
 impl HierarchyEventBus<SpillMessage> {
     pub fn new(runtime_manager: &RuntimeManager, config: &Config) -> Self {
+        let localfile_concurrency = match config.hybrid_store.memory_spill_to_localfile_concurrency
+        {
+            Some(value) => value as usize,
+            _ => runtime_manager.localfile_write_runtime.thread_num(),
+        };
+        let hdfs_concurrency = match config.hybrid_store.memory_spill_to_hdfs_concurrency {
+            Some(value) => value as usize,
+            _ => runtime_manager.hdfs_write_runtime.thread_num(),
+        };
+
         let parent: EventBus<SpillMessage> = EventBus::new(
             &runtime_manager.dispatch_runtime,
             "Hierarchy-Parent".to_string(),
-            config.hybrid_store.memory_spill_to_localfile_concurrency as usize
-                + config.hybrid_store.memory_spill_to_hdfs_concurrency as usize,
+            localfile_concurrency + hdfs_concurrency,
         );
         let child_localfile: EventBus<SpillMessage> = EventBus::new(
             &runtime_manager.localfile_write_runtime,
             "Hierarchy-Child-localfile".to_string(),
-            config.hybrid_store.memory_spill_to_localfile_concurrency as usize,
+            localfile_concurrency,
         );
         let child_hdfs: EventBus<SpillMessage> = EventBus::new(
             &runtime_manager.hdfs_write_runtime,
             "Hierarchy-Child-hdfs".to_string(),
-            config.hybrid_store.memory_spill_to_hdfs_concurrency as usize,
+            hdfs_concurrency,
         );
 
         // dispatch event into the concrete handler when the selection is finished
@@ -114,8 +123,8 @@ impl HierarchyEventBus<SpillMessage> {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::Config;
-    use crate::config::StorageType::LOCALFILE;
+    use crate::config::StorageType::{HDFS, LOCALFILE};
+    use crate::config::{Config, StorageType};
     use crate::event_bus::{Event, Subscriber};
     use crate::runtime::manager::RuntimeManager;
     use crate::store::spill::hierarchy_event_bus::HierarchyEventBus;
@@ -169,6 +178,45 @@ mod tests {
             }
             return true;
         }
+    }
+
+    #[test]
+    fn test_concurrency() -> Result<()> {
+        let runtime_manager = RuntimeManager::default();
+        let config = Config::create_simple_config();
+        let event_bus = HierarchyEventBus::new(&runtime_manager, &config);
+
+        let localfile_bus = event_bus.children.get(&LOCALFILE).unwrap();
+        let hdfs_bus = event_bus.children.get(&HDFS).unwrap();
+
+        // case1: unset the concurrency limit
+        assert_eq!(
+            runtime_manager.localfile_write_runtime.thread_num(),
+            localfile_bus.concurrency_limit()
+        );
+        assert_eq!(
+            runtime_manager.hdfs_write_runtime.thread_num(),
+            hdfs_bus.concurrency_limit()
+        );
+        assert_eq!(
+            runtime_manager.localfile_write_runtime.thread_num()
+                + runtime_manager.hdfs_write_runtime.thread_num(),
+            event_bus.parent.concurrency_limit()
+        );
+
+        // case2: set concurrency limit
+        let mut config = Config::create_simple_config();
+        config.hybrid_store.memory_spill_to_localfile_concurrency = Some(10);
+        config.hybrid_store.memory_spill_to_hdfs_concurrency = Some(20);
+        let event_bus = HierarchyEventBus::new(&runtime_manager, &config);
+        let localfile_bus = event_bus.children.get(&LOCALFILE).unwrap();
+        let hdfs_bus = event_bus.children.get(&HDFS).unwrap();
+
+        assert_eq!(10, localfile_bus.concurrency_limit());
+        assert_eq!(20, hdfs_bus.concurrency_limit());
+        assert_eq!(30, event_bus.parent.concurrency_limit());
+
+        Ok(())
     }
 
     #[test]

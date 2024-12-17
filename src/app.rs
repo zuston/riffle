@@ -1024,8 +1024,8 @@ pub(crate) mod test {
                 memory_spill_low_watermark: 0.0,
                 memory_single_buffer_max_spill_size: None,
                 memory_spill_to_cold_threshold_size: None,
-                memory_spill_to_localfile_concurrency: 100,
-                memory_spill_to_hdfs_concurrency: 100,
+                memory_spill_to_localfile_concurrency: None,
+                memory_spill_to_hdfs_concurrency: None,
                 huge_partition_memory_spill_to_hdfs_threshold_size: "64M".to_string(),
             },
         );

@@ -55,6 +55,8 @@ struct Inner<T> {
 
     name: String,
     runtime: RuntimeRef,
+
+    concurrency_num: usize,
     concurrency_limit: Arc<Semaphore>,
 
     event_executed_hook: OnceCell<Arc<Box<dyn Fn(Event<T>, bool) + 'static + Send + Sync>>>,
@@ -76,6 +78,7 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
                 queue_send: send,
                 name: name.to_string(),
                 runtime: runtime.clone(),
+                concurrency_num: concurrency_limit,
                 concurrency_limit: concurrency_limiter,
                 event_executed_hook: Default::default(),
             }),
@@ -187,6 +190,10 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
             .with_label_values(&[&self.inner.name])
             .inc();
         Ok(())
+    }
+
+    pub fn concurrency_limit(&self) -> usize {
+        self.inner.concurrency_num
     }
 }
 

@@ -38,6 +38,7 @@ pub type RuntimeRef = Arc<Runtime>;
 pub struct Runtime {
     rt: TokioRuntime,
     metrics: Arc<Metrics>,
+    thread_num: usize,
 }
 
 impl Runtime {
@@ -70,6 +71,10 @@ impl Runtime {
             alive_thread_num: self.metrics.thread_alive_gauge.get(),
             idle_thread_num: self.metrics.thread_idle_gauge.get(),
         }
+    }
+
+    pub fn thread_num(&self) -> usize {
+        self.thread_num
     }
 }
 
@@ -107,6 +112,7 @@ impl<T> Future for JoinHandle<T> {
 pub struct Builder {
     thread_name: String,
     builder: TokioRuntimeBuilder,
+    thread_num: usize,
 }
 
 impl Default for Builder {
@@ -114,6 +120,7 @@ impl Default for Builder {
         Self {
             thread_name: "runtime-worker".to_string(),
             builder: TokioRuntimeBuilder::new_multi_thread(),
+            thread_num: 1,
         }
     }
 }
@@ -135,6 +142,7 @@ impl Builder {
     pub fn worker_threads(&mut self, val: usize) -> &mut Self {
         self.builder.worker_threads(val);
         self.builder.max_blocking_threads(val);
+        self.thread_num = val;
         self
     }
 
@@ -170,7 +178,11 @@ impl Builder {
             }))
             .build()?;
 
-        Ok(Runtime { rt, metrics })
+        Ok(Runtime {
+            rt,
+            metrics,
+            thread_num: self.thread_num,
+        })
     }
 }
 
