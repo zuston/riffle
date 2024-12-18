@@ -3,6 +3,7 @@ use crate::store::local::{FileStat, LocalIO};
 use crate::store::BytesWrapper;
 use anyhow::anyhow;
 use async_trait::async_trait;
+use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
@@ -57,6 +58,7 @@ impl LocalIO for SyncLocalIO {
             .inner
             .write_runtime_ref
             .spawn_blocking(move || fs::create_dir_all(dir))
+            .instrument_await("wait the spawned block future")
             .await??;
         Ok(())
     }
@@ -85,6 +87,7 @@ impl LocalIO for SyncLocalIO {
                 buf_writer.flush()?;
                 Ok::<(), io::Error>(())
             })
+            .instrument_await("wait the spawned block future")
             .await
             .map_err(|e| anyhow!(e))??;
 
@@ -130,6 +133,7 @@ impl LocalIO for SyncLocalIO {
 
                 Ok(Bytes::from(buffer))
             })
+            .instrument_await("wait the spawned block future")
             .await??;
 
         Ok(r)

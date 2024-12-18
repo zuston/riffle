@@ -225,7 +225,11 @@ impl LocalDiskDelegator {
 #[async_trait]
 impl LocalIO for LocalDiskDelegator {
     async fn create_dir(&self, dir: &str) -> Result<()> {
-        self.inner.io_handler.create_dir(dir).await
+        self.inner
+            .io_handler
+            .create_dir(dir)
+            .instrument_await(format!("create directory to disk: {}", &self.inner.root))
+            .await
     }
 
     async fn append(&self, path: &str, data: BytesWrapper) -> Result<()> {
@@ -236,7 +240,11 @@ impl LocalIO for LocalDiskDelegator {
             .start_timer();
         let len = data.len();
 
-        self.inner.io_handler.append(path, data).await?;
+        self.inner
+            .io_handler
+            .append(path, data)
+            .instrument_await(format!("append to disk: {}", &self.inner.root))
+            .await?;
 
         timer.observe_duration();
         TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER
@@ -253,7 +261,12 @@ impl LocalIO for LocalDiskDelegator {
             .with_label_values(&[&self.inner.root])
             .start_timer();
 
-        let data = self.inner.io_handler.read(path, offset, length).await?;
+        let data = self
+            .inner
+            .io_handler
+            .read(path, offset, length)
+            .instrument_await(format!("read from disk: {}", &self.inner.root))
+            .await?;
 
         timer.observe_duration();
         TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER
@@ -270,7 +283,11 @@ impl LocalIO for LocalDiskDelegator {
             .with_label_values(&[&self.inner.root])
             .start_timer();
 
-        self.inner.io_handler.delete(path).await?;
+        self.inner
+            .io_handler
+            .delete(path)
+            .instrument_await(format!("delete from disk: {}", &self.inner.root))
+            .await?;
 
         timer.observe_duration();
 
@@ -278,11 +295,19 @@ impl LocalIO for LocalDiskDelegator {
     }
 
     async fn write(&self, path: &str, data: Bytes) -> Result<()> {
-        self.inner.io_handler.write(path, data).await
+        self.inner
+            .io_handler
+            .write(path, data)
+            .instrument_await(format!("write to disk: {}", &self.inner.root))
+            .await
     }
 
     async fn file_stat(&self, path: &str) -> Result<FileStat> {
-        self.inner.io_handler.file_stat(path).await
+        self.inner
+            .io_handler
+            .file_stat(path)
+            .instrument_await(format!("state disk: {}", &self.inner.root))
+            .await
     }
 }
 

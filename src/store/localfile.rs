@@ -225,7 +225,7 @@ impl LocalFileStore {
             .instrument_await("waiting the localfile partition lock...")
             .await;
         let local_disk = &locked_obj.disk;
-        let mut next_offset = locked_obj.pointer.load(Ordering::SeqCst);
+        let next_offset = locked_obj.pointer.load(SeqCst);
 
         if local_disk.is_corrupted()? {
             return Err(WorkerError::PARTIAL_DATA_LOST(local_disk.root()));
@@ -237,9 +237,10 @@ impl LocalFileStore {
 
         if !parent_dir_is_created {
             if let Some(path) = Path::new(&data_file_path).parent() {
+                let path = format!("{}/", path.to_str().unwrap()).as_str().to_owned();
                 local_disk
-                    .create_dir(format!("{}/", path.to_str().unwrap()).as_str())
-                    .instrument_await("creating the directory...")
+                    .create_dir(path.as_str())
+                    .instrument_await(format!("creating the directory: {}", path.as_str()))
                     .await?;
             }
         }
@@ -247,11 +248,18 @@ impl LocalFileStore {
         let shuffle_file_format = self.generate_shuffle_file_format(blocks, next_offset)?;
         local_disk
             .append(&data_file_path, shuffle_file_format.data)
-            .instrument_await(format!("data flushing. path: {}", &data_file_path))
+            .instrument_await(format!(
+                "data flushing with {} bytes. path: {}",
+                shuffle_file_format.len, &data_file_path
+            ))
             .await?;
+        let index_bytes_len = shuffle_file_format.index.len();
         local_disk
             .append(&index_file_path, shuffle_file_format.index)
-            .instrument_await(format!("index flushing. path: {}", &index_file_path))
+            .instrument_await(format!(
+                "index flushing with {} bytes. path: {}",
+                index_bytes_len, &index_file_path
+            ))
             .await?;
 
         TOTAL_LOCALFILE_USED.inc_by(shuffle_file_format.len as u64);
@@ -259,7 +267,7 @@ impl LocalFileStore {
         locked_obj
             .deref()
             .pointer
-            .store(shuffle_file_format.offset, Ordering::SeqCst);
+            .store(shuffle_file_format.offset, SeqCst);
 
         Ok(())
     }
@@ -319,7 +327,7 @@ impl Store for LocalFileStore {
 
         let locked_object = locked_object
             .read()
-            .instrument_await("waiting the partition file lock")
+            .instrument_await("waiting the partition file [write] lock")
             .await;
         let local_disk = &locked_object.disk;
 
@@ -332,8 +340,8 @@ impl Store for LocalFileStore {
         let data = local_disk
             .read(&data_file_path, offset, Some(len))
             .instrument_await(format!(
-                "getting data from localfile: {:?}",
-                &data_file_path
+                "getting data with expected {} bytes from localfile: {}",
+                len, &data_file_path
             ))
             .await?;
 
@@ -369,7 +377,10 @@ impl Store for LocalFileStore {
             })
             .clone();
 
-        let locked_object = locked_object.read().await;
+        let locked_object = locked_object
+            .read()
+            .instrument_await("waiting the partition file [read] lock")
+            .await;
         let local_disk = &locked_object.disk;
         if local_disk.is_corrupted()? {
             return Err(WorkerError::LOCAL_DISK_OWNED_BY_PARTITION_CORRUPTED(
