@@ -53,9 +53,6 @@ pub enum WorkerError {
     #[error("The memory usage is limited by huge partition mechanism")]
     MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION,
 
-    #[error(transparent)]
-    Other(#[from] anyhow::Error),
-
     #[error("Http request failed. {0}")]
     HTTP_SERVICE_ERROR(String),
 
@@ -88,6 +85,15 @@ pub enum WorkerError {
 
     #[error("{0}. error: {1}")]
     HDFS_IO_ERROR(String, anyhow::Error),
+
+    #[error("Out of memory. error: {0}")]
+    OUT_OF_MEMORY(anyhow::Error),
+
+    #[error("HDFS has been unhealthy.")]
+    HDFS_UNHEALTHY,
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
 }
 
 impl From<AcquireError> for WorkerError {
@@ -104,7 +110,10 @@ impl From<ParseQueryError> for WorkerError {
 
 impl From<std::io::Error> for WorkerError {
     fn from(err: std::io::Error) -> Self {
-        WorkerError::Other(Error::new(err))
+        match err.kind() {
+            std::io::ErrorKind::OutOfMemory => WorkerError::OUT_OF_MEMORY(Error::new(err)),
+            _ => WorkerError::Other(Error::new(err)),
+        }
     }
 }
 

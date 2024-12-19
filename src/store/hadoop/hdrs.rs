@@ -1,3 +1,4 @@
+use crate::error::WorkerError;
 use crate::store::hadoop::HdfsDelegator;
 use crate::store::BytesWrapper;
 use anyhow::Result;
@@ -62,7 +63,7 @@ impl HdfsDelegator for HdrsClient {
         Ok(())
     }
 
-    async fn append(&self, file_path: &str, data: BytesWrapper) -> Result<()> {
+    async fn append(&self, file_path: &str, data: BytesWrapper) -> Result<(), WorkerError> {
         let path = self.wrap_root(file_path);
         let client = &self.inner.client;
         let mut file = client.open_file().append(true).open(path.as_str())?;

@@ -38,6 +38,8 @@ use log::{error, info, warn};
 
 use std::path::Path;
 
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
@@ -89,6 +91,8 @@ pub struct HdfsStore {
     runtime_manager: RuntimeManager,
 
     partition_write_concurrency: usize,
+
+    health: AtomicBool,
 }
 
 unsafe impl Send for HdfsStore {}
@@ -113,6 +117,7 @@ impl HdfsStore {
             runtime_manager: runtime_manager.clone(),
 
             partition_write_concurrency: conf.partition_write_max_concurrency,
+            health: AtomicBool::new(true),
         }
     }
 
@@ -142,6 +147,10 @@ impl HdfsStore {
         uid: PartitionedUId,
         data_blocks: Vec<&Block>,
     ) -> Result<(), WorkerError> {
+        if !self.is_healthy().await? {
+            return Err(WorkerError::HDFS_UNHEALTHY);
+        }
+
         let _ = self
             .concurrency_access_limiter
             .acquire()
@@ -241,6 +250,17 @@ impl HdfsStore {
             .await
         {
             Err(e) => {
+                match &e {
+                    WorkerError::OUT_OF_MEMORY(exception) => {
+                        self.health.store(false, SeqCst);
+                        error!(
+                            "Mark the hdfs store unhealthy due to the oom error, error: {:?}",
+                            exception
+                        );
+                    }
+                    _ => {}
+                }
+
                 let mut partition_cached_meta = self
                     .partition_cached_meta
                     .get_mut(&data_file_path_prefix)
@@ -389,7 +409,7 @@ impl Store for HdfsStore {
     }
 
     async fn is_healthy(&self) -> Result<bool> {
-        Ok(true)
+        Ok(self.health.load(SeqCst))
     }
 
     async fn require_buffer(
@@ -450,10 +470,11 @@ mod tests {
     use crate::app::{PartitionedUId, SHUFFLE_SERVER_ID};
     use crate::app::{PurgeDataContext, WritingViewContext};
     use crate::config::HdfsStoreConfig;
+    use crate::error::WorkerError;
     use crate::runtime::manager::RuntimeManager;
     use crate::store::hadoop::HdfsDelegator;
     use crate::store::hdfs::HdfsStore;
-    use crate::store::{Block, Store};
+    use crate::store::{Block, BytesWrapper, Store};
     use anyhow::anyhow;
     use async_trait::async_trait;
     use bytes::Bytes;
@@ -484,6 +505,7 @@ mod tests {
 
     struct FakedHdfsClient {
         mark_failure: Arc<AtomicBool>,
+        oom_failure: Arc<AtomicBool>,
     }
     unsafe impl Send for FakedHdfsClient {}
     unsafe impl Sync for FakedHdfsClient {}
@@ -493,10 +515,20 @@ mod tests {
             Ok(())
         }
 
-        async fn append(&self, file_path: &str, data: Bytes) -> anyhow::Result<()> {
+        async fn append(
+            &self,
+            file_path: &str,
+            data: BytesWrapper,
+        ) -> anyhow::Result<(), WorkerError> {
+            if self.oom_failure.load(SeqCst) {
+                return Err(
+                    std::io::Error::new(std::io::ErrorKind::OutOfMemory, "oom failure").into(),
+                );
+            }
+
             tokio::time::sleep(Duration::from_millis(100)).await;
             if self.mark_failure.load(SeqCst) {
-                return Err(anyhow!(""));
+                return Err(WorkerError::Other(anyhow!("")));
             }
             Ok(())
         }
@@ -515,6 +547,47 @@ mod tests {
     }
 
     #[test]
+    fn oom_test() -> anyhow::Result<()> {
+        SHUFFLE_SERVER_ID.get_or_init(|| "10.0.0.1".to_owned());
+        let app_id = "oom_test_app_id";
+
+        let config = HdfsStoreConfig::default();
+        let runtime_manager = RuntimeManager::default();
+        let hdfs_store = HdfsStore::from(config, &runtime_manager);
+
+        let client: Arc<Box<dyn HdfsDelegator>> = Arc::new(Box::new(FakedHdfsClient {
+            mark_failure: Arc::new(AtomicBool::new(false)),
+            oom_failure: Arc::new(AtomicBool::new(true)),
+        }));
+        hdfs_store
+            .app_remote_clients
+            .insert(app_id.to_owned(), client);
+
+        let uid = PartitionedUId::from(app_id.to_owned(), 1, 1);
+        let writing_ctx = WritingViewContext::create_for_test(
+            uid,
+            vec![Block {
+                block_id: 0,
+                length: 10i32,
+                uncompress_length: 200,
+                crc: 0,
+                data: Bytes::copy_from_slice(&vec![0; 10]),
+                task_attempt_id: 0,
+            }],
+        );
+
+        let hdfs_store = Arc::new(hdfs_store);
+        let hdfs = hdfs_store.clone();
+        let ctx = writing_ctx.clone();
+        let result = runtime_manager.default_runtime.block_on(hdfs.insert(ctx));
+        assert!(result.is_err());
+        assert!(!runtime_manager
+            .default_runtime
+            .block_on(hdfs.is_healthy())?);
+        Ok(())
+    }
+
+    #[test]
     fn append_test() -> anyhow::Result<()> {
         SHUFFLE_SERVER_ID.get_or_init(|| "10.0.0.1".to_owned());
         let app_id = "append_app_id";
@@ -526,6 +599,7 @@ mod tests {
         let mark_failure_tag = Arc::new(AtomicBool::new(false));
         let client: Arc<Box<dyn HdfsDelegator>> = Arc::new(Box::new(FakedHdfsClient {
             mark_failure: mark_failure_tag.clone(),
+            oom_failure: Arc::new(AtomicBool::new(false)),
         }));
         hdfs_store
             .app_remote_clients

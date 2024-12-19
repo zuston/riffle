@@ -279,7 +279,16 @@ impl HybridStore {
             .warm_store
             .as_ref()
             .ok_or(anyhow!("empty warm store. It should not happen"))?;
-        let cold = self.cold_store.as_ref().unwrap_or(warm);
+
+        // if the cold is unhealthy(when the oom occurs), it should fallback to the warm
+        let cold = {
+            let cold = self.cold_store.as_ref().unwrap_or(warm);
+            if !cold.is_healthy().await? {
+                warm
+            } else {
+                cold
+            }
+        };
 
         // The following spill policies.
         // 1. local store is unhealthy. spill to hdfs (This is disabled by default, which will slow down the performance)

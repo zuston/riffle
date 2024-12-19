@@ -1,14 +1,21 @@
+use crate::error::WorkerError;
 use crate::store::hadoop::HdfsDelegator;
 use crate::store::BytesWrapper;
-use anyhow::Result;
+use anyhow::{Error, Result};
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use hdfs_native::{Client, WriteOptions};
+use hdfs_native::{Client, HdfsError, WriteOptions};
 use log::{debug, info};
 use std::collections::HashMap;
 use std::sync::Arc;
 use url::Url;
+
+impl From<HdfsError> for WorkerError {
+    fn from(value: HdfsError) -> Self {
+        WorkerError::Other(Error::new(value))
+    }
+}
 
 #[derive(Clone)]
 pub struct HdfsNativeClient {
@@ -63,7 +70,7 @@ impl HdfsDelegator for HdfsNativeClient {
         Ok(())
     }
 
-    async fn append(&self, file_path: &str, data: BytesWrapper) -> Result<()> {
+    async fn append(&self, file_path: &str, data: BytesWrapper) -> Result<(), WorkerError> {
         debug!("appending to {} with {} bytes", file_path, data.len());
         let file_path = &self.wrap_root(file_path);
         let mut file_writer = self
