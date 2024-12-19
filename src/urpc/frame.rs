@@ -12,8 +12,10 @@ use bytes::{Buf, Bytes};
 use log::warn;
 use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 use std::io::{Cursor, IoSlice};
+use strum_macros::EnumVariantNames;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::net::TcpStream;
 use tracing::{debug, info};
@@ -55,19 +57,27 @@ enum MessageType {
 
 const HEADER_LEN: usize = 4 + 1 + 4;
 
-#[derive(Debug)]
+#[derive(Debug, strum_macros::Display)]
 pub enum Frame {
+    #[strum(serialize = "SendShuffleData")]
     SendShuffleData(SendDataRequestCommand),
 
+    #[strum(serialize = "GetMemoryData")]
     GetMemoryData(GetMemoryDataRequestCommand),
+    #[strum(serialize = "GetMemoryDataResponse")]
     GetMemoryDataResponse(GetMemoryDataResponseCommand),
 
+    #[strum(serialize = "GetLocalDataIndex")]
     GetLocalDataIndex(GetLocalDataIndexRequestCommand),
+    #[strum(serialize = "GetLocalDataIndexResponse")]
     GetLocalDataIndexResponse(GetLocalDataIndexResponseCommand),
 
+    #[strum(serialize = "GetLocalData")]
     GetLocalData(GetLocalDataRequestCommand),
+    #[strum(serialize = "GetLocalDataResponse")]
     GetLocalDataResponse(GetLocalDataResponseCommand),
 
+    #[strum(serialize = "RpcResponse")]
     RpcResponse(RpcResponseCommand),
 }
 

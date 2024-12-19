@@ -12,7 +12,7 @@ use crate::urpc::shutdown::Shutdown;
 use crate::app::AppManagerRef;
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::error::WorkerError;
-use crate::metric::URPC_CONNECTION_NUMBER;
+use crate::metric::{URPC_CONNECTION_NUMBER, URPC_REQUEST_PROCESSING_LATENCY};
 use crate::urpc::command::Command;
 use anyhow::Result;
 use await_tree::InstrumentAwait;
@@ -109,6 +109,9 @@ impl Handler {
                 None => return Ok(()),
             };
 
+            let _ = URPC_REQUEST_PROCESSING_LATENCY
+                .with_label_values(&[&format!("{}", &frame)])
+                .start_timer();
             Command::from_frame(frame)?
                 .apply(
                     app_manager_ref.clone(),
@@ -165,6 +168,7 @@ mod test {
     use crate::rpc::DefaultRpcService;
     use crate::runtime::manager::RuntimeManager;
     use crate::storage::StorageService;
+    use crate::urpc::frame::Frame;
 
     #[tokio::test]
     #[ignore]
@@ -181,5 +185,11 @@ mod test {
         DefaultRpcService {}.start(&config, runtime_manager.clone(), app_manager_ref.clone())?;
 
         Ok(())
+    }
+
+    #[test]
+    fn enum_test() {
+        let frame = Frame::GetLocalData(Default::default());
+        assert_eq!("GetLocalData", format!("{}", frame));
     }
 }

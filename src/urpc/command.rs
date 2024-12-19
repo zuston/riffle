@@ -3,10 +3,7 @@ use crate::app::{
     WritingViewContext,
 };
 use crate::constant::StatusCode;
-use crate::metric::{
-    URPC_GET_LOCALFILE_DATA_PROCESS_TIME, URPC_GET_MEMORY_DATA_PROCESS_TIME,
-    URPC_SEND_DATA_PROCESS_TIME, URPC_SEND_DATA_TRANSPORT_TIME,
-};
+use crate::metric::URPC_SEND_DATA_TRANSPORT_TIME;
 use crate::store::ResponseDataIndex::Local;
 use crate::store::{Block, LocalDataIndex, ResponseData};
 use crate::urpc::connection::Connection;
@@ -74,7 +71,6 @@ impl GetMemoryDataRequestCommand {
         conn: &mut Connection,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
-        let timer = URPC_GET_MEMORY_DATA_PROCESS_TIME.start_timer();
         let request_id = self.request_id;
         let app_id = self.app_id.as_str();
         let shuffle_id = self.shuffle_id;
@@ -120,7 +116,6 @@ impl GetMemoryDataRequestCommand {
         };
         let frame = Frame::GetMemoryDataResponse(response);
         conn.write_frame(&frame).await?;
-        timer.observe_duration();
         Ok(())
     }
 }
@@ -133,7 +128,7 @@ pub struct GetLocalDataResponseCommand {
     pub(crate) data: Bytes,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct GetLocalDataRequestCommand {
     pub(crate) request_id: i64,
     pub(crate) app_id: String,
@@ -153,7 +148,6 @@ impl GetLocalDataRequestCommand {
         conn: &mut Connection,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
-        let timer = URPC_GET_LOCALFILE_DATA_PROCESS_TIME.start_timer();
         let request_id = self.request_id;
         let app_id = self.app_id.as_str();
         let shuffle_id = self.shuffle_id;
@@ -215,7 +209,6 @@ impl GetLocalDataRequestCommand {
 
         let frame = Frame::GetLocalDataResponse(command);
         conn.write_frame(&frame).await?;
-        timer.observe_duration();
         return Ok(());
     }
 }
@@ -341,8 +334,6 @@ impl SendDataRequestCommand {
         conn: &mut Connection,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
-        let timer = URPC_SEND_DATA_PROCESS_TIME.start_timer();
-
         let request_id = self.request_id;
         let ticket_id = self.ticket_id;
         let shuffle_id = self.shuffle_id;
@@ -429,7 +420,6 @@ impl SendDataRequestCommand {
             },
         };
         write_response(conn, response).await?;
-        timer.observe_duration();
         Ok(())
     }
 }

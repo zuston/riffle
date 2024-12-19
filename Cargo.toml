@@ -105,6 +105,8 @@ parking_lot = { version = "0.12.3", features = ["deadlock_detection"] }
 num_enum = "0.7.0"
 core_affinity = "0.8.1"
 chrono = "0.4.38"
+strum = "0.20.0"
+strum_macros = "0.20.0"
 
 [dependencies.mimalloc]
 version = "0.1.39"

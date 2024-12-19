@@ -251,33 +251,30 @@ pub static TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER: Lazy<IntCounterVec> = 
 
 // for urpc metrics
 
-pub static URPC_GET_LOCALFILE_DATA_PROCESS_TIME: Lazy<Histogram> = Lazy::new(|| {
-    let opts = HistogramOpts::new("urpc_get_localfile_data_process_time", "none")
-        .buckets(Vec::from(DEFAULT_BUCKETS as &'static [f64]));
-
-    let histogram = Histogram::with_opts(opts).unwrap();
-    histogram
+pub static URPC_REQUEST_PROCESSING_LATENCY: Lazy<HistogramVec> = Lazy::new(|| {
+    let opts = histogram_opts!(
+        "urpc_request_processing_latency",
+        "uRPC latency",
+        Vec::from(DEFAULT_BUCKETS as &'static [f64])
+    );
+    let urpc_latency = register_histogram_vec_with_registry!(opts, &["path"], REGISTRY).unwrap();
+    urpc_latency
 });
 
-pub static URPC_SEND_DATA_PROCESS_TIME: Lazy<Histogram> = Lazy::new(|| {
-    let opts = HistogramOpts::new("urpc_send_data_process_time", "none")
-        .buckets(Vec::from(DEFAULT_BUCKETS as &'static [f64]));
-
-    let histogram = Histogram::with_opts(opts).unwrap();
-    histogram
+pub static URPC_REQUEST_PARSING_LATENCY: Lazy<HistogramVec> = Lazy::new(|| {
+    let opts = histogram_opts!(
+        "urpc_request_parsing_latency",
+        "uRPC latency",
+        Vec::from(DEFAULT_BUCKETS as &'static [f64])
+    );
+    let urpc_latency = register_histogram_vec_with_registry!(opts, &["path"], REGISTRY).unwrap();
+    urpc_latency
 });
 
 pub static URPC_SEND_DATA_TRANSPORT_TIME: Lazy<Histogram> = Lazy::new(|| {
     let opts = HistogramOpts::new("urpc_send_data_transport_time", "none")
         .buckets(Vec::from(DEFAULT_BUCKETS as &'static [f64]));
 
-    let histogram = Histogram::with_opts(opts).unwrap();
-    histogram
-});
-
-pub static URPC_GET_MEMORY_DATA_PROCESS_TIME: Lazy<Histogram> = Lazy::new(|| {
-    let opts = HistogramOpts::new("urpc_get_memory_data_process_time", "none")
-        .buckets(Vec::from(DEFAULT_BUCKETS as &'static [f64]));
     let histogram = Histogram::with_opts(opts).unwrap();
     histogram
 });
@@ -801,19 +798,10 @@ fn register_custom_metrics() {
 
     // for urpc
     REGISTRY
-        .register(Box::new(URPC_SEND_DATA_PROCESS_TIME.clone()))
-        .expect("");
-    REGISTRY
         .register(Box::new(URPC_SEND_DATA_TRANSPORT_TIME.clone()))
         .expect("");
     REGISTRY
-        .register(Box::new(URPC_GET_LOCALFILE_DATA_PROCESS_TIME.clone()))
-        .expect("");
-    REGISTRY
         .register(Box::new(URPC_GET_LOCALFILE_DATA_TRANSPORT_TIME.clone()))
-        .expect("");
-    REGISTRY
-        .register(Box::new(URPC_GET_MEMORY_DATA_PROCESS_TIME.clone()))
         .expect("");
     REGISTRY
         .register(Box::new(URPC_CONNECTION_NUMBER.clone()))

@@ -4,6 +4,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 use tokio::net::TcpStream;
 
 use crate::error::WorkerError;
+use crate::metric::URPC_REQUEST_PARSING_LATENCY;
 use crate::urpc::frame::Frame;
 use anyhow::Result;
 
@@ -28,10 +29,14 @@ impl Connection {
 
         match Frame::check(&mut buf) {
             Ok(_) => {
+                let timer = std::time::Instant::now();
                 let len = buf.position() as usize;
                 buf.set_position(0);
                 let frame = Frame::parse(&mut buf)?;
                 self.buffer.advance(len);
+                URPC_REQUEST_PARSING_LATENCY
+                    .with_label_values(&[&format!("{}", &frame)])
+                    .observe(timer.elapsed().as_secs_f64());
                 Ok(Some(frame))
             }
             Err(WorkerError::STREAM_INCOMPLETE) => Ok(None),
