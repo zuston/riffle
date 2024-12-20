@@ -88,12 +88,16 @@ impl SpillWritingViewContext {
     }
 }
 
-async fn handle_spill_failure_whatever_error(message: &SpillMessage, store_ref: Arc<HybridStore>) {
+async fn handle_spill_failure_whatever_error(
+    message: &SpillMessage,
+    store_ref: Arc<HybridStore>,
+    flush_error: WorkerError,
+) {
     // Ignore all errors when app is not found. Because the pending spill operation may happen after app has been purged.
     let ctx = &message.ctx;
     let is_valid_app = ctx.is_valid();
     if !is_valid_app {
-        debug!("Dropping the spill event for app: {:?}. Ths app is not found, may be purged. Ignore this", &message.ctx.uid.app_id);
+        debug!("Dropping the spill event for app: {:?}. Ths app is not found, may be purged. Ignore this. error: {}", &message.ctx.uid.app_id, flush_error);
         TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND.inc();
     } else {
         warn!(
@@ -104,7 +108,7 @@ async fn handle_spill_failure_whatever_error(message: &SpillMessage, store_ref: 
             .release_memory_buffer(message.size, &message)
             .await
         {
-            error!("Errors on releasing memory data when dropping the spill event, that should not happen. err: {:#?}", err);
+            error!("Errors on releasing memory data when dropping the spill event, that should not happen. err: {:#?}. flush_error: {}", err, flush_error);
         }
         TOTAL_SPILL_EVENTS_DROPPED.inc();
         TOTAL_MEMORY_SPILL_OPERATION_FAILED.inc();
@@ -121,10 +125,9 @@ async fn handle_spill_failure(
     match err {
         WorkerError::SPILL_EVENT_EXCEED_RETRY_MAX_LIMIT(_)
         | WorkerError::PARTIAL_DATA_LOST(_)
-        | WorkerError::LOCAL_DISK_UNHEALTHY(_)
         | WorkerError::APP_HAS_BEEN_PURGED
         | WorkerError::APP_IS_NOT_FOUND => {
-            handle_spill_failure_whatever_error(message, store_ref).await;
+            handle_spill_failure_whatever_error(message, store_ref, err).await;
             false
         }
         error => {

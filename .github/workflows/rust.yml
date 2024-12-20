@@ -37,6 +37,7 @@ jobs:
         features:
           - ""
           - "memory-prof"
+          - "hdfs"
     runs-on: ubuntu-latest
     steps:
 
@@ -60,7 +61,7 @@ jobs:
         working-directory: ./
         run: cargo fmt --check
         if: ${{ matrix.features == '' }}
-      - name: Run tests
+      - name: Run basic tests
         working-directory: ./
         run: cargo test --verbose -- --test-threads=1
         if: ${{ matrix.features == '' }}
@@ -68,3 +69,7 @@ jobs:
         working-directory: ./
         run: cargo test --verbose --features memory-prof -- --test-threads=1
         if: ${{ matrix.features == 'memory-prof' }}
+      - name: Run tests with hdfs
+        working-directory: ./
+        run: cargo test --verbose --features hdfs -- --test-threads=1
+        if: ${{ matrix.features == 'hdfs' }}

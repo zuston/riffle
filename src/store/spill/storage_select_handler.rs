@@ -36,8 +36,8 @@ impl Subscriber for StorageSelectHandler {
         }
 
         if let Err(err) = select_result {
-            error!("Errors on the selecting storage for app: {:?} and then drop this event. error: {:?}", &msg.ctx.uid, err);
-            handle_spill_failure_whatever_error(msg, self.store.clone()).await;
+            error!("Errors on the selecting storage for app: {:?} and then drop this event. error: {:?}", &msg.ctx.uid, &err);
+            handle_spill_failure_whatever_error(msg, self.store.clone(), err).await;
         }
         false
     }

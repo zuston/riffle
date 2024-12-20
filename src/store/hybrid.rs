@@ -304,7 +304,7 @@ impl HybridStore {
                 warm
             }
         } else {
-            warm
+            cold
         };
 
         // huge partition fallback to hdfs if size > threshold
