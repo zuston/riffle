@@ -3,6 +3,7 @@ use crate::store::hybrid::HybridStore;
 use crate::store::spill::metrics::FlushingMetricsMonitor;
 use crate::store::spill::{handle_spill_failure, handle_spill_success, SpillMessage};
 use async_trait::async_trait;
+use log::{error, warn};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -23,7 +24,7 @@ unsafe impl Sync for StorageFlushHandler {}
 impl Subscriber for StorageFlushHandler {
     type Input = SpillMessage;
 
-    async fn on_event(&self, event: &Event<Self::Input>) -> bool {
+    async fn on_event(&self, event: Event<Self::Input>) -> bool {
         let message = event.get_data();
         let app_id = &message.ctx.uid.app_id;
 
@@ -31,20 +32,23 @@ impl Subscriber for StorageFlushHandler {
             FlushingMetricsMonitor::new(app_id, message.size, message.get_candidate_storage_type());
 
         let result = self.store.flush_storage_for_buffer(message).await;
-        let result = if result.is_ok() {
-            // release resource
-            handle_spill_success(message, self.store.clone()).await;
-            true
-        } else {
-            if let Err(err) = result {
+        match result {
+            Ok(_) => {
+                handle_spill_success(message, self.store.clone()).await;
+            }
+            Err(err) => {
                 message.inc_retry_counter();
                 let could_be_retried = handle_spill_failure(err, message, self.store.clone()).await;
-                !could_be_retried
-            } else {
-                true
+                if could_be_retried {
+                    if let Err(e) = &self.store.event_bus.publish(event).await {
+                        error!(
+                            "Errors on resending the event into parent event bus. err: {:#?}",
+                            e
+                        );
+                    }
+                }
             }
-        };
-
-        result
+        }
+        true
     }
 }

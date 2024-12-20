@@ -16,9 +16,10 @@ use tracing::Instrument;
 pub trait Subscriber: Send + Sync {
     type Input;
 
-    async fn on_event(&self, event: &Event<Self::Input>) -> bool;
+    async fn on_event(&self, event: Event<Self::Input>) -> bool;
 }
 
+#[derive(Debug, Clone)]
 pub struct Event<T> {
     pub data: T,
 }
@@ -139,7 +140,7 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
 
                     let binding = bus.inner.subscriber.get();
                     let subscriber = binding.as_ref().unwrap();
-                    let is_succeed = subscriber.on_event(&message).await;
+                    let _ = subscriber.on_event(message).await;
 
                     timer.observe_duration();
                     GAUGE_EVENT_BUS_QUEUE_HANDLING_SIZE
@@ -151,11 +152,11 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
 
                     drop(concurrency_guarder);
 
-                    let hook = bus.inner.event_executed_hook.clone();
-                    if hook.get().is_some() {
-                        let hook = hook.get().unwrap().clone();
-                        hook(message, is_succeed)
-                    }
+                    // let hook = bus.inner.event_executed_hook.clone();
+                    // if hook.get().is_some() {
+                    //     let hook = hook.get().unwrap().clone();
+                    //     hook(message, is_succeed)
+                    // }
                 }));
         }
     }
@@ -212,16 +213,6 @@ mod test {
     fn test_event_bus() -> anyhow::Result<()> {
         let runtime = create_runtime(1, "test");
         let mut event_bus = EventBus::new(&runtime, "test".to_string(), 1usize);
-
-        // create the hook
-        let hook_result_ref = Arc::new(AtomicBool::new(true));
-        let cloned = hook_result_ref.clone();
-        let func = move |message: Event<String>, is_succeed: bool| {
-            cloned.store(false, SeqCst);
-        };
-        let func = Box::new(func);
-        event_bus.with_hook(func);
-
         let flag = Arc::new(AtomicI64::new(0));
 
         struct SimpleCallback {
@@ -232,7 +223,7 @@ mod test {
         impl Subscriber for SimpleCallback {
             type Input = String;
 
-            async fn on_event(&self, event: &Event<Self::Input>) -> bool {
+            async fn on_event(&self, event: Event<Self::Input>) -> bool {
                 println!("SimpleCallback has accepted event: {:?}", event.get_data());
                 self.flag.fetch_add(1, Ordering::SeqCst);
                 true
@@ -262,9 +253,6 @@ mod test {
                 .with_label_values(&["test"])
                 .get()
         );
-
-        // case3: create the hook
-        assert_eq!(false, hook_result_ref.load(Relaxed));
 
         Ok(())
     }

@@ -26,19 +26,23 @@ unsafe impl Sync for StorageSelectHandler {}
 impl Subscriber for StorageSelectHandler {
     type Input = SpillMessage;
 
-    async fn on_event(&self, event: &Event<Self::Input>) -> bool {
+    async fn on_event(&self, event: Event<Self::Input>) -> bool {
         let msg = event.get_data();
         let select_result = self.store.select_storage_for_buffer(msg).await;
-
-        if select_result.is_ok() {
-            msg.set_candidate_storage_type(select_result.unwrap());
-            return true;
+        let upstream_event_bus = &self.store.event_bus;
+        match select_result {
+            Ok(storage) => {
+                if let Some(event_bus) = upstream_event_bus.children.get(&storage) {
+                    msg.set_candidate_storage_type(storage);
+                    let _ = event_bus.publish(event).await;
+                }
+                true
+            }
+            Err(e) => {
+                error!("Errors on the selecting storage for app: {:?} and then drop this event. error: {:?}", &msg.ctx.uid, &e);
+                handle_spill_failure_whatever_error(msg, self.store.clone(), e).await;
+                false
+            }
         }
-
-        if let Err(err) = select_result {
-            error!("Errors on the selecting storage for app: {:?} and then drop this event. error: {:?}", &msg.ctx.uid, &err);
-            handle_spill_failure_whatever_error(msg, self.store.clone(), err).await;
-        }
-        false
     }
 }

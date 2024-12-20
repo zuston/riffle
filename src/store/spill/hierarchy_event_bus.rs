@@ -5,7 +5,6 @@ use crate::runtime::manager::RuntimeManager;
 use crate::store::spill::SpillMessage;
 use anyhow::Result;
 use dashmap::DashMap;
-use log::warn;
 
 // This is the predefined event bus for the spill operations.
 // the parent is the dispatcher, it will firstly get the candidate
@@ -17,7 +16,7 @@ use log::warn;
 
 pub struct HierarchyEventBus<T> {
     parent: EventBus<T>,
-    children: DashMap<StorageType, EventBus<T>>,
+    pub(crate) children: DashMap<StorageType, EventBus<T>>,
 }
 
 impl HierarchyEventBus<SpillMessage> {
@@ -48,58 +47,11 @@ impl HierarchyEventBus<SpillMessage> {
             hdfs_concurrency,
         );
 
-        // dispatch event into the concrete handler when the selection is finished
-        let localfile_cloned = child_localfile.clone();
-        let hdfs_cloned = child_hdfs.clone();
-        let hook = move |msg: Event<SpillMessage>, is_succeed: bool| {
-            if !is_succeed {
-                return;
-            }
-
-            let msg = msg.data;
-            let stype = &msg.get_candidate_storage_type();
-            if stype.is_none() {
-                warn!(
-                    "No any candidates storage. Ignore this. app: {}",
-                    &msg.ctx.uid.app_id
-                );
-            } else {
-                if let Some(stype) = stype {
-                    let _ = match stype {
-                        LOCALFILE => localfile_cloned.sync_publish(msg.into()),
-                        HDFS => hdfs_cloned.sync_publish(msg.into()),
-                        _ => Ok(()),
-                    };
-                };
-            }
-        };
-        parent.with_hook(Box::new(hook));
-
-        // setup the retry or drop hook for children handlers
-        let parent_cloned = parent.clone();
-        let hook = move |msg: Event<SpillMessage>, is_succeed: bool| {
-            if is_succeed {
-                return;
-            }
-            if let Err(err) = parent_cloned.sync_publish(msg) {
-                warn!(
-                    "Errors on resending the event into parent event bus. err: {:#?}",
-                    err
-                );
-            }
-        };
-        child_localfile.with_hook(Box::new(hook.clone()));
-        child_hdfs.with_hook(Box::new(hook));
-
-        let parent_cloned = parent.clone();
         let children = DashMap::new();
         children.insert(LOCALFILE, child_localfile);
         children.insert(HDFS, child_hdfs);
 
-        Self {
-            parent: parent_cloned,
-            children,
-        }
+        Self { parent, children }
     }
 
     pub fn subscribe<
@@ -123,8 +75,8 @@ impl HierarchyEventBus<SpillMessage> {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::Config;
     use crate::config::StorageType::{HDFS, LOCALFILE};
-    use crate::config::{Config, StorageType};
     use crate::event_bus::{Event, Subscriber};
     use crate::runtime::manager::RuntimeManager;
     use crate::store::spill::hierarchy_event_bus::HierarchyEventBus;
@@ -140,16 +92,26 @@ mod tests {
     struct SelectionHandler {
         ops: Arc<AtomicU64>,
         result_ref: Arc<AtomicBool>,
+        event_bus: Arc<HierarchyEventBus<SpillMessage>>,
     }
     #[async_trait]
     impl Subscriber for SelectionHandler {
         type Input = SpillMessage;
 
-        async fn on_event(&self, event: &Event<Self::Input>) -> bool {
+        async fn on_event(&self, event: Event<Self::Input>) -> bool {
             let msg = &event.data;
             msg.set_candidate_storage_type(LOCALFILE);
             self.ops.fetch_add(1, SeqCst);
-            self.result_ref.load(SeqCst)
+            if self.result_ref.load(SeqCst) {
+                let _ = self
+                    .event_bus
+                    .children
+                    .get(&LOCALFILE)
+                    .unwrap()
+                    .publish(event)
+                    .await;
+            }
+            true
         }
     }
 
@@ -159,24 +121,23 @@ mod tests {
         result_ref: Arc<AtomicBool>,
         failure_counter: Arc<AtomicU64>,
         failure_max: u64,
+        event_bus: Arc<HierarchyEventBus<SpillMessage>>,
     }
     #[async_trait]
     impl Subscriber for FlushHandler {
         type Input = SpillMessage;
 
-        async fn on_event(&self, event: &Event<Self::Input>) -> bool {
+        async fn on_event(&self, event: Event<Self::Input>) -> bool {
             println!("Flushed");
             self.ops.fetch_add(1, SeqCst);
-            let is_succeed = self.result_ref.load(SeqCst);
-            if !is_succeed {
-                return if self.failure_counter.load(SeqCst) >= self.failure_max {
-                    true
-                } else {
-                    self.failure_counter.fetch_add(1, SeqCst);
-                    false
-                };
+            if self.result_ref.load(SeqCst) {
+                return true;
             }
-            return true;
+            if self.failure_counter.load(SeqCst) < self.failure_max {
+                let _ = self.event_bus.publish(event).await;
+                self.failure_counter.fetch_add(1, SeqCst);
+            }
+            true
         }
     }
 
@@ -223,7 +184,7 @@ mod tests {
     fn test_event_bus() -> Result<()> {
         let runtime_manager = RuntimeManager::default();
         let config = Config::create_simple_config();
-        let event_bus = HierarchyEventBus::new(&runtime_manager, &config);
+        let event_bus = Arc::new(HierarchyEventBus::new(&runtime_manager, &config));
 
         let select_handler_ops = Arc::new(AtomicU64::new(0));
         let select_handler_result = Arc::new(AtomicBool::new(true));
@@ -233,6 +194,7 @@ mod tests {
         let select_handler = SelectionHandler {
             ops: cloned,
             result_ref: result_cloned,
+            event_bus: event_bus.clone(),
         };
 
         let flush_handler_ops = Arc::new(AtomicU64::new(0));
@@ -245,6 +207,7 @@ mod tests {
             result_ref: result_cloned,
             failure_counter: Default::default(),
             failure_max: 3,
+            event_bus: event_bus.clone(),
         };
 
         event_bus.subscribe(select_handler, flush_handler);
