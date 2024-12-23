@@ -60,10 +60,10 @@ impl LocalfileStoreStat {
     pub fn is_healthy(&self, used_ratio_threshold: f64) -> bool {
         for stat in &self.stats {
             if stat.used_ratio > used_ratio_threshold {
-                return true;
+                return false;
             }
         }
-        false
+        true
     }
 }
 
