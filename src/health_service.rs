@@ -9,6 +9,7 @@ pub struct HealthService {
     hybrid_storage: HybridStorage,
 
     alive_app_number_limit: Option<usize>,
+    disk_used_ratio_health_threshold: Option<f64>,
 }
 
 impl HealthService {
@@ -21,10 +22,18 @@ impl HealthService {
             app_manager_ref: app_manager.clone(),
             hybrid_storage: storage.clone(),
             alive_app_number_limit: conf.alive_app_number_max_limit,
+            disk_used_ratio_health_threshold: conf.disk_used_ratio_health_threshold,
         }
     }
 
     pub async fn is_healthy(&self) -> Result<bool> {
+        if let Some(disk_used_ratio_health_threshold) = self.disk_used_ratio_health_threshold {
+            let localfile_stat = self.app_manager_ref.store_localfile_stat()?;
+            if !localfile_stat.is_healthy(disk_used_ratio_health_threshold) {
+                return Ok(false);
+            }
+        }
+
         if !self.app_manager_ref.store_is_healthy().await? {
             return Ok(false);
         }

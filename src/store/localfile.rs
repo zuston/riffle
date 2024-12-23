@@ -53,7 +53,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::Instrument;
 
-use crate::store::local::{LocalDiskStorage, LocalIO};
+use crate::store::local::{LocalDiskStorage, LocalIO, LocalfileStoreStat};
 use crate::store::spill::SpillWritingViewContext;
 
 struct LockedObj {
@@ -97,6 +97,15 @@ impl LocalFileStore {
             runtime_manager,
             partition_locks: Default::default(),
         }
+    }
+
+    pub fn stat(&self) -> Result<LocalfileStoreStat> {
+        let mut stats = vec![];
+        for local_disk in &self.local_disks {
+            let stat = local_disk.stat()?;
+            stats.push(stat);
+        }
+        Ok(LocalfileStoreStat { stats })
     }
 
     pub fn from(localfile_config: LocalfileStoreConfig, runtime_manager: RuntimeManager) -> Self {

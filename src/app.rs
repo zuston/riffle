@@ -50,6 +50,7 @@ use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::constant::ALL_LABEL;
 use crate::grpc::protobuf::uniffle::RemoteStorage;
 use crate::storage::HybridStorage;
+use crate::store::local::LocalfileStoreStat;
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::util;
 use await_tree::InstrumentAwait;
@@ -828,6 +829,10 @@ impl AppManager {
 
     pub async fn store_memory_snapshot(&self) -> Result<CapacitySnapshot> {
         self.store.mem_snapshot()
+    }
+
+    pub fn store_localfile_stat(&self) -> Result<LocalfileStoreStat> {
+        self.store.localfile_stat()
     }
 
     pub fn store_memory_spill_event_num(&self) -> Result<u64> {

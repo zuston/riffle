@@ -10,7 +10,7 @@ use crate::metric::{
 use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::local::sync_io::SyncLocalIO;
-use crate::store::local::{FileStat, LocalDiskStorage, LocalIO};
+use crate::store::local::{DiskStat, FileStat, LocalDiskStorage, LocalIO};
 use crate::store::BytesWrapper;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -149,6 +149,22 @@ impl LocalDiskDelegator {
                 self.mark_corrupted()?;
             }
         }
+    }
+
+    fn used_ratio(&self) -> Result<f64> {
+        let capacity = self.get_disk_capacity()?;
+        let available = self.get_disk_available()?;
+        let used = capacity - available;
+        let used_ratio = used as f64 / capacity as f64;
+        Ok(used_ratio)
+    }
+
+    pub fn stat(&self) -> Result<DiskStat> {
+        let used_ratio = self.used_ratio()?;
+        Ok(DiskStat {
+            root: self.root(),
+            used_ratio,
+        })
     }
 
     async fn capacity_check(&self) -> Result<()> {

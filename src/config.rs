@@ -187,6 +187,7 @@ impl Default for RuntimeConfig {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 pub struct HealthServiceConfig {
     pub alive_app_number_max_limit: Option<usize>,
+    pub disk_used_ratio_health_threshold: Option<f64>,
 }
 
 // =========================================================

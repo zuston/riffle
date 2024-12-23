@@ -55,6 +55,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::runtime::manager::RuntimeManager;
+use crate::store::local::LocalfileStoreStat;
 use crate::store::mem::buffer::MemoryBuffer;
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::spill::hierarchy_event_bus::HierarchyEventBus;
@@ -63,11 +64,21 @@ use crate::store::spill::storage_select_handler::StorageSelectHandler;
 use crate::store::spill::{SpillMessage, SpillWritingViewContext};
 use tokio::time::Instant;
 
-pub trait PersistentStore: Store + Persistent + Send + Sync {}
-impl PersistentStore for LocalFileStore {}
+pub trait PersistentStore: Store + Persistent + Send + Sync + Any {
+    fn as_any(&self) -> &dyn Any;
+}
+impl PersistentStore for LocalFileStore {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 #[cfg(feature = "hdfs")]
-impl PersistentStore for HdfsStore {}
+impl PersistentStore for HdfsStore {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 const DEFAULT_MEMORY_SPILL_MAX_CONCURRENCY: i32 = 20;
 
@@ -348,6 +359,15 @@ impl HybridStore {
 
     pub fn mem_snapshot(&self) -> Result<CapacitySnapshot> {
         self.hot_store.memory_snapshot()
+    }
+
+    pub fn localfile_stat(&self) -> Result<LocalfileStoreStat> {
+        if let Some(warm) = self.warm_store.as_ref() {
+            if let Some(localfile) = warm.as_any().downcast_ref::<LocalFileStore>() {
+                return localfile.stat();
+            }
+        }
+        Ok(Default::default())
     }
 
     pub async fn get_memory_buffer(&self, uid: &PartitionedUId) -> Result<Arc<MemoryBuffer>> {

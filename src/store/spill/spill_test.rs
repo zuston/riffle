@@ -303,6 +303,7 @@ mod mock {
     use crate::store::{Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex, Store};
     use async_trait::async_trait;
     use parking_lot::Mutex;
+    use std::any::Any;
     use std::sync::atomic::Ordering::SeqCst;
     use std::sync::atomic::{AtomicBool, AtomicU64};
     use std::sync::Arc;
@@ -338,7 +339,11 @@ mod mock {
         }
     }
     impl Persistent for MockStore {}
-    impl PersistentStore for MockStore {}
+    impl PersistentStore for MockStore {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
     #[async_trait]
     impl Store for MockStore {
         fn start(self: Arc<Self>) {
