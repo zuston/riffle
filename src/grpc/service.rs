@@ -35,8 +35,9 @@ use crate::grpc::protobuf::uniffle::{
     ShuffleUnregisterByAppIdResponse, ShuffleUnregisterRequest, ShuffleUnregisterResponse,
 };
 use crate::metric::{
-    GRPC_BUFFER_REQUIRE_PROCESS_TIME, GRPC_GET_LOCALFILE_DATA_PROCESS_TIME,
-    GRPC_GET_LOCALFILE_DATA_TRANSPORT_TIME, GRPC_GET_MEMORY_DATA_FREEZE_PROCESS_TIME,
+    GRPC_BUFFER_REQUIRE_PROCESS_TIME, GRPC_GET_LOCALFILE_DATA_LATENCY,
+    GRPC_GET_LOCALFILE_DATA_PROCESS_TIME, GRPC_GET_LOCALFILE_DATA_TRANSPORT_TIME,
+    GRPC_GET_LOCALFILE_INDEX_LATENCY, GRPC_GET_MEMORY_DATA_FREEZE_PROCESS_TIME,
     GRPC_GET_MEMORY_DATA_PROCESS_TIME, GRPC_GET_MEMORY_DATA_TRANSPORT_TIME,
     GRPC_SEND_DATA_PROCESS_TIME, GRPC_SEND_DATA_TRANSPORT_TIME,
 };
@@ -51,6 +52,7 @@ use fastrace::future::FutureExt;
 use fastrace::trace;
 use log::{debug, error, info, warn};
 use std::collections::HashMap;
+use tokio::time::Instant;
 use tonic::{Request, Response, Status};
 
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
@@ -315,6 +317,7 @@ impl ShuffleServer for DefaultShuffleServer {
         &self,
         request: Request<GetLocalShuffleIndexRequest>,
     ) -> Result<Response<GetLocalShuffleIndexResponse>, Status> {
+        let start = tokio::time::Instant::now();
         let req = request.into_inner();
         let app_id = req.app_id;
         let shuffle_id: i32 = req.shuffle_id;
@@ -363,6 +366,8 @@ impl ShuffleServer for DefaultShuffleServer {
             }));
         }
 
+        GRPC_GET_LOCALFILE_INDEX_LATENCY.record(start.elapsed().as_millis() as u64);
+
         match data_index_wrapper.unwrap() {
             ResponseDataIndex::Local(data_index) => {
                 Ok(Response::new(GetLocalShuffleIndexResponse {
@@ -380,6 +385,7 @@ impl ShuffleServer for DefaultShuffleServer {
         &self,
         request: Request<GetLocalShuffleDataRequest>,
     ) -> Result<Response<GetLocalShuffleDataResponse>, Status> {
+        let start = tokio::time::Instant::now();
         let timer = GRPC_GET_LOCALFILE_DATA_PROCESS_TIME.start_timer();
         let req = request.into_inner();
         let app_id = req.app_id;
@@ -434,6 +440,8 @@ impl ShuffleServer for DefaultShuffleServer {
         }
 
         timer.observe_duration();
+
+        GRPC_GET_LOCALFILE_DATA_LATENCY.record(start.elapsed().as_millis() as u64);
 
         Ok(Response::new(GetLocalShuffleDataResponse {
             data: data_fetched_result.unwrap().from_local(),

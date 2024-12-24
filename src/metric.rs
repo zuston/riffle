@@ -17,15 +17,17 @@
 
 use crate::app::SHUFFLE_SERVER_ID;
 use crate::config::Config;
+use crate::histogram;
 use crate::mem_allocator::ALLOCATOR;
 use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
 use log::{error, info};
 use once_cell::sync::Lazy;
 use prometheus::{
-    histogram_opts, labels, register_gauge_vec, register_histogram_vec_with_registry,
-    register_int_counter_vec, register_int_gauge_vec, GaugeVec, Histogram, HistogramOpts,
-    HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
+    histogram_opts, labels, register_gauge_vec, register_histogram_vec,
+    register_histogram_vec_with_registry, register_int_counter_vec, register_int_gauge_vec,
+    GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge,
+    IntGaugeVec, Registry,
 };
 use std::collections::HashMap;
 use std::time::Duration;
@@ -49,6 +51,12 @@ const SPILL_BATCH_SIZE_BUCKETS: &[f64] = &[
     ReadableSize::gb(10).as_bytes() as f64,
     ReadableSize::gb(100).as_bytes() as f64,
 ];
+
+pub static GRPC_GET_LOCALFILE_DATA_LATENCY: Lazy<histogram::Histogram> =
+    Lazy::new(|| crate::histogram::Histogram::new("grpc_get_localfile_data_latency"));
+
+pub static GRPC_GET_LOCALFILE_INDEX_LATENCY: Lazy<histogram::Histogram> =
+    Lazy::new(|| crate::histogram::Histogram::new("grpc_get_localfile_index_latency"));
 
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
 
@@ -99,6 +107,10 @@ pub static GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES: Lazy<IntGauge> = Lazy::new(|| {
         "in flush queue bytes of memory spill",
     )
     .expect("")
+});
+
+pub static LATENCY_GENERAL: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!("latency_general", "latency_general", &["name", "quantile"]).unwrap()
 });
 
 pub static GRPC_GET_MEMORY_DATA_TRANSPORT_TIME: Lazy<Histogram> = Lazy::new(|| {
@@ -835,6 +847,9 @@ impl MetricService {
                     // refresh the allocator size metrics
                     #[cfg(all(unix, feature = "allocator-analysis"))]
                     GAUGE_ALLOCATOR_ALLOCATED_SIZE.set(ALLOCATOR.allocated() as i64);
+
+                    GRPC_GET_LOCALFILE_DATA_LATENCY.observe();
+                    GRPC_GET_LOCALFILE_INDEX_LATENCY.observe();
 
                     let general_metrics = prometheus::gather();
                     let custom_metrics = REGISTRY.gather();

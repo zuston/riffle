@@ -63,6 +63,7 @@ mod log_service;
 #[cfg(feature = "logforth")]
 mod logforth_service;
 
+pub mod histogram;
 mod mem_allocator;
 mod metric;
 mod readable_size;
@@ -76,6 +77,7 @@ pub mod store;
 pub mod tracing;
 pub mod urpc;
 pub mod util;
+
 const MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY: &str = "MAX_MEMORY_ALLOCATION_LIMIT_SIZE";
 
 fn main() -> Result<()> {

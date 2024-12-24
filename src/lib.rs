@@ -46,6 +46,8 @@ mod reject;
 pub mod semaphore_with_index;
 pub mod storage;
 
+pub mod histogram;
+
 use crate::app::{AppManager, AppManagerRef};
 use crate::common::init_global_variable;
 use crate::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
