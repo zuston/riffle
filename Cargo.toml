@@ -51,6 +51,8 @@ allocator-analysis = ["dep:cap"]
 
 mimalloc = ["dep:mimalloc"]
 
+logforth = ["dep:logforth"]
+
 [dependencies]
 anyhow = "1"
 tokio = { version = "1.28.2", features = ["full"] }
@@ -107,6 +109,11 @@ core_affinity = "0.8.1"
 chrono = "0.4.38"
 strum = "0.20.0"
 strum_macros = "0.20.0"
+
+[dependencies.logforth]
+version = "0.19.1"
+features = ["rolling-file"]
+optional = true
 
 [dependencies.mimalloc]
 version = "0.1.39"

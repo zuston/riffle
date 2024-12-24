@@ -23,7 +23,12 @@ use crate::config::Config;
 use crate::health_service::HealthService;
 use crate::heartbeat::HeartbeatTask;
 use crate::http::{HTTPServer, HttpMonitorService};
+#[cfg(not(feature = "logforth"))]
 use crate::log_service::LogService;
+
+#[cfg(feature = "logforth")]
+use crate::logforth_service::LogService;
+
 use crate::mem_allocator::ALLOCATOR;
 use crate::metric::MetricService;
 use crate::readable_size::ReadableSize;
@@ -51,7 +56,13 @@ pub mod health_service;
 pub mod heartbeat;
 mod http;
 pub mod kerberos;
+
+#[cfg(not(feature = "logforth"))]
 mod log_service;
+
+#[cfg(feature = "logforth")]
+mod logforth_service;
+
 mod mem_allocator;
 mod metric;
 mod readable_size;
@@ -87,7 +98,11 @@ fn main() -> Result<()> {
     let config_path = args_match.value_of("config").unwrap_or("./config.toml");
     let config = Config::from(config_path);
 
-    let _guard = LogService::init(&config.log.clone());
+    #[cfg(not(feature = "logforth"))]
+    let _guard = LogService::init(&config.log);
+
+    #[cfg(feature = "logforth")]
+    let _guard = LogService::init(&config.log);
 
     init_global_variable(&config);
 
