@@ -1,5 +1,6 @@
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::config::LocalfileStoreConfig;
+use crate::error::WorkerError;
 use crate::metric::{
     GAUGE_LOCAL_DISK_CAPACITY, GAUGE_LOCAL_DISK_IS_HEALTHY, GAUGE_LOCAL_DISK_USED,
     GAUGE_LOCAL_DISK_USED_RATIO, LOCALFILE_DISK_APPEND_OPERATION_DURATION,
@@ -23,7 +24,10 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::time::timeout;
 use tracing::{info, Instrument};
+
+pub static IO_DURATION_THRESHOLD: u64 = 20 * 60;
 
 #[derive(Clone)]
 pub struct LocalDiskDelegator {
@@ -240,15 +244,15 @@ impl LocalDiskDelegator {
 
 #[async_trait]
 impl LocalIO for LocalDiskDelegator {
-    async fn create_dir(&self, dir: &str) -> Result<()> {
-        self.inner
-            .io_handler
-            .create_dir(dir)
+    async fn create_dir(&self, dir: &str) -> Result<(), WorkerError> {
+        let future = self.inner.io_handler.create_dir(dir);
+        timeout(Duration::from_secs(IO_DURATION_THRESHOLD), future)
             .instrument_await(format!("create directory to disk: {}", &self.inner.root))
-            .await
+            .await??;
+        Ok(())
     }
 
-    async fn append(&self, path: &str, data: BytesWrapper) -> Result<()> {
+    async fn append(&self, path: &str, data: BytesWrapper) -> Result<(), WorkerError> {
         // todo: add the concurrency limitation. do we need? may be not.
 
         let timer = LOCALFILE_DISK_APPEND_OPERATION_DURATION
@@ -256,11 +260,10 @@ impl LocalIO for LocalDiskDelegator {
             .start_timer();
         let len = data.len();
 
-        self.inner
-            .io_handler
-            .append(path, data)
+        let future = self.inner.io_handler.append(path, data);
+        timeout(Duration::from_secs(IO_DURATION_THRESHOLD), future)
             .instrument_await(format!("append to disk: {}", &self.inner.root))
-            .await?;
+            .await??;
 
         timer.observe_duration();
         TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER
@@ -272,17 +275,20 @@ impl LocalIO for LocalDiskDelegator {
         Ok(())
     }
 
-    async fn read(&self, path: &str, offset: i64, length: Option<i64>) -> Result<Bytes> {
+    async fn read(
+        &self,
+        path: &str,
+        offset: i64,
+        length: Option<i64>,
+    ) -> Result<Bytes, WorkerError> {
         let timer = LOCALFILE_DISK_READ_OPERATION_DURATION
             .with_label_values(&[&self.inner.root])
             .start_timer();
 
-        let data = self
-            .inner
-            .io_handler
-            .read(path, offset, length)
+        let future = self.inner.io_handler.read(path, offset, length);
+        let data = timeout(Duration::from_secs(IO_DURATION_THRESHOLD), future)
             .instrument_await(format!("read from disk: {}", &self.inner.root))
-            .await?;
+            .await??;
 
         timer.observe_duration();
         TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER
@@ -294,36 +300,35 @@ impl LocalIO for LocalDiskDelegator {
         Ok(data)
     }
 
-    async fn delete(&self, path: &str) -> Result<()> {
+    async fn delete(&self, path: &str) -> Result<(), WorkerError> {
         let timer = LOCALFILE_DISK_DELETE_OPERATION_DURATION
             .with_label_values(&[&self.inner.root])
             .start_timer();
 
-        self.inner
-            .io_handler
-            .delete(path)
+        let future = self.inner.io_handler.delete(path);
+        timeout(Duration::from_secs(IO_DURATION_THRESHOLD), future)
             .instrument_await(format!("delete from disk: {}", &self.inner.root))
-            .await?;
+            .await??;
 
         timer.observe_duration();
 
         Ok(())
     }
 
-    async fn write(&self, path: &str, data: Bytes) -> Result<()> {
-        self.inner
-            .io_handler
-            .write(path, data)
+    async fn write(&self, path: &str, data: Bytes) -> Result<(), WorkerError> {
+        let future = self.inner.io_handler.write(path, data);
+        timeout(Duration::from_secs(IO_DURATION_THRESHOLD), future)
             .instrument_await(format!("write to disk: {}", &self.inner.root))
-            .await
+            .await??;
+        Ok(())
     }
 
-    async fn file_stat(&self, path: &str) -> Result<FileStat> {
-        self.inner
-            .io_handler
-            .file_stat(path)
+    async fn file_stat(&self, path: &str) -> Result<FileStat, WorkerError> {
+        let future = self.inner.io_handler.file_stat(path);
+        let file_stat = timeout(Duration::from_secs(IO_DURATION_THRESHOLD), future)
             .instrument_await(format!("state disk: {}", &self.inner.root))
-            .await
+            .await??;
+        Ok(file_stat)
     }
 }
 

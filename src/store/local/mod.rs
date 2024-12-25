@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use crate::error::WorkerError;
 use crate::store::BytesWrapper;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -30,12 +31,17 @@ pub struct FileStat {
 
 #[async_trait]
 pub trait LocalIO: Clone {
-    async fn create_dir(&self, dir: &str) -> Result<()>;
-    async fn append(&self, path: &str, data: BytesWrapper) -> Result<()>;
-    async fn read(&self, path: &str, offset: i64, length: Option<i64>) -> Result<Bytes>;
-    async fn delete(&self, path: &str) -> Result<()>;
-    async fn write(&self, path: &str, data: Bytes) -> Result<()>;
-    async fn file_stat(&self, path: &str) -> Result<FileStat>;
+    async fn create_dir(&self, dir: &str) -> Result<(), WorkerError>;
+    async fn append(&self, path: &str, data: BytesWrapper) -> Result<(), WorkerError>;
+    async fn read(
+        &self,
+        path: &str,
+        offset: i64,
+        length: Option<i64>,
+    ) -> Result<Bytes, WorkerError>;
+    async fn delete(&self, path: &str) -> Result<(), WorkerError>;
+    async fn write(&self, path: &str, data: Bytes) -> Result<(), WorkerError>;
+    async fn file_stat(&self, path: &str) -> Result<FileStat, WorkerError>;
 }
 
 pub trait LocalDiskStorage: LocalIO {

@@ -126,7 +126,8 @@ async fn handle_spill_failure(
         WorkerError::SPILL_EVENT_EXCEED_RETRY_MAX_LIMIT(_)
         | WorkerError::PARTIAL_DATA_LOST(_)
         | WorkerError::APP_HAS_BEEN_PURGED
-        | WorkerError::APP_IS_NOT_FOUND => {
+        | WorkerError::APP_IS_NOT_FOUND
+        | WorkerError::FUTURE_EXEC_TIMEOUT(_) => {
             handle_spill_failure_whatever_error(message, store_ref, err).await;
             false
         }

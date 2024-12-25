@@ -1,3 +1,4 @@
+use crate::error::WorkerError;
 use crate::runtime::RuntimeRef;
 use crate::store::local::{FileStat, LocalIO};
 use crate::store::BytesWrapper;
@@ -52,7 +53,7 @@ impl SyncLocalIO {
 
 #[async_trait]
 impl LocalIO for SyncLocalIO {
-    async fn create_dir(&self, dir: &str) -> anyhow::Result<()> {
+    async fn create_dir(&self, dir: &str) -> anyhow::Result<(), WorkerError> {
         let dir = self.with_root(dir);
         let r = self
             .inner
@@ -63,7 +64,7 @@ impl LocalIO for SyncLocalIO {
         Ok(())
     }
 
-    async fn append(&self, path: &str, data: BytesWrapper) -> anyhow::Result<()> {
+    async fn append(&self, path: &str, data: BytesWrapper) -> anyhow::Result<(), WorkerError> {
         let path = self.with_root(path);
         let buffer_capacity = self.inner.buf_writer_capacity.clone();
 
@@ -94,7 +95,12 @@ impl LocalIO for SyncLocalIO {
         Ok(())
     }
 
-    async fn read(&self, path: &str, offset: i64, length: Option<i64>) -> anyhow::Result<Bytes> {
+    async fn read(
+        &self,
+        path: &str,
+        offset: i64,
+        length: Option<i64>,
+    ) -> anyhow::Result<Bytes, WorkerError> {
         let path = self.with_root(path);
         let buf = self.inner.buf_reader_capacity.clone();
 
@@ -139,7 +145,7 @@ impl LocalIO for SyncLocalIO {
         Ok(r)
     }
 
-    async fn delete(&self, path: &str) -> anyhow::Result<()> {
+    async fn delete(&self, path: &str) -> anyhow::Result<(), WorkerError> {
         let path = self.with_root(path);
 
         let r = self
@@ -160,7 +166,7 @@ impl LocalIO for SyncLocalIO {
         Ok(())
     }
 
-    async fn write(&self, path: &str, data: Bytes) -> anyhow::Result<()> {
+    async fn write(&self, path: &str, data: Bytes) -> anyhow::Result<(), WorkerError> {
         let path = self.with_root(path);
         let r = self
             .inner
@@ -170,7 +176,7 @@ impl LocalIO for SyncLocalIO {
         Ok(())
     }
 
-    async fn file_stat(&self, path: &str) -> anyhow::Result<FileStat> {
+    async fn file_stat(&self, path: &str) -> anyhow::Result<FileStat, WorkerError> {
         let path = self.with_root(path);
         let r = self
             .inner

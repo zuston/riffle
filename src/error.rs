@@ -22,6 +22,8 @@ use log::error;
 use poem::error::ParseQueryError;
 use thiserror::Error;
 use tokio::sync::AcquireError;
+use tokio::task::JoinError;
+use tokio::time::error::Elapsed;
 
 #[derive(Error, Debug)]
 #[allow(non_camel_case_types)]
@@ -92,6 +94,12 @@ pub enum WorkerError {
     #[error("HDFS has been unhealthy.")]
     HDFS_UNHEALTHY,
 
+    #[error("future execution timeout. error: {0}")]
+    FUTURE_EXEC_TIMEOUT(anyhow::Error),
+
+    #[error("future join error: {0}")]
+    FUTURE_JOB_ERROR(anyhow::Error),
+
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -123,11 +131,24 @@ impl From<FromUtf8Error> for WorkerError {
     }
 }
 
+impl From<Elapsed> for WorkerError {
+    fn from(value: Elapsed) -> Self {
+        WorkerError::FUTURE_EXEC_TIMEOUT(Error::new(value))
+    }
+}
+
+impl From<JoinError> for WorkerError {
+    fn from(value: JoinError) -> Self {
+        WorkerError::FUTURE_JOB_ERROR(Error::new(value))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-
+    use crate::error::WorkerError;
     use crate::error::WorkerError::HDFS_IO_ERROR;
     use anyhow::{Error, Result};
+    use std::time::Duration;
 
     #[test]
     pub fn error_test() -> Result<()> {
@@ -141,6 +162,27 @@ mod tests {
         let e = Error::from(std::io::Error::new(std::io::ErrorKind::Other, "oh no!"));
         let raw = format!("{}", HDFS_IO_ERROR("".to_string(), e));
         assert_eq!(". error: oh no!", raw);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_await_timeout() -> Result<()> {
+        async fn exec() -> Result<(), WorkerError> {
+            let future = tokio::spawn(async {
+                tokio::time::sleep(Duration::from_millis(1000)).await;
+            });
+            let result = tokio::time::timeout(Duration::from_millis(200), future).await??;
+            Ok(())
+        }
+
+        match exec().await {
+            Err(e) => match e {
+                WorkerError::FUTURE_EXEC_TIMEOUT(_) => (),
+                _ => assert!(false),
+            },
+            _ => assert!(false),
+        }
+
         Ok(())
     }
 }
