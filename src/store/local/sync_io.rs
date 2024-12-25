@@ -1,4 +1,5 @@
 use crate::error::WorkerError;
+use crate::metric::LOCALFILE_READ_MEMORY_ALLOCATION_LATENCY;
 use crate::runtime::RuntimeRef;
 use crate::store::local::{FileStat, LocalIO};
 use crate::store::BytesWrapper;
@@ -10,6 +11,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
 use std::{fs, io};
 
 #[derive(Clone)]
@@ -116,7 +118,10 @@ impl LocalIO for SyncLocalIO {
 
                 let len = length.unwrap() as usize;
                 let mut file = File::open(path)?;
+
+                let start = Instant::now();
                 let mut buffer = vec![0; len];
+                LOCALFILE_READ_MEMORY_ALLOCATION_LATENCY.record(start.elapsed().as_nanos() as u64);
 
                 let bytes_read = match buf {
                     Some(capacity) => {

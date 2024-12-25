@@ -52,13 +52,16 @@ const SPILL_BATCH_SIZE_BUCKETS: &[f64] = &[
     ReadableSize::gb(100).as_bytes() as f64,
 ];
 
+pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
+
+pub static LOCALFILE_READ_MEMORY_ALLOCATION_LATENCY: Lazy<histogram::Histogram> =
+    Lazy::new(|| histogram::Histogram::new("localfile_read_memory_allocation_latency"));
+
 pub static GRPC_GET_LOCALFILE_DATA_LATENCY: Lazy<histogram::Histogram> =
-    Lazy::new(|| crate::histogram::Histogram::new("grpc_get_localfile_data_latency"));
+    Lazy::new(|| histogram::Histogram::new("grpc_get_localfile_data_latency"));
 
 pub static GRPC_GET_LOCALFILE_INDEX_LATENCY: Lazy<histogram::Histogram> =
-    Lazy::new(|| crate::histogram::Histogram::new("grpc_get_localfile_index_latency"));
-
-pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
+    Lazy::new(|| histogram::Histogram::new("grpc_get_localfile_index_latency"));
 
 pub static TOTAL_RECEIVED_DATA: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new("total_received_data", "Incoming Requests").expect("metric should be created")
@@ -850,6 +853,7 @@ impl MetricService {
 
                     GRPC_GET_LOCALFILE_DATA_LATENCY.observe();
                     GRPC_GET_LOCALFILE_INDEX_LATENCY.observe();
+                    LOCALFILE_READ_MEMORY_ALLOCATION_LATENCY.observe();
 
                     let general_metrics = prometheus::gather();
                     let custom_metrics = REGISTRY.gather();
