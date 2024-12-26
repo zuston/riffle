@@ -349,8 +349,8 @@ impl Store for LocalFileStore {
         let data = local_disk
             .read(&data_file_path, offset, Some(len))
             .instrument_await(format!(
-                "getting data with expected {} bytes from localfile: {}",
-                len, &data_file_path
+                "getting data from offset:{} with expected {} bytes from localfile: {}",
+                offset, len, &data_file_path
             ))
             .await?;
 
