@@ -1,8 +1,10 @@
+use crate::config::IoSchedulerConfig;
 use crate::metric::{
     IO_SCHEDULER_APPEND_PERMITS, IO_SCHEDULER_APPEND_WAIT, IO_SCHEDULER_READ_PERMITS,
     IO_SCHEDULER_READ_WAIT, IO_SCHEDULER_SHARED_PERMITS,
 };
 use await_tree::InstrumentAwait;
+use log::info;
 use prometheus::IntGaugeVec;
 use tokio::sync::{AcquireError, Semaphore, SemaphorePermit};
 
@@ -44,11 +46,21 @@ impl<'a> Drop for IoPermit<'a> {
 }
 
 impl IoScheduler {
-    pub fn new(root: &str, bandwidth: usize) -> IoScheduler {
-        let half = bandwidth / 2;
-        let read_buffer = Semaphore::new(half);
-        let append_buffer = Semaphore::new(half);
-        let shared_buffer = Semaphore::new(half);
+    pub fn new(root: &str, io_scheduler_config: &Option<IoSchedulerConfig>) -> IoScheduler {
+        let (bandwidth, read_ratio, append_ratio, shared_ratio) = match io_scheduler_config {
+            Some(io_scheduler) => (
+                io_scheduler.disk_bandwidth,
+                io_scheduler.read_buffer_ratio,
+                io_scheduler.append_buffer_ratio,
+                io_scheduler.shared_buffer_ratio,
+            ),
+            _ => (1024 * 1024 * 1024, 0.5, 0.5, 0.5),
+        };
+
+        info!("Initialized io scheduler with disk bandwidth {} of disk: {}. read: {}, append: {}, shared: {}", bandwidth, root, read_ratio, append_ratio, shared_ratio);
+        let read_buffer = Semaphore::new((bandwidth as f64 * read_ratio) as usize);
+        let append_buffer = Semaphore::new((bandwidth as f64 * append_ratio) as usize);
+        let shared_buffer = Semaphore::new((bandwidth as f64 * shared_ratio) as usize);
         Self {
             bandwidth,
             read_buffer,
@@ -105,12 +117,21 @@ impl IoScheduler {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::IoSchedulerConfig;
     use crate::store::local::scheduler::{IoScheduler, IoType};
     use anyhow::Result;
 
     #[tokio::test]
     async fn test_permit() -> Result<()> {
-        let scheduler = IoScheduler::new("/tmp", 10);
+        let scheduler = IoScheduler::new(
+            "/tmp",
+            &Some(IoSchedulerConfig {
+                disk_bandwidth: 10,
+                read_buffer_ratio: 0.5,
+                append_buffer_ratio: 0.5,
+                shared_buffer_ratio: 0.5,
+            }),
+        );
         let read_permit_1 = scheduler.acquire(IoType::READ, 4).await?;
         let read_permit_2 = scheduler.acquire(IoType::READ, 5).await?;
         let append_permit_1 = scheduler.acquire(IoType::APPEND, 4).await?;

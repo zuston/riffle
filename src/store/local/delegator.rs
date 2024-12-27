@@ -85,7 +85,7 @@ impl LocalDiskDelegator {
                 healthy_check_interval_sec: config.disk_healthy_check_interval_sec,
                 capacity_ref: Default::default(),
                 available_ref: Default::default(),
-                io_scheduler: IoScheduler::new(root, 1024 * 1024 * 1024),
+                io_scheduler: IoScheduler::new(root, &config.io_scheduler_config),
             }),
         };
 

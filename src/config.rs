@@ -116,7 +116,19 @@ pub struct LocalfileStoreConfig {
     pub disk_read_buf_capacity: String,
     #[serde(default = "as_default_disk_healthy_check_interval_sec")]
     pub disk_healthy_check_interval_sec: u64,
+
+    pub io_scheduler_config: Option<IoSchedulerConfig>,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct IoSchedulerConfig {
+    pub disk_bandwidth: usize,
+
+    pub read_buffer_ratio: f64,
+    pub append_buffer_ratio: f64,
+    pub shared_buffer_ratio: f64,
+}
+
 fn as_default_disk_healthy_check_interval_sec() -> u64 {
     60
 }
@@ -146,6 +158,7 @@ impl LocalfileStoreConfig {
             disk_write_buf_capacity: as_default_disk_write_buf_capacity(),
             disk_read_buf_capacity: as_default_disk_read_buf_capacity(),
             disk_healthy_check_interval_sec: as_default_disk_healthy_check_interval_sec(),
+            io_scheduler_config: None,
         }
     }
 }
