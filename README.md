@@ -1,18 +1,6 @@
 Another implementation of Apache Uniffle shuffle server (Single binary, no extra dependencies and quick)
 
-## Roadmap
-
-- [ ] Support storing data into s3
-- [ ] Support single buffer flush
-- [ ] Support huge partition limit
-- [ ] Quick decommission that will spill data into remote storage like s3
-- [ ] Using DirectIO to access file data
-- [x] Support customized protocol to interact with netty based uniffle client
-- [ ] Support writing multiple replicas by pipeline mode in server side
-- [ ] Create the grafana template to show the metrics dashboard by the unified style
-- [ ] Introduce the clippy to validate
-- [ ] Zero copy for **urpc** and mem + localfile getting/writing
-- [ ] Recover when upgrading
+> Production ready, this project has been used for online shuffle storage service.
 
 ## Benchmark report
 
