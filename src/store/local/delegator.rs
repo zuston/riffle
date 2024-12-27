@@ -10,6 +10,7 @@ use crate::metric::{
 };
 use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
+use crate::store::local::scheduler::{IoScheduler, IoType};
 use crate::store::local::sync_io::SyncLocalIO;
 use crate::store::local::{DiskStat, FileStat, LocalDiskStorage, LocalIO};
 use crate::store::BytesWrapper;
@@ -45,13 +46,13 @@ struct Inner {
     high_watermark: f32,
     low_watermark: f32,
 
-    concurrency: usize,
-
     healthy_check_interval_sec: u64,
 
     // only for the test case
     capacity_ref: OnceCell<Arc<AtomicU64>>,
     available_ref: OnceCell<Arc<AtomicU64>>,
+
+    io_scheduler: IoScheduler,
 }
 
 impl LocalDiskDelegator {
@@ -62,7 +63,6 @@ impl LocalDiskDelegator {
     ) -> LocalDiskDelegator {
         let high_watermark = config.disk_high_watermark;
         let low_watermark = config.disk_low_watermark;
-        let concurrency = config.disk_max_concurrency as usize;
         let write_capacity = ReadableSize::from_str(&config.disk_write_buf_capacity).unwrap();
         let read_capacity = ReadableSize::from_str(&config.disk_read_buf_capacity).unwrap();
 
@@ -82,10 +82,10 @@ impl LocalDiskDelegator {
                 is_corrupted: Arc::new(AtomicBool::new(false)),
                 high_watermark,
                 low_watermark,
-                concurrency,
                 healthy_check_interval_sec: config.disk_healthy_check_interval_sec,
                 capacity_ref: Default::default(),
                 available_ref: Default::default(),
+                io_scheduler: IoScheduler::new(root, 1024 * 1024 * 1024),
             }),
         };
 
@@ -253,7 +253,8 @@ impl LocalIO for LocalDiskDelegator {
     }
 
     async fn append(&self, path: &str, data: BytesWrapper) -> Result<(), WorkerError> {
-        // todo: add the concurrency limitation. do we need? may be not.
+        let len = data.len();
+        let _permit = self.inner.io_scheduler.acquire(IoType::APPEND, len).await?;
 
         let timer = LOCALFILE_DISK_APPEND_OPERATION_DURATION
             .with_label_values(&[&self.inner.root])
@@ -281,6 +282,12 @@ impl LocalIO for LocalDiskDelegator {
         offset: i64,
         length: Option<i64>,
     ) -> Result<Bytes, WorkerError> {
+        let _permit = self
+            .inner
+            .io_scheduler
+            .acquire(IoType::READ, 14 * 1024 * 1024)
+            .await?;
+
         let timer = LOCALFILE_DISK_READ_OPERATION_DURATION
             .with_label_values(&[&self.inner.root])
             .start_timer();

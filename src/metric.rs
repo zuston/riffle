@@ -608,7 +608,34 @@ pub static EVENT_BUS_HANDLE_DURATION: Lazy<HistogramVec> = Lazy::new(|| {
     opts
 });
 
+pub static IO_SCHEDULER_READ_PERMITS: Lazy<IntGaugeVec> =
+    Lazy::new(|| register_int_gauge_vec!("read_permits", "read_permits", &["root"]).unwrap());
+pub static IO_SCHEDULER_APPEND_PERMITS: Lazy<IntGaugeVec> =
+    Lazy::new(|| register_int_gauge_vec!("append_permits", "append_permits", &["root"]).unwrap());
+pub static IO_SCHEDULER_SHARED_PERMITS: Lazy<IntGaugeVec> =
+    Lazy::new(|| register_int_gauge_vec!("shared_permits", "shared_permits", &["root"]).unwrap());
+pub static IO_SCHEDULER_READ_WAIT: Lazy<IntGaugeVec> =
+    Lazy::new(|| register_int_gauge_vec!("read_wait", "read_wait", &["root"]).unwrap());
+pub static IO_SCHEDULER_APPEND_WAIT: Lazy<IntGaugeVec> =
+    Lazy::new(|| register_int_gauge_vec!("append_wait", "append_wait", &["root"]).unwrap());
+
 fn register_custom_metrics() {
+    REGISTRY
+        .register(Box::new(IO_SCHEDULER_READ_PERMITS.clone()))
+        .expect("");
+    REGISTRY
+        .register(Box::new(IO_SCHEDULER_APPEND_PERMITS.clone()))
+        .expect("");
+    REGISTRY
+        .register(Box::new(IO_SCHEDULER_SHARED_PERMITS.clone()))
+        .expect("");
+    REGISTRY
+        .register(Box::new(IO_SCHEDULER_READ_WAIT.clone()))
+        .expect("");
+    REGISTRY
+        .register(Box::new(IO_SCHEDULER_APPEND_WAIT.clone()))
+        .expect("");
+
     REGISTRY
         .register(Box::new(GAUGE_MEMORY_SPILL_IN_FLUSHING_BYTES.clone()))
         .expect("");

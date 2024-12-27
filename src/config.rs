@@ -110,8 +110,6 @@ pub struct LocalfileStoreConfig {
     pub disk_high_watermark: f32,
     #[serde(default = "as_default_disk_low_watermark")]
     pub disk_low_watermark: f32,
-    #[serde(default = "as_default_disk_max_concurrency")]
-    pub disk_max_concurrency: i32,
     #[serde(default = "as_default_disk_write_buf_capacity")]
     pub disk_write_buf_capacity: String,
     #[serde(default = "as_default_disk_read_buf_capacity")]
@@ -121,9 +119,6 @@ pub struct LocalfileStoreConfig {
 }
 fn as_default_disk_healthy_check_interval_sec() -> u64 {
     60
-}
-fn as_default_disk_max_concurrency() -> i32 {
-    2000
 }
 fn as_default_disk_low_watermark() -> f32 {
     0.7
@@ -148,7 +143,6 @@ impl LocalfileStoreConfig {
             min_number_of_available_disks: as_default_healthy_check_min_disks(),
             disk_high_watermark: as_default_disk_high_watermark(),
             disk_low_watermark: as_default_disk_low_watermark(),
-            disk_max_concurrency: as_default_disk_max_concurrency(),
             disk_write_buf_capacity: as_default_disk_write_buf_capacity(),
             disk_read_buf_capacity: as_default_disk_read_buf_capacity(),
             disk_healthy_check_interval_sec: as_default_disk_healthy_check_interval_sec(),

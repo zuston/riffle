@@ -23,6 +23,7 @@ use bytes::Bytes;
 
 pub mod async_io;
 pub mod delegator;
+mod scheduler;
 pub mod sync_io;
 
 pub struct FileStat {
