@@ -10,6 +10,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use bytes::{Bytes, BytesMut};
+use log::debug;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Error, Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -88,6 +89,13 @@ pub fn inner_direct_read(path: &str, offset: i64, len: i64) -> Result<Bytes, Err
 
     let start = offset as usize - left_boundary;
     let end = start + len as usize;
+    debug!(
+        "read {} bytes. start:{}, end:{}. data: {:?}",
+        &buf.len(),
+        start,
+        end,
+        &buf.to_vec()
+    );
     let data = Bytes::copy_from_slice(&buf[start..end]);
     Ok(data)
 }
@@ -259,9 +267,14 @@ impl LocalIO for SyncLocalIO {
                 } else {
                     (file_len, None)
                 };
+                let size = if let Some(b) = &remain_bytes {
+                    b.len()
+                } else {
+                    0
+                };
 
                 let mut opts = OpenOptions::new();
-                opts.append(true).create(true);
+                opts.create(true).write(true);
                 #[cfg(target_os = "linux")]
                 {
                     use std::os::unix::fs::OpenOptionsExt;
@@ -281,6 +294,12 @@ impl LocalIO for SyncLocalIO {
                 } else {
                     batch_data
                 };
+                debug!(
+                    "next_offset: {}. remain_bytes_len: {}. real flushed_data_len: {}",
+                    next_offset,
+                    size,
+                    flush_data.len()
+                );
                 let aligned_data = align_bytes(ALIGN, flush_data);
 
                 #[cfg(target_family = "unix")]
