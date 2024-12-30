@@ -2,9 +2,10 @@ use crate::bits::{align_bytes, align_down, align_up};
 use crate::error::WorkerError;
 use crate::metric::LOCALFILE_READ_MEMORY_ALLOCATION_LATENCY;
 use crate::runtime::RuntimeRef;
-use crate::store::local::allocator::ALIGN;
+use crate::store::local::allocator::{IoBuffer, ALIGN, IO_BUFFER_ALLOCATOR};
 use crate::store::local::{FileStat, LocalIO};
 use crate::store::BytesWrapper;
+use allocator_api2::SliceExt;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
@@ -270,7 +271,11 @@ impl LocalIO for SyncLocalIO {
                 let left_boundary = align_down(ALIGN, offset as usize);
                 let right_boundary = align_up(ALIGN, (offset + len) as usize);
                 let range = right_boundary - left_boundary;
-                let mut buffer = vec![0; range];
+
+                let mut buf = IoBuffer::with_capacity_in(range, &IO_BUFFER_ALLOCATOR);
+                unsafe {
+                    buf.set_len(range);
+                }
 
                 let path = Path::new(&path);
                 let mut file = File::open(path)?;
@@ -281,7 +286,7 @@ impl LocalIO for SyncLocalIO {
                 #[cfg(target_family = "windows")]
                 use std::os::windows::fs::FileExt;
 
-                let read = file.read_at(&mut *buffer, left_boundary as u64)?;
+                let read = file.read_at(buf.as_mut(), left_boundary as u64)?;
                 if read != range {
                     return Err(io::Error::new(
                         io::ErrorKind::Other,
@@ -294,7 +299,7 @@ impl LocalIO for SyncLocalIO {
 
                 let start = offset as usize - left_boundary;
                 let end = start + len as usize;
-                let data = Bytes::from(buffer).slice(start..end);
+                let data = Bytes::copy_from_slice(&buf[start..end]);
                 Ok(data)
             })
             .instrument_await("wait the spawned block future")
