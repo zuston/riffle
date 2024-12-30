@@ -151,9 +151,8 @@ pub fn align_bytes(align: usize, data: Bytes) -> Bytes {
 
 #[cfg(test)]
 mod tests {
-    use crate::bits::align_up;
     use bytes::Bytes;
-    use uniffle_worker::bits::{align_bytes, align_down};
+    use crate::bits::{align_up, align_bytes, align_down};
 
     #[test]
     fn test_align() {
