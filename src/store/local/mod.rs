@@ -21,6 +21,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
 
+pub mod allocator;
 pub mod async_io;
 pub mod delegator;
 mod scheduler;

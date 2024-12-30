@@ -2,6 +2,7 @@ use crate::bits::{align_bytes, align_down, align_up};
 use crate::error::WorkerError;
 use crate::metric::LOCALFILE_READ_MEMORY_ALLOCATION_LATENCY;
 use crate::runtime::RuntimeRef;
+use crate::store::local::allocator::ALIGN;
 use crate::store::local::{FileStat, LocalIO};
 use crate::store::BytesWrapper;
 use anyhow::anyhow;
@@ -14,8 +15,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 use std::{fs, io};
-
-pub const ALIGN: usize = 4096;
 
 #[derive(Clone)]
 pub struct SyncLocalIO {

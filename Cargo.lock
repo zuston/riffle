@@ -4448,6 +4448,7 @@ checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
 name = "uniffle-x"
 version = "0.1.0"
 dependencies = [
+ "allocator-api2",
  "anyhow",
  "async-channel",
  "async-trait",
