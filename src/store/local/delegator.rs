@@ -4,7 +4,8 @@ use crate::error::WorkerError;
 use crate::metric::{
     GAUGE_LOCAL_DISK_CAPACITY, GAUGE_LOCAL_DISK_IS_HEALTHY, GAUGE_LOCAL_DISK_USED,
     GAUGE_LOCAL_DISK_USED_RATIO, LOCALFILE_DISK_APPEND_OPERATION_DURATION,
-    LOCALFILE_DISK_DELETE_OPERATION_DURATION, LOCALFILE_DISK_READ_OPERATION_DURATION,
+    LOCALFILE_DISK_DELETE_OPERATION_DURATION, LOCALFILE_DISK_DIRECT_APPEND_OPERATION_DURATION,
+    LOCALFILE_DISK_DIRECT_READ_OPERATION_DURATION, LOCALFILE_DISK_READ_OPERATION_DURATION,
     TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER, TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER,
     TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER, TOTAL_LOCAL_DISK_READ_OPERATION_COUNTER,
 };
@@ -336,6 +337,28 @@ impl LocalIO for LocalDiskDelegator {
             .instrument_await(format!("state disk: {}", &self.inner.root))
             .await??;
         Ok(file_stat)
+    }
+
+    async fn direct_append(&self, path: &str, data: BytesWrapper) -> Result<u64, WorkerError> {
+        let timer = LOCALFILE_DISK_DIRECT_APPEND_OPERATION_DURATION
+            .with_label_values(&[&self.inner.root])
+            .start_timer();
+        self.inner.io_handler.direct_append(path, data).await
+    }
+
+    async fn direct_read(
+        &self,
+        path: &str,
+        offset: i64,
+        length: i64,
+    ) -> Result<Bytes, WorkerError> {
+        let timer = LOCALFILE_DISK_DIRECT_READ_OPERATION_DURATION
+            .with_label_values(&[&self.inner.root])
+            .start_timer();
+        self.inner
+            .io_handler
+            .direct_read(path, offset, length)
+            .await
     }
 }
 

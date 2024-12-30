@@ -218,6 +218,26 @@ pub static LOCALFILE_DISK_READ_OPERATION_DURATION: Lazy<HistogramVec> = Lazy::ne
     opts
 });
 
+pub static LOCALFILE_DISK_DIRECT_APPEND_OPERATION_DURATION: Lazy<HistogramVec> = Lazy::new(|| {
+    let opts = histogram_opts!(
+        "localfile_disk_direct_append_operation_duration",
+        "localfile disk direct append time",
+        Vec::from(DEFAULT_BUCKETS)
+    );
+    let opts = register_histogram_vec_with_registry!(opts, &["root"], REGISTRY).unwrap();
+    opts
+});
+
+pub static LOCALFILE_DISK_DIRECT_READ_OPERATION_DURATION: Lazy<HistogramVec> = Lazy::new(|| {
+    let opts = histogram_opts!(
+        "localfile_disk_direct_read_operation_duration",
+        "localfile disk direct read time",
+        Vec::from(DEFAULT_BUCKETS)
+    );
+    let opts = register_histogram_vec_with_registry!(opts, &["root"], REGISTRY).unwrap();
+    opts
+});
+
 pub static LOCALFILE_DISK_DELETE_OPERATION_DURATION: Lazy<HistogramVec> = Lazy::new(|| {
     let opts = histogram_opts!(
         "localfile_disk_delete_operation_duration",

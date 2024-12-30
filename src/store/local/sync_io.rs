@@ -1,3 +1,4 @@
+use crate::bits::{align_bytes, align_down, align_up};
 use crate::error::WorkerError;
 use crate::metric::LOCALFILE_READ_MEMORY_ALLOCATION_LATENCY;
 use crate::runtime::RuntimeRef;
@@ -13,6 +14,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 use std::{fs, io};
+
+pub const ALIGN: usize = 4096;
 
 #[derive(Clone)]
 pub struct SyncLocalIO {
@@ -192,14 +195,123 @@ impl LocalIO for SyncLocalIO {
             content_length: r.len(),
         })
     }
+
+    async fn direct_append(
+        &self,
+        path: &str,
+        data: BytesWrapper,
+    ) -> anyhow::Result<u64, WorkerError> {
+        let path = self.with_root(path);
+        let r = self
+            .inner
+            .write_runtime_ref
+            .spawn_blocking(move || {
+                let path = Path::new(&path);
+                let next_offset = match fs::metadata(&path) {
+                    Ok(metadata) => {
+                        let len = metadata.len();
+                        len
+                    }
+                    Err(_) => 0,
+                };
+
+                let mut opts = OpenOptions::new();
+                opts.append(true).create(true);
+                #[cfg(target_os = "linux")]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    opts.custom_flags(libc::O_DIRECT);
+                }
+                let file = opts.open(path)?;
+                let data = match data {
+                    BytesWrapper::Direct(bytes) => bytes,
+                    BytesWrapper::Composed(composed) => composed.freeze(),
+                };
+                let data = align_bytes(4096, data);
+
+                #[cfg(target_family = "unix")]
+                use std::os::unix::fs::FileExt;
+
+                #[cfg(target_family = "windows")]
+                use std::os::windows::fs::FileExt;
+
+                let written = file.write_at(&data, next_offset)?;
+                if written != data.len() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!(
+                            "Errors on direct appending. expected: {}, actual: {}",
+                            data.len(),
+                            written
+                        ),
+                    ));
+                }
+                file.sync_all()?;
+
+                Ok::<u64, io::Error>(written as u64 + next_offset)
+            })
+            .instrument_await("wait the spawned block future")
+            .await
+            .map_err(|e| anyhow!(e))??;
+
+        Ok(r)
+    }
+
+    async fn direct_read(
+        &self,
+        path: &str,
+        offset: i64,
+        len: i64,
+    ) -> anyhow::Result<Bytes, WorkerError> {
+        let path = self.with_root(path);
+        let r = self
+            .inner
+            .read_runtime_ref
+            .spawn_blocking(move || {
+                let left_boundary = align_down(ALIGN, offset as usize);
+                let right_boundary = align_up(ALIGN, (offset + len) as usize);
+                let range = right_boundary - left_boundary;
+                let mut buffer = vec![0; range];
+
+                let path = Path::new(&path);
+                let mut file = File::open(path)?;
+
+                #[cfg(target_family = "unix")]
+                use std::os::unix::fs::FileExt;
+
+                #[cfg(target_family = "windows")]
+                use std::os::windows::fs::FileExt;
+
+                let read = file.read_at(&mut *buffer, left_boundary as u64)?;
+                if read != range {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!(
+                            "Errors on direct read. expected: {}, actual: {}",
+                            range, read
+                        ),
+                    ));
+                }
+
+                let start = offset as usize - left_boundary;
+                let end = start + len as usize;
+                let data = Bytes::from(buffer).slice(start..end);
+                Ok(data)
+            })
+            .instrument_await("wait the spawned block future")
+            .await??;
+
+        Ok(r)
+    }
 }
 
 #[cfg(test)]
 mod test {
     use crate::runtime::manager::create_runtime;
-    use crate::store::local::sync_io::SyncLocalIO;
+    use crate::store::local::sync_io::{SyncLocalIO, ALIGN};
     use crate::store::local::LocalIO;
-    use bytes::Bytes;
+    use bytes::{Bytes, BytesMut};
+    use std::fs;
     use std::thread::{sleep, Thread};
     use std::time::Duration;
 
@@ -281,6 +393,63 @@ mod test {
         }
 
         assert_eq!(20, sum);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_direct_io() -> anyhow::Result<()> {
+        let base_runtime_ref = create_runtime(2, "base");
+
+        let read_rumtime_ref = create_runtime(1, "read");
+        let write_rumtime_ref = create_runtime(1, "write");
+
+        let temp_dir = tempdir::TempDir::new("test_direct_io")?;
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        // let temp_path = "/tmp/test_direct_io";
+        println!("created the temp file path: {}", &temp_path);
+
+        let data_file_name = "1.data";
+        let io_handler = SyncLocalIO::new(
+            &read_rumtime_ref,
+            &write_rumtime_ref,
+            &temp_path,
+            None,
+            None,
+        );
+
+        let mut written_data = BytesMut::new();
+        written_data.extend_from_slice(&vec![b'x'; 3]);
+        written_data.extend_from_slice(&vec![b'y'; 2]);
+        written_data.extend_from_slice(&vec![b'z'; 5]);
+        let written_data = written_data.freeze();
+
+        // append
+        let offset = base_runtime_ref
+            .block_on(io_handler.direct_append(data_file_name, written_data.clone().into()))?;
+        assert_eq!(ALIGN as u64, offset);
+        let offset = base_runtime_ref
+            .block_on(io_handler.direct_append(data_file_name, written_data.clone().into()))?;
+        assert_eq!(ALIGN as u64 * 2, offset);
+        let offset = base_runtime_ref.block_on(
+            io_handler.direct_append(data_file_name, Bytes::from(vec![b'a'; 4096 + 10]).into()),
+        )?;
+        assert_eq!(ALIGN as u64 * 4, offset);
+
+        // read
+        let data_1 = base_runtime_ref.block_on(io_handler.direct_read(data_file_name, 3, 3))?;
+        assert_eq!(vec![b'y', b'y', b'z'], data_1);
+
+        let data_2 =
+            base_runtime_ref.block_on(io_handler.direct_read(data_file_name, 4096 + 2, 4))?;
+        assert_eq!(vec![b'x', b'y', b'y', b'z'], data_2);
+
+        let data_3 = base_runtime_ref.block_on(io_handler.direct_read(
+            data_file_name,
+            4096 * 2,
+            4096 + 10,
+        ))?;
+        assert_eq!(vec![b'a'; 4096 + 10], data_3);
 
         Ok(())
     }

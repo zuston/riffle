@@ -255,8 +255,8 @@ impl LocalFileStore {
         }
 
         let shuffle_file_format = self.generate_shuffle_file_format(blocks, next_offset)?;
-        local_disk
-            .append(&data_file_path, shuffle_file_format.data)
+        let aligned_next_offset = local_disk
+            .direct_append(&data_file_path, shuffle_file_format.data)
             .instrument_await(format!(
                 "data flushing with {} bytes. path: {}",
                 shuffle_file_format.len, &data_file_path
@@ -276,7 +276,7 @@ impl LocalFileStore {
         locked_obj
             .deref()
             .pointer
-            .store(shuffle_file_format.offset, SeqCst);
+            .store(aligned_next_offset as i64, SeqCst);
 
         Ok(())
     }
@@ -347,7 +347,7 @@ impl Store for LocalFileStore {
         }
 
         let data = local_disk
-            .read(&data_file_path, offset, Some(len))
+            .direct_read(&data_file_path, offset, len)
             .instrument_await(format!(
                 "getting data from offset:{} with expected {} bytes from localfile: {}",
                 offset, len, &data_file_path
