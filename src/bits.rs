@@ -164,6 +164,12 @@ mod tests {
         let down_aligned = align_down(align, offset);
         assert_eq!(8192, up_aligned);
         assert_eq!(4096, down_aligned);
+
+        let offset = 4096;
+        let up_aligned = align_up(align, offset);
+        let down_aligned = align_down(align, offset);
+        assert_eq!(4096, up_aligned);
+        assert_eq!(4096, down_aligned);
     }
 
     #[test]

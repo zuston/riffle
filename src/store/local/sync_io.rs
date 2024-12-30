@@ -9,9 +9,9 @@ use allocator_api2::SliceExt;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{BufReader, BufWriter, Error, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
@@ -54,6 +54,42 @@ impl SyncLocalIO {
     fn with_root(&self, path: &str) -> String {
         format!("{}/{}", &self.inner.root, path)
     }
+}
+
+pub fn inner_direct_read(path: &str, offset: i64, len: i64) -> Result<Bytes, Error> {
+    let left_boundary = align_down(ALIGN, offset as usize);
+    let right_boundary = align_up(ALIGN, (offset + len) as usize);
+    let range = right_boundary - left_boundary;
+
+    let mut buf = IoBuffer::with_capacity_in(range, &IO_BUFFER_ALLOCATOR);
+    unsafe {
+        buf.set_len(range);
+    }
+
+    let path = Path::new(&path);
+    let mut file = File::open(path)?;
+
+    #[cfg(target_family = "unix")]
+    use std::os::unix::fs::FileExt;
+
+    #[cfg(target_family = "windows")]
+    use std::os::windows::fs::FileExt;
+
+    let read = file.read_at(buf.as_mut(), left_boundary as u64)?;
+    if read != range {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!(
+                "Errors on direct read. expected: {}, actual: {}",
+                range, read
+            ),
+        ));
+    }
+
+    let start = offset as usize - left_boundary;
+    let end = start + len as usize;
+    let data = Bytes::copy_from_slice(&buf[start..end]);
+    Ok(data)
 }
 
 #[async_trait]
@@ -199,20 +235,29 @@ impl LocalIO for SyncLocalIO {
     async fn direct_append(
         &self,
         path: &str,
-        data: BytesWrapper,
-    ) -> anyhow::Result<u64, WorkerError> {
-        let path = self.with_root(path);
+        written_bytes: usize,
+        raw_data: BytesWrapper,
+    ) -> anyhow::Result<(), WorkerError> {
+        let raw_path = self.with_root(path);
         let r = self
             .inner
             .write_runtime_ref
             .spawn_blocking(move || {
-                let path = Path::new(&path);
-                let next_offset = match fs::metadata(&path) {
+                let path = Path::new(&raw_path);
+                let file_len = match fs::metadata(&path) {
                     Ok(metadata) => {
                         let len = metadata.len();
                         len
                     }
                     Err(_) => 0,
+                };
+                let (next_offset, remain_bytes) = if file_len != written_bytes as u64 {
+                    let left = align_down(ALIGN, written_bytes);
+                    let remaining_bytes =
+                        inner_direct_read(&raw_path, left as i64, (written_bytes - left) as i64)?;
+                    (left as u64, Some(remaining_bytes))
+                } else {
+                    (file_len, None)
                 };
 
                 let mut opts = OpenOptions::new();
@@ -223,11 +268,20 @@ impl LocalIO for SyncLocalIO {
                     opts.custom_flags(libc::O_DIRECT);
                 }
                 let file = opts.open(path)?;
-                let data = match data {
+                let batch_data = match raw_data {
                     BytesWrapper::Direct(bytes) => bytes,
                     BytesWrapper::Composed(composed) => composed.freeze(),
                 };
-                let data = align_bytes(4096, data);
+                let flush_data = if let Some(remain_bytes) = remain_bytes {
+                    let mut bytes_mut =
+                        BytesMut::with_capacity(remain_bytes.len() + batch_data.len());
+                    bytes_mut.extend_from_slice(&remain_bytes);
+                    bytes_mut.extend_from_slice(&batch_data);
+                    bytes_mut.freeze()
+                } else {
+                    batch_data
+                };
+                let aligned_data = align_bytes(ALIGN, flush_data);
 
                 #[cfg(target_family = "unix")]
                 use std::os::unix::fs::FileExt;
@@ -235,20 +289,20 @@ impl LocalIO for SyncLocalIO {
                 #[cfg(target_family = "windows")]
                 use std::os::windows::fs::FileExt;
 
-                let written = file.write_at(&data, next_offset)?;
-                if written != data.len() {
+                let written = file.write_at(&aligned_data, next_offset)?;
+                if written != aligned_data.len() {
                     return Err(io::Error::new(
                         io::ErrorKind::Other,
                         format!(
                             "Errors on direct appending. expected: {}, actual: {}",
-                            data.len(),
+                            aligned_data.len(),
                             written
                         ),
                     ));
                 }
                 file.sync_all()?;
 
-                Ok::<u64, io::Error>(written as u64 + next_offset)
+                Ok::<(), io::Error>(())
             })
             .instrument_await("wait the spawned block future")
             .await
@@ -267,41 +321,7 @@ impl LocalIO for SyncLocalIO {
         let r = self
             .inner
             .read_runtime_ref
-            .spawn_blocking(move || {
-                let left_boundary = align_down(ALIGN, offset as usize);
-                let right_boundary = align_up(ALIGN, (offset + len) as usize);
-                let range = right_boundary - left_boundary;
-
-                let mut buf = IoBuffer::with_capacity_in(range, &IO_BUFFER_ALLOCATOR);
-                unsafe {
-                    buf.set_len(range);
-                }
-
-                let path = Path::new(&path);
-                let mut file = File::open(path)?;
-
-                #[cfg(target_family = "unix")]
-                use std::os::unix::fs::FileExt;
-
-                #[cfg(target_family = "windows")]
-                use std::os::windows::fs::FileExt;
-
-                let read = file.read_at(buf.as_mut(), left_boundary as u64)?;
-                if read != range {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        format!(
-                            "Errors on direct read. expected: {}, actual: {}",
-                            range, read
-                        ),
-                    ));
-                }
-
-                let start = offset as usize - left_boundary;
-                let end = start + len as usize;
-                let data = Bytes::copy_from_slice(&buf[start..end]);
-                Ok(data)
-            })
+            .spawn_blocking(move || inner_direct_read(&path, offset, len))
             .instrument_await("wait the spawned block future")
             .await??;
 
@@ -311,6 +331,7 @@ impl LocalIO for SyncLocalIO {
 
 #[cfg(test)]
 mod test {
+    use crate::bits::align_up;
     use crate::runtime::manager::create_runtime;
     use crate::store::local::sync_io::{SyncLocalIO, ALIGN};
     use crate::store::local::LocalIO;
@@ -429,31 +450,38 @@ mod test {
         let written_data = written_data.freeze();
 
         // append
-        let offset = base_runtime_ref
-            .block_on(io_handler.direct_append(data_file_name, written_data.clone().into()))?;
-        assert_eq!(ALIGN as u64, offset);
-        let offset = base_runtime_ref
-            .block_on(io_handler.direct_append(data_file_name, written_data.clone().into()))?;
-        assert_eq!(ALIGN as u64 * 2, offset);
-        let offset = base_runtime_ref.block_on(
-            io_handler.direct_append(data_file_name, Bytes::from(vec![b'a'; 4096 + 10]).into()),
-        )?;
-        assert_eq!(ALIGN as u64 * 4, offset);
+        let offset = base_runtime_ref.block_on(io_handler.direct_append(
+            data_file_name,
+            0,
+            written_data.clone().into(),
+        ))?;
+        let offset = base_runtime_ref.block_on(io_handler.direct_append(
+            data_file_name,
+            10,
+            written_data.clone().into(),
+        ))?;
+        let offset = base_runtime_ref.block_on(io_handler.direct_append(
+            data_file_name,
+            20,
+            Bytes::from(vec![b'a'; 4096 + 10]).into(),
+        ))?;
 
         // read
         let data_1 = base_runtime_ref.block_on(io_handler.direct_read(data_file_name, 3, 3))?;
         assert_eq!(vec![b'y', b'y', b'z'], data_1);
 
-        let data_2 =
-            base_runtime_ref.block_on(io_handler.direct_read(data_file_name, 4096 + 2, 4))?;
-        assert_eq!(vec![b'x', b'y', b'y', b'z'], data_2);
+        let data_2 = base_runtime_ref.block_on(io_handler.direct_read(data_file_name, 11, 4))?;
+        assert_eq!(vec![b'x', b'x', b'y', b'y'], data_2);
 
-        let data_3 = base_runtime_ref.block_on(io_handler.direct_read(
-            data_file_name,
-            4096 * 2,
-            4096 + 10,
-        ))?;
-        assert_eq!(vec![b'a'; 4096 + 10], data_3);
+        let data_3 = base_runtime_ref.block_on(io_handler.direct_read(data_file_name, 19, 2))?;
+        assert_eq!(vec![b'z', b'a'], data_3);
+
+        assert_eq!(
+            align_up(ALIGN, 10 + 10 + 4096 + 10) as u64,
+            fs::metadata(format!("{}/{}", &temp_path, &data_file_name))
+                .unwrap()
+                .len()
+        );
 
         Ok(())
     }

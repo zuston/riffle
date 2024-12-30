@@ -339,11 +339,19 @@ impl LocalIO for LocalDiskDelegator {
         Ok(file_stat)
     }
 
-    async fn direct_append(&self, path: &str, data: BytesWrapper) -> Result<u64, WorkerError> {
+    async fn direct_append(
+        &self,
+        path: &str,
+        written_bytes: usize,
+        data: BytesWrapper,
+    ) -> Result<(), WorkerError> {
         let timer = LOCALFILE_DISK_DIRECT_APPEND_OPERATION_DURATION
             .with_label_values(&[&self.inner.root])
             .start_timer();
-        self.inner.io_handler.direct_append(path, data).await
+        self.inner
+            .io_handler
+            .direct_append(path, written_bytes, data)
+            .await
     }
 
     async fn direct_read(
