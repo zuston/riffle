@@ -134,6 +134,8 @@ fn inner_direct_read(path: &str, offset: i64, len: i64) -> Result<Bytes, Error> 
         buf_from_pool = true;
         (IO_BUFFER_POOL.acquire(), IO_BUFFER_POOL.buffer_size())
     } else {
+        /// todo: if the required data len > pool buffer size, it can split to multi
+        /// access to reuse the aligned buffer to reduce system load.
         ALIGNMENT_BUFFER_POOL_READ_ACQUIRE_MISS.inc();
         (IoBuffer::new(range), range)
     };
