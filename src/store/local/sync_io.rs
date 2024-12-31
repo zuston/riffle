@@ -1,7 +1,9 @@
 use crate::bits::is_aligned;
 use crate::bits::{align_down, align_up};
 use crate::error::WorkerError;
-use crate::metric::LOCALFILE_READ_MEMORY_ALLOCATION_LATENCY;
+use crate::metric::{
+    ALIGNMENT_BUFFER_POOL_READ_ACQUIRE_MISS, LOCALFILE_READ_MEMORY_ALLOCATION_LATENCY,
+};
 use crate::runtime::RuntimeRef;
 use crate::store::alignment::io_buffer_pool::IoBufferPool;
 use crate::store::alignment::io_bytes::IoBuffer;
@@ -132,6 +134,7 @@ fn inner_direct_read(path: &str, offset: i64, len: i64) -> Result<Bytes, Error> 
         buf_from_pool = true;
         (IO_BUFFER_POOL.acquire(), IO_BUFFER_POOL.buffer_size())
     } else {
+        ALIGNMENT_BUFFER_POOL_READ_ACQUIRE_MISS.inc();
         (IoBuffer::new(range), range)
     };
     // only gotten the min range buf to reduce io range access

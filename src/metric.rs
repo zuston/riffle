@@ -54,6 +54,14 @@ const SPILL_BATCH_SIZE_BUCKETS: &[f64] = &[
 
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
 
+pub static ALIGNMENT_BUFFER_POOL_READ_ACQUIRE_MISS: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new(
+        "alignment_buffer_pool_read_acquire_miss",
+        "alignment_buffer_pool_read_acquire_miss",
+    )
+    .expect("metric should be created")
+});
+
 pub static LOCALFILE_READ_MEMORY_ALLOCATION_LATENCY: Lazy<histogram::Histogram> =
     Lazy::new(|| histogram::Histogram::new("localfile_read_memory_allocation_latency"));
 
@@ -640,6 +648,9 @@ pub static IO_SCHEDULER_APPEND_WAIT: Lazy<IntGaugeVec> =
     Lazy::new(|| register_int_gauge_vec!("append_wait", "append_wait", &["root"]).unwrap());
 
 fn register_custom_metrics() {
+    REGISTRY
+        .register(Box::new(ALIGNMENT_BUFFER_POOL_READ_ACQUIRE_MISS.clone()))
+        .expect("");
     REGISTRY
         .register(Box::new(IO_SCHEDULER_READ_PERMITS.clone()))
         .expect("");
