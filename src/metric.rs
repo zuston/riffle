@@ -62,6 +62,14 @@ pub static ALIGNMENT_BUFFER_POOL_READ_ACQUIRE_MISS: Lazy<IntCounter> = Lazy::new
     .expect("metric should be created")
 });
 
+pub static ALIGNMENT_BUFFER_POOL_ACQUIRED_MISS: Lazy<IntGauge> = Lazy::new(|| {
+    IntGauge::new(
+        "alignment_buffer_pool_acquired_miss",
+        "alignment_buffer_pool_acquired_miss",
+    )
+    .expect("metric should be created")
+});
+
 pub static ALIGNMENT_BUFFER_POOL_ACQUIRED_BUFFER: Lazy<IntGauge> = Lazy::new(|| {
     IntGauge::new(
         "alignment_buffer_pool_acquired_buffer",
@@ -656,6 +664,9 @@ pub static IO_SCHEDULER_APPEND_WAIT: Lazy<IntGaugeVec> =
     Lazy::new(|| register_int_gauge_vec!("append_wait", "append_wait", &["root"]).unwrap());
 
 fn register_custom_metrics() {
+    REGISTRY
+        .register(Box::new(ALIGNMENT_BUFFER_POOL_ACQUIRED_MISS.clone()))
+        .expect("");
     REGISTRY
         .register(Box::new(ALIGNMENT_BUFFER_POOL_ACQUIRED_BUFFER.clone()))
         .expect("");
