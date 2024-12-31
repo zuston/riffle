@@ -13,6 +13,7 @@
 //  limitations under the License.
 
 use crate::bits;
+use crate::metric::ALIGNMENT_BUFFER_POOL_ACQUIRED_BUFFER;
 use crate::store::alignment::io_bytes::{IoBuffer, IoBytes};
 use crate::store::alignment::ALIGN;
 use crossbeam::queue::ArrayQueue;
@@ -60,6 +61,7 @@ impl IoBufferPool {
             None => create(),
         };
         assert_eq!(res.len(), self.buffer_size);
+        ALIGNMENT_BUFFER_POOL_ACQUIRED_BUFFER.inc();
         res
     }
 
@@ -67,6 +69,7 @@ impl IoBufferPool {
         if self.queue.len() < self.capacity {
             let _ = self.queue.push(buffer.into());
         }
+        ALIGNMENT_BUFFER_POOL_ACQUIRED_BUFFER.dec();
     }
 
     pub fn buffer_size(&self) -> usize {
