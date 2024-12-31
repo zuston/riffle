@@ -26,8 +26,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::store::local::allocator::{IoBuffer, IO_BUFFER_ALLOCATOR};
-use bytes::Bytes;
 use std::{
     fmt::{Debug, Display},
     ops::{Add, BitAnd, Not, Sub},
@@ -140,21 +138,9 @@ pub fn align_down<U: Unsigned>(align: U, v: U) -> U {
     v & !(align - U::from(1))
 }
 
-pub fn align_bytes(align: usize, data: Bytes) -> IoBuffer {
-    debug_assert_pow2(align);
-    let mut io_buffer = IoBuffer::with_capacity_in(data.len(), &IO_BUFFER_ALLOCATOR);
-    io_buffer.extend_from_slice(&data);
-    let aligned_len = align_up(align, data.len());
-    io_buffer.reserve(aligned_len - data.len());
-    unsafe { io_buffer.set_len(aligned_len) };
-    io_buffer
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::bits::{align_bytes, align_down, align_up, assert_aligned};
-    use crate::store::local::allocator::ALIGN;
-    use bytes::Bytes;
+    use crate::bits::{align_down, align_up};
 
     #[test]
     fn test_align() {
@@ -170,16 +156,5 @@ mod tests {
         let down_aligned = align_down(align, offset);
         assert_eq!(4096, up_aligned);
         assert_eq!(4096, down_aligned);
-    }
-
-    #[test]
-    fn test_align_bytes() {
-        let raw_data = vec![b'x'; 8];
-        let data = Bytes::from(raw_data.clone());
-
-        let aligned = align_bytes(ALIGN, data);
-        assert_eq!(ALIGN, aligned.len());
-
-        assert_aligned(ALIGN, aligned.as_ptr() as _);
     }
 }

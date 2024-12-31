@@ -21,12 +21,10 @@ use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
 
-pub mod allocator;
 pub mod async_io;
 pub mod delegator;
 mod scheduler;
 pub mod sync_io;
-
 pub struct FileStat {
     pub content_length: u64,
 }
