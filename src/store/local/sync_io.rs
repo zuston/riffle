@@ -5,7 +5,7 @@ use crate::metric::{
     ALIGNMENT_BUFFER_POOL_READ_ACQUIRE_MISS, LOCALFILE_READ_MEMORY_ALLOCATION_LATENCY,
 };
 use crate::runtime::RuntimeRef;
-use crate::store::alignment::io_buffer_pool::IoBufferPool;
+use crate::store::alignment::io_buffer_pool::{IoBufferPool, RecycledIoBuffer};
 use crate::store::alignment::io_bytes::IoBuffer;
 use crate::store::alignment::{ALIGN, IO_BUFFER_ALLOCATOR};
 use crate::store::local::{FileStat, LocalIO};
@@ -129,15 +129,13 @@ fn inner_direct_read(path: &str, offset: i64, len: i64) -> Result<Bytes, Error> 
     let right_boundary = align_up(ALIGN, (offset + len) as usize);
     let range = right_boundary - left_boundary;
 
-    let mut buf_from_pool = false;
     let (mut buf, expected) = if range < IO_BUFFER_POOL.buffer_size() {
-        buf_from_pool = true;
         (IO_BUFFER_POOL.acquire(), IO_BUFFER_POOL.buffer_size())
     } else {
         /// todo: if the required data len > pool buffer size, it can split to multi
         /// access to reuse the aligned buffer to reduce system load.
         ALIGNMENT_BUFFER_POOL_READ_ACQUIRE_MISS.inc();
-        (IoBuffer::new(range), range)
+        (RecycledIoBuffer::new(None, IoBuffer::new(range)), range)
     };
     // only gotten the min range buf to reduce io range access
     let mut range_buf = &mut buf[..range];
@@ -172,9 +170,6 @@ fn inner_direct_read(path: &str, offset: i64, len: i64) -> Result<Bytes, Error> 
         &range_buf.to_vec()
     );
     let data = Bytes::copy_from_slice(&range_buf[start..end]);
-    if buf_from_pool {
-        IO_BUFFER_POOL.release(buf);
-    }
     Ok(data)
 }
 

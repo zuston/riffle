@@ -17,6 +17,7 @@ use crate::metric::{ALIGNMENT_BUFFER_POOL_ACQUIRED_BUFFER, ALIGNMENT_BUFFER_POOL
 use crate::store::alignment::io_bytes::{IoBuffer, IoBytes};
 use crate::store::alignment::ALIGN;
 use crossbeam::queue::ArrayQueue;
+use std::ops::{Deref, DerefMut};
 
 #[derive(Debug)]
 enum Buffer {
@@ -53,7 +54,7 @@ impl IoBufferPool {
         }
     }
 
-    pub fn acquire(&self) -> IoBuffer {
+    pub fn acquire(&self) -> RecycledIoBuffer {
         let create = || IoBuffer::new(self.buffer_size);
         let res = match self.queue.pop() {
             Some(Buffer::IoBuffer(buffer)) => buffer,
@@ -65,7 +66,10 @@ impl IoBufferPool {
         };
         assert_eq!(res.len(), self.buffer_size);
         ALIGNMENT_BUFFER_POOL_ACQUIRED_BUFFER.inc();
-        res
+        RecycledIoBuffer {
+            internal: res,
+            pool_ref: Some(self),
+        }
     }
 
     pub fn release(&self, buffer: impl Into<Buffer>) {
@@ -77,5 +81,58 @@ impl IoBufferPool {
 
     pub fn buffer_size(&self) -> usize {
         self.buffer_size
+    }
+}
+
+pub struct RecycledIoBuffer<'a> {
+    internal: IoBuffer,
+    pool_ref: Option<&'a IoBufferPool>,
+}
+
+impl<'a> RecycledIoBuffer<'a> {
+    pub fn new(pool: Option<&'a IoBufferPool>, buffer: IoBuffer) -> Self {
+        Self {
+            internal: buffer,
+            pool_ref: pool,
+        }
+    }
+}
+
+impl Drop for RecycledIoBuffer<'_> {
+    fn drop(&mut self) {
+        if let Some(pool) = self.pool_ref {
+            pool.release(self.internal.clone());
+        }
+    }
+}
+
+impl Deref for RecycledIoBuffer<'_> {
+    type Target = IoBuffer;
+
+    fn deref(&self) -> &Self::Target {
+        &self.internal
+    }
+}
+
+impl DerefMut for RecycledIoBuffer<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.internal
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::store::alignment::io_buffer_pool::IoBufferPool;
+    use crate::store::alignment::ALIGN;
+
+    #[test]
+    fn test_pool() -> anyhow::Result<()> {
+        let pool = IoBufferPool::new(ALIGN, 10);
+        let buffer = pool.acquire();
+        assert_eq!(0, pool.queue.len());
+        drop(buffer);
+        assert_eq!(1, pool.queue.len());
+
+        Ok(())
     }
 }
