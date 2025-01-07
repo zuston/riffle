@@ -48,6 +48,12 @@ impl IoBuffer {
     }
 }
 
+impl Default for IoBuffer {
+    fn default() -> Self {
+        IoBuffer::new(16 * 1024 * 1024)
+    }
+}
+
 impl Deref for IoBuffer {
     type Target = BoxA<[u8], &'static AlignedAllocator<ALIGN>>;
 

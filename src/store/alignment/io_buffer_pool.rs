@@ -101,7 +101,8 @@ impl<'a> RecycledIoBuffer<'a> {
 impl Drop for RecycledIoBuffer<'_> {
     fn drop(&mut self) {
         if let Some(pool) = self.pool_ref {
-            pool.release(self.internal.clone());
+            let taked = std::mem::take(&mut self.internal);
+            pool.release(taked);
         }
     }
 }
