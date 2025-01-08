@@ -46,8 +46,7 @@ use crate::store::{PartitionedData, ResponseDataIndex};
 use crate::util;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use croaring::treemap::JvmSerializer;
-use croaring::Treemap;
+use croaring::{JvmLegacy, Treemap};
 use fastrace::future::FutureExt;
 use fastrace::trace;
 use log::{debug, error, info, warn};
@@ -491,13 +490,9 @@ impl ShuffleServer for DefaultShuffleServer {
 
         let serialized_expected_task_ids_bitmap =
             if !req.serialized_expected_task_ids_bitmap.is_empty() {
-                match Treemap::deserialize(&req.serialized_expected_task_ids_bitmap) {
-                    Ok(filter) => Some(filter),
-                    Err(e) => {
-                        error!("Failed to deserialize: {}", e);
-                        None
-                    }
-                }
+                let bitmap =
+                    Treemap::deserialize::<JvmLegacy>(&req.serialized_expected_task_ids_bitmap);
+                Some(bitmap)
             } else {
                 None
             };
@@ -707,7 +702,7 @@ impl ShuffleServer for DefaultShuffleServer {
             }
         }
 
-        let serialization = bitmap_result.serialize().unwrap();
+        let serialization = bitmap_result.serialize::<JvmLegacy>();
         Ok(Response::new(GetShuffleResultForMultiPartResponse {
             status: 0,
             ret_msg: "".to_string(),

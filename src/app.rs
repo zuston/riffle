@@ -33,8 +33,7 @@ use crate::store::{Block, RequireBufferResponse, ResponseData, ResponseDataIndex
 use crate::util::{now_timestamp_as_millis, now_timestamp_as_sec};
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
-use croaring::treemap::JvmSerializer;
-use croaring::Treemap;
+use croaring::{JvmLegacy, Treemap};
 
 use dashmap::DashMap;
 use log::{debug, error, info, warn};
@@ -192,7 +191,7 @@ impl PartitionedMeta {
 
     fn get_block_ids(&self) -> Result<Bytes> {
         let meta = self.inner.read();
-        let serialized_data = meta.blocks_bitmap.serialize()?;
+        let serialized_data = meta.blocks_bitmap.serialize::<JvmLegacy>();
         Ok(Bytes::from(serialized_data))
     }
 
@@ -953,7 +952,6 @@ pub(crate) mod test {
     use crate::runtime::manager::RuntimeManager;
     use crate::storage::StorageService;
     use crate::store::{Block, ResponseData};
-    use croaring::treemap::JvmSerializer;
     use croaring::Treemap;
     use dashmap::DashMap;
 
@@ -1176,7 +1174,7 @@ pub(crate) mod test {
             })
             .expect("TODO: panic message");
 
-        let deserialized = Treemap::deserialize(&data).unwrap();
+        let deserialized = Treemap::deserialize(&data);
         assert_eq!(deserialized, Treemap::from_iter(vec![123, 124]));
     }
 
