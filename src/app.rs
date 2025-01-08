@@ -160,6 +160,8 @@ struct PartitionedMetaInner {
     blocks_bitmap: Treemap,
     total_size: u64,
     is_huge_partition: bool,
+
+    block_id_counter: u64,
 }
 
 impl PartitionedMeta {
@@ -169,6 +171,7 @@ impl PartitionedMeta {
                 blocks_bitmap: Treemap::default(),
                 total_size: 0,
                 is_huge_partition: false,
+                block_id_counter: 0,
             })),
         }
     }
@@ -197,10 +200,16 @@ impl PartitionedMeta {
 
     fn report_block_ids(&mut self, ids: Vec<i64>) -> Result<()> {
         let mut meta = self.inner.write();
+        meta.block_id_counter += ids.len() as u64;
         for id in ids {
             meta.blocks_bitmap.add(id as u64);
         }
         Ok(())
+    }
+
+    fn get_block_id_count(&self) -> Result<u64> {
+        let meta = self.inner.read();
+        Ok(meta.block_id_counter)
     }
 
     fn is_huge_partition(&self) -> bool {
@@ -486,8 +495,12 @@ impl App {
     }
 
     pub fn get_block_ids(&self, ctx: GetBlocksContext) -> Result<Bytes> {
-        debug!("get blocks: {:?}", ctx.clone());
         let partitioned_meta = self.get_partition_meta(&ctx.uid);
+        debug!(
+            "Gotten block id number: {} for ctx: {:?}",
+            partitioned_meta.get_block_id_count()?,
+            &ctx
+        );
         partitioned_meta.get_block_ids()
     }
 
@@ -519,11 +532,26 @@ impl App {
         self.total_resident_data_size
             .fetch_sub(removed_size as u64, SeqCst);
 
-        // app level deletion
-        if shuffle_id.is_none() {
+        if let Some(shuffle_id) = shuffle_id {
+            // shuffle level deletion
+            let mut deletion_keys = vec![];
+            let view = self.bitmap_of_blocks.clone().into_read_only();
+            for entry in view.iter() {
+                let (shuffle, partition) = entry.0;
+                if shuffle_id == *shuffle {
+                    deletion_keys.push(entry.0.clone());
+                }
+            }
+            GAUGE_PARTITION_NUMBER.sub(deletion_keys.len() as i64);
+            for deletion_key in deletion_keys {
+                self.bitmap_of_blocks.remove(&deletion_key);
+            }
+        } else {
+            // app level deletion
             GAUGE_PARTITION_NUMBER.sub(self.bitmap_of_blocks.len() as i64);
             self.sub_huge_partition_metric();
         }
+
         Ok(())
     }
 
