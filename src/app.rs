@@ -952,7 +952,7 @@ pub(crate) mod test {
     use crate::runtime::manager::RuntimeManager;
     use crate::storage::StorageService;
     use crate::store::{Block, ResponseData};
-    use croaring::Treemap;
+    use croaring::{JvmLegacy, Treemap};
     use dashmap::DashMap;
 
     #[test]
@@ -1174,7 +1174,7 @@ pub(crate) mod test {
             })
             .expect("TODO: panic message");
 
-        let deserialized = Treemap::deserialize(&data);
+        let deserialized = Treemap::deserialize::<JvmLegacy>(&data);
         assert_eq!(deserialized, Treemap::from_iter(vec![123, 124]));
     }
 
