@@ -64,8 +64,7 @@ use crate::runtime::manager::RuntimeManager;
 use crate::storage::StorageService;
 use anyhow::Result;
 use bytes::{Buf, Bytes, BytesMut};
-use croaring::treemap::JvmSerializer;
-use croaring::Treemap;
+use croaring::{JvmLegacy, Treemap};
 use std::time::Duration;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::oneshot;
@@ -201,7 +200,8 @@ pub async fn write_read_for_one_time(mut client: ShuffleServerClient<Channel>) -
 
         assert_eq!(0, block_id_result.status);
 
-        let block_id_bitmap = Treemap::deserialize(&*block_id_result.serialized_bitmap)?;
+        let block_id_bitmap =
+            Treemap::deserialize::<JvmLegacy>(&*block_id_result.serialized_bitmap);
         assert_eq!(1, block_id_bitmap.iter().count());
         assert!(block_id_bitmap.contains(idx as u64));
 
