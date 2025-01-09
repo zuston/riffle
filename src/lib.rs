@@ -48,6 +48,7 @@ pub mod storage;
 
 pub mod bits;
 pub mod histogram;
+pub mod id_layout;
 
 use crate::app::{AppManager, AppManagerRef};
 use crate::common::init_global_variable;
@@ -194,6 +195,7 @@ pub async fn write_read_for_one_time(mut client: ShuffleServerClient<Channel>) -
                 app_id: app_id.clone(),
                 shuffle_id: 0,
                 partition_id: idx,
+                block_id_layout: None,
             })
             .await?
             .into_inner();

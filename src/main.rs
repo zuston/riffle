@@ -57,6 +57,8 @@ pub mod heartbeat;
 mod http;
 pub mod kerberos;
 
+pub mod id_layout;
+
 #[cfg(not(feature = "logforth"))]
 mod log_service;
 
