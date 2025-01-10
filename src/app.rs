@@ -139,8 +139,7 @@ pub struct App {
     app_config_options: AppConfigOptions,
     latest_heartbeat_time: AtomicU64,
     store: Arc<HybridStore>,
-    // key: (shuffle_id, partition_id)
-    bitmap_of_blocks: DashMap<(i32, i32), PartitionedMeta>,
+
     huge_partition_marked_threshold: Option<u64>,
     huge_partition_memory_max_available_size: Option<u64>,
 
@@ -151,7 +150,11 @@ pub struct App {
 
     pub(crate) registry_timestamp: u128,
 
+    // key: shuffle_id, val: shuffle's all block_ids bitmap
     block_id_bitmap: DashMap<i32, RwLock<Treemap>>,
+
+    // key: (shuffle_id, partition_id)
+    partition_meta_infos: DashMap<(i32, i32), PartitionedMeta>,
 }
 
 #[derive(Clone)]
@@ -160,21 +163,16 @@ struct PartitionedMeta {
 }
 
 struct PartitionedMetaInner {
-    blocks_bitmap: Treemap,
     total_size: u64,
     is_huge_partition: bool,
-
-    block_id_counter: u64,
 }
 
 impl PartitionedMeta {
     fn new() -> Self {
         PartitionedMeta {
             inner: Arc::new(RwLock::new(PartitionedMetaInner {
-                blocks_bitmap: Treemap::default(),
                 total_size: 0,
                 is_huge_partition: false,
-                block_id_counter: 0,
             })),
         }
     }
@@ -188,31 +186,6 @@ impl PartitionedMeta {
         let mut meta = self.inner.write();
         meta.total_size += data_size as u64;
         Ok(())
-    }
-
-    fn get_block_ids_bitmap(&self) -> Result<Treemap> {
-        let meta = self.inner.read();
-        Ok(meta.blocks_bitmap.clone())
-    }
-
-    fn get_block_ids(&self) -> Result<Bytes> {
-        let meta = self.inner.read();
-        let serialized_data = meta.blocks_bitmap.serialize::<JvmLegacy>();
-        Ok(Bytes::from(serialized_data))
-    }
-
-    fn report_block_ids(&mut self, ids: Vec<i64>) -> Result<()> {
-        let mut meta = self.inner.write();
-        meta.block_id_counter += ids.len() as u64;
-        for id in ids {
-            meta.blocks_bitmap.add(id as u64);
-        }
-        Ok(())
-    }
-
-    fn get_block_id_count(&self) -> Result<u64> {
-        let meta = self.inner.read();
-        Ok(meta.block_id_counter)
     }
 
     fn is_huge_partition(&self) -> bool {
@@ -288,7 +261,7 @@ impl App {
             app_config_options: config_options,
             latest_heartbeat_time: AtomicU64::new(now_timestamp_as_sec()),
             store,
-            bitmap_of_blocks: DashMap::new(),
+            partition_meta_infos: DashMap::new(),
             huge_partition_marked_threshold,
             huge_partition_memory_max_available_size: huge_partition_backpressure_size,
             total_received_data_size: Default::default(),
@@ -304,7 +277,7 @@ impl App {
     }
 
     pub fn partition_number(&self) -> usize {
-        self.bitmap_of_blocks.len()
+        self.partition_meta_infos.len()
     }
 
     fn get_latest_heartbeat_time(&self) -> u64 {
@@ -488,7 +461,7 @@ impl App {
         let shuffle_id = uid.shuffle_id;
         let partition_id = uid.partition_id;
         let partitioned_meta = self
-            .bitmap_of_blocks
+            .partition_meta_infos
             .entry((shuffle_id, partition_id))
             .or_insert_with(|| {
                 TOTAL_PARTITION_NUMBER.inc();
@@ -496,21 +469,6 @@ impl App {
                 PartitionedMeta::new()
             });
         partitioned_meta.clone()
-    }
-
-    pub fn get_block_ids(&self, ctx: GetBlocksContext) -> Result<Bytes> {
-        let partitioned_meta = self.get_partition_meta(&ctx.uid);
-        debug!(
-            "Gotten block id number: {} for ctx: {:?}",
-            partitioned_meta.get_block_id_count()?,
-            &ctx
-        );
-        partitioned_meta.get_block_ids()
-    }
-
-    pub fn get_block_ids_bitmap(&self, ctx: GetBlocksContext) -> Result<Treemap> {
-        let partitioned_meta = self.get_partition_meta(&ctx.uid);
-        partitioned_meta.get_block_ids_bitmap()
     }
 
     pub fn inc_partition_size(&self, uid: &PartitionedUId, size: u64) -> Result<()> {
@@ -565,22 +523,11 @@ impl App {
             .fetch_sub(removed_size as u64, SeqCst);
 
         if let Some(shuffle_id) = shuffle_id {
-            // shuffle level deletion
-            let mut deletion_keys = vec![];
-            let view = self.bitmap_of_blocks.clone().into_read_only();
-            for entry in view.iter() {
-                let (shuffle, partition) = entry.0;
-                if shuffle_id == *shuffle {
-                    deletion_keys.push(entry.0.clone());
-                }
-            }
-            GAUGE_PARTITION_NUMBER.sub(deletion_keys.len() as i64);
-            for deletion_key in deletion_keys {
-                self.bitmap_of_blocks.remove(&deletion_key);
-            }
+            // shuffle level bitmap deletion
+            self.block_id_bitmap.remove(&shuffle_id);
         } else {
             // app level deletion
-            GAUGE_PARTITION_NUMBER.sub(self.bitmap_of_blocks.len() as i64);
+            GAUGE_PARTITION_NUMBER.sub(self.partition_meta_infos.len() as i64);
             self.sub_huge_partition_metric();
         }
 
