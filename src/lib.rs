@@ -59,6 +59,7 @@ use crate::grpc::protobuf::uniffle::{
     SendShuffleDataRequest, ShuffleBlock, ShuffleData, ShuffleRegisterRequest,
 };
 use crate::http::{HTTPServer, HttpMonitorService};
+use crate::id_layout::{IdLayout, DEFAULT_BLOCK_ID_LAYOUT};
 use crate::metric::MetricService;
 use crate::rpc::DefaultRpcService;
 use crate::runtime::manager::RuntimeManager;
@@ -169,6 +170,8 @@ pub async fn write_read_for_one_time(mut client: ShuffleServerClient<Channel>) -
         assert_eq!(0, response.status);
 
         // report the finished block ids
+        let partition_id = idx;
+        let block_id = DEFAULT_BLOCK_ID_LAYOUT.get_block_id(1, partition_id as i64, 1);
         client
             .report_shuffle_result(ReportShuffleResultRequest {
                 app_id: app_id.clone(),
@@ -177,7 +180,7 @@ pub async fn write_read_for_one_time(mut client: ShuffleServerClient<Channel>) -
                 bitmap_num: 0,
                 partition_to_block_ids: vec![PartitionToBlockIds {
                     partition_id: idx,
-                    block_ids: vec![idx as i64],
+                    block_ids: vec![block_id],
                 }],
             })
             .await?;
@@ -205,7 +208,12 @@ pub async fn write_read_for_one_time(mut client: ShuffleServerClient<Channel>) -
         let block_id_bitmap =
             Treemap::deserialize::<JvmLegacy>(&*block_id_result.serialized_bitmap);
         assert_eq!(1, block_id_bitmap.iter().count());
-        assert!(block_id_bitmap.contains(idx as u64));
+        for entry in block_id_bitmap.iter() {
+            assert_eq!(
+                idx as i64,
+                DEFAULT_BLOCK_ID_LAYOUT.get_partition_id(entry as i64)
+            );
+        }
 
         let response_data = client
             .get_memory_shuffle_data(GetMemoryShuffleDataRequest {
