@@ -16,9 +16,10 @@
 // under the License.
 
 use crate::app::{
-    AppConfigOptions, AppManagerRef, DataDistribution, GetBlocksContext, PartitionedUId,
-    ReadingIndexViewContext, ReadingOptions, ReadingViewContext, RemoteStorageConfig,
-    ReportBlocksContext, RequireBufferContext, WritingViewContext,
+    AppConfigOptions, AppManagerRef, DataDistribution, GetBlocksContext, GetMultiBlockIdsContext,
+    PartitionedUId, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
+    RemoteStorageConfig, ReportBlocksContext, ReportMultiBlockIdsContext, RequireBufferContext,
+    WritingViewContext,
 };
 use crate::constant::StatusCode;
 use crate::error::WorkerError;
@@ -34,6 +35,7 @@ use crate::grpc::protobuf::uniffle::{
     ShuffleRegisterRequest, ShuffleRegisterResponse, ShuffleUnregisterByAppIdRequest,
     ShuffleUnregisterByAppIdResponse, ShuffleUnregisterRequest, ShuffleUnregisterResponse,
 };
+use crate::id_layout::to_layout;
 use crate::metric::{
     GRPC_BUFFER_REQUIRE_PROCESS_TIME, GRPC_GET_LOCALFILE_DATA_LATENCY,
     GRPC_GET_LOCALFILE_DATA_PROCESS_TIME, GRPC_GET_LOCALFILE_DATA_TRANSPORT_TIME,
@@ -572,38 +574,23 @@ impl ShuffleServer for DefaultShuffleServer {
             }));
         }
         let app = app.unwrap();
-
+        let mut block_ids = vec![];
         for partition_to_block_id in partition_to_block_ids {
-            let partition_id = partition_to_block_id.partition_id;
-            debug!(
-                "Reporting partition:{} {} blocks",
-                partition_id,
-                partition_to_block_id.block_ids.len()
-            );
-            let ctx = ReportBlocksContext {
-                uid: PartitionedUId {
-                    app_id: app_id.clone(),
-                    shuffle_id,
-                    partition_id,
-                },
-                blocks: partition_to_block_id.block_ids,
-            };
-
-            match app.report_block_ids(ctx).await {
-                Err(e) => {
-                    return Ok(Response::new(ReportShuffleResultResponse {
-                        status: StatusCode::INTERNAL_ERROR.into(),
-                        ret_msg: e.to_string(),
-                    }))
-                }
-                _ => (),
-            }
+            block_ids.extend(partition_to_block_id.block_ids);
         }
-
-        Ok(Response::new(ReportShuffleResultResponse {
-            status: StatusCode::SUCCESS.into(),
-            ret_msg: "".to_string(),
-        }))
+        match app
+            .report_multi_block_ids(ReportMultiBlockIdsContext::new(shuffle_id, block_ids))
+            .await
+        {
+            Err(e) => Ok(Response::new(ReportShuffleResultResponse {
+                status: StatusCode::INTERNAL_ERROR.into(),
+                ret_msg: e.to_string(),
+            })),
+            _ => Ok(Response::new(ReportShuffleResultResponse {
+                status: StatusCode::SUCCESS.into(),
+                ret_msg: "".to_string(),
+            })),
+        }
     }
 
     async fn get_shuffle_result(
@@ -614,6 +601,7 @@ impl ShuffleServer for DefaultShuffleServer {
         let app_id = req.app_id;
         let shuffle_id = req.shuffle_id;
         let partition_id = req.partition_id;
+        let layout = req.block_id_layout;
 
         let app = self.app_manager_ref.get_app(&app_id);
         if app.is_none() {
@@ -623,16 +611,12 @@ impl ShuffleServer for DefaultShuffleServer {
                 serialized_bitmap: Default::default(),
             }));
         }
-
-        let partition_id = PartitionedUId {
-            app_id: app_id.to_string(),
+        let ctx = GetMultiBlockIdsContext {
             shuffle_id,
-            partition_id,
+            partition_ids: vec![partition_id],
+            layout: to_layout(layout),
         };
-        let block_ids_result = app.unwrap().get_block_ids(GetBlocksContext {
-            uid: partition_id.clone(),
-        });
-
+        let block_ids_result = app.unwrap().get_multi_block_ids(ctx).await;
         if block_ids_result.is_err() {
             let err_msg = block_ids_result.err();
             error!(
@@ -660,6 +644,9 @@ impl ShuffleServer for DefaultShuffleServer {
         let req = request.into_inner();
         let app_id = req.app_id;
         let shuffle_id = req.shuffle_id;
+        // todo: handle the empty layout
+        let layout = req.block_id_layout;
+        let partitions = req.partitions;
 
         let app = self.app_manager_ref.get_app(&app_id);
         if app.is_none() {
@@ -674,40 +661,29 @@ impl ShuffleServer for DefaultShuffleServer {
             }));
         }
         let app = app.unwrap();
-
-        let mut bitmap_result = Treemap::default();
-        for partition_id in req.partitions {
-            let block_ids_bitmap_result = app.get_block_ids_bitmap(GetBlocksContext {
-                uid: PartitionedUId {
-                    app_id: app_id.clone(),
-                    shuffle_id,
-                    partition_id,
-                },
-            });
-            if block_ids_bitmap_result.is_err() {
-                let err_msg = block_ids_bitmap_result.err();
+        let ctx = GetMultiBlockIdsContext {
+            shuffle_id,
+            partition_ids: partitions,
+            layout: to_layout(layout),
+        };
+        match app.get_multi_block_ids(ctx).await {
+            Err(e) => {
                 error!(
                     "Errors on getting shuffle block ids by multipart way of app:[{}], error: {:?}",
-                    &app_id, err_msg
+                    &app_id, &e
                 );
-                return Ok(Response::new(GetShuffleResultForMultiPartResponse {
+                Ok(Response::new(GetShuffleResultForMultiPartResponse {
                     status: StatusCode::INTERNAL_ERROR.into(),
-                    ret_msg: format!("{:?}", err_msg),
+                    ret_msg: format!("{:?}", &e),
                     serialized_bitmap: Default::default(),
-                }));
+                }))
             }
-
-            for block_id in block_ids_bitmap_result.unwrap().iter() {
-                bitmap_result.add(block_id);
-            }
+            Ok(data) => Ok(Response::new(GetShuffleResultForMultiPartResponse {
+                status: 0,
+                ret_msg: "".to_string(),
+                serialized_bitmap: data,
+            })),
         }
-
-        let serialization = bitmap_result.serialize::<JvmLegacy>();
-        Ok(Response::new(GetShuffleResultForMultiPartResponse {
-            status: 0,
-            ret_msg: "".to_string(),
-            serialized_bitmap: Bytes::from(serialization),
-        }))
     }
 
     async fn finish_shuffle(

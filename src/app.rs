@@ -39,7 +39,7 @@ use dashmap::DashMap;
 use log::{debug, error, info, warn};
 
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use std::hash::{Hash, Hasher};
 
@@ -47,7 +47,8 @@ use std::str::FromStr;
 
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::constant::ALL_LABEL;
-use crate::grpc::protobuf::uniffle::RemoteStorage;
+use crate::grpc::protobuf::uniffle::{BlockIdLayout, RemoteStorage};
+use crate::id_layout::IdLayout;
 use crate::storage::HybridStorage;
 use crate::store::local::LocalfileStoreStat;
 use crate::store::mem::capacity::CapacitySnapshot;
@@ -138,8 +139,7 @@ pub struct App {
     app_config_options: AppConfigOptions,
     latest_heartbeat_time: AtomicU64,
     store: Arc<HybridStore>,
-    // key: (shuffle_id, partition_id)
-    bitmap_of_blocks: DashMap<(i32, i32), PartitionedMeta>,
+
     huge_partition_marked_threshold: Option<u64>,
     huge_partition_memory_max_available_size: Option<u64>,
 
@@ -149,6 +149,12 @@ pub struct App {
     huge_partition_number: AtomicU64,
 
     pub(crate) registry_timestamp: u128,
+
+    // key: shuffle_id, val: shuffle's all block_ids bitmap
+    block_id_bitmap: DashMap<i32, RwLock<Treemap>>,
+
+    // key: (shuffle_id, partition_id)
+    partition_meta_infos: DashMap<(i32, i32), PartitionedMeta>,
 }
 
 #[derive(Clone)]
@@ -157,21 +163,16 @@ struct PartitionedMeta {
 }
 
 struct PartitionedMetaInner {
-    blocks_bitmap: Treemap,
     total_size: u64,
     is_huge_partition: bool,
-
-    block_id_counter: u64,
 }
 
 impl PartitionedMeta {
     fn new() -> Self {
         PartitionedMeta {
             inner: Arc::new(RwLock::new(PartitionedMetaInner {
-                blocks_bitmap: Treemap::default(),
                 total_size: 0,
                 is_huge_partition: false,
-                block_id_counter: 0,
             })),
         }
     }
@@ -185,31 +186,6 @@ impl PartitionedMeta {
         let mut meta = self.inner.write();
         meta.total_size += data_size as u64;
         Ok(())
-    }
-
-    fn get_block_ids_bitmap(&self) -> Result<Treemap> {
-        let meta = self.inner.read();
-        Ok(meta.blocks_bitmap.clone())
-    }
-
-    fn get_block_ids(&self) -> Result<Bytes> {
-        let meta = self.inner.read();
-        let serialized_data = meta.blocks_bitmap.serialize::<JvmLegacy>();
-        Ok(Bytes::from(serialized_data))
-    }
-
-    fn report_block_ids(&mut self, ids: Vec<i64>) -> Result<()> {
-        let mut meta = self.inner.write();
-        meta.block_id_counter += ids.len() as u64;
-        for id in ids {
-            meta.blocks_bitmap.add(id as u64);
-        }
-        Ok(())
-    }
-
-    fn get_block_id_count(&self) -> Result<u64> {
-        let meta = self.inner.read();
-        Ok(meta.block_id_counter)
     }
 
     fn is_huge_partition(&self) -> bool {
@@ -285,13 +261,14 @@ impl App {
             app_config_options: config_options,
             latest_heartbeat_time: AtomicU64::new(now_timestamp_as_sec()),
             store,
-            bitmap_of_blocks: DashMap::new(),
+            partition_meta_infos: DashMap::new(),
             huge_partition_marked_threshold,
             huge_partition_memory_max_available_size: huge_partition_backpressure_size,
             total_received_data_size: Default::default(),
             total_resident_data_size: Default::default(),
             huge_partition_number: Default::default(),
             registry_timestamp: now_timestamp_as_millis(),
+            block_id_bitmap: Default::default(),
         }
     }
 
@@ -300,7 +277,7 @@ impl App {
     }
 
     pub fn partition_number(&self) -> usize {
-        self.bitmap_of_blocks.len()
+        self.partition_meta_infos.len()
     }
 
     fn get_latest_heartbeat_time(&self) -> u64 {
@@ -484,7 +461,7 @@ impl App {
         let shuffle_id = uid.shuffle_id;
         let partition_id = uid.partition_id;
         let partitioned_meta = self
-            .bitmap_of_blocks
+            .partition_meta_infos
             .entry((shuffle_id, partition_id))
             .or_insert_with(|| {
                 TOTAL_PARTITION_NUMBER.inc();
@@ -494,32 +471,45 @@ impl App {
         partitioned_meta.clone()
     }
 
-    pub fn get_block_ids(&self, ctx: GetBlocksContext) -> Result<Bytes> {
-        let partitioned_meta = self.get_partition_meta(&ctx.uid);
-        debug!(
-            "Gotten block id number: {} for ctx: {:?}",
-            partitioned_meta.get_block_id_count()?,
-            &ctx
-        );
-        partitioned_meta.get_block_ids()
-    }
-
-    pub fn get_block_ids_bitmap(&self, ctx: GetBlocksContext) -> Result<Treemap> {
-        let partitioned_meta = self.get_partition_meta(&ctx.uid);
-        partitioned_meta.get_block_ids_bitmap()
-    }
-
     pub fn inc_partition_size(&self, uid: &PartitionedUId, size: u64) -> Result<()> {
         let mut partitioned_meta = self.get_partition_meta(&uid);
         partitioned_meta.inc_size(size as i32)
     }
 
-    pub async fn report_block_ids(&self, ctx: ReportBlocksContext) -> Result<()> {
+    pub async fn get_multi_block_ids(&self, ctx: GetMultiBlockIdsContext) -> Result<Bytes> {
         self.heartbeat()?;
 
-        debug!("Report blocks: {:?}", ctx.clone());
-        let mut partitioned_meta = self.get_partition_meta(&ctx.uid);
-        partitioned_meta.report_block_ids(ctx.blocks)?;
+        let shuffle_id = &ctx.shuffle_id;
+        let block_id_layout = &ctx.layout;
+        let partitions: HashSet<&i32> = HashSet::from_iter(&ctx.partition_ids);
+
+        let treemap = self
+            .block_id_bitmap
+            .entry(*shuffle_id)
+            .or_insert_with(|| RwLock::new(Treemap::new()));
+        let treemap = treemap.read();
+        let mut retrieved = Treemap::new();
+        for element in treemap.iter() {
+            let partition_id = block_id_layout.get_partition_id(element as i64);
+            if partitions.contains(&(partition_id as i32)) {
+                retrieved.add(element);
+            }
+        }
+        Ok(Bytes::from(retrieved.serialize::<JvmLegacy>()))
+    }
+
+    pub async fn report_multi_block_ids(&self, ctx: ReportMultiBlockIdsContext) -> Result<()> {
+        self.heartbeat()?;
+
+        let shuffle_id = &ctx.shuffle_id;
+        let treemap = self
+            .block_id_bitmap
+            .entry(*shuffle_id)
+            .or_insert_with(|| RwLock::new(Treemap::new()));
+        let mut treemap = treemap.write();
+        for block_id in ctx.block_ids {
+            treemap.add(block_id as u64);
+        }
 
         Ok(())
     }
@@ -533,22 +523,11 @@ impl App {
             .fetch_sub(removed_size as u64, SeqCst);
 
         if let Some(shuffle_id) = shuffle_id {
-            // shuffle level deletion
-            let mut deletion_keys = vec![];
-            let view = self.bitmap_of_blocks.clone().into_read_only();
-            for entry in view.iter() {
-                let (shuffle, partition) = entry.0;
-                if shuffle_id == *shuffle {
-                    deletion_keys.push(entry.0.clone());
-                }
-            }
-            GAUGE_PARTITION_NUMBER.sub(deletion_keys.len() as i64);
-            for deletion_key in deletion_keys {
-                self.bitmap_of_blocks.remove(&deletion_key);
-            }
+            // shuffle level bitmap deletion
+            self.block_id_bitmap.remove(&shuffle_id);
         } else {
             // app level deletion
-            GAUGE_PARTITION_NUMBER.sub(self.bitmap_of_blocks.len() as i64);
+            GAUGE_PARTITION_NUMBER.sub(self.partition_meta_infos.len() as i64);
             self.sub_huge_partition_metric();
         }
 
@@ -589,6 +568,27 @@ impl From<&str> for PurgeDataContext {
 pub struct ReportBlocksContext {
     pub(crate) uid: PartitionedUId,
     pub(crate) blocks: Vec<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReportMultiBlockIdsContext {
+    pub shuffle_id: i32,
+    pub block_ids: Vec<i64>,
+}
+impl ReportMultiBlockIdsContext {
+    pub fn new(shuffle_id: i32, block_ids: Vec<i64>) -> ReportMultiBlockIdsContext {
+        Self {
+            shuffle_id,
+            block_ids,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GetMultiBlockIdsContext {
+    pub shuffle_id: i32,
+    pub partition_ids: Vec<i32>,
+    pub layout: IdLayout,
 }
 
 #[derive(Debug, Clone)]
@@ -970,13 +970,15 @@ impl PartitionedUId {
 #[cfg(test)]
 pub(crate) mod test {
     use crate::app::{
-        AppManager, GetBlocksContext, PartitionedUId, ReadingOptions, ReadingViewContext,
-        ReportBlocksContext, RequireBufferContext, WritingViewContext,
+        AppManager, GetBlocksContext, GetMultiBlockIdsContext, PartitionedUId, ReadingOptions,
+        ReadingViewContext, ReportBlocksContext, ReportMultiBlockIdsContext, RequireBufferContext,
+        WritingViewContext,
     };
     use crate::config::{Config, HybridStoreConfig, LocalfileStoreConfig, MemoryStoreConfig};
     use bytes::Bytes;
 
     use crate::error::WorkerError;
+    use crate::id_layout::{to_layout, IdLayout, DEFAULT_BLOCK_ID_LAYOUT};
     use crate::runtime::manager::RuntimeManager;
     use crate::storage::StorageService;
     use crate::store::{Block, ResponseData};
@@ -1181,29 +1183,40 @@ pub(crate) mod test {
             .unwrap();
 
         let app = app_manager_ref.get_app(app_id.as_ref()).unwrap();
+        let block_id_1 = DEFAULT_BLOCK_ID_LAYOUT.get_block_id(1, 10, 2);
+        let block_id_2 = DEFAULT_BLOCK_ID_LAYOUT.get_block_id(2, 10, 3);
+        let block_id_3 = DEFAULT_BLOCK_ID_LAYOUT.get_block_id(2, 20, 3);
         runtime_manager
-            .wait(app.report_block_ids(ReportBlocksContext {
-                uid: PartitionedUId {
-                    app_id: app_id.clone(),
-                    shuffle_id: 1,
-                    partition_id: 0,
-                },
-                blocks: vec![123, 124],
+            .wait(app.report_multi_block_ids(ReportMultiBlockIdsContext {
+                shuffle_id: 1,
+                block_ids: vec![block_id_1.clone(), block_id_2.clone(), block_id_3.clone()],
             }))
             .expect("TODO: panic message");
 
-        let data = app
-            .get_block_ids(GetBlocksContext {
-                uid: PartitionedUId {
-                    app_id,
-                    shuffle_id: 1,
-                    partition_id: 0,
-                },
-            })
-            .expect("TODO: panic message");
-
+        // case1: fetch partition=10
+        let data = runtime_manager
+            .wait(app.get_multi_block_ids(GetMultiBlockIdsContext {
+                shuffle_id: 1,
+                partition_ids: vec![10],
+                layout: to_layout(None),
+            }))
+            .expect("");
         let deserialized = Treemap::deserialize::<JvmLegacy>(&data);
-        assert_eq!(deserialized, Treemap::from_iter(vec![123, 124]));
+        assert_eq!(
+            deserialized,
+            Treemap::from_iter(vec![block_id_1 as u64, block_id_2 as u64])
+        );
+
+        // case2: fetch partition=20
+        let data = runtime_manager
+            .wait(app.get_multi_block_ids(GetMultiBlockIdsContext {
+                shuffle_id: 1,
+                partition_ids: vec![20],
+                layout: to_layout(None),
+            }))
+            .expect("");
+        let deserialized = Treemap::deserialize::<JvmLegacy>(&data);
+        assert_eq!(deserialized, Treemap::from_iter(vec![block_id_3 as u64]));
     }
 
     #[test]
