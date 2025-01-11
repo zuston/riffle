@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#![allow(dead_code, unused)]
 #![feature(impl_trait_in_assoc_type)]
 
 use crate::app::{AppManager, APP_MANAGER_REF};
