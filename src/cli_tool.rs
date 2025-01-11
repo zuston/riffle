@@ -1,3 +1,5 @@
+#![allow(dead_code, unused)]
+
 use bytes::{Buf, Bytes};
 use clap::{App, Arg};
 use std::fs;
