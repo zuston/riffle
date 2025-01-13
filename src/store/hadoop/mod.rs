@@ -25,7 +25,7 @@ pub(crate) trait HdfsDelegator: Send + Sync {
 }
 
 #[cfg(feature = "hdfs")]
-pub fn getHdfsDelegator(
+pub fn get_hdfs_delegator(
     root: &str,
     configs: HashMap<String, String>,
 ) -> Result<Box<dyn HdfsDelegator>> {

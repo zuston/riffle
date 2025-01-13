@@ -47,7 +47,7 @@ use crate::error::WorkerError::Other;
 use crate::kerberos::KerberosTask;
 use crate::runtime::manager::RuntimeManager;
 use crate::semaphore_with_index::SemaphoreWithIndex;
-use crate::store::hadoop::{getHdfsDelegator, HdfsDelegator};
+use crate::store::hadoop::{get_hdfs_delegator, HdfsDelegator};
 use tracing::{debug, Instrument};
 
 struct WritingHandler {
@@ -432,7 +432,7 @@ impl Store for HdfsStore {
         }
 
         let remote_storage_conf = remote_storage_conf_option.unwrap();
-        let client = getHdfsDelegator(
+        let client = get_hdfs_delegator(
             remote_storage_conf.root.as_str(),
             remote_storage_conf.configs,
         )?;
