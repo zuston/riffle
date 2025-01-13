@@ -525,6 +525,26 @@ impl App {
         if let Some(shuffle_id) = shuffle_id {
             // shuffle level bitmap deletion
             self.block_id_bitmap.remove(&shuffle_id);
+
+            let mut deletion_keys = vec![];
+            for entry in self.partition_meta_infos.clone().into_read_only().iter() {
+                let key = entry.0;
+                if shuffle_id == key.0 {
+                    deletion_keys.push(key);
+                }
+            }
+            GAUGE_PARTITION_NUMBER.sub(deletion_keys.len() as i64);
+            let mut huge_partition_cnt = 0;
+            for deletion_key in deletion_keys {
+                if let Some(meta) = self.partition_meta_infos.remove(deletion_key) {
+                    if meta.1.is_huge_partition() {
+                        huge_partition_cnt += 1;
+                    }
+                }
+            }
+            GAUGE_HUGE_PARTITION_NUMBER
+                .with_label_values(&vec![ALL_LABEL])
+                .sub(huge_partition_cnt as i64);
         } else {
             // app level deletion
             GAUGE_PARTITION_NUMBER.sub(self.partition_meta_infos.len() as i64);
