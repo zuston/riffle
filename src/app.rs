@@ -527,7 +527,8 @@ impl App {
             self.block_id_bitmap.remove(&shuffle_id);
 
             let mut deletion_keys = vec![];
-            for entry in self.partition_meta_infos.clone().into_read_only().iter() {
+            let view = self.partition_meta_infos.clone().into_read_only();
+            for entry in view.iter() {
                 let key = entry.0;
                 if shuffle_id == key.0 {
                     deletion_keys.push(key);
