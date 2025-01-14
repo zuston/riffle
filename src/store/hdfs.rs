@@ -202,7 +202,7 @@ impl HdfsStore {
                             error!("Errors on creating dir of {}", parent_path_str.as_str());
                             e
                         })?;
-                    println!("creating dir: {}", parent_path_str.as_str());
+                    debug!("creating dir: {}", parent_path_str.as_str());
 
                     let data_file_complete_path = format!("{}_{}.data", &data_file_path_prefix, 0);
                     let index_file_complete_path =
@@ -346,7 +346,7 @@ impl HdfsStore {
                 if let Some(file_name) = Path::new(path).file_name() {
                     if let Some(file_name) = file_name.to_str() {
                         if file_name.starts_with(file_prefix) {
-                            println!("deleting file: {}", path);
+                            debug!("deleting file: {}", path);
                             filesystem.delete_file(path).await?;
                         }
                     }
@@ -430,11 +430,6 @@ impl Store for HdfsStore {
                     removed_size += meta.1.data_len;
                 }
             }
-        }
-
-        if let PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(_) = ctx.purge_reason {
-            let a = 1;
-            println!("size: {}", keys_to_delete.len());
         }
 
         if !keys_to_delete.is_empty() {
