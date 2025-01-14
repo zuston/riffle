@@ -1,10 +1,11 @@
 use crate::error::WorkerError;
-use crate::store::hadoop::HdfsDelegator;
+use crate::store::hadoop::{FileStatus, HdfsDelegator};
 use crate::store::BytesWrapper;
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
 use hdrs::{Client, ClientBuilder};
+use libc::stat;
 use std::collections::HashMap;
 use std::io::Write;
 use std::sync::Arc;
@@ -91,5 +92,26 @@ impl HdfsDelegator for HdrsClient {
         let client = &self.inner.client;
         client.remove_dir_all(path.as_str())?;
         Ok(())
+    }
+
+    async fn delete_file(&self, file_path: &str) -> Result<()> {
+        let path = self.wrap_root(file_path);
+        let client = &self.inner.client;
+        client.remove_file(path.as_str())?;
+        Ok(())
+    }
+
+    async fn list_status(&self, dir: &str) -> Result<Vec<FileStatus>> {
+        let path = self.wrap_root(dir);
+        let client = &self.inner.client;
+        let meta = client.read_dir(path.as_str())?;
+        let mut result = vec![];
+        for status in meta.into_inner() {
+            result.push(FileStatus {
+                path: status.path().to_string(),
+                is_dir: status.is_dir(),
+            });
+        }
+        Ok(result)
     }
 }

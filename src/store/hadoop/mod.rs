@@ -22,6 +22,10 @@ pub(crate) trait HdfsDelegator: Send + Sync {
 
     async fn create_dir(&self, dir: &str) -> Result<()>;
     async fn delete_dir(&self, dir: &str) -> Result<()>;
+
+    async fn delete_file(&self, file_path: &str) -> Result<()>;
+
+    async fn list_status(&self, dir: &str) -> Result<Vec<FileStatus>>;
 }
 
 #[cfg(feature = "hdfs")]
@@ -34,4 +38,9 @@ pub fn get_hdfs_delegator(
 
     #[cfg(feature = "hdrs")]
     return Ok(Box::new(HdrsClient::new(root.to_owned(), configs)?));
+}
+
+pub struct FileStatus {
+    pub path: String,
+    pub is_dir: bool,
 }

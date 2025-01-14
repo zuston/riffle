@@ -1,5 +1,5 @@
 use crate::error::WorkerError;
-use crate::store::hadoop::HdfsDelegator;
+use crate::store::hadoop::{FileStatus, HdfsDelegator};
 use crate::store::BytesWrapper;
 use anyhow::{Error, Result};
 use async_trait::async_trait;
@@ -103,5 +103,22 @@ impl HdfsDelegator for HdfsNativeClient {
         let dir = &self.wrap_root(dir);
         self.inner.client.delete(dir, true).await?;
         Ok(())
+    }
+
+    async fn delete_file(&self, file_path: &str) -> Result<()> {
+        self.delete_dir(file_path).await
+    }
+
+    async fn list_status(&self, dir: &str) -> Result<Vec<FileStatus>> {
+        let complete_path = &self.wrap_root(dir);
+        let list = self.inner.client.list_status(complete_path, false).await?;
+        let mut vec = vec![];
+        for file_status in list {
+            vec.push(FileStatus {
+                path: file_status.path,
+                is_dir: file_status.isdir,
+            });
+        }
+        Ok(vec)
     }
 }

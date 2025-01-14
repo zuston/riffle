@@ -16,8 +16,9 @@
 // under the License.
 
 use crate::app::{
-    PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingViewContext,
+    PartitionedUId, PurgeDataContext, PurgeReason, ReadingIndexViewContext, ReadingViewContext,
     RegisterAppContext, ReleaseTicketContext, RequireBufferContext, WritingViewContext,
+    SHUFFLE_SERVER_ID,
 };
 use crate::config::{HdfsStoreConfig, StorageType};
 use crate::error::WorkerError;
@@ -38,16 +39,17 @@ use log::{error, info, warn};
 
 use std::path::Path;
 
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering::SeqCst;
-use std::sync::Arc;
-use tokio::sync::Semaphore;
-
 use crate::error::WorkerError::Other;
 use crate::kerberos::KerberosTask;
 use crate::runtime::manager::RuntimeManager;
 use crate::semaphore_with_index::SemaphoreWithIndex;
 use crate::store::hadoop::{get_hdfs_delegator, HdfsDelegator};
+use libc::stat;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering::SeqCst;
+use std::sync::Arc;
+use tokio::sync::Semaphore;
+use tokio::time::Instant;
 use tracing::{debug, Instrument};
 
 struct WritingHandler {
@@ -327,6 +329,34 @@ impl HdfsStore {
             })?;
         Ok(())
     }
+
+    async fn delete_recursively(
+        &self,
+        filesystem: &Arc<Box<dyn HdfsDelegator>>,
+        path: &str,
+        file_prefix: &str,
+    ) -> Result<()> {
+        let files = filesystem.list_status(path).await?;
+        for file_status in files {
+            let path = file_status.path.as_str();
+            if file_status.is_dir {
+                Box::pin(self.delete_recursively(filesystem, path, file_prefix)).await?;
+            } else {
+                if let Some(file_name) = Path::new(path).file_name() {
+                    if let Some(file_name) = file_name.to_str() {
+                        if file_name.starts_with(file_prefix) {
+                            filesystem.delete_file(path).await?;
+                        }
+                    }
+                }
+            }
+        }
+        let files = filesystem.list_status(path).await?;
+        if files.len() == 0 {
+            filesystem.delete_dir(path).await?;
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -400,14 +430,33 @@ impl Store for HdfsStore {
             }
         }
 
-        // app level purge if the app heartbeat is timeout or explicitly purge.
-        // 1. But if the app heartbeat is timeout, we should only delete this server's own written files
-        // 2. If the app is explicitly unregistered, delete all basic directory.
-        // The detailed info could be referred from https://github.com/apache/incubator-uniffle/pull/1681
         if !keys_to_delete.is_empty() {
-            if shuffle_id_option.is_some() {
+            // app level purge if the app heartbeat is timeout or explicitly purge.
+            // 1. But if the app heartbeat is timeout, we should only delete this server's own written files
+            // 2. If the app is explicitly unregistered, delete all basic directory.
+            // The detailed info could be referred from https://github.com/apache/incubator-uniffle/pull/1681
+
+            let is_app_level_explicit_unregister =
+                if let PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(_) = ctx.purge_reason {
+                    true
+                } else {
+                    false
+                };
+            if shuffle_id_option.is_some() || is_app_level_explicit_unregister {
+                let timer = Instant::now();
                 filesystem.delete_dir(dir.as_str()).await?;
-                info!("The hdfs data of path[{}] has been deleted", &dir);
+                info!(
+                    "The hdfs data of path[{}] has been deleted that cost [{}]ms",
+                    &dir,
+                    timer.elapsed().as_millis()
+                );
+            } else {
+                let timer = Instant::now();
+                let prefix = SHUFFLE_SERVER_ID.get().unwrap().as_str();
+                self.delete_recursively(&filesystem, dir.as_str(), prefix)
+                    .await?;
+                info!("The hdfs data of path[{}] with prefix[{}] has been deleted recursively that costs [{}]ms",
+                    &dir, prefix, timer.elapsed().as_millis());
             }
         }
 
@@ -478,7 +527,7 @@ mod tests {
     use crate::config::HdfsStoreConfig;
     use crate::error::WorkerError;
     use crate::runtime::manager::RuntimeManager;
-    use crate::store::hadoop::HdfsDelegator;
+    use crate::store::hadoop::{FileStatus, HdfsDelegator};
     use crate::store::hdfs::HdfsStore;
     use crate::store::{Block, BytesWrapper, Store};
     use anyhow::anyhow;
@@ -549,6 +598,14 @@ mod tests {
 
         async fn delete_dir(&self, dir: &str) -> anyhow::Result<()> {
             Ok(())
+        }
+
+        async fn delete_file(&self, file_path: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn list_status(&self, dir: &str) -> anyhow::Result<Vec<FileStatus>> {
+            Ok(vec![])
         }
     }
 
