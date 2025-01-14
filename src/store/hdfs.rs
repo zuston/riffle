@@ -473,7 +473,7 @@ impl Store for HdfsStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::app::{PartitionedUId, SHUFFLE_SERVER_ID};
+    use crate::app::{PartitionedUId, PurgeReason, SHUFFLE_SERVER_ID};
     use crate::app::{PurgeDataContext, WritingViewContext};
     use crate::config::HdfsStoreConfig;
     use crate::error::WorkerError;
@@ -489,7 +489,6 @@ mod tests {
     use std::sync::atomic::Ordering::SeqCst;
     use std::sync::Arc;
     use std::time::Duration;
-    use uniffle_worker::app::PurgeReason;
     use url::Url;
 
     #[test]
