@@ -31,10 +31,6 @@ unsafe impl Send for HdfsNativeClient {}
 unsafe impl Sync for HdfsNativeClient {}
 
 impl HdfsNativeClient {
-    fn wrap_root(&self, path: &str) -> String {
-        format!("{}/{}", &self.inner.root, path)
-    }
-
     pub(crate) fn new(root: String, configs: HashMap<String, String>) -> Result<HdfsNativeClient> {
         // todo: do more optimizations!
         let url = Url::parse(root.as_str())?;
@@ -60,7 +56,7 @@ impl HdfsNativeClient {
 #[async_trait]
 impl HdfsDelegator for HdfsNativeClient {
     async fn touch(&self, file_path: &str) -> Result<()> {
-        let file_path = &self.wrap_root(file_path);
+        let file_path = &self.with_root(file_path)?;
         self.inner
             .client
             .create(file_path, WriteOptions::default())
@@ -72,7 +68,7 @@ impl HdfsDelegator for HdfsNativeClient {
 
     async fn append(&self, file_path: &str, data: BytesWrapper) -> Result<(), WorkerError> {
         debug!("appending to {} with {} bytes", file_path, data.len());
-        let file_path = &self.wrap_root(file_path);
+        let file_path = &self.with_root(file_path)?;
         let mut file_writer = self
             .inner
             .client
@@ -88,19 +84,19 @@ impl HdfsDelegator for HdfsNativeClient {
     }
 
     async fn len(&self, file_path: &str) -> Result<u64> {
-        let file_path = &self.wrap_root(file_path);
+        let file_path = &self.with_root(file_path)?;
         let file_info = self.inner.client.get_file_info(file_path).await?;
         Ok(file_info.length as u64)
     }
 
     async fn create_dir(&self, dir: &str) -> Result<()> {
-        let dir = &self.wrap_root(dir);
+        let dir = &self.with_root(dir)?;
         let _ = self.inner.client.mkdirs(dir, 777, true).await?;
         Ok(())
     }
 
     async fn delete_dir(&self, dir: &str) -> Result<()> {
-        let dir = &self.wrap_root(dir);
+        let dir = &self.with_root(dir)?;
         self.inner.client.delete(dir, true).await?;
         Ok(())
     }
@@ -110,15 +106,20 @@ impl HdfsDelegator for HdfsNativeClient {
     }
 
     async fn list_status(&self, dir: &str) -> Result<Vec<FileStatus>> {
-        let complete_path = &self.wrap_root(dir);
+        let complete_path = &self.with_root(dir)?;
         let list = self.inner.client.list_status(complete_path, false).await?;
         let mut vec = vec![];
         for file_status in list {
+            let path = file_status.path;
             vec.push(FileStatus {
-                path: file_status.path,
+                path: self.without_root(&path)?,
                 is_dir: file_status.isdir,
             });
         }
         Ok(vec)
+    }
+
+    fn root(&self) -> String {
+        self.inner.root.to_string()
     }
 }

@@ -202,6 +202,7 @@ impl HdfsStore {
                             error!("Errors on creating dir of {}", parent_path_str.as_str());
                             e
                         })?;
+                    println!("creating dir: {}", parent_path_str.as_str());
 
                     let data_file_complete_path = format!("{}_{}.data", &data_file_path_prefix, 0);
                     let index_file_complete_path =
@@ -345,6 +346,7 @@ impl HdfsStore {
                 if let Some(file_name) = Path::new(path).file_name() {
                     if let Some(file_name) = file_name.to_str() {
                         if file_name.starts_with(file_prefix) {
+                            println!("deleting file: {}", path);
                             filesystem.delete_file(path).await?;
                         }
                     }
@@ -428,6 +430,11 @@ impl Store for HdfsStore {
                     removed_size += meta.1.data_len;
                 }
             }
+        }
+
+        if let PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(_) = ctx.purge_reason {
+            let a = 1;
+            println!("size: {}", keys_to_delete.len());
         }
 
         if !keys_to_delete.is_empty() {
@@ -527,12 +534,16 @@ mod tests {
     use crate::config::HdfsStoreConfig;
     use crate::error::WorkerError;
     use crate::runtime::manager::RuntimeManager;
+    use crate::semaphore_with_index::SemaphoreWithIndex;
     use crate::store::hadoop::{FileStatus, HdfsDelegator};
     use crate::store::hdfs::HdfsStore;
     use crate::store::{Block, BytesWrapper, Store};
     use anyhow::anyhow;
     use async_trait::async_trait;
     use bytes::Bytes;
+    use log::info;
+    use std::fs;
+    use std::fs::File;
     use std::path::Path;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering::SeqCst;
@@ -607,6 +618,10 @@ mod tests {
         async fn list_status(&self, dir: &str) -> anyhow::Result<Vec<FileStatus>> {
             Ok(vec![])
         }
+
+        fn root(&self) -> String {
+            "root".to_string()
+        }
     }
 
     #[test]
@@ -647,6 +662,187 @@ mod tests {
         assert!(!runtime_manager
             .default_runtime
             .block_on(hdfs.is_healthy())?);
+        Ok(())
+    }
+
+    #[test]
+    fn partial_delete_test() -> anyhow::Result<()> {
+        SHUFFLE_SERVER_ID.get_or_init(|| "10.0.0.1".to_owned());
+        let app_id = "partial_delete_test";
+
+        let config = HdfsStoreConfig::default();
+        let runtime_manager = RuntimeManager::default();
+        let hdfs_store = HdfsStore::from(config, &runtime_manager);
+
+        struct MockedHdfsClient {
+            root: String,
+        }
+        unsafe impl Send for MockedHdfsClient {}
+        unsafe impl Sync for MockedHdfsClient {}
+
+        let temp_dir = tempdir::TempDir::new("partial_delete_test_store").unwrap();
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        println!("init local file path: {}", temp_path);
+        #[async_trait]
+        impl HdfsDelegator for MockedHdfsClient {
+            async fn touch(&self, file_path: &str) -> anyhow::Result<()> {
+                let path = self.with_root(file_path)?;
+                File::create(path)?;
+                Ok(())
+            }
+
+            async fn append(
+                &self,
+                file_path: &str,
+                data: BytesWrapper,
+            ) -> anyhow::Result<(), WorkerError> {
+                Ok(())
+            }
+
+            async fn len(&self, file_path: &str) -> anyhow::Result<u64> {
+                Ok(1)
+            }
+
+            async fn create_dir(&self, dir: &str) -> anyhow::Result<()> {
+                let path = self.with_root(dir)?;
+                fs::create_dir_all(path)?;
+                Ok(())
+            }
+
+            async fn delete_dir(&self, dir: &str) -> anyhow::Result<()> {
+                let path = self.with_root(dir)?;
+                fs::remove_dir_all(path)?;
+                Ok(())
+            }
+
+            async fn delete_file(&self, file_path: &str) -> anyhow::Result<()> {
+                let path = self.with_root(file_path)?;
+                fs::remove_file(path)?;
+                Ok(())
+            }
+
+            async fn list_status(&self, dir: &str) -> anyhow::Result<Vec<FileStatus>> {
+                let path = self.with_root(dir)?;
+                println!("listing status: {}", &path);
+                let read_dir = fs::read_dir(path)?;
+                let mut result = vec![];
+                for status in read_dir.into_iter() {
+                    let status = status?;
+                    let path = status.path().as_path().to_str().unwrap().to_string();
+                    let is_dir = status.metadata()?.is_dir();
+                    result.push(FileStatus {
+                        path: self.without_root(path.as_str())?,
+                        is_dir,
+                    });
+                }
+                Ok(result)
+            }
+
+            fn root(&self) -> String {
+                self.root.to_string()
+            }
+        }
+
+        let client: Arc<Box<dyn HdfsDelegator>> = Arc::new(Box::new(MockedHdfsClient {
+            root: temp_path.to_string(),
+        }));
+        hdfs_store
+            .app_remote_clients
+            .insert(app_id.to_owned(), client.clone());
+
+        let uid = PartitionedUId::from(app_id.to_owned(), 1, 1);
+        let writing_ctx = WritingViewContext::create_for_test(
+            uid,
+            vec![Block {
+                block_id: 0,
+                length: 10i32,
+                uncompress_length: 200,
+                crc: 0,
+                data: Bytes::copy_from_slice(&vec![0; 10]),
+                task_attempt_id: 0,
+            }],
+        );
+        let hdfs_store = Arc::new(hdfs_store);
+        let hdfs = hdfs_store.clone();
+        let result = runtime_manager
+            .default_runtime
+            .block_on(hdfs.insert(writing_ctx))?;
+
+        // create data with another shuffle_server_id
+        let uid = PartitionedUId::from(app_id.to_owned(), 2, 1);
+        let writing_ctx = WritingViewContext::create_for_test(
+            uid,
+            vec![Block {
+                block_id: 0,
+                length: 10i32,
+                uncompress_length: 200,
+                crc: 0,
+                data: Bytes::copy_from_slice(&vec![0; 10]),
+                task_attempt_id: 0,
+            }],
+        );
+        let result = runtime_manager
+            .default_runtime
+            .block_on(hdfs.insert(writing_ctx))?;
+
+        // check the local file existence
+        fn file_number_recursively(path: &str) -> usize {
+            let mut file_count = 0;
+            if let Ok(entries) = fs::read_dir(path) {
+                for entry in entries {
+                    if let Ok(entry) = entry {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            file_count += file_number_recursively(path.to_str().unwrap());
+                        } else {
+                            println!("found file: {}", path.to_str().unwrap());
+                            file_count += 1;
+                        }
+                    }
+                }
+            }
+            file_count
+        }
+        assert_eq!(4, file_number_recursively(temp_path.as_str()));
+
+        // touch file with another shuffle_server_id
+        let complete_file = format!(
+            "{}/{}",
+            temp_path.as_str(),
+            "partial_delete_test/3/1-1/10.0.0.2_0_0.data"
+        );
+        let parent_dir = Path::new(complete_file.as_str())
+            .parent()
+            .unwrap()
+            .to_owned();
+        fs::create_dir_all(parent_dir);
+        File::create(complete_file)?;
+
+        assert_eq!(5, file_number_recursively(temp_path.as_str()));
+
+        // remove the data by the shuffle level purge
+        runtime_manager
+            .default_runtime
+            .block_on(hdfs_store.purge(&PurgeDataContext {
+                purge_reason: PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(
+                    "partial_delete_test".to_string(),
+                    1,
+                ),
+            }))?;
+        assert_eq!(2 + 1, file_number_recursively(temp_path.as_str()));
+        println!("Done with shuffle_level purge");
+
+        // remove the data by the heartbeat_timeout purge reason
+        runtime_manager
+            .default_runtime
+            .block_on(hdfs_store.purge(&PurgeDataContext {
+                purge_reason: PurgeReason::APP_LEVEL_HEARTBEAT_TIMEOUT(
+                    "partial_delete_test".to_string(),
+                ),
+            }))?;
+        assert_eq!(1, file_number_recursively(temp_path.as_str()));
+        println!("Done with heartbeat timeout app level purge");
+
         Ok(())
     }
 

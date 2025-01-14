@@ -13,6 +13,7 @@ use crate::store::BytesWrapper;
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 #[async_trait]
 pub(crate) trait HdfsDelegator: Send + Sync {
@@ -26,6 +27,28 @@ pub(crate) trait HdfsDelegator: Send + Sync {
     async fn delete_file(&self, file_path: &str) -> Result<()>;
 
     async fn list_status(&self, dir: &str) -> Result<Vec<FileStatus>>;
+
+    fn root(&self) -> String;
+
+    fn without_root(&self, path: &str) -> Result<String> {
+        let root = self.root();
+        let root = root.as_str();
+        let path = if path.starts_with(root) {
+            path.strip_prefix(root).unwrap()
+        } else {
+            path
+        };
+        let path = if path.starts_with("/") {
+            path.strip_prefix("/").unwrap()
+        } else {
+            path
+        };
+        Ok(path.to_string())
+    }
+
+    fn with_root(&self, path: &str) -> Result<String> {
+        Ok(format!("{}/{}", &self.root(), path))
+    }
 }
 
 #[cfg(feature = "hdfs")]

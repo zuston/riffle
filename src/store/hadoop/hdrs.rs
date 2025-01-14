@@ -44,16 +44,12 @@ impl HdrsClient {
             }),
         })
     }
-
-    fn wrap_root(&self, path: &str) -> String {
-        format!("{}/{}", &self.inner.root, path)
-    }
 }
 
 #[async_trait]
 impl HdfsDelegator for HdrsClient {
     async fn touch(&self, file_path: &str) -> Result<()> {
-        let path = self.wrap_root(file_path);
+        let path = self.with_root(file_path)?;
         let client = &self.inner.client;
         let mut file = client
             .open_file()
@@ -65,7 +61,7 @@ impl HdfsDelegator for HdrsClient {
     }
 
     async fn append(&self, file_path: &str, data: BytesWrapper) -> Result<(), WorkerError> {
-        let path = self.wrap_root(file_path);
+        let path = self.with_root(file_path)?;
         let client = &self.inner.client;
         let mut file = client.open_file().append(true).open(path.as_str())?;
         file.write_all(&data.freeze())?;
@@ -74,44 +70,50 @@ impl HdfsDelegator for HdrsClient {
     }
 
     async fn len(&self, file_path: &str) -> Result<u64> {
-        let path = self.wrap_root(file_path);
+        let path = self.with_root(file_path)?;
         let client = &self.inner.client;
         let metadata = client.metadata(path.as_str())?;
         Ok(metadata.len())
     }
 
     async fn create_dir(&self, dir: &str) -> Result<()> {
-        let path = self.wrap_root(dir);
+        let path = self.with_root(dir)?;
         let client = &self.inner.client;
         client.create_dir(path.as_str())?;
         Ok(())
     }
 
     async fn delete_dir(&self, dir: &str) -> Result<()> {
-        let path = self.wrap_root(dir);
+        let path = self.with_root(dir)?;
         let client = &self.inner.client;
         client.remove_dir_all(path.as_str())?;
         Ok(())
     }
 
     async fn delete_file(&self, file_path: &str) -> Result<()> {
-        let path = self.wrap_root(file_path);
+        let path = self.with_root(file_path)?;
         let client = &self.inner.client;
         client.remove_file(path.as_str())?;
         Ok(())
     }
 
     async fn list_status(&self, dir: &str) -> Result<Vec<FileStatus>> {
-        let path = self.wrap_root(dir);
+        let path = self.with_root(dir)?;
         let client = &self.inner.client;
         let meta = client.read_dir(path.as_str())?;
         let mut result = vec![];
         for status in meta.into_inner() {
+            let absolute_path = status.path();
+            let path_without_root = self.without_root(absolute_path).await?;
             result.push(FileStatus {
-                path: status.path().to_string(),
+                path: path_without_root,
                 is_dir: status.is_dir(),
             });
         }
         Ok(result)
+    }
+
+    async fn root(&self) -> Result<String> {
+        Ok(self.inner.root.to_string())
     }
 }
