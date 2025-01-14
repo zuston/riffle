@@ -405,8 +405,10 @@ impl Store for HdfsStore {
         // 2. If the app is explicitly unregistered, delete all basic directory.
         // The detailed info could be referred from https://github.com/apache/incubator-uniffle/pull/1681
         if !keys_to_delete.is_empty() {
-            filesystem.delete_dir(dir.as_str()).await?;
-            info!("The hdfs data of path[{}] has been deleted", &dir);
+            if shuffle_id_option.is_some() {
+                filesystem.delete_dir(dir.as_str()).await?;
+                info!("The hdfs data of path[{}] has been deleted", &dir);
+            }
         }
 
         Ok(removed_size)
@@ -487,6 +489,7 @@ mod tests {
     use std::sync::atomic::Ordering::SeqCst;
     use std::sync::Arc;
     use std::time::Duration;
+    use uniffle_worker::app::PurgeReason;
     use url::Url;
 
     #[test]
@@ -683,9 +686,8 @@ mod tests {
         // case4: purge test
         runtime_manager
             .default_runtime
-            .block_on(hdfs_store.purge(PurgeDataContext {
-                app_id: app_id.to_owned(),
-                shuffle_id: None,
+            .block_on(hdfs_store.purge(&PurgeDataContext {
+                purge_reason: PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(app_id.to_owned()),
             }))?;
         assert_eq!(0, hdfs_store.app_remote_clients.len());
         assert_eq!(0, hdfs_store.partition_cached_meta.len());

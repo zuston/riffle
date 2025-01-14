@@ -649,7 +649,7 @@ mod test {
 
         // shuffle level purge
         runtime
-            .wait(local_store.purge(PurgeDataContext::new(
+            .wait(local_store.purge(&PurgeDataContext::new(
                 &PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(app_id.to_owned(), 0),
             )))
             .expect("");
@@ -662,7 +662,9 @@ mod test {
         );
 
         // app level purge
-        runtime.wait(local_store.purge((&*app_id).into()))?;
+        runtime.wait(local_store.purge(&PurgeDataContext {
+            purge_reason: PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(app_id.to_owned()),
+        }))?;
         assert_eq!(
             false,
             runtime.wait(tokio::fs::try_exists(format!("{}/{}", &temp_path, &app_id)))?

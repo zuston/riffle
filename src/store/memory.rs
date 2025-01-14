@@ -658,7 +658,11 @@ mod test {
         };
         match runtime.default_runtime.block_on(store.require_buffer(ctx)) {
             Ok(_) => {
-                let _ = runtime.default_runtime.block_on(store.purge("100".into()));
+                let _ = runtime
+                    .default_runtime
+                    .block_on(store.purge(&PurgeDataContext {
+                        purge_reason: PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER("100".to_string()),
+                    }));
             }
             _ => panic!(),
         }
@@ -718,10 +722,8 @@ mod test {
 
         // partial purge for app's one shuffle data
         runtime
-            .wait(store.purge(PurgeDataContext::new(
-                app_id.to_string(),
-                Some(shuffle_id),
-                PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER,
+            .wait(store.purge(&PurgeDataContext::new(
+                &PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(app_id.to_owned(), shuffle_id),
             )))
             .expect("");
         assert!(!store.state.contains_key(&PartitionedUId::from(
@@ -731,7 +733,11 @@ mod test {
         )));
 
         // purge
-        runtime.wait(store.purge(app_id.into())).expect("");
+        runtime
+            .wait(store.purge(&PurgeDataContext::new(
+                &PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(app_id.to_owned()),
+            )))
+            .expect("");
         assert!(
             weak_ref_before.clone().unwrap().upgrade().is_none(),
             "Arc should not exist after purge"
