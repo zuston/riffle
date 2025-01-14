@@ -301,9 +301,8 @@ impl Store for MemoryStore {
     }
 
     #[trace]
-    async fn purge(&self, ctx: PurgeDataContext) -> Result<i64> {
-        let app_id = ctx.app_id;
-        let shuffle_id_option = ctx.shuffle_id;
+    async fn purge(&self, ctx: &PurgeDataContext) -> Result<i64> {
+        let (app_id, shuffle_id_option) = ctx.extract();
 
         // remove the corresponding app's data
         let read_only_state_view = self.state.clone().into_read_only();
@@ -311,7 +310,7 @@ impl Store for MemoryStore {
         for entry in read_only_state_view.iter() {
             let pid = entry.0;
             if pid.app_id == app_id {
-                if ctx.shuffle_id.is_some() {
+                if shuffle_id_option.is_some() {
                     if pid.shuffle_id == shuffle_id_option.unwrap() {
                         _removed_list.push(pid);
                     } else {
@@ -413,8 +412,8 @@ impl From<(i64, i64, i64)> for MemorySnapshot {
 #[cfg(test)]
 mod test {
     use crate::app::{
-        PartitionedUId, PurgeDataContext, ReadingOptions, ReadingViewContext, RequireBufferContext,
-        WritingViewContext,
+        PartitionedUId, PurgeDataContext, PurgeReason, ReadingOptions, ReadingViewContext,
+        RequireBufferContext, WritingViewContext,
     };
 
     use crate::store::memory::MemoryStore;
@@ -719,7 +718,11 @@ mod test {
 
         // partial purge for app's one shuffle data
         runtime
-            .wait(store.purge(PurgeDataContext::new(app_id.to_string(), Some(shuffle_id))))
+            .wait(store.purge(PurgeDataContext::new(
+                app_id.to_string(),
+                Some(shuffle_id),
+                PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER,
+            )))
             .expect("");
         assert!(!store.state.contains_key(&PartitionedUId::from(
             app_id.to_string(),

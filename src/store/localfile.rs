@@ -425,9 +425,8 @@ impl Store for LocalFileStore {
         }))
     }
 
-    async fn purge(&self, ctx: PurgeDataContext) -> Result<i64> {
-        let app_id = ctx.app_id;
-        let shuffle_id_option = ctx.shuffle_id;
+    async fn purge(&self, ctx: &PurgeDataContext) -> Result<i64> {
+        let (app_id, shuffle_id_option) = ctx.extract();
 
         let data_relative_dir_path = match shuffle_id_option {
             Some(shuffle_id) => LocalFileStore::gen_relative_path_for_shuffle(&app_id, shuffle_id),
@@ -501,7 +500,7 @@ impl Store for LocalFileStore {
 #[cfg(test)]
 mod test {
     use crate::app::{
-        PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingOptions,
+        PartitionedUId, PurgeDataContext, PurgeReason, ReadingIndexViewContext, ReadingOptions,
         ReadingViewContext, WritingViewContext,
     };
     use crate::store::localfile::LocalFileStore;
@@ -650,7 +649,9 @@ mod test {
 
         // shuffle level purge
         runtime
-            .wait(local_store.purge(PurgeDataContext::new(app_id.to_string(), Some(0))))
+            .wait(local_store.purge(PurgeDataContext::new(
+                &PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(app_id.to_owned(), 0),
+            )))
             .expect("");
         assert_eq!(
             false,

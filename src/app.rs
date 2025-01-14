@@ -42,7 +42,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use std::hash::{Hash, Hasher};
-
+use std::ops::Deref;
 use std::str::FromStr;
 
 use crate::await_tree::AWAIT_TREE_REGISTRY;
@@ -514,11 +514,9 @@ impl App {
         Ok(())
     }
 
-    pub async fn purge(&self, app_id: String, shuffle_id: Option<i32>) -> Result<()> {
-        let removed_size = self
-            .store
-            .purge(PurgeDataContext::new(app_id, shuffle_id))
-            .await?;
+    pub async fn purge(&self, reason: &PurgeReason) -> Result<()> {
+        let (app_id, shuffle_id) = reason.extract();
+        let removed_size = self.store.purge(&PurgeDataContext::new(reason)).await?;
         self.total_resident_data_size
             .fetch_sub(removed_size as u64, SeqCst);
 
@@ -564,24 +562,50 @@ impl App {
     }
 }
 
+#[allow(non_camel_case_types)]
 #[derive(Debug, Clone)]
-pub struct PurgeDataContext {
-    pub(crate) app_id: String,
-    pub(crate) shuffle_id: Option<i32>,
+pub enum PurgeReason {
+    SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(String, i32),
+    APP_LEVEL_EXPLICIT_UNREGISTER(String),
+    APP_LEVEL_HEARTBEAT_TIMEOUT(String),
 }
 
-impl PurgeDataContext {
-    pub fn new(app_id: String, shuffle_id: Option<i32>) -> PurgeDataContext {
-        PurgeDataContext { app_id, shuffle_id }
+impl PurgeReason {
+    pub fn extract(&self) -> (String, Option<i32>) {
+        match &self {
+            PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(x, y) => (x.to_owned(), Some(*y)),
+            PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(x) => (x.to_owned(), None),
+            PurgeReason::APP_LEVEL_HEARTBEAT_TIMEOUT(x) => (x.to_owned(), None),
+        }
+    }
+
+    pub fn extract_app_id(&self) -> String {
+        match &self {
+            PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(x, y) => x.to_owned(),
+            PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(x) => x.to_owned(),
+            PurgeReason::APP_LEVEL_HEARTBEAT_TIMEOUT(x) => x.to_owned(),
+        }
     }
 }
 
-impl From<&str> for PurgeDataContext {
-    fn from(app_id_ref: &str) -> Self {
+#[derive(Debug, Clone)]
+pub struct PurgeDataContext {
+    pub purge_reason: PurgeReason,
+}
+
+impl PurgeDataContext {
+    pub fn new(reason: &PurgeReason) -> PurgeDataContext {
         PurgeDataContext {
-            app_id: app_id_ref.to_string(),
-            shuffle_id: None,
+            purge_reason: reason.clone(),
         }
+    }
+}
+
+impl Deref for PurgeDataContext {
+    type Target = PurgeReason;
+
+    fn deref(&self) -> &Self::Target {
+        &self.purge_reason
     }
 }
 
@@ -704,14 +728,8 @@ pub enum ReadingOptions {
 // ==========================================================
 
 #[derive(Debug, Clone)]
-#[allow(non_camel_case_types)]
-pub enum PurgeEvent {
-    // app_id
-    HEARTBEAT_TIMEOUT(String),
-    // app_id + shuffle_id
-    APP_PARTIAL_SHUFFLES_PURGE(String, i32),
-    // app_id
-    APP_PURGE(String),
+pub struct PurgeEvent {
+    reason: PurgeReason,
 }
 
 pub type AppManagerRef = Arc<AppManager>;
@@ -777,7 +795,9 @@ impl AppManager {
                             key, current, last_time, app_manager_ref_cloned.app_heartbeat_timeout_min);
                             if app_manager_ref_cloned
                                 .sender
-                                .send(PurgeEvent::HEARTBEAT_TIMEOUT(key.clone()))
+                                .send(PurgeEvent {
+                                    reason: PurgeReason::APP_LEVEL_HEARTBEAT_TIMEOUT(key.clone()),
+                                })
                                 .await
                                 .is_err()
                             {
@@ -833,35 +853,30 @@ impl AppManager {
 
         let app_manager_cloned = app_ref.clone();
         runtime_manager.default_runtime.spawn(async move {
-            let await_root = AWAIT_TREE_REGISTRY.clone()
+            let await_root = AWAIT_TREE_REGISTRY
+                .clone()
                 .register(format!("App periodic purger"))
                 .await;
-            await_root.instrument(async move {
-                info!("Starting purge event handler...");
-                while let Ok(event) = app_manager_cloned.receiver.recv().instrument_await("waiting events coming...").await {
-                    let _ = match event {
-                        PurgeEvent::HEARTBEAT_TIMEOUT(app_id) => {
-                            info!(
-                            "The app:[{}]'s data will be purged due to heartbeat timeout",
-                            &app_id
-                        );
-                            app_manager_cloned.purge_app_data(app_id, None).await
-                        }
-                        PurgeEvent::APP_PURGE(app_id) => {
-                            info!(
-                            "The app:[{}] has been finished, its data will be purged.",
-                            &app_id
-                        );
-                            app_manager_cloned.purge_app_data(app_id, None).await
-                        }
-                        PurgeEvent::APP_PARTIAL_SHUFFLES_PURGE(app_id, shuffle_id) => {
-                            info!("The app:[{:?}] with shuffleId: [{:?}] will be purged due to unregister service interface", &app_id, shuffle_id);
-                            app_manager_cloned.purge_app_data(app_id, Some(shuffle_id)).await
+            await_root
+                .instrument(async move {
+                    info!("Starting purge event handler...");
+                    while let Ok(event) = app_manager_cloned
+                        .receiver
+                        .recv()
+                        .instrument_await("waiting events coming...")
+                        .await
+                    {
+                        let reason = event.reason;
+                        info!("Purging data with reason: {:?}", &reason);
+                        if let Err(err) = app_manager_cloned.purge_app_data(&reason).await {
+                            error!(
+                                "Errors on purging data with reason: {:?}. err: {:?}",
+                                &reason, err
+                            );
                         }
                     }
-                        .map_err(|err| error!("Errors on purging data. error: {:?}", err));
-                }
-            }).await;
+                })
+                .await;
         });
 
         app_ref
@@ -887,7 +902,8 @@ impl AppManager {
         self.store.get_spill_event_num()
     }
 
-    async fn purge_app_data(&self, app_id: String, shuffle_id_option: Option<i32>) -> Result<()> {
+    async fn purge_app_data(&self, reason: &PurgeReason) -> Result<()> {
+        let (app_id, shuffle_id_option) = reason.extract();
         let app = self.get_app(&app_id).ok_or(anyhow!(format!(
             "App:{} don't exist when purging data, this should not happen",
             &app_id
@@ -907,7 +923,7 @@ impl AppManager {
                 format!("{:?}", StorageType::HDFS).as_str(),
             ]);
         }
-        app.purge(app_id.clone(), shuffle_id_option).await?;
+        app.purge(reason).await?;
         Ok(())
     }
 
@@ -947,13 +963,19 @@ impl AppManager {
 
     pub async fn unregister_shuffle(&self, app_id: String, shuffle_id: i32) -> Result<()> {
         self.sender
-            .send(PurgeEvent::APP_PARTIAL_SHUFFLES_PURGE(app_id, shuffle_id))
+            .send(PurgeEvent {
+                reason: PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(app_id, shuffle_id),
+            })
             .await?;
         Ok(())
     }
 
     pub async fn unregister_app(&self, app_id: String) -> Result<()> {
-        self.sender.send(PurgeEvent::APP_PURGE(app_id)).await?;
+        self.sender
+            .send(PurgeEvent {
+                reason: PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(app_id),
+            })
+            .await?;
         Ok(())
     }
 
@@ -991,9 +1013,9 @@ impl PartitionedUId {
 #[cfg(test)]
 pub(crate) mod test {
     use crate::app::{
-        AppManager, GetBlocksContext, GetMultiBlockIdsContext, PartitionedUId, ReadingOptions,
-        ReadingViewContext, ReportBlocksContext, ReportMultiBlockIdsContext, RequireBufferContext,
-        WritingViewContext,
+        AppManager, GetBlocksContext, GetMultiBlockIdsContext, PartitionedUId, PurgeReason,
+        ReadingOptions, ReadingViewContext, ReportBlocksContext, ReportMultiBlockIdsContext,
+        RequireBufferContext, WritingViewContext,
     };
     use crate::config::{Config, HybridStoreConfig, LocalfileStoreConfig, MemoryStoreConfig};
     use bytes::Bytes;
@@ -1164,7 +1186,11 @@ pub(crate) mod test {
 
             // case3: purge
             runtime_manager
-                .wait(app_manager_ref.purge_app_data(app_id.to_string(), None))
+                .wait(
+                    app_manager_ref.purge_app_data(&PurgeReason::APP_LEVEL_HEARTBEAT_TIMEOUT(
+                        app_id.to_owned(),
+                    )),
+                )
                 .expect("");
 
             assert_eq!(false, app_manager_ref.get_app(app_id).is_none());

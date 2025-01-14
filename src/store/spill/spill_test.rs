@@ -365,7 +365,7 @@ mod mock {
             todo!()
         }
 
-        async fn purge(&self, ctx: PurgeDataContext) -> anyhow::Result<i64> {
+        async fn purge(&self, ctx: &PurgeDataContext) -> anyhow::Result<i64> {
             todo!()
         }
 

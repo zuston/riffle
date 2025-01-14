@@ -352,10 +352,10 @@ impl Store for HdfsStore {
         Err(WorkerError::NOT_READ_HDFS_DATA_FROM_SERVER)
     }
 
-    async fn purge(&self, ctx: PurgeDataContext) -> Result<i64> {
-        let app_id = ctx.app_id;
+    async fn purge(&self, ctx: &PurgeDataContext) -> Result<i64> {
+        let (app_id, shuffle_id_option) = ctx.extract();
 
-        let fs_option = if ctx.shuffle_id.is_none() {
+        let fs_option = if shuffle_id_option.is_none() {
             let fs = self.app_remote_clients.remove(&app_id);
             if fs.is_none() {
                 None
@@ -377,7 +377,7 @@ impl Store for HdfsStore {
 
         let filesystem = fs_option.unwrap();
 
-        let dir = match ctx.shuffle_id {
+        let dir = match shuffle_id_option {
             Some(shuffle_id) => self.get_shuffle_dir(app_id.as_str(), shuffle_id),
             _ => self.get_app_dir(app_id.as_str()),
         };
@@ -400,6 +400,10 @@ impl Store for HdfsStore {
             }
         }
 
+        // app level purge if the app heartbeat is timeout or explicitly purge.
+        // 1. But if the app heartbeat is timeout, we should only delete this server's own written files
+        // 2. If the app is explicitly unregistered, delete all basic directory.
+        // The detailed info could be referred from https://github.com/apache/incubator-uniffle/pull/1681
         if !keys_to_delete.is_empty() {
             filesystem.delete_dir(dir.as_str()).await?;
             info!("The hdfs data of path[{}] has been deleted", &dir);
