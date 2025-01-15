@@ -22,11 +22,11 @@ pub(crate) trait HdfsDelegator: Send + Sync {
     async fn len(&self, file_path: &str) -> Result<u64>;
 
     async fn create_dir(&self, dir: &str) -> Result<()>;
-    async fn delete_dir(&self, dir: &str) -> Result<()>;
+    async fn delete_dir(&self, dir: &str) -> Result<(), WorkerError>;
 
-    async fn delete_file(&self, file_path: &str) -> Result<()>;
+    async fn delete_file(&self, file_path: &str) -> Result<(), WorkerError>;
 
-    async fn list_status(&self, dir: &str) -> Result<Vec<FileStatus>>;
+    async fn list_status(&self, dir: &str) -> Result<Vec<FileStatus>, WorkerError>;
 
     fn root(&self) -> String;
 

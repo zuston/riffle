@@ -83,28 +83,28 @@ impl HdfsDelegator for HdrsClient {
         Ok(())
     }
 
-    async fn delete_dir(&self, dir: &str) -> Result<()> {
+    async fn delete_dir(&self, dir: &str) -> Result<(), WorkerError> {
         let path = self.with_root(dir)?;
         let client = &self.inner.client;
         client.remove_dir_all(path.as_str())?;
         Ok(())
     }
 
-    async fn delete_file(&self, file_path: &str) -> Result<()> {
+    async fn delete_file(&self, file_path: &str) -> Result<(), WorkerError> {
         let path = self.with_root(file_path)?;
         let client = &self.inner.client;
         client.remove_file(path.as_str())?;
         Ok(())
     }
 
-    async fn list_status(&self, dir: &str) -> Result<Vec<FileStatus>> {
+    async fn list_status(&self, dir: &str) -> Result<Vec<FileStatus>, WorkerError> {
         let path = self.with_root(dir)?;
         let client = &self.inner.client;
         let meta = client.read_dir(path.as_str())?;
         let mut result = vec![];
         for status in meta.into_inner() {
             let absolute_path = status.path();
-            let path_without_root = self.without_root(absolute_path).await?;
+            let path_without_root = self.without_root(absolute_path)?;
             result.push(FileStatus {
                 path: path_without_root,
                 is_dir: status.is_dir(),
@@ -113,7 +113,7 @@ impl HdfsDelegator for HdrsClient {
         Ok(result)
     }
 
-    async fn root(&self) -> Result<String> {
-        Ok(self.inner.root.to_string())
+    fn root(&self) -> String {
+        self.inner.root.to_string()
     }
 }

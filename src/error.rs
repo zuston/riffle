@@ -88,6 +88,9 @@ pub enum WorkerError {
     #[error("{0}. error: {1}")]
     HDFS_IO_ERROR(String, anyhow::Error),
 
+    #[error("dir or file is not found. error: {0}")]
+    DIR_OR_FILE_NOT_FOUND(anyhow::Error),
+
     #[error("Out of memory. error: {0}")]
     OUT_OF_MEMORY(anyhow::Error),
 
@@ -120,6 +123,8 @@ impl From<std::io::Error> for WorkerError {
     fn from(err: std::io::Error) -> Self {
         match err.kind() {
             std::io::ErrorKind::OutOfMemory => WorkerError::OUT_OF_MEMORY(Error::new(err)),
+            // todo: should cover the hdfs-native not found error!
+            std::io::ErrorKind::NotFound => WorkerError::DIR_OR_FILE_NOT_FOUND(Error::new(err)),
             _ => WorkerError::Other(Error::new(err)),
         }
     }

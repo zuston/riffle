@@ -95,17 +95,17 @@ impl HdfsDelegator for HdfsNativeClient {
         Ok(())
     }
 
-    async fn delete_dir(&self, dir: &str) -> Result<()> {
+    async fn delete_dir(&self, dir: &str) -> Result<(), WorkerError> {
         let dir = &self.with_root(dir)?;
         self.inner.client.delete(dir, true).await?;
         Ok(())
     }
 
-    async fn delete_file(&self, file_path: &str) -> Result<()> {
+    async fn delete_file(&self, file_path: &str) -> Result<(), WorkerError> {
         self.delete_dir(file_path).await
     }
 
-    async fn list_status(&self, dir: &str) -> Result<Vec<FileStatus>> {
+    async fn list_status(&self, dir: &str) -> Result<Vec<FileStatus>, WorkerError> {
         let complete_path = &self.with_root(dir)?;
         let list = self.inner.client.list_status(complete_path, false).await?;
         let mut vec = vec![];

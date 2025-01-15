@@ -349,6 +349,10 @@ pub static URPC_GET_LOCALFILE_DATA_TRANSPORT_TIME: Lazy<Histogram> = Lazy::new(|
 pub static URPC_CONNECTION_NUMBER: Lazy<IntGauge> =
     Lazy::new(|| IntGauge::new("urpc_connection_number", "urpc_connection_number").expect(""));
 
+pub static PURGE_FAILED_COUNTER: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new("purge_failed_count", "purge_failed_count").expect("metric should be created")
+});
+
 // ===========
 
 pub static TOTAL_MEMORY_USED: Lazy<IntCounter> = Lazy::new(|| {
@@ -664,6 +668,10 @@ pub static IO_SCHEDULER_APPEND_WAIT: Lazy<IntGaugeVec> =
     Lazy::new(|| register_int_gauge_vec!("append_wait", "append_wait", &["root"]).unwrap());
 
 fn register_custom_metrics() {
+    REGISTRY
+        .register(Box::new(PURGE_FAILED_COUNTER.clone()))
+        .expect("purge_failed_count must be registered");
+
     REGISTRY
         .register(Box::new(ALIGNMENT_BUFFER_POOL_ACQUIRED_MISS.clone()))
         .expect("");

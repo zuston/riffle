@@ -336,7 +336,7 @@ impl HdfsStore {
         filesystem: &Arc<Box<dyn HdfsDelegator>>,
         path: &str,
         file_prefix: &str,
-    ) -> Result<()> {
+    ) -> Result<(), WorkerError> {
         let files = filesystem.list_status(path).await?;
         for file_status in files {
             let path = file_status.path.as_str();
@@ -455,8 +455,16 @@ impl Store for HdfsStore {
             } else {
                 let timer = Instant::now();
                 let prefix = SHUFFLE_SERVER_ID.get().unwrap().as_str();
-                self.delete_recursively(&filesystem, dir.as_str(), prefix)
-                    .await?;
+                match self
+                    .delete_recursively(&filesystem, dir.as_str(), prefix)
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(WorkerError::DIR_OR_FILE_NOT_FOUND(e)) => {
+                        warn!("The internal hdfs file or dir is not found for path[{}]. Maybe this is also being deleted by other shuffle-servers. Ignore this!", &dir);
+                    }
+                    Err(e) => return Err(anyhow::Error::from(e)),
+                }
                 info!("The hdfs data of path[{}] with prefix[{}] has been deleted recursively that costs [{}]ms",
                     &dir, prefix, timer.elapsed().as_millis());
             }

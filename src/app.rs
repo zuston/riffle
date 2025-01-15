@@ -19,7 +19,7 @@ use crate::config::{Config, StorageType};
 use crate::error::WorkerError;
 use crate::metric::{
     GAUGE_APP_NUMBER, GAUGE_HUGE_PARTITION_NUMBER, GAUGE_PARTITION_NUMBER,
-    GAUGE_TOPN_APP_RESIDENT_BYTES, TOTAL_APP_FLUSHED_BYTES, TOTAL_APP_NUMBER,
+    GAUGE_TOPN_APP_RESIDENT_BYTES, PURGE_FAILED_COUNTER, TOTAL_APP_FLUSHED_BYTES, TOTAL_APP_NUMBER,
     TOTAL_HUGE_PARTITION_NUMBER, TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED,
     TOTAL_PARTITION_NUMBER, TOTAL_READ_DATA, TOTAL_READ_DATA_FROM_LOCALFILE,
     TOTAL_READ_DATA_FROM_MEMORY, TOTAL_READ_INDEX_FROM_LOCALFILE, TOTAL_RECEIVED_DATA,
@@ -869,6 +869,7 @@ impl AppManager {
                         let reason = event.reason;
                         info!("Purging data with reason: {:?}", &reason);
                         if let Err(err) = app_manager_cloned.purge_app_data(&reason).await {
+                            PURGE_FAILED_COUNTER.inc();
                             error!(
                                 "Errors on purging data with reason: {:?}. err: {:?}",
                                 &reason, err
