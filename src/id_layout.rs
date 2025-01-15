@@ -1,4 +1,5 @@
 use crate::grpc::protobuf::uniffle::BlockIdLayout;
+use log::warn;
 use once_cell::sync::Lazy;
 use std::ops::Deref;
 
@@ -10,9 +11,10 @@ pub const DEFAULT_BLOCK_ID_LAYOUT: Lazy<IdLayout> = Lazy::new(|| {
     )
 });
 
-const DEFAULT_SEQUENCE_NO_BIT: i32 = 18;
+// todo: the default layout should be configured by options
+const DEFAULT_SEQUENCE_NO_BIT: i32 = 16;
 const DEFAULT_PARTITION_ID_BIT: i32 = 24;
-const DEFAULT_TASK_ID_BIT: i32 = 21;
+const DEFAULT_TASK_ID_BIT: i32 = 23;
 
 #[derive(Debug, Clone)]
 pub struct IdLayout {
@@ -61,12 +63,20 @@ impl From<&BlockIdLayout> for IdLayout {
 
 pub fn to_layout(layout: Option<BlockIdLayout>) -> IdLayout {
     if let Some(block_id_layout) = layout {
+        if block_id_layout.sequence_no_bits != DEFAULT_SEQUENCE_NO_BIT
+            || block_id_layout.partition_id_bits != DEFAULT_PARTITION_ID_BIT
+            || block_id_layout.task_attempt_id_bits != DEFAULT_TASK_ID_BIT
+        {
+            warn!("This should not happen that client blockId layout is not expected. sequence: {}, partition: {}. task: {}",
+                block_id_layout.sequence_no_bits, block_id_layout.partition_id_bits, block_id_layout.task_attempt_id_bits);
+        }
         IdLayout::new(
             block_id_layout.sequence_no_bits,
             block_id_layout.partition_id_bits,
             block_id_layout.task_attempt_id_bits,
         )
     } else {
+        warn!("This should not happen that client blockId layout is missing and using the default block id layout!");
         IdLayout::new(
             DEFAULT_SEQUENCE_NO_BIT,
             DEFAULT_PARTITION_ID_BIT,
