@@ -236,7 +236,7 @@ pub trait Store {
         &self,
         ctx: ReadingIndexViewContext,
     ) -> Result<ResponseDataIndex, WorkerError>;
-    async fn purge(&self, ctx: PurgeDataContext) -> Result<i64>;
+    async fn purge(&self, ctx: &PurgeDataContext) -> Result<i64>;
     async fn is_healthy(&self) -> Result<bool>;
 
     async fn require_buffer(
