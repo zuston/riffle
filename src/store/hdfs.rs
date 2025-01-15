@@ -610,15 +610,15 @@ mod tests {
             Ok(())
         }
 
-        async fn delete_dir(&self, dir: &str) -> anyhow::Result<()> {
+        async fn delete_dir(&self, dir: &str) -> anyhow::Result<(), WorkerError> {
             Ok(())
         }
 
-        async fn delete_file(&self, file_path: &str) -> anyhow::Result<()> {
+        async fn delete_file(&self, file_path: &str) -> anyhow::Result<(), WorkerError> {
             Ok(())
         }
 
-        async fn list_status(&self, dir: &str) -> anyhow::Result<Vec<FileStatus>> {
+        async fn list_status(&self, dir: &str) -> anyhow::Result<Vec<FileStatus>, WorkerError> {
             Ok(vec![])
         }
 
@@ -712,19 +712,19 @@ mod tests {
                 Ok(())
             }
 
-            async fn delete_dir(&self, dir: &str) -> anyhow::Result<()> {
+            async fn delete_dir(&self, dir: &str) -> anyhow::Result<(), WorkerError> {
                 let path = self.with_root(dir)?;
                 fs::remove_dir_all(path)?;
                 Ok(())
             }
 
-            async fn delete_file(&self, file_path: &str) -> anyhow::Result<()> {
+            async fn delete_file(&self, file_path: &str) -> anyhow::Result<(), WorkerError> {
                 let path = self.with_root(file_path)?;
                 fs::remove_file(path)?;
                 Ok(())
             }
 
-            async fn list_status(&self, dir: &str) -> anyhow::Result<Vec<FileStatus>> {
+            async fn list_status(&self, dir: &str) -> anyhow::Result<Vec<FileStatus>, WorkerError> {
                 let path = self.with_root(dir)?;
                 println!("listing status: {}", &path);
                 let read_dir = fs::read_dir(path)?;
