@@ -151,7 +151,7 @@ pub struct App {
     pub(crate) registry_timestamp: u128,
 
     // key: shuffle_id, val: shuffle's all block_ids bitmap
-    block_id_bitmap: DashMap<i32, RwLock<Treemap>>,
+    block_id_bitmap: DashMap<i32, Arc<RwLock<Treemap>>>,
 
     // key: (shuffle_id, partition_id)
     partition_meta_infos: DashMap<(i32, i32), PartitionedMeta>,
@@ -486,7 +486,8 @@ impl App {
         let treemap = self
             .block_id_bitmap
             .entry(*shuffle_id)
-            .or_insert_with(|| RwLock::new(Treemap::new()));
+            .or_insert_with(|| Arc::new(RwLock::new(Treemap::new())))
+            .clone();
         let treemap = treemap.read();
         let mut retrieved = Treemap::new();
         for element in treemap.iter() {
@@ -505,7 +506,8 @@ impl App {
         let treemap = self
             .block_id_bitmap
             .entry(*shuffle_id)
-            .or_insert_with(|| RwLock::new(Treemap::new()));
+            .or_insert_with(|| Arc::new(RwLock::new(Treemap::new())))
+            .clone();
         let mut treemap = treemap.write();
         for block_id in ctx.block_ids {
             treemap.add(block_id as u64);
