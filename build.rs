@@ -17,8 +17,19 @@
 
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Inject commit id into the compiler envs
+    let raw_commit_id_output = Command::new("git")
+        .args(&["rev-parse", "HEAD"])
+        .output()
+        .expect("Failed to execute git command");
+    let git_hash = String::from_utf8_lossy(&raw_commit_id_output.stdout)
+        .trim()
+        .to_string();
+    println!("cargo:rustc-env=GIT_COMMIT_HASH={}", git_hash);
+
     // generate the uniffle code for service server
     let mut config = prost_build::Config::new();
     config.bytes(&["."]);
