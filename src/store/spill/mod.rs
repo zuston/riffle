@@ -96,13 +96,17 @@ async fn handle_spill_failure_whatever_error(
     // Ignore all errors when app is not found. Because the pending spill operation may happen after app has been purged.
     let ctx = &message.ctx;
     let is_valid_app = ctx.is_valid();
-    if !is_valid_app {
-        debug!("Dropping the spill event for app: {:?}. Ths app is not found, may be purged. Ignore this. error: {}", &message.ctx.uid.app_id, flush_error);
+    let is_app_not_found_or_purged = match flush_error {
+        WorkerError::APP_HAS_BEEN_PURGED | WorkerError::APP_IS_NOT_FOUND => true,
+        _ => false,
+    };
+    if !is_valid_app || is_app_not_found_or_purged {
+        debug!("Dropping the spill event for uid: {:?}. Ths app is not found, may be purged. Ignore this. error: {}", &message.ctx.uid, flush_error);
         TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND.inc();
     } else {
         warn!(
-            "Dropping the spill event for app: {:?}. Attention: this will make data lost!",
-            &message.ctx.uid.app_id
+            "Dropping the spill event for uid: {:?}. Attention: this will make data lost!",
+            &message.ctx.uid
         );
         if let Err(err) = store_ref
             .release_memory_buffer(message.size, &message)
@@ -142,9 +146,10 @@ async fn handle_spill_failure(
                     _ => {}
                 }
             }
+            let uid = &message.ctx.uid;
             error!(
-                "Errors on spill memory data to persistent storage. The error: {:#?}",
-                error
+                "Errors on spill memory data to persistent storage for uid: {:?}. The error: {:#?}",
+                uid, error
             );
             // could be retry?
             true
@@ -158,8 +163,8 @@ async fn handle_spill_success(message: &SpillMessage, store_ref: Arc<HybridStore
         .await
     {
         debug!(
-            "Errors on releasing memory data, that should not happen. err: {:#?}",
-            err
+            "Errors on releasing memory data for uid: {:?}, that should not happen. err: {:#?}",
+            &message.ctx.uid, err
         );
     }
     store_ref.finish_spill_event(message.size as u64);
