@@ -38,7 +38,9 @@ impl ResponseError for WorkerError {
 struct IndexPageHandler {}
 impl Handler for IndexPageHandler {
     fn get_route_method(&self) -> RouteMethod {
-        get(make_sync(|_| "Hello uniffle server"))
+        get(make_sync(|_| {
+            format!("Riffle\nGit commit id [{}]", env!("GIT_COMMIT_HASH"))
+        }))
     }
 
     fn get_route_path(&self) -> String {

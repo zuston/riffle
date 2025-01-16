@@ -87,8 +87,7 @@ const MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY: &str = "MAX_MEMORY_ALLOCATION_LIMIT_SI
 fn main() -> Result<()> {
     setup_max_memory_allocation();
 
-    let args_match = App::new("Uniffle Worker")
-        .version("0.9.0-SNAPSHOT")
+    let args_match = App::new("Riffle")
         .about("Rust based shuffle server for Apache Uniffle")
         .arg(
             Arg::with_name("config")
@@ -109,6 +108,11 @@ fn main() -> Result<()> {
 
     #[cfg(feature = "logforth")]
     let _guard = LogService::init(&config.log);
+
+    info!(
+        "Riffle is built on the git commit hash: {}",
+        env!("GIT_COMMIT_HASH")
+    );
 
     init_global_variable(&config);
 
