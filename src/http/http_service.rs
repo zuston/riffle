@@ -40,7 +40,7 @@ impl Handler for IndexPageHandler {
     fn get_route_method(&self) -> RouteMethod {
         get(make_sync(|_| {
             format!(
-                "<h1>Riffle</h1><h3>git commit id [{}]</h3>",
+                "Riffle\nGit commit id [{}]",
                 env!("GIT_COMMIT_HASH")
             )
         }))
