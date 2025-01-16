@@ -949,18 +949,22 @@ impl AppManager {
             app_id.clone(),
             shuffle_id
         );
-        let app_ref = self.apps.entry(app_id.clone()).or_insert_with(|| {
-            TOTAL_APP_NUMBER.inc();
-            GAUGE_APP_NUMBER.inc();
+        let app_ref = self
+            .apps
+            .entry(app_id.clone())
+            .or_insert_with(|| {
+                TOTAL_APP_NUMBER.inc();
+                GAUGE_APP_NUMBER.inc();
 
-            Arc::new(App::from(
-                app_id,
-                app_config_options,
-                self.store.clone(),
-                self.runtime_manager.clone(),
-                &self.config,
-            ))
-        });
+                Arc::new(App::from(
+                    app_id,
+                    app_config_options,
+                    self.store.clone(),
+                    self.runtime_manager.clone(),
+                    &self.config,
+                ))
+            })
+            .clone();
         app_ref.register_shuffle(shuffle_id)
     }
 
@@ -1022,6 +1026,7 @@ pub(crate) mod test {
     };
     use crate::config::{Config, HybridStoreConfig, LocalfileStoreConfig, MemoryStoreConfig};
     use bytes::Bytes;
+    use std::sync::Arc;
 
     use crate::error::WorkerError;
     use crate::id_layout::{to_layout, IdLayout, DEFAULT_BLOCK_ID_LAYOUT};
@@ -1030,6 +1035,7 @@ pub(crate) mod test {
     use crate::store::{Block, ResponseData};
     use croaring::{JvmLegacy, Treemap};
     use dashmap::DashMap;
+    use parking_lot::RwLock;
 
     #[test]
     fn test_uid_hash() {
@@ -1283,5 +1289,26 @@ pub(crate) mod test {
 
         let apps = vec![0, 1, 2, 3];
         println!("{:#?}", &apps[0..2]);
+    }
+
+    #[test]
+    fn test_dashmap_internal_clone() {
+        let dashmap: DashMap<i32, Arc<RwLock<i32>>> = DashMap::new();
+        dashmap.insert(1, Arc::new(RwLock::new(1)));
+        dashmap.insert(2, Arc::new(RwLock::new(2)));
+
+        let entry_1 = dashmap
+            .entry(3)
+            .or_insert_with(|| Arc::new(RwLock::new(3)))
+            .clone();
+        let entry_2 = dashmap
+            .entry(3)
+            .or_insert_with(|| Arc::new(RwLock::new(3)))
+            .clone();
+        let k1 = *entry_1.read();
+        // drop(entry_1);
+        let k2 = *entry_2.read();
+        // drop(entry_2);
+        assert_eq!(k1, k2);
     }
 }
