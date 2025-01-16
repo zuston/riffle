@@ -616,7 +616,14 @@ impl ShuffleServer for DefaultShuffleServer {
             partition_ids: vec![partition_id],
             layout: to_layout(layout),
         };
-        let block_ids_result = app.unwrap().get_multi_block_ids(ctx).await;
+        let block_ids_result = app
+            .unwrap()
+            .get_multi_block_ids(ctx)
+            .instrument_await(format!(
+                "getting the block_id bitmap for app[{}]/shuffle_id[{}]/partition[{}]",
+                &app_id, shuffle_id, partition_id
+            ))
+            .await;
         if block_ids_result.is_err() {
             let err_msg = block_ids_result.err();
             error!(
@@ -666,7 +673,14 @@ impl ShuffleServer for DefaultShuffleServer {
             partition_ids: partitions,
             layout: to_layout(layout),
         };
-        match app.get_multi_block_ids(ctx).await {
+        match app
+            .get_multi_block_ids(ctx)
+            .instrument_await(format!(
+                "getting the block_id bitmap for app[{}]/shuffle_id[{}]",
+                &app_id, shuffle_id
+            ))
+            .await
+        {
             Err(e) => {
                 error!(
                     "Errors on getting shuffle block ids by multipart way of app:[{}], error: {:?}",
