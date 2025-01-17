@@ -48,6 +48,7 @@ pub mod semaphore_with_index;
 pub mod storage;
 
 pub mod bits;
+pub mod block_id_manager;
 pub mod histogram;
 pub mod id_layout;
 
