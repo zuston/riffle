@@ -257,6 +257,10 @@ impl App {
             );
         }
         let block_id_manager = get_block_id_manager(&config.app_config.block_id_manager_type);
+        info!(
+            "Using the block id manager: {} for app: {}",
+            &config.app_config.block_id_manager_type, &app_id
+        );
         App {
             app_id,
             app_config_options: config_options,
