@@ -158,7 +158,7 @@ impl BlockIdManager for DefaultBlockIdManager {
         for deletion_key in deletion_keys {
             if let Some(bitmap) = self.block_id_bitmap.remove(&deletion_key) {
                 let bitmap = bitmap.1.read();
-                number -= bitmap.cardinality();
+                number += bitmap.cardinality();
             }
         }
         self.number.fetch_sub(number, SeqCst);
@@ -167,5 +167,94 @@ impl BlockIdManager for DefaultBlockIdManager {
 
     async fn get_blocks_number(&self) -> Result<u64> {
         Ok(self.number.load(SeqCst))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::{GetMultiBlockIdsContext, ReportMultiBlockIdsContext};
+    use crate::block_id_manager::{get_block_id_manager, BlockIdManager, BlockIdManagerType};
+    use crate::id_layout::{to_layout, DEFAULT_BLOCK_ID_LAYOUT};
+    use anyhow::Result;
+    use croaring::{JvmLegacy, Treemap};
+    use futures::future::ok;
+    use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
+
+    async fn test_block_id_manager(manager: Arc<Box<dyn BlockIdManager>>) -> Result<()> {
+        let shuffle_id = 10;
+
+        let mut partitioned_block_ids = HashMap::new();
+        for pid in 0..100 {
+            let mut block_ids = vec![];
+            for idx in 0..20 {
+                let block_id = DEFAULT_BLOCK_ID_LAYOUT.get_block_id(idx, pid, idx + pid);
+                block_ids.push(block_id);
+            }
+            partitioned_block_ids.insert(pid as i32, block_ids);
+        }
+
+        // report
+        manager
+            .report_multi_block_ids(ReportMultiBlockIdsContext {
+                shuffle_id,
+                block_ids: partitioned_block_ids.clone(),
+            })
+            .await?;
+        assert_eq!(100 * 20, manager.get_blocks_number().await?);
+
+        // get by one partition
+        for partition_id in 0..100 {
+            let gotten = manager
+                .get_multi_block_ids(GetMultiBlockIdsContext {
+                    shuffle_id,
+                    partition_ids: vec![partition_id],
+                    layout: to_layout(None),
+                })
+                .await?;
+            let deserialized = Treemap::deserialize::<JvmLegacy>(&gotten);
+            assert_eq!(20, deserialized.cardinality());
+            let layout = to_layout(None);
+            for block_id in deserialized.iter() {
+                assert_eq!(
+                    partition_id,
+                    layout.get_partition_id(block_id as i64) as i32
+                );
+            }
+        }
+
+        // get by multi partition
+        let partition_ids = vec![1, 2, 3, 4];
+        let gotten = manager
+            .get_multi_block_ids(GetMultiBlockIdsContext {
+                shuffle_id,
+                partition_ids: partition_ids.clone(),
+                layout: to_layout(None),
+            })
+            .await?;
+        let deserialized = Treemap::deserialize::<JvmLegacy>(&gotten);
+        assert_eq!(20 * 4, deserialized.cardinality());
+        let layout = to_layout(None);
+        let hash_ids = HashSet::<i32>::from_iter(partition_ids);
+        for block_id in deserialized.iter() {
+            let pid = layout.get_partition_id(block_id as i64) as i32;
+            if !hash_ids.contains(&pid) {
+                panic!()
+            }
+        }
+
+        // purge
+        manager.purge_block_ids(shuffle_id).await?;
+        assert_eq!(0, manager.get_blocks_number().await?);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test() -> Result<()> {
+        test_block_id_manager(get_block_id_manager(&BlockIdManagerType::DEFAULT)).await?;
+        test_block_id_manager(get_block_id_manager(&BlockIdManagerType::PARTITIONED)).await?;
+
+        Ok(())
     }
 }
