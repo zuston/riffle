@@ -21,7 +21,7 @@ pub trait BlockIdManager: Send + Sync {
     fn get_blocks_number(&self) -> Result<u64>;
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, strum_macros::Display)]
 pub enum BlockIdManagerType {
     DEFAULT,
     PARTITIONED,
