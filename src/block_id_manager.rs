@@ -18,7 +18,7 @@ pub trait BlockIdManager: Send + Sync {
     async fn get_multi_block_ids(&self, ctx: GetMultiBlockIdsContext) -> Result<Bytes>;
     async fn report_multi_block_ids(&self, ctx: ReportMultiBlockIdsContext) -> Result<()>;
     async fn purge_block_ids(&self, shuffle_id: i32) -> Result<()>;
-    async fn get_blocks_number(&self) -> Result<u64>;
+    fn get_blocks_number(&self) -> Result<u64>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -96,7 +96,7 @@ impl BlockIdManager for PartitionedBlockIdManager {
         Ok(())
     }
 
-    async fn get_blocks_number(&self) -> Result<u64> {
+    fn get_blocks_number(&self) -> Result<u64> {
         let number = self.number.load(SeqCst);
         Ok(number)
     }
@@ -165,7 +165,7 @@ impl BlockIdManager for DefaultBlockIdManager {
         Ok(())
     }
 
-    async fn get_blocks_number(&self) -> Result<u64> {
+    fn get_blocks_number(&self) -> Result<u64> {
         Ok(self.number.load(SeqCst))
     }
 }
@@ -201,7 +201,7 @@ mod tests {
                 block_ids: partitioned_block_ids.clone(),
             })
             .await?;
-        assert_eq!(100 * 20, manager.get_blocks_number().await?);
+        assert_eq!(100 * 20, manager.get_blocks_number()?);
 
         // get by one partition
         for partition_id in 0..100 {
@@ -245,7 +245,7 @@ mod tests {
 
         // purge
         manager.purge_block_ids(shuffle_id).await?;
-        assert_eq!(0, manager.get_blocks_number().await?);
+        assert_eq!(0, manager.get_blocks_number()?);
 
         Ok(())
     }

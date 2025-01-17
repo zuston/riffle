@@ -273,6 +273,10 @@ impl App {
         }
     }
 
+    pub fn reported_block_id_number(&self) -> u64 {
+        self.block_id_manager.get_blocks_number().unwrap_or(0)
+    }
+
     pub fn huge_partition_number(&self) -> u64 {
         self.huge_partition_number.load(SeqCst)
     }

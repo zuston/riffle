@@ -51,6 +51,7 @@ fn table() -> Html<String> {
                 <th>duration (minutes)</th>
                 <th>resident data (gb)</th>
                 <th>partition number/huge partition</th>
+                <th>reported block id number</th>
             </tr>
     "#
     .to_string();
@@ -73,13 +74,14 @@ fn table() -> Html<String> {
             .to_string();
 
         html_content.push_str(&format!(
-            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}/{}</td></tr>",
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}/{}</td><td>{}</td></tr>",
             app_id,
             date,
             duration_min,
             bytes_to_gb(resident_bytes),
             app.partition_number(),
             app.huge_partition_number(),
+            app.reported_block_id_number(),
         ));
     }
 
