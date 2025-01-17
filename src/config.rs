@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use crate::block_id_manager::BlockIdManagerType;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -355,6 +356,13 @@ pub struct AppConfig {
 
     pub huge_partition_marked_threshold: Option<String>,
     pub huge_partition_memory_limit_percent: Option<f64>,
+
+    #[serde(default = "as_default_block_id_manager_type")]
+    pub block_id_manager_type: BlockIdManagerType,
+}
+
+fn as_default_block_id_manager_type() -> BlockIdManagerType {
+    BlockIdManagerType::DEFAULT
 }
 
 fn as_default_app_config() -> AppConfig {
@@ -362,6 +370,7 @@ fn as_default_app_config() -> AppConfig {
         app_heartbeat_timeout_min: as_default_app_heartbeat_timeout_min(),
         huge_partition_marked_threshold: None,
         huge_partition_memory_limit_percent: None,
+        block_id_manager_type: as_default_block_id_manager_type(),
     }
 }
 

@@ -67,6 +67,7 @@ mod log_service;
 mod logforth_service;
 
 pub mod bits;
+pub mod block_id_manager;
 pub mod histogram;
 mod mem_allocator;
 mod metric;

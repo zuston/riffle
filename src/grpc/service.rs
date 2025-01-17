@@ -574,9 +574,12 @@ impl ShuffleServer for DefaultShuffleServer {
             }));
         }
         let app = app.unwrap();
-        let mut block_ids = vec![];
+        let mut block_ids = HashMap::new();
         for partition_to_block_id in partition_to_block_ids {
-            block_ids.extend(partition_to_block_id.block_ids);
+            block_ids.insert(
+                partition_to_block_id.partition_id,
+                partition_to_block_id.block_ids,
+            );
         }
         match app
             .report_multi_block_ids(ReportMultiBlockIdsContext::new(shuffle_id, block_ids))
