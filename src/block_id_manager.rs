@@ -16,8 +16,8 @@ use std::sync::Arc;
 #[async_trait]
 pub trait BlockIdManager: Send + Sync {
     async fn get_multi_block_ids(&self, ctx: GetMultiBlockIdsContext) -> Result<Bytes>;
-    async fn report_multi_block_ids(&self, ctx: ReportMultiBlockIdsContext) -> Result<()>;
-    async fn purge_block_ids(&self, shuffle_id: i32) -> Result<()>;
+    async fn report_multi_block_ids(&self, ctx: ReportMultiBlockIdsContext) -> Result<u64>;
+    async fn purge_block_ids(&self, shuffle_id: i32) -> Result<u64>;
     fn get_blocks_number(&self) -> Result<u64>;
 }
 
@@ -68,7 +68,7 @@ impl BlockIdManager for PartitionedBlockIdManager {
         Ok(Bytes::from(retrieved.serialize::<JvmLegacy>()))
     }
 
-    async fn report_multi_block_ids(&self, ctx: ReportMultiBlockIdsContext) -> Result<()> {
+    async fn report_multi_block_ids(&self, ctx: ReportMultiBlockIdsContext) -> Result<u64> {
         let shuffle_id = &ctx.shuffle_id;
         let treemap = self
             .block_id_bitmap
@@ -85,15 +85,17 @@ impl BlockIdManager for PartitionedBlockIdManager {
             }
         }
         self.number.fetch_add(number as u64, SeqCst);
-        Ok(())
+        Ok(number as u64)
     }
 
-    async fn purge_block_ids(&self, shuffle_id: i32) -> Result<()> {
+    async fn purge_block_ids(&self, shuffle_id: i32) -> Result<u64> {
+        let mut purged = 0;
         if let Some(treemap) = self.block_id_bitmap.remove(&shuffle_id) {
             let map = treemap.1.read();
-            self.number.fetch_sub(map.cardinality(), SeqCst);
+            let purged = map.cardinality();
+            self.number.fetch_sub(purged, SeqCst);
         }
-        Ok(())
+        Ok(purged as u64)
     }
 
     fn get_blocks_number(&self) -> Result<u64> {
@@ -125,7 +127,7 @@ impl BlockIdManager for DefaultBlockIdManager {
         Ok(Bytes::from(treemap.serialize::<JvmLegacy>()))
     }
 
-    async fn report_multi_block_ids(&self, ctx: ReportMultiBlockIdsContext) -> Result<()> {
+    async fn report_multi_block_ids(&self, ctx: ReportMultiBlockIdsContext) -> Result<u64> {
         let shuffle_id = ctx.shuffle_id;
         let partitioned_block_ids = ctx.block_ids;
         let mut number = 0;
@@ -142,10 +144,10 @@ impl BlockIdManager for DefaultBlockIdManager {
             }
         }
         self.number.fetch_add(number as u64, SeqCst);
-        Ok(())
+        Ok(number as u64)
     }
 
-    async fn purge_block_ids(&self, shuffle_id: i32) -> Result<()> {
+    async fn purge_block_ids(&self, shuffle_id: i32) -> Result<u64> {
         let view = self.block_id_bitmap.clone().into_read_only();
         let mut deletion_keys = vec![];
         for (v_shuffle_id, v_partition_id) in view.keys() {
@@ -162,7 +164,7 @@ impl BlockIdManager for DefaultBlockIdManager {
             }
         }
         self.number.fetch_sub(number, SeqCst);
-        Ok(())
+        Ok(number)
     }
 
     fn get_blocks_number(&self) -> Result<u64> {
