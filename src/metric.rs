@@ -25,9 +25,9 @@ use log::{error, info};
 use once_cell::sync::Lazy;
 use prometheus::{
     histogram_opts, labels, register_gauge_vec, register_histogram_vec,
-    register_histogram_vec_with_registry, register_int_counter_vec, register_int_gauge_vec,
-    GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge,
-    IntGaugeVec, Registry,
+    register_histogram_vec_with_registry, register_int_counter_vec, register_int_gauge,
+    register_int_gauge_vec, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounter,
+    IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
 use std::collections::HashMap;
 use std::time::Duration;
@@ -53,6 +53,10 @@ const SPILL_BATCH_SIZE_BUCKETS: &[f64] = &[
 ];
 
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
+
+pub static BLOCK_ID_NUMBER: Lazy<IntGauge> = Lazy::new(|| {
+    IntGauge::new("block_id_number", "block_id_number").expect("metric should be created")
+});
 
 pub static ALIGNMENT_BUFFER_POOL_READ_ACQUIRE_MISS: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new(
@@ -668,6 +672,9 @@ pub static IO_SCHEDULER_APPEND_WAIT: Lazy<IntGaugeVec> =
     Lazy::new(|| register_int_gauge_vec!("append_wait", "append_wait", &["root"]).unwrap());
 
 fn register_custom_metrics() {
+    REGISTRY
+        .register(Box::new(BLOCK_ID_NUMBER.clone()))
+        .expect("block_id_number must be registered");
     REGISTRY
         .register(Box::new(PURGE_FAILED_COUNTER.clone()))
         .expect("purge_failed_count must be registered");

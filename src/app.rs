@@ -18,7 +18,7 @@
 use crate::config::{Config, StorageType};
 use crate::error::WorkerError;
 use crate::metric::{
-    GAUGE_APP_NUMBER, GAUGE_HUGE_PARTITION_NUMBER, GAUGE_PARTITION_NUMBER,
+    BLOCK_ID_NUMBER, GAUGE_APP_NUMBER, GAUGE_HUGE_PARTITION_NUMBER, GAUGE_PARTITION_NUMBER,
     GAUGE_TOPN_APP_RESIDENT_BYTES, PURGE_FAILED_COUNTER, TOTAL_APP_FLUSHED_BYTES, TOTAL_APP_NUMBER,
     TOTAL_HUGE_PARTITION_NUMBER, TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED,
     TOTAL_PARTITION_NUMBER, TOTAL_READ_DATA, TOTAL_READ_DATA_FROM_LOCALFILE,
@@ -58,6 +58,7 @@ use await_tree::InstrumentAwait;
 use crossbeam::epoch::Atomic;
 use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
+use prometheus::core::Collector;
 use prometheus::proto::MetricType::GAUGE;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -492,7 +493,8 @@ impl App {
 
     pub async fn report_multi_block_ids(&self, ctx: ReportMultiBlockIdsContext) -> Result<()> {
         self.heartbeat()?;
-        self.block_id_manager.report_multi_block_ids(ctx).await?;
+        let number = self.block_id_manager.report_multi_block_ids(ctx).await?;
+        BLOCK_ID_NUMBER.add(number as i64);
         Ok(())
     }
 
@@ -504,7 +506,8 @@ impl App {
 
         if let Some(shuffle_id) = shuffle_id {
             // shuffle level bitmap deletion
-            self.block_id_manager.purge_block_ids(shuffle_id).await?;
+            let purged_number = self.block_id_manager.purge_block_ids(shuffle_id).await?;
+            BLOCK_ID_NUMBER.sub(purged_number as i64);
 
             let mut deletion_keys = vec![];
             let view = self.partition_meta_infos.clone().into_read_only();
@@ -530,6 +533,8 @@ impl App {
             // app level deletion
             GAUGE_PARTITION_NUMBER.sub(self.partition_meta_infos.len() as i64);
             self.sub_huge_partition_metric();
+
+            BLOCK_ID_NUMBER.sub(self.block_id_manager.get_blocks_number()? as i64);
         }
 
         Ok(())
