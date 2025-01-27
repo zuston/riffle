@@ -204,6 +204,8 @@ impl Default for RuntimeConfig {
 pub struct HealthServiceConfig {
     pub alive_app_number_max_limit: Option<usize>,
     pub disk_used_ratio_health_threshold: Option<f64>,
+    // the threshold of the memory allocated from allocator
+    pub memory_allocated_threshold: Option<String>,
 }
 
 // =========================================================

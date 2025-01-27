@@ -1,9 +1,12 @@
 use crate::app::AppManagerRef;
 use crate::config::HealthServiceConfig;
+use crate::mem_allocator::ALLOCATOR;
 use crate::storage::HybridStorage;
 use anyhow::Result;
+use bytesize::ByteSize;
 use dashmap::DashMap;
-use log::warn;
+use libc::passwd;
+use log::{info, warn};
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::Arc;
@@ -15,6 +18,7 @@ pub struct HealthService {
 
     alive_app_number_limit: Option<usize>,
     disk_used_ratio_health_threshold: Option<f64>,
+    memory_allocated_threshold: Option<u64>,
 
     health_stat: Arc<HealthStat>,
 }
@@ -23,6 +27,7 @@ struct HealthStat {
     s_1: AtomicBool,
     s_2: AtomicBool,
     s_3: AtomicBool,
+    s_4: AtomicBool,
 }
 
 impl Default for HealthStat {
@@ -31,8 +36,13 @@ impl Default for HealthStat {
             s_1: AtomicBool::new(true),
             s_2: AtomicBool::new(true),
             s_3: AtomicBool::new(true),
+            s_4: AtomicBool::new(true),
         }
     }
+}
+
+fn parse(s: &str) -> u64 {
+    s.parse::<ByteSize>().unwrap().0
 }
 
 impl HealthService {
@@ -41,11 +51,23 @@ impl HealthService {
         storage: &HybridStorage,
         conf: &HealthServiceConfig,
     ) -> Self {
+        let memory_allocated_threshold = match &conf.memory_allocated_threshold {
+            Some(threshold) => Some(parse(threshold)),
+            _ => None,
+        };
+        if let Some(val) = &memory_allocated_threshold {
+            info!(
+                "The memory allocated threshold has been activated. threshold: {}",
+                val
+            );
+        }
+
         Self {
             app_manager_ref: app_manager.clone(),
             hybrid_storage: storage.clone(),
             alive_app_number_limit: conf.alive_app_number_max_limit,
             disk_used_ratio_health_threshold: conf.disk_used_ratio_health_threshold,
+            memory_allocated_threshold,
             health_stat: Arc::new(Default::default()),
         }
     }
@@ -91,6 +113,22 @@ impl HealthService {
             let alive_app_number = self.app_manager_ref.get_alive_app_number();
             if alive_app_number > limit {
                 return Ok(false);
+            }
+        }
+
+        #[cfg(all(unix, feature = "allocator-analysis"))]
+        {
+            if let Some(threshold) = self.memory_allocated_threshold {
+                if self.health_stat.s_4.load(SeqCst) {
+                    return Ok(false);
+                }
+
+                let allocated = ALLOCATOR.allocated();
+                if (allocated > threshold as usize) {
+                    self.health_stat.s_4.store(false, SeqCst);
+                    warn!("Mark the service unhealthy due to exceeding the memory allocated threshold");
+                    return Ok(false);
+                }
             }
         }
 
