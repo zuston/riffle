@@ -30,7 +30,7 @@ jobs:
           ./release.sh
 
       - name: Upload
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: uniffle-worker
           path: target-docker/release/uniffle-worker
