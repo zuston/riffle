@@ -23,7 +23,7 @@ use anyhow::Result;
 use await_tree::InstrumentAwait;
 use dashmap::DashMap;
 use fastrace::trace;
-use log::warn;
+use log::{info, warn};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::Instrument;
@@ -168,12 +168,18 @@ impl TicketManager {
             let read_view = (*ticket_store).clone().into_read_only();
             GAUGE_MEM_ALLOCATED_TICKET_NUM.set(read_view.len() as i64);
 
+            let mut total_allocated = 0;
             let mut discard_tickets = vec![];
             for ticket in read_view.iter() {
+                total_allocated += ticket.1.size;
                 if ticket.1.is_timeout(ticket_timeout_sec) {
                     discard_tickets.push(ticket.1);
                 }
             }
+            info!(
+                "Before purging timeout tickets, allocated tickets' memory size is {}",
+                total_allocated
+            );
 
             let mut total_removed_size = 0i64;
             for ticket in discard_tickets.iter() {
