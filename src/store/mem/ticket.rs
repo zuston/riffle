@@ -17,7 +17,7 @@
 
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::error::WorkerError;
-use crate::metric::TOTAL_EVICT_TIMEOUT_TICKETS_NUM;
+use crate::metric::{GAUGE_MEM_ALLOCATED_TICKET_NUM, TOTAL_EVICT_TIMEOUT_TICKETS_NUM};
 use crate::runtime::manager::RuntimeManager;
 use anyhow::Result;
 use await_tree::InstrumentAwait;
@@ -166,6 +166,7 @@ impl TicketManager {
 
         loop {
             let read_view = (*ticket_store).clone().into_read_only();
+            GAUGE_MEM_ALLOCATED_TICKET_NUM.set(read_view.len() as i64);
 
             let mut discard_tickets = vec![];
             for ticket in read_view.iter() {
