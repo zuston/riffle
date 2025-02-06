@@ -606,6 +606,14 @@ pub static TOTAL_EVICT_TIMEOUT_TICKETS_NUM: Lazy<IntCounter> = Lazy::new(|| {
     .expect("")
 });
 
+pub static GAUGE_MEM_ALLOCATED_TICKET_NUM: Lazy<IntGauge> = Lazy::new(|| {
+    IntGauge::new(
+        "memory_allocated_tickets_num",
+        "memory_allocated_tickets_num",
+    )
+    .unwrap()
+});
+
 pub static GAUGE_ALLOCATOR_ALLOCATED_SIZE: Lazy<IntGauge> = Lazy::new(|| {
     IntGauge::new(
         "allocator_allocated_size",
@@ -742,6 +750,10 @@ fn register_custom_metrics() {
 
     REGISTRY
         .register(Box::new(GAUGE_ALLOCATOR_ALLOCATED_SIZE.clone()))
+        .expect("");
+
+    REGISTRY
+        .register(Box::new(GAUGE_MEM_ALLOCATED_TICKET_NUM.clone()))
         .expect("");
 
     REGISTRY
