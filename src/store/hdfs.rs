@@ -41,6 +41,7 @@ use std::path::Path;
 
 use crate::error::WorkerError::Other;
 use crate::kerberos::KerberosTask;
+use crate::lazy_initializer::LazyInit;
 use crate::runtime::manager::RuntimeManager;
 use crate::semaphore_with_index::SemaphoreWithIndex;
 use crate::store::hadoop::{get_hdfs_delegator, HdfsDelegator};
@@ -82,7 +83,7 @@ pub struct HdfsStore {
     concurrency_access_limiter: Semaphore,
 
     // key: app_id, value: hdfs_native_client
-    pub(crate) app_remote_clients: DashMap<String, Arc<Box<dyn HdfsDelegator>>>,
+    pub(crate) app_remote_clients: DashMap<String, Arc<LazyInit<Box<dyn HdfsDelegator>>>>,
 
     // key: data_file_path
     partition_file_locks: DashMap<String, Arc<SemaphoreWithIndex>>,
@@ -181,11 +182,12 @@ impl HdfsStore {
             format!("{}_{}", index_file_path, index),
         );
 
-        let filesystem = self
+        let fs_fork = self
             .app_remote_clients
             .get(&uid.app_id)
             .ok_or(WorkerError::APP_HAS_BEEN_PURGED)?
             .clone();
+        let filesystem = fs_fork.get_or_init();
 
         let (mut next_offset, retry_time) =
             match self.partition_cached_meta.get(&data_file_path_prefix) {
@@ -298,7 +300,7 @@ impl HdfsStore {
 
     async fn write_data_and_index(
         &self,
-        filesystem: &Arc<Box<dyn HdfsDelegator>>,
+        filesystem: &Box<dyn HdfsDelegator>,
         data_file_path: &String,
         data_bytes_holder: BytesWrapper,
         index_file_path: &String,
@@ -333,7 +335,7 @@ impl HdfsStore {
 
     async fn delete_recursively(
         &self,
-        filesystem: &Arc<Box<dyn HdfsDelegator>>,
+        filesystem: &Box<dyn HdfsDelegator>,
         path: &str,
         file_prefix: &str,
     ) -> Result<(), WorkerError> {
@@ -407,7 +409,11 @@ impl Store for HdfsStore {
             return Ok(0);
         }
 
-        let filesystem = fs_option.unwrap();
+        let fs = fs_option.unwrap();
+        if !fs.is_initialized() {
+            return Ok(0);
+        }
+        let filesystem = fs.get_or_init();
 
         let dir = match shuffle_id_option {
             Some(shuffle_id) => self.get_shuffle_dir(app_id.as_str(), shuffle_id),
@@ -497,10 +503,13 @@ impl Store for HdfsStore {
         }
 
         let remote_storage_conf = remote_storage_conf_option.unwrap();
-        let client = get_hdfs_delegator(
-            remote_storage_conf.root.as_str(),
-            remote_storage_conf.configs,
-        )?;
+        let client = LazyInit::new(move || {
+            get_hdfs_delegator(
+                remote_storage_conf.root.as_str(),
+                remote_storage_conf.configs,
+            )
+            .expect("Errors on getting hdfs client")
+        });
 
         let app_id = ctx.app_id.clone();
         self.app_remote_clients
@@ -536,6 +545,7 @@ mod tests {
     use crate::app::{PurgeDataContext, WritingViewContext};
     use crate::config::HdfsStoreConfig;
     use crate::error::WorkerError;
+    use crate::lazy_initializer::LazyInit;
     use crate::runtime::manager::RuntimeManager;
     use crate::semaphore_with_index::SemaphoreWithIndex;
     use crate::store::hadoop::{FileStatus, HdfsDelegator};
@@ -636,9 +646,12 @@ mod tests {
         let runtime_manager = RuntimeManager::default();
         let hdfs_store = HdfsStore::from(config, &runtime_manager);
 
-        let client: Arc<Box<dyn HdfsDelegator>> = Arc::new(Box::new(FakedHdfsClient {
-            mark_failure: Arc::new(AtomicBool::new(false)),
-            oom_failure: Arc::new(AtomicBool::new(true)),
+        let client = Arc::new(LazyInit::new(|| {
+            let client: Box<dyn HdfsDelegator> = Box::new(FakedHdfsClient {
+                mark_failure: Arc::new(AtomicBool::new(false)),
+                oom_failure: Arc::new(AtomicBool::new(true)),
+            });
+            client
         }));
         hdfs_store
             .app_remote_clients
@@ -746,8 +759,12 @@ mod tests {
             }
         }
 
-        let client: Arc<Box<dyn HdfsDelegator>> = Arc::new(Box::new(MockedHdfsClient {
-            root: temp_path.to_string(),
+        let root_internal = temp_path.to_string();
+        let client = Arc::new(LazyInit::new(move || {
+            let client: Box<dyn HdfsDelegator> = Box::new(MockedHdfsClient {
+                root: root_internal,
+            });
+            client
         }));
         hdfs_store
             .app_remote_clients
@@ -859,9 +876,13 @@ mod tests {
         let hdfs_store = HdfsStore::from(config, &runtime_manager);
 
         let mark_failure_tag = Arc::new(AtomicBool::new(false));
-        let client: Arc<Box<dyn HdfsDelegator>> = Arc::new(Box::new(FakedHdfsClient {
-            mark_failure: mark_failure_tag.clone(),
-            oom_failure: Arc::new(AtomicBool::new(false)),
+        let tag_fork = mark_failure_tag.clone();
+        let client = Arc::new(LazyInit::new(move || {
+            let client: Box<dyn HdfsDelegator> = Box::new(FakedHdfsClient {
+                mark_failure: tag_fork,
+                oom_failure: Arc::new(AtomicBool::new(false)),
+            });
+            client
         }));
         hdfs_store
             .app_remote_clients
