@@ -1,9 +1,12 @@
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering::SeqCst;
 
 pub struct LazyInit<T> {
     initializer: Mutex<Option<Box<dyn FnOnce() -> T + Send>>>,
     value: OnceCell<T>,
+    initialized: AtomicBool,
 }
 
 impl<T> LazyInit<T> {
@@ -14,14 +17,21 @@ impl<T> LazyInit<T> {
         LazyInit {
             initializer: Mutex::new(Some(Box::new(initializer))),
             value: OnceCell::new(),
+            initialized: AtomicBool::new(false),
         }
     }
 
     pub fn get_or_init(&self) -> &T {
         self.value.get_or_init(|| {
             let initializer = self.initializer.lock().take().unwrap();
-            initializer()
+            let v = initializer();
+            self.initialized.store(true, SeqCst);
+            v
         })
+    }
+
+    pub fn is_initialized(&self) -> bool {
+        self.initialized.load(SeqCst)
     }
 }
 

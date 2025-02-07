@@ -410,6 +410,9 @@ impl Store for HdfsStore {
         }
 
         let fs = fs_option.unwrap();
+        if !fs.is_initialized() {
+            return Ok(0);
+        }
         let filesystem = fs.get_or_init();
 
         let dir = match shuffle_id_option {
