@@ -387,7 +387,7 @@ mod mock {
             todo!()
         }
 
-        async fn register_app(&self, ctx: RegisterAppContext) -> anyhow::Result<()> {
+        fn register_app(&self, ctx: RegisterAppContext) -> anyhow::Result<()> {
             todo!()
         }
 

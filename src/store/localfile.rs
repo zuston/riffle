@@ -472,7 +472,7 @@ impl Store for LocalFileStore {
         todo!()
     }
 
-    async fn register_app(&self, _ctx: RegisterAppContext) -> Result<()> {
+    fn register_app(&self, _ctx: RegisterAppContext) -> Result<()> {
         Ok(())
     }
 

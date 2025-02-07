@@ -602,21 +602,19 @@ impl Store for HybridStore {
         self.hot_store.release_ticket(ctx).await
     }
 
-    async fn register_app(&self, ctx: RegisterAppContext) -> Result<()> {
-        self.hot_store.register_app(ctx.clone()).await?;
+    fn register_app(&self, ctx: RegisterAppContext) -> Result<()> {
+        self.hot_store.register_app(ctx.clone())?;
         if self.warm_store.is_some() {
             self.warm_store
                 .as_ref()
                 .unwrap()
-                .register_app(ctx.clone())
-                .await?;
+                .register_app(ctx.clone())?;
         }
         if self.cold_store.is_some() {
             self.cold_store
                 .as_ref()
                 .unwrap()
-                .register_app(ctx.clone())
-                .await?;
+                .register_app(ctx.clone())?;
         }
         Ok(())
     }

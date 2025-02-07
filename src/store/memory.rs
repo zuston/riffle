@@ -378,7 +378,7 @@ impl Store for MemoryStore {
     }
 
     #[trace]
-    async fn register_app(&self, _ctx: RegisterAppContext) -> Result<()> {
+    fn register_app(&self, _ctx: RegisterAppContext) -> Result<()> {
         Ok(())
     }
 
