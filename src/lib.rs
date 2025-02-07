@@ -51,6 +51,7 @@ pub mod bits;
 pub mod block_id_manager;
 pub mod histogram;
 pub mod id_layout;
+pub mod lazy_initializer;
 
 use crate::app::{AppManager, AppManagerRef};
 use crate::common::init_global_variable;
