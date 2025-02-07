@@ -244,7 +244,7 @@ pub trait Store {
         ctx: RequireBufferContext,
     ) -> Result<RequireBufferResponse, WorkerError>;
     async fn release_ticket(&self, ctx: ReleaseTicketContext) -> Result<i64, WorkerError>;
-    async fn register_app(&self, ctx: RegisterAppContext) -> Result<()>;
+    fn register_app(&self, ctx: RegisterAppContext) -> Result<()>;
 
     async fn name(&self) -> StorageType;
 

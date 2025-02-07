@@ -211,25 +211,14 @@ impl App {
         // todo: should throw exception if register failed.
         let copy_app_id = app_id.to_string();
         let app_options = config_options.clone();
-        let cloned_store = store.clone();
-        let register_result = futures::executor::block_on(async move {
-            runtime_manager
-                .default_runtime
-                .spawn(async move {
-                    cloned_store
-                        .register_app(RegisterAppContext {
-                            app_id: copy_app_id,
-                            app_config_options: app_options,
-                        })
-                        .await
-                })
-                .await
-        });
-        if register_result.is_err() {
-            error!(
-                "Errors on registering app to store: {:#?}",
-                register_result.err()
-            );
+        match store.register_app(RegisterAppContext {
+            app_id: copy_app_id,
+            app_config_options: app_options,
+        }) {
+            Err(error) => {
+                error!("Errors on registering app to store: {:#?}", error,);
+            }
+            _ => {}
         }
 
         let huge_partition_marked_threshold =

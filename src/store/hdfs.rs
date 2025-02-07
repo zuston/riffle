@@ -488,7 +488,7 @@ impl Store for HdfsStore {
         todo!()
     }
 
-    async fn register_app(&self, ctx: RegisterAppContext) -> Result<()> {
+    fn register_app(&self, ctx: RegisterAppContext) -> Result<()> {
         let remote_storage_conf_option = ctx.app_config_options.remote_storage_config_option;
         if remote_storage_conf_option.is_none() {
             return Err(anyhow!(
