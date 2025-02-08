@@ -119,7 +119,7 @@ impl HealthService {
         #[cfg(all(unix, feature = "allocator-analysis"))]
         {
             if let Some(threshold) = self.memory_allocated_threshold {
-                if self.health_stat.s_4.load(SeqCst) {
+                if !self.health_stat.s_4.load(SeqCst) {
                     return Ok(false);
                 }
 
