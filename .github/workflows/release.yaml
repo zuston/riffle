@@ -6,7 +6,7 @@ on:
       - "test_release.1.*"
 
 jobs:
-  build-snapshot:
+  linux-x86_64:
     name: Build Snapshot
     runs-on: ubuntu-22.04
 
