@@ -16,6 +16,9 @@ RUN yum install -y libzip unzip wget cmake3 openssl-devel llvm clang-devel clang
 RUN yum install -y devtoolset-8-gcc devtoolset-8-gcc-c++
 RUN echo '. /opt/rh/devtoolset-8/enable' >> ~/.bashrc
 
+RUN yum install -y llvm-toolset-7
+RUN echo '. /opt/rh/llvm-toolset-7/enable' >> ~/.bashrc
+
 # install rust nightly toolchain
 RUN curl https://sh.rustup.rs > /rustup-init
 RUN chmod +x /rustup-init
