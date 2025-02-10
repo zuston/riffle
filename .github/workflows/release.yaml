@@ -2,8 +2,8 @@ name: ReleaseBot
 
 on:
   push:
-    tags:
-      - "v*.*.*"
+    branches:
+      - "test_release.1.*"
 
 jobs:
   build-snapshot:
