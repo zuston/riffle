@@ -10,7 +10,7 @@ RUN yum install -y centos-release-scl epel-release
 RUN sed -i "s/mirror.centos.org/vault.centos.org/g" /etc/yum.repos.d/*.repo
 RUN sed -i "s/^#.*baseurl=http/baseurl=https/g" /etc/yum.repos.d/*.repo
 RUN sed -i "s/^mirrorlist/#mirrorlist/g" /etc/yum.repos.d/*.repo
-RUN yum install -y libzip unzip wget cmake3 openssl-devel llvm clang-devel clang jemalloc krb5-workstation
+RUN yum install -y libzip unzip wget cmake3 openssl-devel llvm clang-devel clang jemalloc krb5-workstation clang-devel
 
 # install gcc-8
 RUN yum install -y devtoolset-8-gcc devtoolset-8-gcc-c++
