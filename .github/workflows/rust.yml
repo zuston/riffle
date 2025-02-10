@@ -40,35 +40,37 @@ jobs:
           - "hdfs"
     runs-on: ubuntu-latest
     steps:
-
-      - name: Install native libs
-        run: sudo apt-get install -y libkrb5-dev libgsasl-dev
-
       - name: Install Protoc
         uses: arduino/setup-protoc@v2
         with:
           version: "23.2"
       - uses: actions/checkout@v3
+
       - name: Build
         working-directory: ./
         run: cargo build --features hdfs --verbose
         if: ${{ matrix.features == '' }}
+
       - name: Build with memory-prof
         working-directory: ./
         run: cargo build --verbose --features memory-prof
         if: ${{ matrix.features == 'memory-prof' }}
+
       - name: Code style check
         working-directory: ./
         run: cargo fmt --check
         if: ${{ matrix.features == '' }}
+
       - name: Run basic tests
         working-directory: ./
         run: cargo test --verbose -- --test-threads=1
         if: ${{ matrix.features == '' }}
+
       - name: Run tests with memory-prof
         working-directory: ./
         run: cargo test --verbose --features memory-prof -- --test-threads=1
         if: ${{ matrix.features == 'memory-prof' }}
+
       - name: Run tests with hdfs
         working-directory: ./
         run: cargo test --verbose --features hdfs -- --test-threads=1
