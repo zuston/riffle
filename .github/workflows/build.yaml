@@ -45,22 +45,13 @@ jobs:
         run: cargo fmt --check
 
   with-default:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v2
-        with:
-          version: "23.2"
-      - uses: actions/checkout@v3
-      - name: Build
-        working-directory: ./
-        run: cargo build --release
-      - name: Unit tests
-        working-directory: ./
-        run: cargo test --verbose -- --test-threads=1
-
-  aarch64-default:
-    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Install Protoc
         uses: arduino/setup-protoc@v2
@@ -75,7 +66,13 @@ jobs:
         run: cargo test --verbose -- --test-threads=1
 
   with-memory-prof:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Install Protoc
         uses: arduino/setup-protoc@v2
