@@ -15,7 +15,7 @@ impl LogService {
             .filename_prefix(LOG_FILE_NAME)
             .max_file_size(512 * 1024 * 1024)
             .max_log_files(10)
-            .build("logs")
+            .build(&log.path)
             .unwrap();
 
         let (non_blocking, _guard) = rolling_file::non_blocking(rolling_writer).finish();
