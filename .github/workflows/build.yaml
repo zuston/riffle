@@ -44,13 +44,16 @@ jobs:
         working-directory: ./
         run: cargo fmt --check
 
-  with-default:
+  build_with_features:
     strategy:
       fail-fast: false
       matrix:
         os:
           - ubuntu-latest
           - ubuntu-24.04-arm
+        features:
+          - "--features memory-prof"
+          - ""
     runs-on: ${{ matrix.os }}
     steps:
       - name: Install Protoc
@@ -58,33 +61,13 @@ jobs:
         with:
           version: "23.2"
       - uses: actions/checkout@v3
+      - uses: Swatinem/rust-cache@v2
       - name: Build
         working-directory: ./
-        run: cargo build --release
+        run: cargo build ${{ matrix.features }} --release
       - name: Unit tests
         working-directory: ./
-        run: cargo test --verbose -- --test-threads=1
-
-  with-memory-prof:
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - ubuntu-24.04-arm
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v2
-        with:
-          version: "23.2"
-      - uses: actions/checkout@v3
-      - name: Build
-        working-directory: ./
-        run: cargo build --features memory-prof --release
-      - name: Unit tests
-        working-directory: ./
-        run: cargo test --verbose --features memory-prof -- --test-threads=1
+        run: cargo test --verbose ${{ matrix.features }} -- --test-threads=1
 
 #  with-hdrs:
 #    runs-on: ubuntu-latest
