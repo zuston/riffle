@@ -10,6 +10,6 @@ services:
       - ~/.cargo/registry:/root/.cargo/registry:rw
       - ./../:/R1:rw
       - ./../target-docker:/R1/target:rw
-    environment:
-      RUSTFLAGS: "-C target-cpu=skylake"
-    command: "bash -c 'source ~/.bashrc && cd /R1 && cargo build --release'"
+#    environment:
+#      RUSTFLAGS: "-C target-cpu=skylake"
+    command: "bash -c 'source ~/.bashrc && cd /R1 && cargo build --features hdrs,logforth --release'"

@@ -6,9 +6,9 @@ on:
       - "v*.*.*"
 
 jobs:
-  build-snapshot:
+  linux-x86_64:
     name: Build Snapshot
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v4
@@ -32,5 +32,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: uniffle-worker
+          name: uniffle-worker-linux-x86_64
           path: target-docker/release/uniffle-worker
