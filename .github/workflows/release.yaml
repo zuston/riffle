@@ -32,5 +32,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: uniffle-worker
+          name: uniffle-worker-linux-x86_64
           path: target-docker/release/uniffle-worker
