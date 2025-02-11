@@ -1,6 +1,6 @@
-Another implementation of Apache Uniffle shuffle server (Single binary, no extra dependencies and quick)
+Another high-performance implementation of Apache Uniffle shuffle server
 
-> Production ready, this project has been used for online shuffle storage service.
+> Production ready, this project has been used for online shuffle storage service
 
 ## Benchmark report
 
