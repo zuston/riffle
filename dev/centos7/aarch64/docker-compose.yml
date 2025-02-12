@@ -2,7 +2,7 @@ version: "3"
 
 services:
   build-release:
-    build: ..
+    build: ../aarch64
     volumes:
       - ~/.m2:/root/.m2:rw
       - ~/.sbt:/root/.sbt:rw

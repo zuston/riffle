@@ -7,7 +7,7 @@ on:
 
 jobs:
   linux-aarch64:
-    name: Build binary
+    name: aarch64
     runs-on: ubuntu-22.04-arm
 
     steps:
@@ -35,7 +35,7 @@ jobs:
           path: target-docker/release/uniffle-worker
 
   linux-x86_64:
-    name: Build Snapshot
+    name: x86_64
     runs-on: ubuntu-22.04
 
     steps:
