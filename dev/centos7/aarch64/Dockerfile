@@ -31,7 +31,7 @@ RUN echo 'export JAVA_HOME="/usr/lib/jvm/java-1.8.0-openjdk"' >> ~/.bashrc
 
 # install protoc
 # Note: Download the aarch64 version of protoc
-RUN wget -O /protobuf-21.7-linux-aarch64.zip https://github.com/protocolbuffers/protobuf/releases/download/v21.7/protoc-21.7-linux-aarch64.zip
+RUN wget -O /protobuf-21.7-linux-aarch64.zip https://github.com/protocolbuffers/protobuf/releases/download/v21.7/protoc-21.7-linux-aarch_64.zip
 RUN mkdir /protobuf-bin && (cd /protobuf-bin && unzip /protobuf-21.7-linux-aarch64.zip)
 RUN echo 'export PATH="$PATH:/protobuf-bin/bin"' >> ~/.bashrc
 
