@@ -8,7 +8,9 @@ pub enum StatusCode {
     NO_PARTITION = 5,
     INTERNAL_ERROR = 6,
     TIMEOUT = 7,
-    NO_BUFFER_FOR_HUGE_PARTITION = 8,
+    ACCESS_DENIED = 8,
+    INVALID_REQUEST = 9,
+    NO_BUFFER_FOR_HUGE_PARTITION = 10,
 }
 
 impl Into<i32> for StatusCode {
