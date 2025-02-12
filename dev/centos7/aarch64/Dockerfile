@@ -1,15 +1,11 @@
 FROM arm64v8/centos:7
 
-# install common tools
 RUN echo "sslverify=false" >> /etc/yum.conf
-RUN sed -i "s/mirror.centos.org/vault.centos.org/g" /etc/yum.repos.d/*.repo
-RUN sed -i "s/^#.*baseurl=http/baseurl=https/g" /etc/yum.repos.d/*.repo
-RUN sed -i "s/^mirrorlist/#mirrorlist/g" /etc/yum.repos.d/*.repo
+RUN sed -i "s/mirror.centos.org/vault.centos.org/g" /etc/yum.repos.d/CentOS-Base.repo
+RUN sed -i "s/^#.*baseurl=http/baseurl=https/g" /etc/yum.repos.d/CentOS-Base.repo
+RUN sed -i "s/^mirrorlist/#mirrorlist/g" /etc/yum.repos.d/CentOS-Base.repo
 RUN yum update -y
-RUN yum install -y centos-release-scl epel-release
-RUN sed -i "s/mirror.centos.org/vault.centos.org/g" /etc/yum.repos.d/*.repo
-RUN sed -i "s/^#.*baseurl=http/baseurl=https/g" /etc/yum.repos.d/*.repo
-RUN sed -i "s/^mirrorlist/#mirrorlist/g" /etc/yum.repos.d/*.repo
+RUN yum install -y epel-release
 RUN yum install -y libzip unzip wget cmake openssl-devel llvm clang-devel clang krb5-workstation git gcc
 
 # install gcc-8
