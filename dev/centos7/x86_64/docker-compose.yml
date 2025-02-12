@@ -2,7 +2,7 @@ version: "3"
 
 services:
   build-release:
-    build: ./centos7
+    build: ..
     volumes:
       - ~/.m2:/root/.m2:rw
       - ~/.sbt:/root/.sbt:rw
