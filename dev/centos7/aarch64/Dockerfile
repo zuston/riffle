@@ -51,6 +51,8 @@ RUN echo "export RUST_BACKTRACE=1" >> ~/.bashrc
 # ref https://github.com/lancedb/lance/pull/1462
 RUN echo "export CFLAGS_aarch64_unknown_linux_gnu=\"-D__ARM_ARCH=8\"" >> ~/.bashrc
 
+RUN echo "export RUSTFLAGS=\"-C extra-filename=-std=c99\"" >> ~/.bashrc
+
 #
 #
 #FROM centos:7
