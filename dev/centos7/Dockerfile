@@ -10,11 +10,15 @@ RUN yum install -y centos-release-scl epel-release
 RUN sed -i "s/mirror.centos.org/vault.centos.org/g" /etc/yum.repos.d/*.repo
 RUN sed -i "s/^#.*baseurl=http/baseurl=https/g" /etc/yum.repos.d/*.repo
 RUN sed -i "s/^mirrorlist/#mirrorlist/g" /etc/yum.repos.d/*.repo
-RUN yum install -y libzip unzip wget cmake3 openssl-devel llvm clang-devel clang krb5-workstation clang-devel git
+RUN yum install -y libzip unzip wget cmake3 openssl-devel llvm clang-devel clang krb5-workstation clang-devel git gcc
 
 # install gcc-8
-RUN yum install -y devtoolset-8-gcc devtoolset-8-gcc-c++
-RUN echo '. /opt/rh/devtoolset-8/enable' >> ~/.bashrc
+#RUN yum install -y devtoolset-8-gcc devtoolset-8-gcc-c++
+#RUN echo '. /opt/rh/devtoolset-8/enable' >> ~/.bashrc
+
+# install gcc-11
+RUN yum install -y devtoolset-11-gcc devtoolset-11-gcc-c++
+RUN echo '. /opt/rh/devtoolset-11/enable' >> ~/.bashrc
 
 RUN yum install -y llvm-toolset-7
 RUN echo '. /opt/rh/llvm-toolset-7/enable' >> ~/.bashrc
@@ -46,3 +50,5 @@ RUN echo "export HADOOP_HOME=/root/hadoop-3.3.5" >> ~/.bashrc
 RUN echo "export CLASSPATH=$(${HADOOP_HOME}/bin/hadoop classpath --glob)" >> ~/.bashrc
 RUN echo "export HDRS_NAMENODE=default" >> ~/.bashrc
 RUN echo "export HDRS_WORKDIR=/tmp/hdrs/" >> ~/.bashrc
+
+RUN echo "export RUST_BACKTRACE=1" >> ~/.bashrc
