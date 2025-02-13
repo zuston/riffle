@@ -2,8 +2,8 @@ name: ReleaseBot
 
 on:
   push:
-    branches:
-      - "arm-2"
+    tags:
+      - "v*.*.*"
 
 jobs:
   linux-aarch64:
