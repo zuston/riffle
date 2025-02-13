@@ -76,6 +76,11 @@ impl Runtime {
     pub fn thread_num(&self) -> usize {
         self.thread_num
     }
+
+    pub fn max_blocking_threads_num(&self) -> usize {
+        // this is defined by tokio runtime.
+        512
+    }
 }
 
 #[derive(Debug)]
@@ -141,7 +146,6 @@ impl Builder {
     /// This can be any number above 0
     pub fn worker_threads(&mut self, val: usize) -> &mut Self {
         self.builder.worker_threads(val);
-        self.builder.max_blocking_threads(val);
         self.thread_num = val;
         self
     }
