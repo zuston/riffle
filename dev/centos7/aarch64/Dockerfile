@@ -33,9 +33,9 @@ RUN chmod +x /rustup-init
 RUN /rustup-init -y --default-toolchain nightly-2024-10-01-aarch64-unknown-linux-gnu
 
 # install java
-#RUN yum install -y java-1.8.0-openjdk java-1.8.0-openjdk-devel
+RUN yum install -y java-1.8.0-openjdk java-1.8.0-openjdk-devel
 # Note: Update JAVA_HOME path for aarch64
-#RUN echo 'export JAVA_HOME="/usr/lib/jvm/java-1.8.0-openjdk"' >> ~/.bashrc
+RUN echo 'export JAVA_HOME="/usr/lib/jvm/java-1.8.0-openjdk"' >> ~/.bashrc
 
 # install protoc
 # Note: Download the aarch64 version of protoc
@@ -48,15 +48,10 @@ RUN echo 'export PATH="$PATH:/protobuf-bin/bin"' >> ~/.bashrc
 RUN echo 'export LD_LIBRARY_PATH=${JAVA_HOME}/jre/lib/aarch64/server:${LD_LIBRARY_PATH}' >> ~/.bashrc
 
 # setup hadoop env
-#RUN curl -LsSf https://dlcdn.apache.org/hadoop/common/hadoop-3.3.5/hadoop-3.3.5.tar.gz | tar zxf - -C /root
-#RUN echo "export HADOOP_HOME=/root/hadoop-3.3.5" >> ~/.bashrc
-#RUN echo "export CLASSPATH=$(${HADOOP_HOME}/bin/hadoop classpath --glob)" >> ~/.bashrc
-#RUN echo "export HDRS_NAMENODE=default" >> ~/.bashrc
-#RUN echo "export HDRS_WORKDIR=/tmp/hdrs/" >> ~/.bashrc
+RUN curl -LsSf https://dlcdn.apache.org/hadoop/common/hadoop-3.3.5/hadoop-3.3.5.tar.gz | tar zxf - -C /root
+RUN echo "export HADOOP_HOME=/root/hadoop-3.3.5" >> ~/.bashrc
+RUN echo "export CLASSPATH=$(${HADOOP_HOME}/bin/hadoop classpath --glob)" >> ~/.bashrc
+RUN echo "export HDRS_NAMENODE=default" >> ~/.bashrc
+RUN echo "export HDRS_WORKDIR=/tmp/hdrs/" >> ~/.bashrc
 
 RUN echo "export RUST_BACKTRACE=1" >> ~/.bashrc
-
-# ref https://github.com/lancedb/lance/pull/1462
-#RUN echo "export CFLAGS_aarch64_unknown_linux_gnu=\"-D__ARM_ARCH=8\"" >> ~/.bashrc
-
-#RUN echo "export RUSTFLAGS=\"$RUSTFLAGS -Clinker=clang -C extra-filename=-std=c99\"" >> ~/.bashrc
