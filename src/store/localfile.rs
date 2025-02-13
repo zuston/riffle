@@ -75,7 +75,10 @@ pub struct LocalFileStore {
     min_number_of_available_disks: i32,
     runtime_manager: RuntimeManager,
     partition_locks: DashMap<String, Arc<RwLock<LockedObj>>>,
+
     direct_io_enable: bool,
+    direct_io_read_enable: bool,
+    direct_io_append_enable: bool,
 }
 
 impl Persistent for LocalFileStore {}
@@ -98,6 +101,8 @@ impl LocalFileStore {
             runtime_manager,
             partition_locks: Default::default(),
             direct_io_enable: config.direct_io_enable,
+            direct_io_read_enable: config.direct_io_read_enable,
+            direct_io_append_enable: config.direct_io_append_enable,
         }
     }
 
@@ -258,7 +263,7 @@ impl LocalFileStore {
         }
 
         let shuffle_file_format = self.generate_shuffle_file_format(blocks, next_offset)?;
-        let append_future = if self.direct_io_enable {
+        let append_future = if self.direct_io_enable && self.direct_io_append_enable {
             local_disk.direct_append(
                 &data_file_path,
                 next_offset as usize,
@@ -357,7 +362,7 @@ impl Store for LocalFileStore {
             ));
         }
 
-        let future_read = if self.direct_io_enable {
+        let future_read = if self.direct_io_enable && self.direct_io_read_enable {
             local_disk.direct_read(&data_file_path, offset, len)
         } else {
             local_disk.read(&data_file_path, offset, Some(len))
