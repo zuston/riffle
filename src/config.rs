@@ -122,10 +122,21 @@ pub struct LocalfileStoreConfig {
 
     #[serde(default = "as_default_direct_io_enable")]
     pub direct_io_enable: bool,
+    #[serde(default = "as_default_direct_io_read_enable")]
+    pub direct_io_read_enable: bool,
+    #[serde(default = "as_default_direct_io_append_enable")]
+    pub direct_io_append_enable: bool,
 }
 
 fn as_default_direct_io_enable() -> bool {
     false
+}
+
+fn as_default_direct_io_read_enable() -> bool {
+    true
+}
+fn as_default_direct_io_append_enable() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -168,6 +179,8 @@ impl LocalfileStoreConfig {
             disk_healthy_check_interval_sec: as_default_disk_healthy_check_interval_sec(),
             io_scheduler_config: None,
             direct_io_enable: as_default_direct_io_enable(),
+            direct_io_read_enable: as_default_direct_io_read_enable(),
+            direct_io_append_enable: as_default_direct_io_append_enable(),
         }
     }
 }
