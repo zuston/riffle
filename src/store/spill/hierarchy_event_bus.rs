@@ -156,16 +156,24 @@ mod tests {
 
         // case1: unset the concurrency limit
         assert_eq!(
-            runtime_manager.localfile_write_runtime.thread_num(),
+            runtime_manager
+                .localfile_write_runtime
+                .max_blocking_threads_num(),
             localfile_bus.concurrency_limit()
         );
         assert_eq!(
-            runtime_manager.hdfs_write_runtime.thread_num(),
+            runtime_manager
+                .hdfs_write_runtime
+                .max_blocking_threads_num(),
             hdfs_bus.concurrency_limit()
         );
         assert_eq!(
-            runtime_manager.localfile_write_runtime.thread_num()
-                + runtime_manager.hdfs_write_runtime.thread_num(),
+            runtime_manager
+                .localfile_write_runtime
+                .max_blocking_threads_num()
+                + runtime_manager
+                    .hdfs_write_runtime
+                    .max_blocking_threads_num(),
             event_bus.parent.concurrency_limit()
         );
 
