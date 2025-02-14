@@ -17,6 +17,7 @@
 
 use crate::app::SHUFFLE_SERVER_ID;
 use crate::config::Config;
+use crate::constant::CPU_ARCH;
 use crate::histogram;
 use crate::mem_allocator::ALLOCATOR;
 use crate::readable_size::ReadableSize;
@@ -973,6 +974,7 @@ impl MetricService {
                         "worker_id".to_owned(),
                         SHUFFLE_SERVER_ID.get().unwrap().to_string(),
                     );
+                    all_labels.insert("cpu_arch".to_owned(), CPU_ARCH.to_owned());
                     if let Some(labels) = &cfg.labels {
                         let labels = labels.clone();
                         all_labels.extend(labels);

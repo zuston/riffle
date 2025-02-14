@@ -23,11 +23,11 @@ use poem::http::StatusCode;
 use poem::listener::TcpListener;
 use poem::{get, Route, RouteMethod, Server};
 
-use std::sync::Mutex;
-
+use crate::constant::CPU_ARCH;
 use crate::http::{HTTPServer, Handler};
 use crate::runtime::manager::RuntimeManager;
 use crate::util::is_port_used;
+use std::sync::Mutex;
 
 impl ResponseError for WorkerError {
     fn status(&self) -> StatusCode {
@@ -39,7 +39,11 @@ struct IndexPageHandler {}
 impl Handler for IndexPageHandler {
     fn get_route_method(&self) -> RouteMethod {
         get(make_sync(|_| {
-            format!("Riffle\nGit commit id [{}]", env!("GIT_COMMIT_HASH"))
+            format!(
+                "Riffle\nGit commit id [{}]\ncpu arch [{}]",
+                env!("GIT_COMMIT_HASH"),
+                CPU_ARCH
+            )
         }))
     }
 
