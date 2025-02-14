@@ -126,6 +126,13 @@ pub struct LocalfileStoreConfig {
     pub direct_io_read_enable: bool,
     #[serde(default = "as_default_direct_io_append_enable")]
     pub direct_io_append_enable: bool,
+
+    #[serde(default = "as_default_io_duration_threshold_sec")]
+    pub io_duration_threshold_sec: usize,
+}
+
+fn as_default_io_duration_threshold_sec() -> usize {
+    5 * 60
 }
 
 fn as_default_direct_io_enable() -> bool {
@@ -181,6 +188,7 @@ impl LocalfileStoreConfig {
             direct_io_enable: as_default_direct_io_enable(),
             direct_io_read_enable: as_default_direct_io_read_enable(),
             direct_io_append_enable: as_default_direct_io_append_enable(),
+            io_duration_threshold_sec: as_default_io_duration_threshold_sec(),
         }
     }
 }
