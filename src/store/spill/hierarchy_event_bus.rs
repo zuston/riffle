@@ -24,11 +24,15 @@ impl HierarchyEventBus<SpillMessage> {
         let localfile_concurrency = match config.hybrid_store.memory_spill_to_localfile_concurrency
         {
             Some(value) => value as usize,
-            _ => runtime_manager.localfile_write_runtime.thread_num(),
+            _ => runtime_manager
+                .localfile_write_runtime
+                .max_blocking_threads_num(),
         };
         let hdfs_concurrency = match config.hybrid_store.memory_spill_to_hdfs_concurrency {
             Some(value) => value as usize,
-            _ => runtime_manager.hdfs_write_runtime.thread_num(),
+            _ => runtime_manager
+                .hdfs_write_runtime
+                .max_blocking_threads_num(),
         };
 
         let parent: EventBus<SpillMessage> = EventBus::new(
@@ -152,16 +156,24 @@ mod tests {
 
         // case1: unset the concurrency limit
         assert_eq!(
-            runtime_manager.localfile_write_runtime.thread_num(),
+            runtime_manager
+                .localfile_write_runtime
+                .max_blocking_threads_num(),
             localfile_bus.concurrency_limit()
         );
         assert_eq!(
-            runtime_manager.hdfs_write_runtime.thread_num(),
+            runtime_manager
+                .hdfs_write_runtime
+                .max_blocking_threads_num(),
             hdfs_bus.concurrency_limit()
         );
         assert_eq!(
-            runtime_manager.localfile_write_runtime.thread_num()
-                + runtime_manager.hdfs_write_runtime.thread_num(),
+            runtime_manager
+                .localfile_write_runtime
+                .max_blocking_threads_num()
+                + runtime_manager
+                    .hdfs_write_runtime
+                    .max_blocking_threads_num(),
             event_bus.parent.concurrency_limit()
         );
 
