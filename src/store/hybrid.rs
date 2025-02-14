@@ -416,6 +416,10 @@ impl HybridStore {
         buffer: Arc<MemoryBuffer>,
     ) -> Result<u64> {
         let spill_result = buffer.spill()?;
+        if spill_result.is_none() {
+            return Ok(0);
+        }
+        let spill_result = spill_result.unwrap();
         let flight_len = spill_result.flight_len();
 
         let app_manager_ref = self.app_manager.clone();
@@ -512,20 +516,25 @@ impl Store for HybridStore {
             return insert_result;
         }
 
-        if let Ok(_) = self.memory_spill_lock.try_lock() {
-            // single buffer spill
-            if let Some(threshold) = self.memory_spill_partition_max_threshold {
-                let size = self.hot_store.get_buffer_staging_size(&uid)?;
-                if size > threshold {
-                    if let Err(err) = self.single_buffer_spill(&uid).await {
-                        warn!(
-                            "Errors on single buffer spill. uid: {:?}. err: {:?}",
-                            &uid, err
-                        );
-                    }
+        // for single buffer spill
+        //
+        // maybe the same partition will trigger spill at the same time, the thread
+        // safe will be ensured by the buffer self.
+        // if the first request has been handled, the following requests will not
+        // fast skip this logic.
+        if let Some(threshold) = self.memory_spill_partition_max_threshold {
+            let size = self.hot_store.get_buffer_staging_size(&uid)?;
+            if size > threshold {
+                if let Err(err) = self.single_buffer_spill(&uid).await {
+                    warn!(
+                        "Errors on single buffer spill. uid: {:?}. err: {:?}",
+                        &uid, err
+                    );
                 }
             }
+        }
 
+        if let Ok(_) = self.memory_spill_lock.try_lock() {
             // watermark spill
             let ratio = self.get_memory_used_ratio()?;
             if ratio > self.config.memory_spill_high_watermark {

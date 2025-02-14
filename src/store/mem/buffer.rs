@@ -308,9 +308,13 @@ impl MemoryBuffer {
         })
     }
 
-    #[trace]
-    pub fn spill(&self) -> Result<BufferSpillResult> {
+    // when there is no any staging data, it will return the None
+    pub fn spill(&self) -> Result<Option<BufferSpillResult>> {
         let mut buffer = self.buffer.write();
+        if buffer.staging_size == 0 {
+            return Ok(None);
+        }
+
         let staging: BatchMemoryBlock = { mem::replace(&mut buffer.staging, Default::default()) };
         let staging_ref = Arc::new(staging);
         let flight_id = buffer.flight_counter;
@@ -323,11 +327,11 @@ impl MemoryBuffer {
         buffer.flight_size += spill_size;
         buffer.staging_size = 0;
 
-        Ok(BufferSpillResult {
+        Ok(Some(BufferSpillResult {
             flight_id,
             flight_len: spill_size as u64,
             blocks: staging_ref.clone(),
-        })
+        }))
     }
 
     #[trace]
@@ -431,7 +435,7 @@ mod test {
         assert_eq!(0, buffer.flight_size()?);
 
         /// case3: make all staging to spill
-        let spill_result = buffer.spill()?;
+        let spill_result = buffer.spill()?.unwrap();
         assert_eq!(10 * 10 * 2, spill_result.flight_len);
         assert_eq!(2, spill_result.blocks.len());
         assert_eq!(
