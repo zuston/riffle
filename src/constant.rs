@@ -1,3 +1,5 @@
+pub const CPU_ARCH: &str = std::env::consts::ARCH;
+
 #[allow(non_camel_case_types)]
 pub enum StatusCode {
     SUCCESS = 0,
