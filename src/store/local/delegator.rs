@@ -132,7 +132,7 @@ impl LocalDiskDelegator {
                 continue;
             }
 
-            if let Err(e) = self
+            let mut health_tag = if let Err(e) = self
                 .capacity_check()
                 .instrument_await("capacity checking")
                 .await
@@ -141,7 +141,11 @@ impl LocalDiskDelegator {
                     "Errors on checking the disk:{} capacity. err: {:#?}",
                     &self.inner.root, e
                 );
-            }
+                false
+            } else {
+                true
+            };
+
             if let Err(e) = self
                 .write_read_check()
                 .instrument_await("write+read checking")
@@ -152,7 +156,12 @@ impl LocalDiskDelegator {
                     &self.inner.root, e
                 );
                 self.mark_corrupted()?;
+                health_tag = false;
             }
+
+            GAUGE_LOCAL_DISK_IS_HEALTHY
+                .with_label_values(&[&self.inner.root])
+                .set(if health_tag { 0 } else { 1 });
         }
     }
 
@@ -172,7 +181,7 @@ impl LocalDiskDelegator {
         })
     }
 
-    async fn capacity_check(&self) -> Result<()> {
+    async fn capacity_check(&self) -> Result<bool> {
         let capacity = self.get_disk_capacity()?;
         let available = self.get_disk_available()?;
         let used = capacity - available;
@@ -189,6 +198,7 @@ impl LocalDiskDelegator {
 
         let used_ratio = used as f64 / capacity as f64;
         let healthy_stat = self.is_healthy()?;
+        let mut is_health = true;
 
         if healthy_stat && used_ratio > self.inner.high_watermark as f64 {
             warn!("Disk={} has been unhealthy", &self.inner.root);
@@ -196,6 +206,7 @@ impl LocalDiskDelegator {
             GAUGE_LOCAL_DISK_IS_HEALTHY
                 .with_label_values(&[&self.inner.root])
                 .set(1i64);
+            is_health = false;
         }
 
         if !healthy_stat && used_ratio < self.inner.low_watermark as f64 {
@@ -204,9 +215,10 @@ impl LocalDiskDelegator {
             GAUGE_LOCAL_DISK_IS_HEALTHY
                 .with_label_values(&[&self.inner.root])
                 .set(0i64);
+            is_health = true;
         }
 
-        Ok(())
+        Ok(is_health)
     }
 
     async fn write_read_check(&self) -> Result<()> {
