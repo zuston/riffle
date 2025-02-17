@@ -29,8 +29,6 @@ use std::time::Duration;
 use tokio::time::timeout;
 use tracing::{info, Instrument};
 
-pub static IO_DURATION_THRESHOLD: u64 = 20 * 60;
-
 #[derive(Clone)]
 pub struct LocalDiskDelegator {
     inner: Arc<Inner>,
@@ -54,6 +52,8 @@ struct Inner {
     available_ref: OnceCell<Arc<AtomicU64>>,
 
     io_scheduler: IoScheduler,
+
+    io_duration_threshold_sec: u64,
 }
 
 impl LocalDiskDelegator {
@@ -87,6 +87,7 @@ impl LocalDiskDelegator {
                 capacity_ref: Default::default(),
                 available_ref: Default::default(),
                 io_scheduler: IoScheduler::new(root, &config.io_scheduler_config),
+                io_duration_threshold_sec: config.io_duration_threshold_sec as u64,
             }),
         };
 
@@ -259,9 +260,12 @@ impl LocalDiskDelegator {
 impl LocalIO for LocalDiskDelegator {
     async fn create_dir(&self, dir: &str) -> Result<(), WorkerError> {
         let future = self.inner.io_handler.create_dir(dir);
-        timeout(Duration::from_secs(IO_DURATION_THRESHOLD), future)
-            .instrument_await(format!("create directory to disk: {}", &self.inner.root))
-            .await??;
+        timeout(
+            Duration::from_secs(self.inner.io_duration_threshold_sec),
+            future,
+        )
+        .instrument_await(format!("create directory to disk: {}", &self.inner.root))
+        .await??;
         Ok(())
     }
 
@@ -272,9 +276,12 @@ impl LocalIO for LocalDiskDelegator {
         let len = data.len();
 
         let future = self.inner.io_handler.append(path, data);
-        timeout(Duration::from_secs(IO_DURATION_THRESHOLD), future)
-            .instrument_await(format!("append to disk: {}", &self.inner.root))
-            .await??;
+        timeout(
+            Duration::from_secs(self.inner.io_duration_threshold_sec),
+            future,
+        )
+        .instrument_await(format!("append to disk: {}", &self.inner.root))
+        .await??;
 
         timer.observe_duration();
         TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER
@@ -297,9 +304,12 @@ impl LocalIO for LocalDiskDelegator {
             .start_timer();
 
         let future = self.inner.io_handler.read(path, offset, length);
-        let data = timeout(Duration::from_secs(IO_DURATION_THRESHOLD), future)
-            .instrument_await(format!("read from disk: {}", &self.inner.root))
-            .await??;
+        let data = timeout(
+            Duration::from_secs(self.inner.io_duration_threshold_sec),
+            future,
+        )
+        .instrument_await(format!("read from disk: {}", &self.inner.root))
+        .await??;
 
         timer.observe_duration();
         TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER
@@ -317,9 +327,12 @@ impl LocalIO for LocalDiskDelegator {
             .start_timer();
 
         let future = self.inner.io_handler.delete(path);
-        timeout(Duration::from_secs(IO_DURATION_THRESHOLD), future)
-            .instrument_await(format!("delete from disk: {}", &self.inner.root))
-            .await??;
+        timeout(
+            Duration::from_secs(self.inner.io_duration_threshold_sec),
+            future,
+        )
+        .instrument_await(format!("delete from disk: {}", &self.inner.root))
+        .await??;
 
         timer.observe_duration();
 
@@ -328,17 +341,23 @@ impl LocalIO for LocalDiskDelegator {
 
     async fn write(&self, path: &str, data: Bytes) -> Result<(), WorkerError> {
         let future = self.inner.io_handler.write(path, data);
-        timeout(Duration::from_secs(IO_DURATION_THRESHOLD), future)
-            .instrument_await(format!("write to disk: {}", &self.inner.root))
-            .await??;
+        timeout(
+            Duration::from_secs(self.inner.io_duration_threshold_sec),
+            future,
+        )
+        .instrument_await(format!("write to disk: {}", &self.inner.root))
+        .await??;
         Ok(())
     }
 
     async fn file_stat(&self, path: &str) -> Result<FileStat, WorkerError> {
         let future = self.inner.io_handler.file_stat(path);
-        let file_stat = timeout(Duration::from_secs(IO_DURATION_THRESHOLD), future)
-            .instrument_await(format!("state disk: {}", &self.inner.root))
-            .await??;
+        let file_stat = timeout(
+            Duration::from_secs(self.inner.io_duration_threshold_sec),
+            future,
+        )
+        .instrument_await(format!("state disk: {}", &self.inner.root))
+        .await??;
         Ok(file_stat)
     }
 
@@ -358,10 +377,18 @@ impl LocalIO for LocalDiskDelegator {
         let timer = LOCALFILE_DISK_DIRECT_APPEND_OPERATION_DURATION
             .with_label_values(&[&self.inner.root])
             .start_timer();
-        self.inner
+
+        let future = self
+            .inner
             .io_handler
-            .direct_append(path, written_bytes, data)
-            .await?;
+            .direct_append(path, written_bytes, data);
+        timeout(
+            Duration::from_secs(self.inner.io_duration_threshold_sec),
+            future,
+        )
+        .instrument_await(format!("direct_append to disk: {}", &path))
+        .await??;
+
         TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER
             .with_label_values(&[&self.inner.root])
             .inc_by(len as u64);
@@ -386,11 +413,15 @@ impl LocalIO for LocalDiskDelegator {
         let timer = LOCALFILE_DISK_DIRECT_READ_OPERATION_DURATION
             .with_label_values(&[&self.inner.root])
             .start_timer();
-        let data = self
-            .inner
-            .io_handler
-            .direct_read(path, offset, length)
-            .await?;
+
+        let future = self.inner.io_handler.direct_read(path, offset, length);
+        let data = timeout(
+            Duration::from_secs(self.inner.io_duration_threshold_sec),
+            future,
+        )
+        .instrument_await(format!("direct_read from disk: {}", path))
+        .await??;
+
         TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER
             .with_label_values(&[&self.inner.root])
             .inc_by(data.len() as u64);
