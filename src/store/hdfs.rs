@@ -281,8 +281,11 @@ impl HdfsStore {
                 filesystem.touch(&data_file_path).await?;
                 filesystem.touch(&index_file_path).await?;
 
-                error!("Errors on appending data into path: {}", &data_file_path);
-                return Err(Other(e.into()));
+                error!(
+                    "Errors on appending data into path: {}. error: {}",
+                    &data_file_path, &e
+                );
+                return Err(e);
             }
             _ => {
                 let mut partition_cached_meta = self
