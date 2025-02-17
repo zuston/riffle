@@ -440,17 +440,21 @@ impl Store for LocalFileStore {
             _ => LocalFileStore::gen_relative_path_for_app(&app_id),
         };
 
-        for local_disk_ref in &self.local_disks {
-            let disk = local_disk_ref.clone();
-            disk.delete(&data_relative_dir_path).await?;
-        }
-
         let keys_to_delete: Vec<_> = self
             .partition_locks
             .iter()
             .filter(|entry| entry.key().starts_with(&data_relative_dir_path))
             .map(|entry| entry.key().to_string())
             .collect();
+
+        if keys_to_delete.is_empty() {
+            return Ok(0);
+        }
+
+        for local_disk_ref in &self.local_disks {
+            let disk = local_disk_ref.clone();
+            disk.delete(&data_relative_dir_path).await?;
+        }
 
         let mut removed_data_size = 0i64;
         for key in keys_to_delete {
