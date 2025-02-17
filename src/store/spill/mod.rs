@@ -97,7 +97,9 @@ async fn handle_spill_failure_whatever_error(
     let ctx = &message.ctx;
     let is_valid_app = ctx.is_valid();
     let is_app_not_found_or_purged = match flush_error {
-        WorkerError::APP_HAS_BEEN_PURGED | WorkerError::APP_IS_NOT_FOUND => true,
+        WorkerError::APP_HAS_BEEN_PURGED
+        | WorkerError::APP_IS_NOT_FOUND
+        | WorkerError::DIR_OR_FILE_NOT_FOUND(_) => true,
         _ => false,
     };
     if !is_valid_app || is_app_not_found_or_purged {
@@ -131,7 +133,8 @@ async fn handle_spill_failure(
         | WorkerError::PARTIAL_DATA_LOST(_)
         | WorkerError::APP_HAS_BEEN_PURGED
         | WorkerError::APP_IS_NOT_FOUND
-        | WorkerError::FUTURE_EXEC_TIMEOUT(_) => {
+        | WorkerError::FUTURE_EXEC_TIMEOUT(_)
+        | WorkerError::DIR_OR_FILE_NOT_FOUND(_) => {
             handle_spill_failure_whatever_error(message, store_ref, err).await;
             false
         }
