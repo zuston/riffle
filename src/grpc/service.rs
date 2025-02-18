@@ -370,7 +370,7 @@ impl ShuffleServer for DefaultShuffleServer {
         let duration = start.elapsed().as_millis() as u64;
         GRPC_GET_LOCALFILE_INDEX_LATENCY.record(duration);
 
-        info!("[get_local_shuffle_index] duration {}(ms). app_id: {}, shuffle_id: {}, partition_id: {}", duration, &app_id, shuffle_id, partition_id);
+        info!("[get_local_shuffle_index] duration {}(ms). app_id: {}, shuffle_id: {}, partition_id: {}", duration, &app_id, shuffle_id, &partition_id.partition_id);
 
         match data_index_wrapper.unwrap() {
             ResponseDataIndex::Local(data_index) => {
@@ -448,7 +448,7 @@ impl ShuffleServer for DefaultShuffleServer {
         let duration = start.elapsed().as_millis() as u64;
         GRPC_GET_LOCALFILE_DATA_LATENCY.record(duration);
 
-        info!("[get_local_shuffle_data] duration {}(ms). app_id: {}, shuffle_id: {}, partition_id: {}", duration, &app_id, shuffle_id, partition_id);
+        info!("[get_local_shuffle_data] duration {}(ms). app_id: {}, shuffle_id: {}, partition_id: {}", duration, &app_id, shuffle_id, &partition_id.partition_id);
 
         Ok(Response::new(GetLocalShuffleDataResponse {
             data: data_fetched_result.unwrap().from_local(),
