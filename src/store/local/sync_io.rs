@@ -141,7 +141,15 @@ fn inner_direct_read(path: &str, offset: i64, len: i64) -> Result<Bytes, Error> 
     let mut range_buf = &mut buf[..range];
 
     let path = Path::new(&path);
-    let mut file = File::open(path)?;
+
+    let mut opts = OpenOptions::new();
+    opts.read(true);
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.custom_flags(libc::O_DIRECT | libc::O_NOATIME);
+    }
+    let mut file = opts.open(path)?;
 
     #[cfg(target_family = "unix")]
     use std::os::unix::fs::FileExt;
@@ -355,7 +363,7 @@ impl LocalIO for SyncLocalIO {
                 #[cfg(target_os = "linux")]
                 {
                     use std::os::unix::fs::OpenOptionsExt;
-                    opts.custom_flags(libc::O_DIRECT);
+                    opts.custom_flags(libc::O_DIRECT | libc::O_NOATIME);
                 }
                 let file = opts.open(path)?;
 
