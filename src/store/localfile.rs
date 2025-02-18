@@ -138,8 +138,8 @@ impl LocalFileStore {
             runtime_manager,
             partition_locks: Default::default(),
             direct_io_enable: localfile_config.direct_io_enable,
-            direct_io_read_enable: true,
-            direct_io_append_enable: true,
+            direct_io_read_enable: localfile_config.direct_io_read_enable,
+            direct_io_append_enable: localfile_config.direct_io_append_enable,
         }
     }
 
