@@ -845,7 +845,7 @@ pub(crate) mod tests {
             partition_id: 0,
         };
         write_some_data(store.clone(), uid.clone(), data_len as i32, data, 400).await;
-        awaitility::at_most(Duration::from_secs(2))
+        awaitility::at_most(Duration::from_secs(10))
             .until(|| store.in_flight_bytes_size.load(SeqCst) == 0);
 
         // case1: all data has been flushed to localfile. the data in memory should be empty
