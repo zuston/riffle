@@ -4,7 +4,6 @@ use crate::metric::{
     IO_SCHEDULER_READ_WAIT, IO_SCHEDULER_SHARED_PERMITS,
 };
 use await_tree::InstrumentAwait;
-use libc::read;
 use log::{info, warn};
 use prometheus::IntGaugeVec;
 use std::cmp::{max, min};
