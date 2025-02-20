@@ -19,8 +19,8 @@ use crate::config::{Config, StorageType};
 use crate::error::WorkerError;
 use crate::metric::{
     BLOCK_ID_NUMBER, GAUGE_APP_NUMBER, GAUGE_HUGE_PARTITION_NUMBER, GAUGE_PARTITION_NUMBER,
-    GAUGE_TOPN_APP_RESIDENT_BYTES, PURGE_FAILED_COUNTER, TOTAL_APP_FLUSHED_BYTES, TOTAL_APP_NUMBER,
-    TOTAL_HUGE_PARTITION_NUMBER, TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED,
+    GAUGE_TOPN_APP_RESIDENT_BYTES, PURGE_FAILED_COUNTER, RESIDENT_BYTES, TOTAL_APP_FLUSHED_BYTES,
+    TOTAL_APP_NUMBER, TOTAL_HUGE_PARTITION_NUMBER, TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED,
     TOTAL_PARTITION_NUMBER, TOTAL_READ_DATA, TOTAL_READ_DATA_FROM_LOCALFILE,
     TOTAL_READ_DATA_FROM_MEMORY, TOTAL_READ_INDEX_FROM_LOCALFILE, TOTAL_RECEIVED_DATA,
     TOTAL_REQUIRE_BUFFER_FAILED,
@@ -306,6 +306,8 @@ impl App {
         self.total_received_data_size.fetch_add(len, SeqCst);
         self.total_resident_data_size.fetch_add(len, SeqCst);
 
+        RESIDENT_BYTES.add(len as i64);
+
         self.store.insert(ctx).await?;
         Ok(len as i32)
     }
@@ -492,6 +494,8 @@ impl App {
         let removed_size = self.store.purge(&PurgeDataContext::new(reason)).await?;
         self.total_resident_data_size
             .fetch_sub(removed_size as u64, SeqCst);
+
+        RESIDENT_BYTES.sub(removed_size);
 
         if let Some(shuffle_id) = shuffle_id {
             // shuffle level bitmap deletion
