@@ -4,15 +4,22 @@ use crate::metric::{
     IO_SCHEDULER_READ_WAIT, IO_SCHEDULER_SHARED_PERMITS,
 };
 use await_tree::InstrumentAwait;
-use log::info;
+use log::{info, warn};
 use prometheus::IntGaugeVec;
+use std::cmp::{max, min};
 use tokio::sync::{AcquireError, Semaphore, SemaphorePermit};
 
 pub struct IoScheduler {
     bandwidth: usize,
+
     read_buffer: Semaphore,
     append_buffer: Semaphore,
     shared_buffer: Semaphore,
+
+    read_total_permits: usize,
+    append_total_permits: usize,
+    shared_total_permits: usize,
+
     root: String,
 }
 
@@ -57,15 +64,26 @@ impl IoScheduler {
             _ => (1024 * 1024 * 1024, 0.5, 0.5, 0.5),
         };
 
-        info!("Initialized io scheduler with disk bandwidth {} of disk: {}. read: {}, append: {}, shared: {}", bandwidth, root, read_ratio, append_ratio, shared_ratio);
-        let read_buffer = Semaphore::new((bandwidth as f64 * read_ratio) as usize);
-        let append_buffer = Semaphore::new((bandwidth as f64 * append_ratio) as usize);
-        let shared_buffer = Semaphore::new((bandwidth as f64 * shared_ratio) as usize);
+        info!("Initialized io scheduler with disk bandwidth {} of disk: {}. read: {}, append: {}, shared: {}",
+            bandwidth, root, read_ratio, append_ratio, shared_ratio);
+
+        let read_total_permits = (bandwidth as f64 * read_ratio) as usize;
+        let read_buffer = Semaphore::new(read_total_permits);
+
+        let append_total_permits = (bandwidth as f64 * append_ratio) as usize;
+        let append_buffer = Semaphore::new(append_total_permits);
+
+        let shared_total_permits = (bandwidth as f64 * shared_ratio) as usize;
+        let shared_buffer = Semaphore::new(shared_total_permits);
+
         Self {
             bandwidth,
             read_buffer,
             append_buffer,
             shared_buffer,
+            read_total_permits,
+            append_total_permits,
+            shared_total_permits,
             root: root.to_owned(),
         }
     }
@@ -75,40 +93,67 @@ impl IoScheduler {
         io_type: IoType,
         batch_bytes: usize,
     ) -> Result<IoPermit<'_>, AcquireError> {
+        let mut buffer_type = "READ";
         let (buffer, mut permit_metric, wait_metric) = match io_type {
             IoType::READ => (
                 &self.read_buffer,
                 IO_SCHEDULER_READ_PERMITS.clone(),
                 IO_SCHEDULER_READ_WAIT.clone(),
             ),
-            IoType::APPEND => (
-                &self.append_buffer,
-                IO_SCHEDULER_APPEND_PERMITS.clone(),
-                IO_SCHEDULER_APPEND_WAIT.clone(),
-            ),
+            IoType::APPEND => {
+                buffer_type = "APPEND";
+                (
+                    &self.append_buffer,
+                    IO_SCHEDULER_APPEND_PERMITS.clone(),
+                    IO_SCHEDULER_APPEND_WAIT.clone(),
+                )
+            }
         };
 
-        wait_metric.with_label_values(&[&self.root]).inc();
-        let permit = if batch_bytes > buffer.available_permits()
-            && batch_bytes <= self.shared_buffer.available_permits()
-        {
-            permit_metric = IO_SCHEDULER_SHARED_PERMITS.clone();
-            self.shared_buffer
-                .acquire_many(batch_bytes as u32)
-                .instrument_await(format!(
-                    "Shared buffer wait in io scheduler:[{}]",
-                    &self.root
-                ))
-                .await?
-        } else {
-            buffer
-                .acquire_many(batch_bytes as u32)
-                .instrument_await(format!(
-                    "{} buffer wait in io scheduler:[{}]",
-                    &io_type, &self.root
-                ))
-                .await?
+        let exclusive_buffer_total_permits = match buffer_type {
+            "READ" => self.read_total_permits,
+            _ => self.append_total_permits,
         };
+        let shared_buffer_total_permits = self.shared_total_permits;
+
+        let max = max(exclusive_buffer_total_permits, shared_buffer_total_permits);
+        let min = min(exclusive_buffer_total_permits, shared_buffer_total_permits);
+
+        let (buffer, request_permits) = if batch_bytes > max || batch_bytes > min {
+            // there is no such big permits space, let's use the biggest one.
+            let permits = std::cmp::min(max, batch_bytes);
+            let buffer = if permits <= exclusive_buffer_total_permits {
+                buffer
+            } else {
+                buffer_type = "SHARED";
+                &self.shared_buffer
+            };
+            warn!("There no such buffer capacity to satisfy request permit: {} and make it reduce to {}", batch_bytes, permits);
+            (buffer, permits)
+        } else {
+            let buffer = if batch_bytes > buffer.available_permits()
+                && batch_bytes <= self.shared_buffer.available_permits()
+            {
+                buffer_type = "SHARED";
+                &self.shared_buffer
+            } else {
+                buffer
+            };
+            (buffer, batch_bytes)
+        };
+
+        // todo: wait_metric should be inc+dec by drop trait
+        wait_metric.with_label_values(&[&self.root]).inc();
+        let permit = buffer
+            .acquire_many(request_permits as u32)
+            .instrument_await(format!(
+                "{} buffer wait (require:{}, available:{}) in io scheduler: {}",
+                buffer_type,
+                request_permits,
+                buffer.available_permits(),
+                &self.root
+            ))
+            .await?;
         wait_metric.with_label_values(&[&self.root]).dec();
 
         Ok(IoPermit::new(&self.root, permit, permit_metric))
@@ -120,6 +165,50 @@ mod tests {
     use crate::config::IoSchedulerConfig;
     use crate::store::local::scheduler::{IoScheduler, IoType};
     use anyhow::Result;
+
+    #[tokio::test]
+    async fn test_exceed_permits() -> Result<()> {
+        let scheduler = IoScheduler::new(
+            "/tmp",
+            &Some(IoSchedulerConfig {
+                disk_bandwidth: 10,
+                read_buffer_ratio: 0.4,
+                append_buffer_ratio: 0.4,
+                shared_buffer_ratio: 0.8,
+            }),
+        );
+
+        // case1: exceeding all buffer capacity, use the max shared capacity
+        let read_permit_1 = scheduler.acquire(IoType::READ, 100).await?;
+        assert_eq!(8, read_permit_1.internal.num_permits());
+        drop(read_permit_1);
+
+        // case2: exceeding the read buffer capacity, use the shared capacity
+        let read_permit_2 = scheduler.acquire(IoType::READ, 6).await?;
+        assert_eq!(6, read_permit_2.internal.num_permits());
+        drop(read_permit_2);
+
+        // another case, that the read capacity > shared capacity
+        let scheduler = IoScheduler::new(
+            "/tmp",
+            &Some(IoSchedulerConfig {
+                disk_bandwidth: 10,
+                read_buffer_ratio: 0.8,
+                append_buffer_ratio: 0.4,
+                shared_buffer_ratio: 0.4,
+            }),
+        );
+
+        let read_permit_1 = scheduler.acquire(IoType::READ, 100).await?;
+        assert_eq!(8, read_permit_1.internal.num_permits());
+        drop(read_permit_1);
+
+        let read_permit_2 = scheduler.acquire(IoType::READ, 6).await?;
+        assert_eq!(6, read_permit_2.internal.num_permits());
+        drop(read_permit_2);
+
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_permit() -> Result<()> {
