@@ -525,6 +525,9 @@ pub static GAUGE_RUNTIME_IDLE_THREAD_NUM: Lazy<IntGaugeVec> = Lazy::new(|| {
     .unwrap()
 });
 
+pub static RESIDENT_BYTES: Lazy<IntGauge> =
+    Lazy::new(|| IntGauge::new("resident_bytes", "resident_bytes").unwrap());
+
 pub static GAUGE_TOPN_APP_RESIDENT_BYTES: Lazy<IntGaugeVec> = Lazy::new(|| {
     register_int_gauge_vec!(
         "topN_app_resident_bytes",
@@ -681,6 +684,10 @@ pub static IO_SCHEDULER_APPEND_WAIT: Lazy<IntGaugeVec> =
     Lazy::new(|| register_int_gauge_vec!("append_wait", "append_wait", &["root"]).unwrap());
 
 fn register_custom_metrics() {
+    REGISTRY
+        .register(Box::new(RESIDENT_BYTES.clone()))
+        .expect("resident_bytes must be registered");
+
     REGISTRY
         .register(Box::new(BLOCK_ID_NUMBER.clone()))
         .expect("block_id_number must be registered");
