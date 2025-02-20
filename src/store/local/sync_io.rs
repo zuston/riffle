@@ -216,6 +216,10 @@ impl LocalIO for SyncLocalIO {
                     }
                 }
                 buf_writer.flush()?;
+
+                let file = buf_writer.into_inner()?;
+                file.sync_all()?;
+
                 Ok::<(), io::Error>(())
             })
             .instrument_await("wait the spawned block future")

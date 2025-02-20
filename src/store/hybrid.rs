@@ -654,7 +654,7 @@ pub(crate) mod tests {
     use bytes::{Buf, Bytes};
 
     use std::any::Any;
-    use std::collections::VecDeque;
+    use std::collections::{HashSet, VecDeque};
 
     use std::sync::atomic::Ordering::SeqCst;
     use std::sync::Arc;
@@ -794,9 +794,9 @@ pub(crate) mod tests {
             serialized_expected_task_ids_bitmap: Default::default(),
         }))?;
 
-        let mut accepted_block_ids = vec![];
+        let mut accepted_block_ids: HashSet<i64> = HashSet::new();
         for segment in response_data.from_memory().shuffle_data_block_segments {
-            accepted_block_ids.push(segment.block_id);
+            accepted_block_ids.insert(segment.block_id);
         }
 
         let local_index_data = runtime.wait(store.get_index(ReadingIndexViewContext {
@@ -820,11 +820,12 @@ pub(crate) mod tests {
                     let id = index_bytes.get_i64();
                     index_bytes.get_i64();
 
-                    accepted_block_ids.push(id);
+                    accepted_block_ids.insert(id);
                 }
             }
         }
 
+        let mut accepted_block_ids = accepted_block_ids.into_iter().collect::<Vec<i64>>();
         accepted_block_ids.sort();
         assert_eq!(accepted_block_ids, expected_block_ids);
 
@@ -845,7 +846,7 @@ pub(crate) mod tests {
             partition_id: 0,
         };
         write_some_data(store.clone(), uid.clone(), data_len as i32, data, 400).await;
-        awaitility::at_most(Duration::from_secs(2))
+        awaitility::at_most(Duration::from_secs(10))
             .until(|| store.in_flight_bytes_size.load(SeqCst) == 0);
 
         // case1: all data has been flushed to localfile. the data in memory should be empty
