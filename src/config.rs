@@ -227,6 +227,7 @@ pub struct HealthServiceConfig {
     pub disk_used_ratio_health_threshold: Option<f64>,
     // the threshold of the memory allocated from allocator
     pub memory_allocated_threshold: Option<String>,
+    pub service_mem_used_without_change_time_window_sec: Option<usize>,
 }
 
 // =========================================================

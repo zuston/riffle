@@ -4,6 +4,9 @@ pub struct CapacitySnapshot {
     used: i64,
 }
 
+unsafe impl Send for CapacitySnapshot {}
+unsafe impl Sync for CapacitySnapshot {}
+
 impl From<(i64, i64, i64)> for CapacitySnapshot {
     fn from(value: (i64, i64, i64)) -> Self {
         CapacitySnapshot {
