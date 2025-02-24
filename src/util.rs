@@ -23,6 +23,8 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use bytesize::ByteSize;
+
 const WORKER_IP: &str = "WORKER_IP";
 
 pub fn get_local_ip() -> Result<IpAddr, std::io::Error> {
@@ -89,6 +91,10 @@ pub fn is_port_used(port: u16) -> bool {
         Ok(_) => false,
         _ => true,
     }
+}
+
+pub fn parse_raw_to_bytesize(s: &str) -> u64 {
+    s.parse::<ByteSize>().unwrap().0
 }
 
 #[cfg(test)]
