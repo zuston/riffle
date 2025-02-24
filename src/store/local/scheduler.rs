@@ -187,6 +187,7 @@ mod tests {
             "/tmp",
             &Some(IoSchedulerConfig {
                 disk_bandwidth: Some("10B".to_owned()),
+                disk_bandwidth_available_ratio: 1.0,
                 read_buffer_ratio: 0.4,
                 append_buffer_ratio: 0.4,
                 shared_buffer_ratio: 0.8,
@@ -208,6 +209,7 @@ mod tests {
             "/tmp",
             &Some(IoSchedulerConfig {
                 disk_bandwidth: Some("10B".to_owned()),
+                disk_bandwidth_available_ratio: 1.0,
                 read_buffer_ratio: 0.8,
                 append_buffer_ratio: 0.4,
                 shared_buffer_ratio: 0.4,
@@ -231,6 +233,7 @@ mod tests {
             "/tmp",
             &Some(IoSchedulerConfig {
                 disk_bandwidth: Some("10B".to_owned()),
+                disk_bandwidth_available_ratio: 1.0,
                 read_buffer_ratio: 0.5,
                 append_buffer_ratio: 0.5,
                 shared_buffer_ratio: 0.5,
