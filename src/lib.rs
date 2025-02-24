@@ -53,6 +53,8 @@ pub mod histogram;
 pub mod id_layout;
 pub mod lazy_initializer;
 
+pub mod disk_explorer;
+
 use crate::app::{AppManager, AppManagerRef};
 use crate::common::init_global_variable;
 use crate::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
