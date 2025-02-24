@@ -1,4 +1,5 @@
 use crate::config::IoSchedulerConfig;
+use crate::disk_explorer::DiskExplorer;
 use crate::metric::{
     IO_SCHEDULER_APPEND_PERMITS, IO_SCHEDULER_APPEND_WAIT, IO_SCHEDULER_READ_PERMITS,
     IO_SCHEDULER_READ_WAIT, IO_SCHEDULER_SHARED_PERMITS,
@@ -57,9 +58,16 @@ impl IoScheduler {
     pub fn new(root: &str, io_scheduler_config: &Option<IoSchedulerConfig>) -> IoScheduler {
         let (bandwidth, read_ratio, append_ratio, shared_ratio) = match io_scheduler_config {
             Some(io_scheduler) => {
-                let bandwidth = util::parse_raw_to_bytesize(&io_scheduler.disk_bandwidth);
+                let bandwidth = match &io_scheduler.disk_bandwidth {
+                    Some(bandwidth) => util::parse_raw_to_bytesize(bandwidth) as usize,
+                    _ => {
+                        let disk_stat = DiskExplorer::detect(root);
+                        disk_stat.bandwidth
+                    }
+                };
+
                 (
-                    bandwidth as usize,
+                    bandwidth,
                     io_scheduler.read_buffer_ratio,
                     io_scheduler.append_buffer_ratio,
                     io_scheduler.shared_buffer_ratio,
@@ -175,7 +183,7 @@ mod tests {
         let scheduler = IoScheduler::new(
             "/tmp",
             &Some(IoSchedulerConfig {
-                disk_bandwidth: "10B".to_owned(),
+                disk_bandwidth: Some("10B".to_owned()),
                 read_buffer_ratio: 0.4,
                 append_buffer_ratio: 0.4,
                 shared_buffer_ratio: 0.8,
@@ -196,7 +204,7 @@ mod tests {
         let scheduler = IoScheduler::new(
             "/tmp",
             &Some(IoSchedulerConfig {
-                disk_bandwidth: "10B".to_owned(),
+                disk_bandwidth: Some("10B".to_owned()),
                 read_buffer_ratio: 0.8,
                 append_buffer_ratio: 0.4,
                 shared_buffer_ratio: 0.4,
@@ -219,7 +227,7 @@ mod tests {
         let scheduler = IoScheduler::new(
             "/tmp",
             &Some(IoSchedulerConfig {
-                disk_bandwidth: "10B".to_owned(),
+                disk_bandwidth: Some("10B".to_owned()),
                 read_buffer_ratio: 0.5,
                 append_buffer_ratio: 0.5,
                 shared_buffer_ratio: 0.5,

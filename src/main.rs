@@ -85,6 +85,8 @@ pub mod tracing;
 pub mod urpc;
 pub mod util;
 
+pub mod disk_explorer;
+
 const MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY: &str = "MAX_MEMORY_ALLOCATION_LIMIT_SIZE";
 
 fn main() -> Result<()> {

@@ -148,7 +148,7 @@ fn as_default_direct_io_append_enable() -> bool {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct IoSchedulerConfig {
-    pub disk_bandwidth: String,
+    pub disk_bandwidth: Option<String>,
 
     pub read_buffer_ratio: f64,
     pub append_buffer_ratio: f64,
