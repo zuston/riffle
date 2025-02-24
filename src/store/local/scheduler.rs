@@ -66,6 +66,9 @@ impl IoScheduler {
                     }
                 };
 
+                let bandwidth =
+                    (io_scheduler.disk_bandwidth_available_ratio * bandwidth as f64) as usize;
+
                 (
                     bandwidth,
                     io_scheduler.read_buffer_ratio,

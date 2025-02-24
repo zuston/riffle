@@ -149,10 +149,16 @@ fn as_default_direct_io_append_enable() -> bool {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct IoSchedulerConfig {
     pub disk_bandwidth: Option<String>,
+    #[serde(default = "as_default_io_bandwidth_available_ratio")]
+    pub disk_bandwidth_available_ratio: f64,
 
     pub read_buffer_ratio: f64,
     pub append_buffer_ratio: f64,
     pub shared_buffer_ratio: f64,
+}
+
+fn as_default_io_bandwidth_available_ratio() -> f64 {
+    1.0
 }
 
 fn as_default_disk_healthy_check_interval_sec() -> u64 {
