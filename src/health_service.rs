@@ -64,10 +64,6 @@ impl Default for HealthStat {
     }
 }
 
-fn parse(s: &str) -> u64 {
-    s.parse::<ByteSize>().unwrap().0
-}
-
 impl HealthService {
     pub fn new(
         app_manager: &AppManagerRef,
@@ -75,7 +71,7 @@ impl HealthService {
         conf: &HealthServiceConfig,
     ) -> Self {
         let memory_allocated_threshold = match &conf.memory_allocated_threshold {
-            Some(threshold) => Some(parse(threshold)),
+            Some(threshold) => Some(util::parse_raw_to_bytesize(&threshold)),
             _ => None,
         };
         if let Some(val) = &memory_allocated_threshold {
