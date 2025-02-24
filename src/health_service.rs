@@ -4,7 +4,6 @@ use crate::mem_allocator::ALLOCATOR;
 use crate::storage::HybridStorage;
 use crate::util;
 use anyhow::Result;
-use bytesize::ByteSize;
 use dashmap::DashMap;
 use libc::passwd;
 use log::{info, warn};
