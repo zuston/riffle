@@ -22,7 +22,7 @@ use crate::app::{
 };
 use crate::config::{LocalfileStoreConfig, StorageType};
 use crate::error::WorkerError;
-use crate::metric::TOTAL_LOCALFILE_USED;
+use crate::metric::{GAUGE_LOCAL_DISK_SERVICE_USED, TOTAL_LOCALFILE_USED};
 use crate::store::ResponseDataIndex::Local;
 use crate::store::{
     Block, LocalDataIndex, PartitionedLocalData, Persistent, RequireBufferResponse, ResponseData,
@@ -305,6 +305,9 @@ impl LocalFileStore {
             .await?;
 
         TOTAL_LOCALFILE_USED.inc_by(shuffle_file_format.len as u64);
+        GAUGE_LOCAL_DISK_SERVICE_USED
+            .with_label_values(&[&local_disk.root()])
+            .add(shuffle_file_format.len as i64);
 
         locked_obj
             .deref()
@@ -471,8 +474,12 @@ impl Store for LocalFileStore {
         for key in keys_to_delete {
             let meta = self.partition_locks.remove(&key);
             if let Some(x) = meta {
-                let size = x.1.write().await.pointer.load(Ordering::SeqCst);
+                let lock_obj = x.1.write().await;
+                let size = lock_obj.pointer.load(SeqCst);
                 removed_data_size += size;
+                GAUGE_LOCAL_DISK_SERVICE_USED
+                    .with_label_values(&[&lock_obj.disk.root()])
+                    .sub(size);
             }
         }
 

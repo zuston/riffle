@@ -477,6 +477,24 @@ pub static GAUGE_LOCAL_DISK_CAPACITY: Lazy<IntGaugeVec> = Lazy::new(|| {
     .unwrap()
 });
 
+pub static GAUGE_LOCAL_DISK_SERVICE_USED: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "local_disk_service_used",
+        "local disk service used for root path",
+        &["root"]
+    )
+    .unwrap()
+});
+
+pub static GAUGE_LOCAL_DISK_SERVICE_USED_RATIO: Lazy<GaugeVec> = Lazy::new(|| {
+    register_gauge_vec!(
+        "local_disk_service_used_ratio",
+        "local disk service used ratio for root path",
+        &["root"]
+    )
+    .unwrap()
+});
+
 pub static GAUGE_LOCAL_DISK_USED: Lazy<IntGaugeVec> = Lazy::new(|| {
     register_int_gauge_vec!(
         "local_disk_used",
