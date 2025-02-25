@@ -105,8 +105,7 @@ pub struct KerberosSecurityConfig {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct LocalfileStoreConfig {
     pub data_paths: Vec<String>,
-    #[serde(default = "as_default_healthy_check_min_disks")]
-    pub min_number_of_available_disks: i32,
+    pub min_number_of_available_disks: Option<i32>,
     #[serde(default = "as_default_disk_high_watermark")]
     pub disk_high_watermark: f32,
     #[serde(default = "as_default_disk_low_watermark")]
@@ -164,9 +163,6 @@ fn as_default_disk_low_watermark() -> f32 {
 fn as_default_disk_high_watermark() -> f32 {
     0.8
 }
-fn as_default_healthy_check_min_disks() -> i32 {
-    1
-}
 fn as_default_disk_write_buf_capacity() -> String {
     "1M".to_string()
 }
@@ -178,7 +174,7 @@ impl LocalfileStoreConfig {
     pub fn new(data_paths: Vec<String>) -> Self {
         LocalfileStoreConfig {
             data_paths,
-            min_number_of_available_disks: as_default_healthy_check_min_disks(),
+            min_number_of_available_disks: Some(1),
             disk_high_watermark: as_default_disk_high_watermark(),
             disk_low_watermark: as_default_disk_low_watermark(),
             disk_write_buf_capacity: as_default_disk_write_buf_capacity(),
