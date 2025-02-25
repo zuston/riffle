@@ -28,6 +28,7 @@ use crate::store::{
     Block, LocalDataIndex, PartitionedLocalData, Persistent, RequireBufferResponse, ResponseData,
     ResponseDataIndex, Store,
 };
+use std::cmp::min;
 use std::ops::Deref;
 use std::path::Path;
 use std::str::FromStr;
@@ -38,7 +39,7 @@ use await_tree::InstrumentAwait;
 use bytes::{BufMut, BytesMut};
 use dashmap::DashMap;
 
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
 
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::composed_bytes::ComposedBytes;
@@ -132,9 +133,23 @@ impl LocalFileStore {
                 &localfile_config,
             ));
         }
+
+        let len = local_disk_instances.len();
+        if len <= 0 {
+            panic!("Must specify at least one local disk path!")
+        }
+
+        let min_number_of_available_disks = match localfile_config.min_number_of_available_disks {
+            Some(value) => min(len as i32, value),
+            _ => len as i32,
+        };
+
+        info!("Initializing localfile store with the disk paths: [{:?}] and min_number_of_available_disks: [{}]",
+            &localfile_config.data_paths, min_number_of_available_disks);
+
         LocalFileStore {
             local_disks: local_disk_instances,
-            min_number_of_available_disks: localfile_config.min_number_of_available_disks,
+            min_number_of_available_disks,
             runtime_manager,
             partition_locks: Default::default(),
             direct_io_enable: localfile_config.direct_io_enable,
