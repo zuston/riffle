@@ -193,11 +193,12 @@ impl LocalDiskDelegator {
         GAUGE_LOCAL_DISK_USED
             .with_label_values(&[&self.inner.root])
             .set(used as i64);
-        GAUGE_LOCAL_DISK_USED_RATIO
-            .with_label_values(&[&self.inner.root])
-            .set((used / capacity) as f64);
 
         let used_ratio = used as f64 / capacity as f64;
+        GAUGE_LOCAL_DISK_USED_RATIO
+            .with_label_values(&[&self.inner.root])
+            .set(used_ratio);
+
         let healthy_stat = self.is_healthy()?;
         let mut is_health = true;
 
