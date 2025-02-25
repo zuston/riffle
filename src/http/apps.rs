@@ -43,7 +43,6 @@ fn table() -> Html<String> {
             }
         </style>
 
-        // refer: https://www.w3schools.com/howto/howto_js_sort_table.asp
         <script>
             function sortTable(n) {
               var table, rows, switching, i, x, y, shouldSwitch, dir, switchcount = 0;
