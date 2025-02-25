@@ -47,7 +47,7 @@ where
     }
 
     fn call(&mut self, req: hyper::Request<Body>) -> Self::Future {
-        TOTAL_GRPC_REQUEST.inc();
+        TOTAL_GRPC_REQUEST.with_label_values(&[&"ALL"]).inc();
         GAUGE_GRPC_REQUEST_QUEUE_SIZE.inc();
 
         // This is necessary because tonic internally uses `tower::buffer::Buffer`.
@@ -60,6 +60,7 @@ where
 
         Box::pin(async move {
             let path = req.uri().path();
+            TOTAL_GRPC_REQUEST.with_label_values(&[path]).inc();
             let timer = metrics.with_label_values(&[path]).start_timer();
 
             let response = inner.call(req).await?;
