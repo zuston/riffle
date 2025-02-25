@@ -833,6 +833,14 @@ fn register_custom_metrics() {
         .expect("");
 
     REGISTRY
+        .register(Box::new(GAUGE_LOCAL_DISK_SERVICE_USED.clone()))
+        .expect("");
+
+    REGISTRY
+        .register(Box::new(GAUGE_LOCAL_DISK_SERVICE_USED_RATIO.clone()))
+        .expect("");
+
+    REGISTRY
         .register(Box::new(GAUGE_LOCAL_DISK_IS_HEALTHY.clone()))
         .expect("");
 
