@@ -596,8 +596,14 @@ pub static GAUGE_MEMORY_SPILL_HDFS_IN_FLUSHING_BYTES: Lazy<IntGauge> = Lazy::new
     .unwrap()
 });
 
-pub static TOTAL_GRPC_REQUEST: Lazy<IntCounter> =
-    Lazy::new(|| IntCounter::new("total_grpc_request_number", "total request number").expect(""));
+pub static TOTAL_GRPC_REQUEST: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
+        "total_grpc_request_number",
+        "total request number",
+        &["path"]
+    )
+    .unwrap()
+});
 
 pub static GAUGE_GRPC_REQUEST_QUEUE_SIZE: Lazy<IntGauge> = Lazy::new(|| {
     IntGauge::new("grpc_request_number", "current service request queue size").unwrap()
