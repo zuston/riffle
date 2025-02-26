@@ -137,7 +137,7 @@ impl From<RemoteStorage> for RemoteStorageConfig {
 // =============================================================
 
 pub struct App {
-    app_id: String,
+    pub app_id: String,
     app_config_options: AppConfigOptions,
     latest_heartbeat_time: AtomicU64,
     store: Arc<HybridStore>,
