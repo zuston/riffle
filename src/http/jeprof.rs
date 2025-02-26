@@ -60,52 +60,6 @@ async fn jemalloc_pprof_handler(req: &Request) -> poem::Result<impl IntoResponse
     Ok(pprof)
 }
 
-#[poem::handler]
-async fn jeprof_handler(req: &Request) -> poem::Result<impl IntoResponse> {
-    let req = req.params::<JeProfRequest>()?;
-    // when memory-prof feature is not enabled, return error
-    if !is_prof_enabled() {
-        return Err(ProfError::MemProfilingNotEnabled.into());
-    }
-    // todo: maybe we can use a global lock to prevent multiple profiling at the same time
-    // enables heap profiling
-    let _ = activate_prof().map_err(|e| {
-        let msg = format!("could not start profiling: {:?}", e);
-        error!("{}", msg);
-        e
-    })?;
-    // create tmp_file
-    let tmp_file = Builder::new()
-        .prefix("heap_dump_")
-        .suffix(".prof")
-        .tempfile()
-        .map_err(|e| IoError(e))?;
-    let path = tmp_file.path();
-    delay_for(Duration::from_secs(req.duration)).await;
-    // dump heap profile
-    let buf: Vec<u8> = dump_prof(&path.to_string_lossy()).await.map_err(|e| {
-        let msg = format!("could not dump heap profile: {:?}", e);
-        error!("{}", msg);
-        e
-    })?;
-    let len = buf.len();
-    if !req.keep_profiling {
-        // disables heap profiling
-        let _ = deactivate_prof().map_err(|e| {
-            let msg = format!("could not stop profiling: {:?}", e);
-            error!("{}", msg);
-            e
-        })?;
-    }
-    Ok(buf
-        .with_header("content-length", len)
-        .with_header(
-            "Content-Disposition",
-            format!("attachment; filename=\"{}\"", &path.to_string_lossy()),
-        )
-        .into_response())
-}
-
 pub struct JeProfHandler {}
 
 impl Default for JeProfHandler {
