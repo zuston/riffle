@@ -190,6 +190,18 @@ alive_app_number_max_limit = 100
 
 </details>
 
+## Grafana dashboard for riffle
+
+Before importing the template json(./grafana) into grafana, you must specify the prometheus configs in riffle's toml file.
+Like the following configs:
+
+```
+[metrics]
+push_gateway_endpoint = "http://example.com/metrics"
+push_interval_sec = 10
+labels = { env = "production", service = "my_service" }
+```
+
 ## Profiling
 
 ### Heap profiling
