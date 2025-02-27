@@ -5,6 +5,7 @@ use crate::runtime::manager::RuntimeManager;
 use crate::store::spill::SpillMessage;
 use anyhow::Result;
 use dashmap::DashMap;
+use tokio::sync::Semaphore;
 
 // This is the predefined event bus for the spill operations.
 // the parent is the dispatcher, it will firstly get the candidate
@@ -13,7 +14,8 @@ use dashmap::DashMap;
 //
 // This is to isolate the localfile / hdfs writing for better performance to avoid
 // slow down scheduling in the same runtime or concurrency limit.
-
+//
+//
 //                                           +--------------------------+          +--------------+
 //                                           |                          |          |              |
 //                                  +-------->localfile flush event bus +----------> io scheduler |
@@ -66,7 +68,7 @@ impl HierarchyEventBus<SpillMessage> {
         let parent: EventBus<SpillMessage> = EventBus::new(
             &runtime_manager.dispatch_runtime,
             "Hierarchy-Parent".to_string(),
-            usize::MAX,
+            Semaphore::MAX_PERMITS,
         );
         let child_localfile: EventBus<SpillMessage> = EventBus::new(
             &runtime_manager.localfile_write_runtime,
