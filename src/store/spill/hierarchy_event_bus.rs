@@ -14,6 +14,33 @@ use dashmap::DashMap;
 // This is to isolate the localfile / hdfs writing for better performance to avoid
 // slow down scheduling in the same runtime or concurrency limit.
 
+//                                           +--------------------------+          +--------------+
+//                                           |                          |          |              |
+//                                  +-------->localfile flush event bus +----------> io scheduler |
+//                                  |        |                          |          |              |
+//                                  |        +--------------------------+          +-------+------+
+// +-----------------------+        |                                                      |
+// |                       |        |                                                      |
+// | dispatcher event bus  +--------+                                                      |
+// |                       |        |                                                      |
+// +-----------------------+        |                                                      |
+//                                  |        +--------------------------+       +----------v-------------+
+//                                  |        |                          |       |                        |
+//                                  +-------->  hdfs flush event bus    |       |     localfile flush    |
+//                                           |                          |       |                        |
+//                                           +-----------+--------------+       |   blocking thread pool |
+//                                                       |                      |                        |
+//                                                       |                      +------------------------+
+//                                                       |
+//                                                       |
+//                                         +-------------v----------------+
+//                                         |                              |
+//                                         |          hdfs flush          |
+//                                         |                              |
+//                                         |      blocking thread pool    |
+//                                         |                              |
+//                                         +------------------------------+
+
 pub struct HierarchyEventBus<T> {
     parent: EventBus<T>,
     pub(crate) children: DashMap<StorageType, EventBus<T>>,
@@ -35,10 +62,11 @@ impl HierarchyEventBus<SpillMessage> {
                 .max_blocking_threads_num(),
         };
 
+        // parent is just as a dispatcher, there is no need to do any concurrency limitation
         let parent: EventBus<SpillMessage> = EventBus::new(
             &runtime_manager.dispatch_runtime,
             "Hierarchy-Parent".to_string(),
-            localfile_concurrency + hdfs_concurrency,
+            usize::MAX,
         );
         let child_localfile: EventBus<SpillMessage> = EventBus::new(
             &runtime_manager.localfile_write_runtime,
