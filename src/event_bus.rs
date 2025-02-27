@@ -59,8 +59,6 @@ struct Inner<T> {
 
     concurrency_num: usize,
     concurrency_limit: Arc<Semaphore>,
-
-    event_executed_hook: OnceCell<Arc<Box<dyn Fn(Event<T>, bool) + 'static + Send + Sync>>>,
 }
 
 unsafe impl<T: Send + Sync + 'static> Send for EventBus<T> {}
@@ -81,7 +79,6 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
                 runtime: runtime.clone(),
                 concurrency_num: concurrency_limit,
                 concurrency_limit: concurrency_limiter,
-                event_executed_hook: Default::default(),
             }),
         };
 
@@ -151,22 +148,12 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
                         .inc();
 
                     drop(concurrency_guarder);
-
-                    // let hook = bus.inner.event_executed_hook.clone();
-                    // if hook.get().is_some() {
-                    //     let hook = hook.get().unwrap().clone();
-                    //     hook(message, is_succeed)
-                    // }
                 }));
         }
     }
 
     pub fn subscribe<R: Subscriber<Input = T> + 'static + Send + Sync>(&self, listener: R) {
         let _ = self.inner.subscriber.set(Arc::new(Box::new(listener)));
-    }
-
-    pub fn with_hook(&self, hook: Box<dyn Fn(Event<T>, bool) + 'static + Send + Sync>) {
-        let _ = self.inner.event_executed_hook.set(Arc::new(hook));
     }
 
     pub async fn publish(&self, event: Event<T>) -> anyhow::Result<()> {

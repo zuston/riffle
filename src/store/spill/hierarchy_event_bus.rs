@@ -5,6 +5,7 @@ use crate::runtime::manager::RuntimeManager;
 use crate::store::spill::SpillMessage;
 use anyhow::Result;
 use dashmap::DashMap;
+use tokio::sync::Semaphore;
 
 // This is the predefined event bus for the spill operations.
 // the parent is the dispatcher, it will firstly get the candidate
@@ -13,6 +14,34 @@ use dashmap::DashMap;
 //
 // This is to isolate the localfile / hdfs writing for better performance to avoid
 // slow down scheduling in the same runtime or concurrency limit.
+//
+//
+//                                           +--------------------------+          +--------------+
+//                                           |                          |          |              |
+//                                  +-------->localfile flush event bus +----------> io scheduler |
+//                                  |        |                          |          |              |
+//                                  |        +--------------------------+          +-------+------+
+// +-----------------------+        |                                                      |
+// |                       |        |                                                      |
+// | dispatcher event bus  +--------+                                                      |
+// |                       |        |                                                      |
+// +-----------------------+        |                                                      |
+//                                  |        +--------------------------+       +----------v-------------+
+//                                  |        |                          |       |                        |
+//                                  +-------->  hdfs flush event bus    |       |     localfile flush    |
+//                                           |                          |       |                        |
+//                                           +-----------+--------------+       |   blocking thread pool |
+//                                                       |                      |                        |
+//                                                       |                      +------------------------+
+//                                                       |
+//                                                       |
+//                                         +-------------v----------------+
+//                                         |                              |
+//                                         |          hdfs flush          |
+//                                         |                              |
+//                                         |      blocking thread pool    |
+//                                         |                              |
+//                                         +------------------------------+
 
 pub struct HierarchyEventBus<T> {
     parent: EventBus<T>,
@@ -35,10 +64,11 @@ impl HierarchyEventBus<SpillMessage> {
                 .max_blocking_threads_num(),
         };
 
+        // parent is just as a dispatcher, there is no need to do any concurrency limitation
         let parent: EventBus<SpillMessage> = EventBus::new(
             &runtime_manager.dispatch_runtime,
             "Hierarchy-Parent".to_string(),
-            localfile_concurrency + hdfs_concurrency,
+            Semaphore::MAX_PERMITS,
         );
         let child_localfile: EventBus<SpillMessage> = EventBus::new(
             &runtime_manager.localfile_write_runtime,
@@ -91,6 +121,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicU64};
     use std::sync::Arc;
     use std::time::Duration;
+    use tokio::sync::Semaphore;
 
     #[derive(Clone)]
     struct SelectionHandler {
@@ -167,15 +198,7 @@ mod tests {
                 .max_blocking_threads_num(),
             hdfs_bus.concurrency_limit()
         );
-        assert_eq!(
-            runtime_manager
-                .localfile_write_runtime
-                .max_blocking_threads_num()
-                + runtime_manager
-                    .hdfs_write_runtime
-                    .max_blocking_threads_num(),
-            event_bus.parent.concurrency_limit()
-        );
+        assert_eq!(Semaphore::MAX_PERMITS, event_bus.parent.concurrency_limit());
 
         // case2: set concurrency limit
         let mut config = Config::create_simple_config();
@@ -187,7 +210,7 @@ mod tests {
 
         assert_eq!(10, localfile_bus.concurrency_limit());
         assert_eq!(20, hdfs_bus.concurrency_limit());
-        assert_eq!(30, event_bus.parent.concurrency_limit());
+        assert_eq!(Semaphore::MAX_PERMITS, event_bus.parent.concurrency_limit());
 
         Ok(())
     }
