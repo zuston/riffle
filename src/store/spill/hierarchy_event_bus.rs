@@ -121,6 +121,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicU64};
     use std::sync::Arc;
     use std::time::Duration;
+    use tokio::sync::Semaphore;
 
     #[derive(Clone)]
     struct SelectionHandler {
@@ -197,15 +198,7 @@ mod tests {
                 .max_blocking_threads_num(),
             hdfs_bus.concurrency_limit()
         );
-        assert_eq!(
-            runtime_manager
-                .localfile_write_runtime
-                .max_blocking_threads_num()
-                + runtime_manager
-                    .hdfs_write_runtime
-                    .max_blocking_threads_num(),
-            event_bus.parent.concurrency_limit()
-        );
+        assert_eq!(Semaphore::MAX_PERMITS, event_bus.parent.concurrency_limit());
 
         // case2: set concurrency limit
         let mut config = Config::create_simple_config();
@@ -217,7 +210,7 @@ mod tests {
 
         assert_eq!(10, localfile_bus.concurrency_limit());
         assert_eq!(20, hdfs_bus.concurrency_limit());
-        assert_eq!(30, event_bus.parent.concurrency_limit());
+        assert_eq!(Semaphore::MAX_PERMITS, event_bus.parent.concurrency_limit());
 
         Ok(())
     }
