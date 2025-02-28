@@ -30,8 +30,9 @@ name = "uniffle-worker"
 path = "src/main.rs"
 
 [[bin]]
-name = "r1-tool"
-path = "src/cli_tool.rs"
+# the riffle ctl
+name = "riffle-ctl"
+path = "src/ctl.rs"
 
 [lib]
 name = "uniffle_worker"
