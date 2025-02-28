@@ -32,7 +32,7 @@ impl Handler for AwaitTreeHandler {
     fn get_route_method(&self) -> RouteMethod {
         get(make(|_| async {
             let registry_cloned = AWAIT_TREE_REGISTRY.clone().get_inner();
-            let registry = registry_cloned.lock().unwrap();
+            let registry = registry_cloned.lock();
             let mut sorted_list: Vec<(u64, String)> = vec![];
             for (v, tree) in registry.iter() {
                 let raw_tree = format!("{}", tree);
