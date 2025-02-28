@@ -38,7 +38,8 @@ use crate::runtime::manager::RuntimeManager;
 use crate::storage::StorageService;
 use crate::tracing::FastraceWrapper;
 use anyhow::Result;
-use clap::{App, Arg};
+use clap::builder::Str;
+use clap::{Arg, Parser};
 use log::info;
 use std::str::FromStr;
 use tracing_subscriber::layer::SubscriberExt;
@@ -89,24 +90,18 @@ pub mod disk_explorer;
 
 const MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY: &str = "MAX_MEMORY_ALLOCATION_LIMIT_SIZE";
 
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[arg[short, long]]
+    config: String,
+}
+
 fn main() -> Result<()> {
     setup_max_memory_allocation();
 
-    let args_match = App::new("Riffle")
-        .about("Rust based shuffle server for Apache Uniffle")
-        .arg(
-            Arg::with_name("config")
-                .short('c')
-                .long("config")
-                .value_name("FILE")
-                .default_value("./config.toml")
-                .help("Sets a custom config file")
-                .takes_value(true),
-        )
-        .get_matches();
-
-    let config_path = args_match.value_of("config").unwrap_or("./config.toml");
-    let config = Config::from(config_path);
+    let args = Args::parse();
+    let config = Config::from(&args.config);
 
     #[cfg(not(feature = "logforth"))]
     let _guard = LogService::init(&config.log);
