@@ -1,19 +1,49 @@
 #![allow(dead_code, unused)]
 
 use bytes::{Buf, Bytes};
-use clap::{App, Arg};
+use clap::builder::Str;
+use clap::{Parser, Subcommand};
 use std::fs;
 use uniffle_worker::util::get_crc;
 
+#[derive(Parser)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    DataValidator {
+        #[arg(short, long)]
+        index_file_path: String,
+        #[arg(short, long)]
+        data_file_path: String,
+    },
+}
+
 fn main() -> anyhow::Result<()> {
-    let cli = App::new("r1-tool")
-        .arg(Arg::with_name("index_file_path").takes_value(true))
-        .arg(Arg::with_name("data_file_path").takes_value(true))
-        .get_matches();
+    let args = Args::parse();
+    if args.command.is_none() {
+        return Ok(());
+    }
 
-    let index_path = cli.value_of("index_file_path").unwrap();
-    let data_path = cli.value_of("data_file_path").unwrap();
+    let command = args.command.unwrap();
+    match command {
+        Commands::DataValidator {
+            index_file_path,
+            data_file_path,
+        } => {
+            do_check_data_consistency(index_file_path, data_file_path)?;
+        }
+        _ => {}
+    }
 
+    Ok(())
+}
+
+fn do_check_data_consistency(index_path: String, data_path: String) -> anyhow::Result<()> {
     let index_data = fs::read(index_path)?;
     let mut index_data = Bytes::copy_from_slice(&index_data);
 
@@ -61,6 +91,5 @@ fn main() -> anyhow::Result<()> {
             );
         }
     }
-
     Ok(())
 }
