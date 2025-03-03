@@ -9,6 +9,7 @@ use crate::metric::{
 use crate::store::hybrid::{HybridStore, PersistentStore};
 use crate::store::mem::buffer::BatchMemoryBlock;
 use log::{debug, error, warn};
+use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering::SeqCst;
@@ -27,6 +28,7 @@ pub struct SpillMessage {
     pub retry_cnt: Arc<AtomicU32>,
     pub flight_id: u64,
     pub candidate_store_type: Arc<Mutex<Option<StorageType>>>,
+    pub huge_partition_tag: OnceCell<bool>,
 }
 
 impl SpillMessage {
@@ -119,7 +121,7 @@ async fn handle_spill_failure_whatever_error(
         TOTAL_SPILL_EVENTS_DROPPED.inc();
         TOTAL_MEMORY_SPILL_OPERATION_FAILED.inc();
     }
-    store_ref.finish_spill_event(message.size as u64);
+    store_ref.finish_spill_event(message);
 }
 
 // handle the spill failure to release resource for the spill event.
@@ -170,5 +172,5 @@ async fn handle_spill_success(message: &SpillMessage, store_ref: Arc<HybridStore
             &message.ctx.uid, err
         );
     }
-    store_ref.finish_spill_event(message.size as u64);
+    store_ref.finish_spill_event(message);
 }
