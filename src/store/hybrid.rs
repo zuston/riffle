@@ -574,6 +574,9 @@ impl Store for HybridStore {
             // watermark spill
             let ratio = self.get_memory_used_ratio()?;
             if ratio > self.config.memory_spill_high_watermark {
+                info!("[Spill] Watermark spill is triggered. ratio: {}. mem_snapshot: {:?}. in_flight_bytes: {}. in_flight_bytes_of_huge_partition: {}",
+                    ratio, self.mem_snapshot()?, self.in_flight_bytes.load(Relaxed), self.in_flight_bytes_of_huge_partition.load(Relaxed));
+
                 if let Err(err) = self.watermark_spill().await {
                     warn!("Errors on watermark spill. {:?}", err)
                 }

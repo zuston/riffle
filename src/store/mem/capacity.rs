@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub struct CapacitySnapshot {
     capacity: i64,
     allocated: i64,
