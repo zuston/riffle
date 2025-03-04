@@ -78,12 +78,14 @@ impl HTTPServer for PoemHTTPServer {
         for handler in handlers.iter() {
             app = app.at(handler.get_route_path(), handler.get_route_method());
         }
-        runtime_manager.http_runtime.spawn_with_await_tree("Http service", async move {
-            let _ = Server::new(TcpListener::bind(format!("0.0.0.0:{}", port)))
-                .name("uniffle-server-http-service")
-                .run(app)
-                .await;
-        });
+        runtime_manager
+            .http_runtime
+            .spawn_with_await_tree("Http service", async move {
+                let _ = Server::new(TcpListener::bind(format!("0.0.0.0:{}", port)))
+                    .name("uniffle-server-http-service")
+                    .run(app)
+                    .await;
+            });
     }
 
     fn register_handler(&self, handler: impl Handler + 'static) {
