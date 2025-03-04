@@ -143,7 +143,7 @@ pub struct App {
     store: Arc<HybridStore>,
 
     huge_partition_marked_threshold: Option<u64>,
-    huge_partition_memory_max_available_size: Option<u64>,
+    huge_partition_memory_backpressure_threshold: Option<u64>,
 
     total_received_data_size: AtomicU64,
     total_resident_data_size: AtomicU64,
@@ -242,8 +242,8 @@ impl App {
 
         if huge_partition_backpressure_size.is_some() && huge_partition_marked_threshold.is_some() {
             info!(
-                "Huge partition limitation is enabled for app: {}",
-                app_id.as_str()
+                "Huge partition limitation is enabled for app: {}. Marked threshold: {}, memory backpressure bytes: {}",
+                app_id.as_str(), huge_partition_marked_threshold.unwrap(), huge_partition_backpressure_size.unwrap()
             );
         }
         let block_id_manager = get_block_id_manager(&config.app_config.block_id_manager_type);
@@ -258,7 +258,7 @@ impl App {
             store,
             partition_meta_infos: DashMap::new(),
             huge_partition_marked_threshold,
-            huge_partition_memory_max_available_size: huge_partition_backpressure_size,
+            huge_partition_memory_backpressure_threshold: huge_partition_backpressure_size,
             total_received_data_size: Default::default(),
             total_resident_data_size: Default::default(),
             huge_partition_number: Default::default(),
@@ -359,7 +359,7 @@ impl App {
         if self.huge_partition_marked_threshold.is_none() {
             return Ok(false);
         }
-        if self.huge_partition_memory_max_available_size.is_none() {
+        if self.huge_partition_memory_backpressure_threshold.is_none() {
             return Ok(false);
         }
 
@@ -411,7 +411,7 @@ impl App {
         if !self.is_huge_partition(uid)? {
             return Ok(false);
         }
-        let huge_partition_memory_used = &self.huge_partition_memory_max_available_size;
+        let huge_partition_memory_used = &self.huge_partition_memory_backpressure_threshold;
         let huge_partition_memory = *(&huge_partition_memory_used.unwrap());
 
         let memory_used = self.store.get_memory_buffer_size(uid).await?;
