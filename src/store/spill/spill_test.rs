@@ -6,7 +6,7 @@ mod tests {
     use crate::config::{Config, StorageType};
     use crate::log_service::LogService;
     use crate::metric::{
-        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES, TOTAL_MEMORY_SPILL_BYTES,
+        GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES, TOTAL_MEMORY_SPILL_BYTES,
         TOTAL_MEMORY_SPILL_OPERATION_FAILED, TOTAL_SPILL_EVENTS_DROPPED,
         TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND,
     };
@@ -96,10 +96,10 @@ mod tests {
     #[tokio::test]
     async fn test_flush_after_app_purged() -> anyhow::Result<()> {
         let _ = LOG;
-        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.set(0);
+        GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.set(0);
         TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND.reset();
         TOTAL_MEMORY_SPILL_BYTES.reset();
-        assert_eq!(GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.get(), 0);
+        assert_eq!(GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.get(), 0);
 
         // when flushing after app is purged, whatever flush fail or succeed.
         // the buffer could be released by other threads.
@@ -195,7 +195,7 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "hdfs")]
     async fn test_single_buffer_spill() {
-        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.set(0);
+        GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.set(0);
 
         let warm_healthy = Arc::new(AtomicBool::new(true));
         let warm = MockStore::new(LOCALFILE, &warm_healthy, None);
@@ -233,7 +233,7 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(0, store.get_spill_event_num().unwrap());
-        assert_eq!(0, GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.get());
+        assert_eq!(0, GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.get());
         let snapshot = store.hot_store.memory_snapshot().unwrap();
         assert_eq!(0, snapshot.used());
         assert_eq!(0, snapshot.allocated());
@@ -242,7 +242,7 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "hdfs")]
     async fn test_localfile_disk_unhealthy() {
-        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.set(0);
+        GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.set(0);
 
         // when the local disk is unhealthy, the data should be flushed
         // to the cold store(like hdfs). If not having cold, it will retry again
@@ -284,7 +284,7 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(0, store.get_spill_event_num().unwrap());
-        assert_eq!(0, GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.get());
+        assert_eq!(0, GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.get());
         let snapshot = store.hot_store.memory_snapshot().unwrap();
         assert_eq!(0, snapshot.used());
         assert_eq!(0, snapshot.allocated());
