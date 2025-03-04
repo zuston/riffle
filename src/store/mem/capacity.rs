@@ -28,4 +28,8 @@ impl CapacitySnapshot {
     pub fn used(&self) -> i64 {
         self.used
     }
+
+    pub fn available(&self) -> i64 {
+        self.capacity - self.allocated - self.used
+    }
 }
