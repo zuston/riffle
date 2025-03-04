@@ -243,6 +243,13 @@ pub struct HybridStoreConfig {
 
     #[serde(default = "as_default_huge_partition_memory_spill_to_hdfs_threshold_size")]
     pub huge_partition_memory_spill_to_hdfs_threshold_size: String,
+
+    #[serde(default = "as_default_sensitive_watermark_spill_enable")]
+    pub sensitive_watermark_spill_enable: bool,
+}
+
+fn as_default_sensitive_watermark_spill_enable() -> bool {
+    false
 }
 
 fn as_default_memory_spill_to_localfile_concurrency() -> i32 {
@@ -276,6 +283,7 @@ impl HybridStoreConfig {
             memory_spill_to_hdfs_concurrency: None,
             huge_partition_memory_spill_to_hdfs_threshold_size:
                 as_default_huge_partition_memory_spill_to_hdfs_threshold_size(),
+            sensitive_watermark_spill_enable: as_default_sensitive_watermark_spill_enable(),
         }
     }
 }
@@ -291,6 +299,7 @@ impl Default for HybridStoreConfig {
             memory_spill_to_hdfs_concurrency: None,
             huge_partition_memory_spill_to_hdfs_threshold_size:
                 as_default_huge_partition_memory_spill_to_hdfs_threshold_size(),
+            sensitive_watermark_spill_enable: as_default_sensitive_watermark_spill_enable(),
         }
     }
 }

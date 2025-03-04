@@ -24,7 +24,8 @@ use crate::app::{
 use crate::config::{Config, HybridStoreConfig, StorageType};
 use crate::error::WorkerError;
 use crate::metric::{
-    GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES, GAUGE_MEMORY_SPILL_TO_HDFS, GAUGE_MEMORY_SPILL_TO_LOCALFILE,
+    GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES, GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES_OF_HUGE_PARTITION,
+    GAUGE_MEMORY_SPILL_TO_HDFS, GAUGE_MEMORY_SPILL_TO_LOCALFILE,
     MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM, TOTAL_MEMORY_SPILL_BYTES, TOTAL_MEMORY_SPILL_TO_HDFS,
     TOTAL_MEMORY_SPILL_TO_LOCALFILE,
 };
@@ -94,7 +95,9 @@ pub struct HybridStore {
     memory_spill_lock: Mutex<()>,
     memory_spill_event_num: AtomicU64,
     // one in_flight bytes lifecycle is bound to the events.
-    in_flight_bytes_size: AtomicU64,
+    in_flight_bytes: AtomicU64,
+
+    in_flight_bytes_of_huge_partition: AtomicU64,
 
     pub(crate) memory_spill_partition_max_threshold: Option<u64>,
     memory_spill_to_cold_threshold_size: Option<u64>,
@@ -170,26 +173,35 @@ impl HybridStore {
             runtime_manager,
             event_bus,
             app_manager: OnceCell::new(),
-            in_flight_bytes_size: Default::default(),
+            in_flight_bytes: Default::default(),
             huge_partition_memory_spill_to_hdfs_threshold_size,
+            in_flight_bytes_of_huge_partition: Default::default(),
         };
         store
     }
 
     fn start_spill_event(&self, bytes_size: u64) {
         self.memory_spill_event_num.fetch_add(1, SeqCst);
-        self.in_flight_bytes_size.fetch_add(bytes_size, SeqCst);
+        self.in_flight_bytes.fetch_add(bytes_size, SeqCst);
 
         MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM.observe(bytes_size as f64);
         TOTAL_MEMORY_SPILL_BYTES.inc_by(bytes_size);
-        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.add(bytes_size as i64);
+        GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.add(bytes_size as i64);
     }
 
-    pub fn finish_spill_event(&self, bytes_size: u64) {
+    pub fn finish_spill_event(&self, msg: &SpillMessage) {
+        let bytes_size = msg.size as u64;
         self.memory_spill_event_num.fetch_sub(1, SeqCst);
-        self.in_flight_bytes_size.fetch_sub(bytes_size, SeqCst);
+        self.in_flight_bytes.fetch_sub(bytes_size, SeqCst);
+        GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.sub(bytes_size as i64);
 
-        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.sub(bytes_size as i64);
+        if let Some(tag) = msg.huge_partition_tag.get() {
+            if *tag {
+                self.in_flight_bytes_of_huge_partition
+                    .fetch_sub(bytes_size, SeqCst);
+                GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES_OF_HUGE_PARTITION.add(bytes_size as i64);
+            }
+        }
     }
 
     fn is_memory_only(&self) -> bool {
@@ -324,7 +336,16 @@ impl HybridStore {
             let app_id = &ctx.uid.app_id;
             match app_manager.get_app(app_id) {
                 Some(app) => {
-                    if app.is_huge_partition(&ctx.uid)?
+                    let huge_partition_tag = app.is_huge_partition(&ctx.uid)?;
+
+                    if spill_message.huge_partition_tag.get().is_none() && huge_partition_tag {
+                        spill_message.huge_partition_tag.set(true);
+                        self.in_flight_bytes_of_huge_partition
+                            .fetch_add(spill_size as u64, SeqCst);
+                        GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES_OF_HUGE_PARTITION.add(spill_size);
+                    }
+
+                    if huge_partition_tag
                         && spill_size as u64
                             > self.huge_partition_memory_spill_to_hdfs_threshold_size
                     {
@@ -383,7 +404,7 @@ impl HybridStore {
     }
 
     pub(crate) fn get_in_flight_size(&self) -> Result<u64> {
-        Ok(self.in_flight_bytes_size.load(Relaxed))
+        Ok(self.in_flight_bytes.load(Relaxed))
     }
 
     pub async fn publish_spill_event(&self, message: SpillMessage) -> Result<()> {
@@ -439,6 +460,7 @@ impl HybridStore {
             retry_cnt: Default::default(),
             flight_id: spill_result.flight_id(),
             candidate_store_type: Arc::new(parking_lot::Mutex::new(None)),
+            huge_partition_tag: OnceCell::new(),
         };
         self.publish_spill_event(message).await?;
         Ok(flight_len)
@@ -446,8 +468,22 @@ impl HybridStore {
 
     fn get_memory_used_ratio(&self) -> Result<f32> {
         let snapshot = self.mem_snapshot()?;
-        let ratio = (snapshot.used() - self.in_flight_bytes_size.load(SeqCst) as i64) as f32
-            / (snapshot.capacity() - snapshot.allocated()) as f32;
+        let used = snapshot.used();
+        let capacity = snapshot.capacity();
+        let allocated = snapshot.allocated();
+
+        let total_in_flight = self.in_flight_bytes.load(SeqCst);
+
+        // if sensitive watermark spill is enabled, it will ignore the huge partition's in flight bytes.
+        // this will avoid backpressure for normal partitions due to the slow writing speed of cold storage.
+        let sensitive_bytes = if self.config.sensitive_watermark_spill_enable {
+            self.in_flight_bytes_of_huge_partition.load(SeqCst)
+        } else {
+            0
+        };
+
+        let ratio = (used - total_in_flight as i64 + sensitive_bytes as i64) as f32
+            / (capacity - allocated) as f32;
         Ok(ratio)
     }
 
@@ -760,6 +796,12 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sensitive_watermark_spill_test() -> anyhow::Result<()> {
+        // todo: add tests
+        Ok(())
+    }
+
+    #[test]
     fn single_buffer_spill_test() -> anyhow::Result<()> {
         let data = b"hello world!";
         let data_len = data.len();
@@ -847,7 +889,7 @@ pub(crate) mod tests {
         };
         write_some_data(store.clone(), uid.clone(), data_len as i32, data, 400).await;
         awaitility::at_most(Duration::from_secs(10))
-            .until(|| store.in_flight_bytes_size.load(SeqCst) == 0);
+            .until(|| store.in_flight_bytes.load(SeqCst) == 0);
 
         // case1: all data has been flushed to localfile. the data in memory should be empty
         let last_block_id = -1;
