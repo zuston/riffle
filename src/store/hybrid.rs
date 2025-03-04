@@ -482,7 +482,7 @@ impl HybridStore {
             0
         };
 
-        let ratio = (used as u64 - total_in_flight + sensitive_bytes) as f32
+        let ratio = (used - total_in_flight as i64 + sensitive_bytes as i64) as f32
             / (capacity - allocated) as f32;
         Ok(ratio)
     }
