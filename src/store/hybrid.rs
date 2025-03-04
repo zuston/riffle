@@ -25,7 +25,7 @@ use crate::config::{Config, HybridStoreConfig, StorageType};
 use crate::error::WorkerError;
 use crate::metric::{
     GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES, GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES_OF_HUGE_PARTITION,
-    GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES, GAUGE_MEMORY_SPILL_TO_HDFS, GAUGE_MEMORY_SPILL_TO_LOCALFILE,
+    GAUGE_MEMORY_SPILL_TO_HDFS, GAUGE_MEMORY_SPILL_TO_LOCALFILE,
     MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM, TOTAL_MEMORY_SPILL_BYTES, TOTAL_MEMORY_SPILL_TO_HDFS,
     TOTAL_MEMORY_SPILL_TO_LOCALFILE,
 };
@@ -337,6 +337,7 @@ impl HybridStore {
             match app_manager.get_app(app_id) {
                 Some(app) => {
                     let huge_partition_tag = app.is_huge_partition(&ctx.uid)?;
+
                     if spill_message.huge_partition_tag.get().is_none() && huge_partition_tag {
                         spill_message.huge_partition_tag.set(true);
                         self.in_flight_bytes_of_huge_partition
@@ -796,6 +797,7 @@ pub(crate) mod tests {
 
     #[test]
     fn sensitive_watermark_spill_test() -> anyhow::Result<()> {
+        // todo: add tests
         Ok(())
     }
 
