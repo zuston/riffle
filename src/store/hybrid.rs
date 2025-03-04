@@ -464,11 +464,22 @@ impl HybridStore {
 
     fn get_memory_used_ratio(&self) -> Result<f32> {
         let snapshot = self.mem_snapshot()?;
-        // Take the huge partition's flushing bytes into consideration to spill as soon as possible
-        let ratio = (snapshot.used() - self.in_flight_bytes.load(SeqCst) as i64
-            + self.in_flight_bytes_of_huge_partition.load(SeqCst) as i64)
-            as f32
-            / (snapshot.capacity() - snapshot.allocated()) as f32;
+        let used = snapshot.used();
+        let capacity = snapshot.capacity();
+        let allocated = snapshot.allocated();
+
+        let total_in_flight = self.in_flight_bytes.load(SeqCst);
+
+        // if sensitive watermark spill is enabled, it will ignore the huge partition's in flight bytes.
+        // this will avoid backpressure for normal partitions due to the slow writing speed of cold storage.
+        let sensitive_bytes = if self.config.sensitive_watermark_spill_enable {
+            self.in_flight_bytes_of_huge_partition.load(SeqCst)
+        } else {
+            0
+        };
+
+        let ratio = (used as u64 - total_in_flight + sensitive_bytes) as f32
+            / (capacity - allocated) as f32;
         Ok(ratio)
     }
 
