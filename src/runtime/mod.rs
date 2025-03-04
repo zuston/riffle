@@ -18,6 +18,7 @@
 pub mod manager;
 mod metrics;
 
+use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::runtime::metrics::Metrics;
 use anyhow::anyhow;
 use pin_project_lite::pin_project;
@@ -42,6 +43,20 @@ pub struct Runtime {
 }
 
 impl Runtime {
+    pub fn spawn_with_await_tree<F>(&self, info: &str, future: F) -> JoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let info = info.to_owned();
+        JoinHandle {
+            inner: self.rt.spawn(async move {
+                let await_root = AWAIT_TREE_REGISTRY.clone().register(info).await;
+                await_root.instrument(future).await
+            }),
+        }
+    }
+
     pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
     where
         F: Future + Send + 'static,

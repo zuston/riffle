@@ -130,7 +130,7 @@ fn main() -> Result<()> {
 
     MetricService::init(&config, runtime_manager.clone());
     FastraceWrapper::init(config.clone());
-    HeartbeatTask::init(&config, &runtime_manager, &app_manager_ref, &health_service);
+    HeartbeatTask::run(&config, &runtime_manager, &app_manager_ref, &health_service);
     HttpMonitorService::init(&config, runtime_manager.clone());
 
     DefaultRpcService {}.start(&config, runtime_manager, app_manager_ref)?;
