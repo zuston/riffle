@@ -24,6 +24,7 @@ use crate::app::{
 use crate::config::{Config, HybridStoreConfig, StorageType};
 use crate::error::WorkerError;
 use crate::metric::{
+    GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES, GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES_OF_HUGE_PARTITION,
     GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES, GAUGE_MEMORY_SPILL_TO_HDFS, GAUGE_MEMORY_SPILL_TO_LOCALFILE,
     MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM, TOTAL_MEMORY_SPILL_BYTES, TOTAL_MEMORY_SPILL_TO_HDFS,
     TOTAL_MEMORY_SPILL_TO_LOCALFILE,
@@ -185,19 +186,20 @@ impl HybridStore {
 
         MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM.observe(bytes_size as f64);
         TOTAL_MEMORY_SPILL_BYTES.inc_by(bytes_size);
-        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.add(bytes_size as i64);
+        GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.add(bytes_size as i64);
     }
 
     pub fn finish_spill_event(&self, msg: &SpillMessage) {
         let bytes_size = msg.size as u64;
         self.memory_spill_event_num.fetch_sub(1, SeqCst);
         self.in_flight_bytes.fetch_sub(bytes_size, SeqCst);
-        GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.sub(bytes_size as i64);
+        GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.sub(bytes_size as i64);
 
         if let Some(tag) = msg.huge_partition_tag.get() {
             if *tag {
                 self.in_flight_bytes_of_huge_partition
                     .fetch_sub(bytes_size, SeqCst);
+                GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES_OF_HUGE_PARTITION.add(bytes_size as i64);
             }
         }
     }
@@ -338,7 +340,8 @@ impl HybridStore {
                     if spill_message.huge_partition_tag.get().is_none() && huge_partition_tag {
                         spill_message.huge_partition_tag.set(true);
                         self.in_flight_bytes_of_huge_partition
-                            .fetch_add(spill_message.size as u64, SeqCst);
+                            .fetch_add(spill_size as u64, SeqCst);
+                        GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES_OF_HUGE_PARTITION.add(spill_size);
                     }
 
                     if huge_partition_tag
@@ -789,6 +792,11 @@ pub(crate) mod tests {
         }
 
         block_ids
+    }
+
+    #[test]
+    fn sensitive_watermark_spill_test() -> anyhow::Result<()> {
+        Ok(())
     }
 
     #[test]

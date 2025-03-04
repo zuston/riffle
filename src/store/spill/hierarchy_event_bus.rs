@@ -257,6 +257,7 @@ mod tests {
             retry_cnt: Default::default(),
             flight_id: 0,
             candidate_store_type: Arc::new(parking_lot::Mutex::new(None)),
+            huge_partition_tag: Default::default(),
         };
         let f = event_bus.publish(spill_msg.clone().into());
         let _ = runtime_manager.wait(f);

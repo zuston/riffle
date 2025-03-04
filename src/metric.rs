@@ -133,9 +133,17 @@ pub static MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM: Lazy<Histogram> = Lazy::new
     histogram
 });
 
-pub static GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES: Lazy<IntGauge> = Lazy::new(|| {
+pub static GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES: Lazy<IntGauge> = Lazy::new(|| {
     IntGauge::new(
-        "memory_spill_in_queue_bytes",
+        "memory_spill_in_flight_bytes",
+        "in flush queue bytes of memory spill",
+    )
+    .expect("")
+});
+
+pub static GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES_OF_HUGE_PARTITION: Lazy<IntGauge> = Lazy::new(|| {
+    IntGauge::new(
+        "memory_spill_in_flight_bytes_of_huge_partition",
         "in flush queue bytes of memory spill",
     )
     .expect("")
@@ -758,7 +766,7 @@ fn register_custom_metrics() {
         .register(Box::new(SERVICE_IS_HEALTHY.clone()))
         .expect("");
     REGISTRY
-        .register(Box::new(GAUGE_MEMORY_SPILL_IN_QUEUE_BYTES.clone()))
+        .register(Box::new(GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.clone()))
         .expect("");
     REGISTRY
         .register(Box::new(TOTAL_MEMORY_SPILL_BYTES.clone()))
