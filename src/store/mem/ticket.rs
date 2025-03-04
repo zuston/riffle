@@ -142,18 +142,11 @@ impl TicketManager {
         mut free_allocated_fn: F,
         runtime_manager: RuntimeManager,
     ) {
-        let await_tree_registry = AWAIT_TREE_REGISTRY.clone();
-        runtime_manager.default_runtime.spawn(async move {
-            let await_root = await_tree_registry
-                .register("Ticket schedule to check".to_string())
-                .await;
-            await_root
-                .instrument(TicketManager::ticket_check(
-                    ticket_manager,
-                    free_allocated_fn,
-                ))
-                .await;
-        });
+        runtime_manager
+            .default_runtime
+            .spawn_with_await_tree("Ticket checker", async move {
+                TicketManager::ticket_check(ticket_manager, free_allocated_fn).await
+            });
     }
 
     async fn ticket_check<F: FnMut(i64) -> bool + Send + 'static>(

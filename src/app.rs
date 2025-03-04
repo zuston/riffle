@@ -751,11 +751,7 @@ impl AppManager {
         let app_ref = Arc::new(AppManager::new(runtime_manager.clone(), config, storage));
         let app_manager_ref_cloned = app_ref.clone();
 
-        runtime_manager.default_runtime.spawn(async move {
-            let await_root = AWAIT_TREE_REGISTRY.clone()
-                .register(format!("App heartbeat periodic checker"))
-                .await;
-            await_root.instrument(async move {
+        runtime_manager.default_runtime.spawn_with_await_tree("App heartbeat checker", async move {
                 info!("Starting app heartbeat checker...");
                 loop {
                     // task1: find out heartbeat timeout apps
@@ -789,76 +785,63 @@ impl AppManager {
                         }
                     }
                 }
-            }).await;
         });
 
         // calculate topN app shuffle data size
         let app_manager_ref = app_ref.clone();
-        runtime_manager.default_runtime.spawn(async move {
-            let await_root = AWAIT_TREE_REGISTRY
-                .clone()
-                .register(format!("App topN periodic statistics"))
-                .await;
-            await_root
-                .instrument(async move {
-                    info!("Starting calculating topN app shuffle data size...");
-                    loop {
-                        tokio::time::sleep(Duration::from_secs(10))
-                            .instrument_await("sleeping for 10s...")
-                            .await;
+        runtime_manager
+            .default_runtime
+            .spawn_with_await_tree("App statictics", async move {
+                info!("Starting calculating topN app shuffle data size...");
+                loop {
+                    tokio::time::sleep(Duration::from_secs(10))
+                        .instrument_await("sleeping for 10s...")
+                        .await;
 
-                        let view = app_manager_ref.apps.clone().into_read_only();
-                        let mut apps: Vec<_> = view.values().collect();
-                        apps.sort_by_key(|x| 0 - x.total_resident_data_size());
+                    let view = app_manager_ref.apps.clone().into_read_only();
+                    let mut apps: Vec<_> = view.values().collect();
+                    apps.sort_by_key(|x| 0 - x.total_resident_data_size());
 
-                        let top_n = 10;
-                        let limit = if apps.len() > top_n {
-                            top_n
-                        } else {
-                            apps.len()
-                        };
-                        for idx in 0..limit {
-                            let app = apps[idx];
-                            if app.total_resident_data_size() <= 0 {
-                                continue;
-                            }
-                            GAUGE_TOPN_APP_RESIDENT_BYTES
-                                .with_label_values(&[&app.app_id])
-                                .set(apps[idx].total_resident_data_size() as i64);
+                    let top_n = 10;
+                    let limit = if apps.len() > top_n {
+                        top_n
+                    } else {
+                        apps.len()
+                    };
+                    for idx in 0..limit {
+                        let app = apps[idx];
+                        if app.total_resident_data_size() <= 0 {
+                            continue;
                         }
+                        GAUGE_TOPN_APP_RESIDENT_BYTES
+                            .with_label_values(&[&app.app_id])
+                            .set(apps[idx].total_resident_data_size() as i64);
                     }
-                })
-                .await;
-        });
+                }
+            });
 
         let app_manager_cloned = app_ref.clone();
-        runtime_manager.default_runtime.spawn(async move {
-            let await_root = AWAIT_TREE_REGISTRY
-                .clone()
-                .register(format!("App periodic purger"))
-                .await;
-            await_root
-                .instrument(async move {
-                    info!("Starting purge event handler...");
-                    while let Ok(event) = app_manager_cloned
-                        .receiver
-                        .recv()
-                        .instrument_await("waiting events coming...")
-                        .await
-                    {
-                        let reason = event.reason;
-                        info!("Purging data with reason: {:?}", &reason);
-                        if let Err(err) = app_manager_cloned.purge_app_data(&reason).await {
-                            PURGE_FAILED_COUNTER.inc();
-                            error!(
-                                "Errors on purging data with reason: {:?}. err: {:?}",
-                                &reason, err
-                            );
-                        }
+        runtime_manager
+            .default_runtime
+            .spawn_with_await_tree("App purger", async move {
+                info!("Starting purge event handler...");
+                while let Ok(event) = app_manager_cloned
+                    .receiver
+                    .recv()
+                    .instrument_await("waiting events coming...")
+                    .await
+                {
+                    let reason = event.reason;
+                    info!("Purging data with reason: {:?}", &reason);
+                    if let Err(err) = app_manager_cloned.purge_app_data(&reason).await {
+                        PURGE_FAILED_COUNTER.inc();
+                        error!(
+                            "Errors on purging data with reason: {:?}. err: {:?}",
+                            &reason, err
+                        );
                     }
-                })
-                .await;
-        });
+                }
+            });
 
         app_ref
     }

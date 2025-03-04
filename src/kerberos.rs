@@ -19,17 +19,20 @@ impl KerberosTask {
 
         info!("Kerberos initialization has been finished.");
 
-        runtime_manager.clone().default_runtime.spawn(async move {
-            let principal = &conf.principal;
-            let keytab = &conf.keytab_path;
-            loop {
-                tokio::time::sleep(Duration::from_secs(3600)).await;
-                match Self::execute_kinit(principal, keytab) {
-                    Ok(_) => info!("Finished the ticket update."),
-                    Err(error) => error!("{:?}", error),
+        runtime_manager
+            .clone()
+            .default_runtime
+            .spawn_with_await_tree("Kerbero updater", async move {
+                let principal = &conf.principal;
+                let keytab = &conf.keytab_path;
+                loop {
+                    tokio::time::sleep(Duration::from_secs(3600)).await;
+                    match Self::execute_kinit(principal, keytab) {
+                        Ok(_) => info!("Finished the ticket update."),
+                        Err(error) => error!("{:?}", error),
+                    }
                 }
-            }
-        });
+            });
 
         Ok(())
     }

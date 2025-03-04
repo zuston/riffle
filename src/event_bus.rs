@@ -83,16 +83,8 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
         };
 
         let cloned = event_bus.clone();
-        runtime.spawn(async move {
-            let await_root = AWAIT_TREE_REGISTRY
-                .clone()
-                .register(format!("EventBus - [{}]", &name))
-                .await;
-            await_root
-                .instrument(async move {
-                    EventBus::handle(cloned).await;
-                })
-                .await;
+        runtime.spawn_with_await_tree(format!("EventBus - [{}]", &name).as_str(), async move {
+            EventBus::handle(cloned).await;
         });
 
         event_bus
@@ -116,15 +108,9 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
                 .unwrap();
 
             let bus = event_bus.clone();
-            let await_root = AWAIT_TREE_REGISTRY
-                .clone()
-                .register(format!("EventBus - [{}] - Handler", &event_bus.inner.name))
-                .await;
-
-            event_bus
-                .inner
-                .runtime
-                .spawn(await_root.instrument(async move {
+            event_bus.inner.runtime.spawn_with_await_tree(
+                format!("EventBus - [{}] - Handler", &event_bus.inner.name).as_str(),
+                async move {
                     let timer = EVENT_BUS_HANDLE_DURATION
                         .with_label_values(&[&bus.inner.name])
                         .start_timer();
@@ -148,7 +134,8 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
                         .inc();
 
                     drop(concurrency_guarder);
-                }));
+                },
+            );
         }
     }
 
