@@ -997,48 +997,51 @@ impl MetricService {
         let push_gateway_endpoint = cfg.push_gateway_endpoint;
         if let Some(ref _endpoint) = push_gateway_endpoint {
             let push_interval_sec = cfg.push_interval_sec;
-            runtime_manager.default_runtime.spawn(async move {
-                info!("Starting prometheus metrics exporter...");
-                loop {
-                    tokio::time::sleep(Duration::from_secs(push_interval_sec as u64)).await;
+            runtime_manager.default_runtime.spawn_with_await_tree(
+                "Metric prometheus reporter",
+                async move {
+                    info!("Starting prometheus metrics exporter...");
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(push_interval_sec as u64)).await;
 
-                    // refresh the allocator size metrics
-                    #[cfg(all(unix, feature = "allocator-analysis"))]
-                    GAUGE_ALLOCATOR_ALLOCATED_SIZE.set(ALLOCATOR.allocated() as i64);
+                        // refresh the allocator size metrics
+                        #[cfg(all(unix, feature = "allocator-analysis"))]
+                        GAUGE_ALLOCATOR_ALLOCATED_SIZE.set(ALLOCATOR.allocated() as i64);
 
-                    GRPC_GET_LOCALFILE_DATA_LATENCY.observe();
-                    GRPC_GET_LOCALFILE_INDEX_LATENCY.observe();
-                    LOCALFILE_READ_MEMORY_ALLOCATION_LATENCY.observe();
+                        GRPC_GET_LOCALFILE_DATA_LATENCY.observe();
+                        GRPC_GET_LOCALFILE_INDEX_LATENCY.observe();
+                        LOCALFILE_READ_MEMORY_ALLOCATION_LATENCY.observe();
 
-                    let general_metrics = prometheus::gather();
-                    let custom_metrics = REGISTRY.gather();
-                    let mut metrics = vec![];
-                    metrics.extend_from_slice(&custom_metrics);
-                    metrics.extend_from_slice(&general_metrics);
+                        let general_metrics = prometheus::gather();
+                        let custom_metrics = REGISTRY.gather();
+                        let mut metrics = vec![];
+                        metrics.extend_from_slice(&custom_metrics);
+                        metrics.extend_from_slice(&general_metrics);
 
-                    let mut all_labels = HashMap::new();
-                    all_labels.insert(
-                        "worker_id".to_owned(),
-                        SHUFFLE_SERVER_ID.get().unwrap().to_string(),
-                    );
-                    all_labels.insert("cpu_arch".to_owned(), CPU_ARCH.to_owned());
-                    if let Some(labels) = &cfg.labels {
-                        let labels = labels.clone();
-                        all_labels.extend(labels);
+                        let mut all_labels = HashMap::new();
+                        all_labels.insert(
+                            "worker_id".to_owned(),
+                            SHUFFLE_SERVER_ID.get().unwrap().to_string(),
+                        );
+                        all_labels.insert("cpu_arch".to_owned(), CPU_ARCH.to_owned());
+                        if let Some(labels) = &cfg.labels {
+                            let labels = labels.clone();
+                            all_labels.extend(labels);
+                        }
+
+                        let pushed_result = prometheus::push_add_metrics(
+                            job_name,
+                            all_labels,
+                            &push_gateway_endpoint.to_owned().unwrap().to_owned(),
+                            metrics,
+                            None,
+                        );
+                        if pushed_result.is_err() {
+                            error!("Errors on pushing metrics. {:?}", pushed_result.err());
+                        }
                     }
-
-                    let pushed_result = prometheus::push_add_metrics(
-                        job_name,
-                        all_labels,
-                        &push_gateway_endpoint.to_owned().unwrap().to_owned(),
-                        metrics,
-                        None,
-                    );
-                    if pushed_result.is_err() {
-                        error!("Errors on pushing metrics. {:?}", pushed_result.err());
-                    }
-                }
-            });
+                },
+            );
         }
     }
 }

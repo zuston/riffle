@@ -94,19 +94,14 @@ impl LocalDiskDelegator {
         let runtime = runtime_manager.clone().default_runtime.clone();
         let io_delegator = delegator.clone();
         let span = format!("disk[{}] checker", root);
-        runtime.spawn(async move {
-            let await_tree = AWAIT_TREE_REGISTRY.register(span).await;
-            await_tree
-                .instrument(async move {
-                    info!("starting the disk[{}] checker", &io_delegator.inner.root);
-                    if let Err(e) = io_delegator.schedule_check().await {
-                        error!(
-                            "disk[{}] checker exit. err: {:?}",
-                            &io_delegator.inner.root, e
-                        )
-                    }
-                })
-                .await;
+        runtime.spawn_with_await_tree(&span, async move {
+            info!("starting the disk[{}] checker", &io_delegator.inner.root);
+            if let Err(e) = io_delegator.schedule_check().await {
+                error!(
+                    "disk[{}] checker exit. err: {:?}",
+                    &io_delegator.inner.root, e
+                )
+            }
         });
 
         delegator
