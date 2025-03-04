@@ -16,8 +16,8 @@
 # under the License.
 
 [package]
-name = "uniffle-x"
-version = "0.1.0"
+name = "riffle"
+version = "0.7.0"
 edition = "2021"
 
 [profile.release]
