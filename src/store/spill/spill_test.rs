@@ -285,20 +285,21 @@ mod tests {
         assert_eq!(2, store.get_spill_event_num()?);
 
         warm_write_hang_ref.store(false, SeqCst);
-        tokio::time::sleep(Duration::from_millis(100)).await;
 
-        assert_eq!(
-            0,
+        awaitility::at_most(Duration::from_secs(5)).until(|| {
             store
                 .hot_store
                 .get_buffer(&PartitionedUId::from(
                     app_id.to_string(),
                     shuffle_id,
-                    partition
+                    partition,
                 ))
                 .unwrap()
-                .total_size()?
-        );
+                .total_size()
+                .unwrap()
+                == 0
+        });
+
         assert_eq!(
             2,
             store

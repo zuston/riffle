@@ -488,7 +488,8 @@ impl HybridStore {
         let sensitive_bytes = if self.config.sensitive_watermark_spill_enable
             || self.sensitive_watermark_spill_tag.get().is_some()
         {
-            self.in_flight_bytes_of_huge_partition.load(SeqCst)
+            // self.in_flight_bytes_of_huge_partition.load(SeqCst)
+            total_in_flight
         } else {
             0
         };
