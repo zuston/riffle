@@ -489,13 +489,30 @@ impl HybridStore {
 
     async fn watermark_spill(&self) -> Result<()> {
         let timer = Instant::now();
-        let expected_mem_used =
+
+        // expected mem used
+        let mem_expected_used =
             (self.hot_store.get_capacity()? as f32 * self.config.memory_spill_low_watermark) as i64;
-        let buffers = self.hot_store.lookup_spill_buffers(expected_mem_used)?;
+        // expected mem spill bytes
+        let mem_real_used =
+            self.hot_store.memory_snapshot()?.used() - self.in_flight_bytes.load(SeqCst) as i64;
+        let mem_expected_spill_bytes = mem_real_used - mem_expected_used;
+
+        if mem_expected_spill_bytes <= 0 {
+            warn!("[Spill] Invalid watermark spill due to expected_spill_bytes <= 0. mem_expected_used: {}. mem_real_used: {}. mem_expected_spill_bytes: {}",
+                mem_expected_used, mem_real_used, mem_expected_spill_bytes);
+            return Ok(());
+        }
+
+        let buffers = self
+            .hot_store
+            .lookup_spill_buffers(mem_expected_spill_bytes)?;
         info!(
-            "[Spill] Looked up all spill blocks. expected memory used:{}. it costs {}(ms)",
-            expected_mem_used,
-            timer.elapsed().as_millis()
+            "[Spill] Looked up all spill blocks that costs {}(ms). mem_expected_used: {}. mem_real_used: {}. mem_expected_spill_bytes: {}",
+            timer.elapsed().as_millis(),
+            mem_expected_used,
+            mem_real_used,
+            mem_expected_spill_bytes
         );
 
         let partition_num = buffers.len();
