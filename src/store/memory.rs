@@ -133,17 +133,10 @@ impl MemoryStore {
 
     pub fn lookup_spill_buffers(
         &self,
-        expected_mem_used: i64,
+        expected_spill_total_bytes: i64,
     ) -> Result<HashMap<PartitionedUId, Arc<MemoryBuffer>>, anyhow::Error> {
         // 1. sort by the staging size.
         // 2. get the spill buffers until reaching the single max batch size
-
-        let snapshot = self.budget.snapshot();
-        let required_spilled_size = snapshot.used() - expected_mem_used;
-        if required_spilled_size <= 0 {
-            warn!("This should not happen that nothing should be picked up! snapshot used: {}, require spill: {}", snapshot.used(), required_spilled_size);
-            return Err(anyhow!(""));
-        }
 
         let mut sorted_tree_map = BTreeMap::new();
 
@@ -161,13 +154,13 @@ impl MemoryStore {
             valset.push(key);
         }
 
-        let mut spill_staging_size = 0;
+        let mut real_spill_total_bytes = 0;
         let mut spill_candidates = HashMap::new();
 
         let iter = sorted_tree_map.iter().rev();
         'outer: for (size, vals) in iter {
             for pid in vals {
-                if spill_staging_size >= required_spilled_size {
+                if real_spill_total_bytes >= expected_spill_total_bytes {
                     break 'outer;
                 }
                 let partition_uid = (*pid).clone();
@@ -175,14 +168,14 @@ impl MemoryStore {
                 if buffer.is_err() {
                     continue;
                 }
-                spill_staging_size += *size;
+                real_spill_total_bytes += *size;
                 spill_candidates.insert(partition_uid, buffer?);
             }
         }
 
-        debug!(
-            "[Spill] expected spill size: {}, picked up real spill size: {}",
-            &required_spilled_size, &spill_staging_size
+        info!(
+            "[Spill] Candidate spill bytes. excepted/real: {}/{}",
+            &expected_spill_total_bytes, &real_spill_total_bytes
         );
         Ok(spill_candidates)
     }

@@ -109,6 +109,9 @@ pub struct HybridStore {
     app_manager: OnceCell<AppManagerRef>,
 
     huge_partition_memory_spill_to_hdfs_threshold_size: u64,
+
+    // Only for test
+    sensitive_watermark_spill_tag: OnceCell<()>,
 }
 
 unsafe impl Send for HybridStore {}
@@ -176,6 +179,7 @@ impl HybridStore {
             in_flight_bytes: Default::default(),
             huge_partition_memory_spill_to_hdfs_threshold_size,
             in_flight_bytes_of_huge_partition: Default::default(),
+            sensitive_watermark_spill_tag: Default::default(),
         };
         store
     }
@@ -466,6 +470,11 @@ impl HybridStore {
         Ok(flight_len)
     }
 
+    // Only for test
+    pub fn enable_sensitive_watermark_spill(&self) {
+        self.sensitive_watermark_spill_tag.set(());
+    }
+
     fn get_memory_used_ratio(&self) -> Result<f32> {
         let snapshot = self.mem_snapshot()?;
         let used = snapshot.used();
@@ -476,7 +485,9 @@ impl HybridStore {
 
         // if sensitive watermark spill is enabled, it will ignore the huge partition's in flight bytes.
         // this will avoid backpressure for normal partitions due to the slow writing speed of cold storage.
-        let sensitive_bytes = if self.config.sensitive_watermark_spill_enable {
+        let sensitive_bytes = if self.config.sensitive_watermark_spill_enable
+            || self.sensitive_watermark_spill_tag.get().is_some()
+        {
             self.in_flight_bytes_of_huge_partition.load(SeqCst)
         } else {
             0
@@ -489,13 +500,30 @@ impl HybridStore {
 
     async fn watermark_spill(&self) -> Result<()> {
         let timer = Instant::now();
-        let expected_mem_used =
+
+        // expected mem used
+        let mem_expected_used =
             (self.hot_store.get_capacity()? as f32 * self.config.memory_spill_low_watermark) as i64;
-        let buffers = self.hot_store.lookup_spill_buffers(expected_mem_used)?;
+        // expected mem spill bytes
+        let mem_real_used =
+            self.hot_store.memory_snapshot()?.used() - self.in_flight_bytes.load(SeqCst) as i64;
+        let mem_expected_spill_bytes = mem_real_used - mem_expected_used;
+
+        if mem_expected_spill_bytes <= 0 {
+            warn!("[Spill] Invalid watermark spill due to expected_spill_bytes <= 0. mem_expected_used: {}. mem_real_used: {}. mem_expected_spill_bytes: {}",
+                mem_expected_used, mem_real_used, mem_expected_spill_bytes);
+            return Ok(());
+        }
+
+        let buffers = self
+            .hot_store
+            .lookup_spill_buffers(mem_expected_spill_bytes)?;
         info!(
-            "[Spill] Looked up all spill blocks. expected memory used:{}. it costs {}(ms)",
-            expected_mem_used,
-            timer.elapsed().as_millis()
+            "[Spill] Looked up all spill blocks that costs {}(ms). mem_expected_used: {}. mem_real_used: {}. mem_expected_spill_bytes: {}",
+            timer.elapsed().as_millis(),
+            mem_expected_used,
+            mem_real_used,
+            mem_expected_spill_bytes
         );
 
         let partition_num = buffers.len();
