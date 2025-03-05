@@ -203,7 +203,7 @@ impl HybridStore {
             if *tag {
                 self.in_flight_bytes_of_huge_partition
                     .fetch_sub(bytes_size, SeqCst);
-                GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES_OF_HUGE_PARTITION.add(bytes_size as i64);
+                GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES_OF_HUGE_PARTITION.sub(bytes_size as i64);
             }
         }
     }
