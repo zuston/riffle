@@ -769,6 +769,11 @@ fn register_custom_metrics() {
         .register(Box::new(GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.clone()))
         .expect("");
     REGISTRY
+        .register(Box::new(
+            GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES_OF_HUGE_PARTITION.clone(),
+        ))
+        .expect("");
+    REGISTRY
         .register(Box::new(TOTAL_MEMORY_SPILL_BYTES.clone()))
         .expect("");
     REGISTRY
