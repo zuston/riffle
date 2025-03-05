@@ -109,6 +109,9 @@ pub struct HybridStore {
     app_manager: OnceCell<AppManagerRef>,
 
     huge_partition_memory_spill_to_hdfs_threshold_size: u64,
+
+    // Only for test
+    sensitive_watermark_spill_tag: OnceCell<()>,
 }
 
 unsafe impl Send for HybridStore {}
@@ -176,6 +179,7 @@ impl HybridStore {
             in_flight_bytes: Default::default(),
             huge_partition_memory_spill_to_hdfs_threshold_size,
             in_flight_bytes_of_huge_partition: Default::default(),
+            sensitive_watermark_spill_tag: Default::default(),
         };
         store
     }
@@ -466,6 +470,11 @@ impl HybridStore {
         Ok(flight_len)
     }
 
+    // Only for test
+    pub fn enable_sensitive_watermark_spill(&self) {
+        self.sensitive_watermark_spill_tag.set(());
+    }
+
     fn get_memory_used_ratio(&self) -> Result<f32> {
         let snapshot = self.mem_snapshot()?;
         let used = snapshot.used();
@@ -476,7 +485,9 @@ impl HybridStore {
 
         // if sensitive watermark spill is enabled, it will ignore the huge partition's in flight bytes.
         // this will avoid backpressure for normal partitions due to the slow writing speed of cold storage.
-        let sensitive_bytes = if self.config.sensitive_watermark_spill_enable {
+        let sensitive_bytes = if self.config.sensitive_watermark_spill_enable
+            || self.sensitive_watermark_spill_tag.get().is_some()
+        {
             self.in_flight_bytes_of_huge_partition.load(SeqCst)
         } else {
             0

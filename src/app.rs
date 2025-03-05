@@ -354,6 +354,13 @@ impl App {
         })
     }
 
+    // Only for test case
+    pub fn mark_huge_partition(&self, uid: &PartitionedUId) -> Result<()> {
+        let mut meta = self.get_partition_meta(uid);
+        meta.mark_as_huge_partition();
+        Ok(())
+    }
+
     pub fn is_huge_partition(&self, uid: &PartitionedUId) -> Result<bool> {
         // is configured with the associated huge_partition config options
         if self.huge_partition_marked_threshold.is_none() {
