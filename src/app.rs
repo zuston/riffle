@@ -1082,6 +1082,8 @@ pub(crate) mod test {
                 memory_spill_to_hdfs_concurrency: None,
                 huge_partition_memory_spill_to_hdfs_threshold_size: "64M".to_string(),
                 sensitive_watermark_spill_enable: false,
+                async_watermark_spill_trigger_enable: false,
+                async_watermark_spill_trigger_interval_ms: 0,
             },
         );
         let mut app_config = &mut config.app_config;
