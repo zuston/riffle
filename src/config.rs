@@ -246,6 +246,19 @@ pub struct HybridStoreConfig {
 
     #[serde(default = "as_default_sensitive_watermark_spill_enable")]
     pub sensitive_watermark_spill_enable: bool,
+
+    #[serde(default = "as_default_async_watermark_spill_trigger_enable")]
+    pub async_watermark_spill_trigger_enable: bool,
+    #[serde(default = "as_default_async_watermark_spill_trigger_interval_ms")]
+    pub async_watermark_spill_trigger_interval_ms: u64,
+}
+
+fn as_default_async_watermark_spill_trigger_interval_ms() -> u64 {
+    500
+}
+
+fn as_default_async_watermark_spill_trigger_enable() -> bool {
+    false
 }
 
 fn as_default_sensitive_watermark_spill_enable() -> bool {
@@ -284,6 +297,9 @@ impl HybridStoreConfig {
             huge_partition_memory_spill_to_hdfs_threshold_size:
                 as_default_huge_partition_memory_spill_to_hdfs_threshold_size(),
             sensitive_watermark_spill_enable: as_default_sensitive_watermark_spill_enable(),
+            async_watermark_spill_trigger_enable: as_default_async_watermark_spill_trigger_enable(),
+            async_watermark_spill_trigger_interval_ms:
+                as_default_async_watermark_spill_trigger_interval_ms(),
         }
     }
 }
@@ -300,6 +316,9 @@ impl Default for HybridStoreConfig {
             huge_partition_memory_spill_to_hdfs_threshold_size:
                 as_default_huge_partition_memory_spill_to_hdfs_threshold_size(),
             sensitive_watermark_spill_enable: as_default_sensitive_watermark_spill_enable(),
+            async_watermark_spill_trigger_enable: as_default_async_watermark_spill_trigger_enable(),
+            async_watermark_spill_trigger_interval_ms:
+                as_default_async_watermark_spill_trigger_interval_ms(),
         }
     }
 }
