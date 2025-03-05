@@ -53,6 +53,7 @@ use std::str::FromStr;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::{Relaxed, SeqCst};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 
 use crate::runtime::manager::RuntimeManager;
@@ -92,7 +93,9 @@ pub struct HybridStore {
 
     config: HybridStoreConfig,
 
-    memory_spill_lock: Mutex<()>,
+    async_watermark_spill_enable: bool,
+
+    sync_memory_spill_lock: Mutex<()>,
     memory_spill_event_num: AtomicU64,
     // one in_flight bytes lifecycle is bound to the events.
     in_flight_bytes: AtomicU64,
@@ -161,6 +164,8 @@ impl HybridStore {
         .unwrap()
         .as_bytes();
 
+        let async_watermark_spill_enable = hybrid_conf.async_watermark_spill_trigger_enable;
+
         let store = HybridStore {
             hot_store: Arc::new(MemoryStore::from(
                 config.memory_store.unwrap(),
@@ -169,7 +174,8 @@ impl HybridStore {
             warm_store: persistent_stores.pop_front(),
             cold_store: persistent_stores.pop_front(),
             config: hybrid_conf,
-            memory_spill_lock: Mutex::new(()),
+            async_watermark_spill_enable,
+            sync_memory_spill_lock: Mutex::new(()),
             memory_spill_event_num: Default::default(),
             memory_spill_partition_max_threshold: memory_spill_buffer_max_threshold,
             memory_spill_to_cold_threshold_size,
@@ -500,6 +506,13 @@ impl HybridStore {
     }
 
     async fn watermark_spill(&self) -> Result<()> {
+        let ratio = self.get_memory_used_ratio()?;
+        if ratio < self.config.memory_spill_high_watermark {
+            return Ok(());
+        }
+        info!("[Spill] Watermark spill is triggered. ratio: {}. mem_snapshot: {:?}. in_flight_bytes: {}. in_flight_bytes_of_huge_partition: {}",
+                    ratio, self.mem_snapshot()?, self.in_flight_bytes.load(Relaxed), self.in_flight_bytes_of_huge_partition.load(Relaxed));
+
         let timer = Instant::now();
 
         // expected mem used
@@ -570,6 +583,27 @@ impl Store for HybridStore {
             StorageSelectHandler::new(&self),
             StorageFlushHandler::new(&self),
         );
+
+        if self.async_watermark_spill_enable {
+            let store = self.clone();
+            let interval_ms = store.config.async_watermark_spill_trigger_interval_ms;
+            if interval_ms <= 0 {
+                panic!("Illegal async_watermark_spill_trigger_interval_ms")
+            }
+            self.runtime_manager.dispatch_runtime.spawn_with_await_tree(
+                "async watermark-spill trigger",
+                async move {
+                    loop {
+                        tokio::time::sleep(Duration::from_millis(interval_ms))
+                            .instrument_await("sleeping")
+                            .await;
+                        if let Err(err) = store.watermark_spill().await {
+                            error!("Errors on watermark-spill. err: {:?}", err);
+                        }
+                    }
+                },
+            );
+        }
     }
 
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
@@ -599,13 +633,8 @@ impl Store for HybridStore {
             }
         }
 
-        if let Ok(_) = self.memory_spill_lock.try_lock() {
-            // watermark spill
-            let ratio = self.get_memory_used_ratio()?;
-            if ratio > self.config.memory_spill_high_watermark {
-                info!("[Spill] Watermark spill is triggered. ratio: {}. mem_snapshot: {:?}. in_flight_bytes: {}. in_flight_bytes_of_huge_partition: {}",
-                    ratio, self.mem_snapshot()?, self.in_flight_bytes.load(Relaxed), self.in_flight_bytes_of_huge_partition.load(Relaxed));
-
+        if !self.async_watermark_spill_enable {
+            if let Ok(_) = self.sync_memory_spill_lock.try_lock() {
                 if let Err(err) = self.watermark_spill().await {
                     warn!("Errors on watermark spill. {:?}", err)
                 }
