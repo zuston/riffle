@@ -160,9 +160,8 @@ features = ["profiling", "unprefixed_malloc_on_supported_platforms"]
 
 # todo: When https://github.com/polarsignals/rust-jemalloc-pprof/pull/22 is merged, using the official repo
 [dependencies.jemalloc_pprof]
-git = "https://github.com/erikgrinaker/rust-jemalloc-pprof.git"
-branch = "symbolize"
-features = ["symbolize"]
+version = "0.7.0"
+features = ["symbolize", "flamegraph"]
 optional = true
 
 [build-dependencies]

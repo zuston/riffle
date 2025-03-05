@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use hyper::StatusCode;
 use log::error;
 
 use super::error::{ProfError, ProfResult};
@@ -28,4 +29,14 @@ pub async fn dump_prof(path: &str) -> ProfResult<Vec<u8>> {
         ProfError::JemallocError(msg)
     })?;
     Ok(pprof)
+}
+
+pub async fn dump_heap_flamegraph() -> ProfResult<Vec<u8>> {
+    let mut prof_ctl = jemalloc_pprof::PROF_CTL.as_ref().unwrap().lock().await;
+    let svg = prof_ctl.dump_flamegraph().map_err(|err| {
+        let msg = format!("Errors on jemalloc prof flamegraph. err: {:?}", &err);
+        error!("{}", &msg);
+        ProfError::JemallocError(msg)
+    })?;
+    Ok(svg)
 }
