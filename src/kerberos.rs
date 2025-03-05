@@ -2,6 +2,7 @@ use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::config::KerberosSecurityConfig;
 use crate::runtime::manager::RuntimeManager;
 use anyhow::{anyhow, Result};
+use await_tree::InstrumentAwait;
 use log::{error, info};
 use std::env;
 use std::process::{Command, Output};
@@ -26,7 +27,9 @@ impl KerberosTask {
                 let principal = &conf.principal;
                 let keytab = &conf.keytab_path;
                 loop {
-                    tokio::time::sleep(Duration::from_secs(3600)).await;
+                    tokio::time::sleep(Duration::from_secs(3600))
+                        .instrument_await("sleeping")
+                        .await;
                     match Self::execute_kinit(principal, keytab) {
                         Ok(_) => info!("Finished the ticket update."),
                         Err(error) => error!("{:?}", error),

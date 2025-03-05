@@ -5,6 +5,7 @@ use crate::grpc::protobuf::uniffle::{ShuffleServerHeartBeatRequest, ShuffleServe
 use crate::health_service::HealthService;
 use crate::metric::SERVICE_IS_HEALTHY;
 use crate::runtime::manager::RuntimeManager;
+use await_tree::InstrumentAwait;
 use log::{error, info};
 use std::time::Duration;
 use tonic::transport::Channel;
@@ -54,7 +55,9 @@ impl HeartbeatTask {
                     .unwrap();
 
                 loop {
-                    tokio::time::sleep(Duration::from_secs(interval_seconds as u64)).await;
+                    tokio::time::sleep(Duration::from_secs(interval_seconds as u64))
+                        .instrument_await("sleeping")
+                        .await;
 
                     let mut all_tags = vec![];
                     all_tags.push(DEFAULT_SHUFFLE_SERVER_TAG.to_string());

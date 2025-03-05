@@ -22,6 +22,7 @@ use crate::histogram;
 use crate::mem_allocator::ALLOCATOR;
 use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
+use await_tree::InstrumentAwait;
 use log::{error, info};
 use once_cell::sync::Lazy;
 use prometheus::{
@@ -1007,7 +1008,9 @@ impl MetricService {
                 async move {
                     info!("Starting prometheus metrics exporter...");
                     loop {
-                        tokio::time::sleep(Duration::from_secs(push_interval_sec as u64)).await;
+                        tokio::time::sleep(Duration::from_secs(push_interval_sec as u64))
+                            .instrument_await("sleeping")
+                            .await;
 
                         // refresh the allocator size metrics
                         #[cfg(all(unix, feature = "allocator-analysis"))]
