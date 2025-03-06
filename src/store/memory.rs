@@ -648,6 +648,7 @@ mod test {
                 partition_id: 0,
             },
             size: 10000,
+            partition_ids: vec![],
         };
         match runtime.default_runtime.block_on(store.require_buffer(ctx)) {
             Ok(_) => {

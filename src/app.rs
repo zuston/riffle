@@ -1122,6 +1122,7 @@ pub(crate) mod test {
                 partition_id: 0,
             },
             size: 10,
+            partition_ids: vec![],
         };
         let f = app.require_buffer(ctx);
         match runtime_manager.wait(f) {
