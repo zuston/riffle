@@ -414,7 +414,7 @@ impl App {
         }
     }
 
-    pub async fn is_backpressure_for_huge_partition(&self, uid: &PartitionedUId) -> Result<bool> {
+    pub async fn is_backpressure_of_partition(&self, uid: &PartitionedUId) -> Result<bool> {
         if !self.is_huge_partition(uid)? {
             return Ok(false);
         }
@@ -448,9 +448,14 @@ impl App {
     ) -> Result<RequireBufferResponse, WorkerError> {
         self.heartbeat()?;
 
-        if self.is_backpressure_for_huge_partition(&ctx.uid).await? {
-            TOTAL_REQUIRE_BUFFER_FAILED.inc();
-            return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
+        let app_id = &ctx.uid.app_id;
+        let shuffle_id = &ctx.uid.shuffle_id;
+        for partition_id in &ctx.partition_ids {
+            let puid = PartitionedUId::from(app_id.to_owned(), *shuffle_id, *partition_id);
+            if self.is_backpressure_of_partition(&puid).await? {
+                TOTAL_REQUIRE_BUFFER_FAILED.inc();
+                return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
+            }
         }
 
         self.store.require_buffer(ctx).await.map_err(|err| {
@@ -679,6 +684,8 @@ pub struct ReadingIndexViewContext {
 pub struct RequireBufferContext {
     pub uid: PartitionedUId,
     pub size: i64,
+    // todo: we should replace uid with (app_id, shuffle_id).
+    pub partition_ids: Vec<i32>,
 }
 
 #[derive(Debug, Clone)]
@@ -699,8 +706,12 @@ impl From<i64> for ReleaseTicketContext {
 }
 
 impl RequireBufferContext {
-    pub fn new(uid: PartitionedUId, size: i64) -> Self {
-        Self { uid, size }
+    pub fn create_for_test(uid: PartitionedUId, size: i64) -> Self {
+        Self {
+            uid,
+            size,
+            partition_ids: vec![],
+        }
     }
 }
 

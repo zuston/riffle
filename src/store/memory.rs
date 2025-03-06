@@ -679,7 +679,7 @@ mod test {
         // the buffer requested
 
         let _buffer = runtime
-            .wait(store.require_buffer(RequireBufferContext::new(uid.clone(), 40)))
+            .wait(store.require_buffer(RequireBufferContext::create_for_test(uid.clone(), 40)))
             .expect("");
 
         let writing_ctx = WritingViewContext::create_for_test(

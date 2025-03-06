@@ -749,8 +749,12 @@ impl ShuffleServer for DefaultShuffleServer {
             .require_buffer(RequireBufferContext {
                 uid: partition_id.clone(),
                 size: req.require_size as i64,
+                partition_ids: req.partition_ids.clone(),
             })
-            .instrument_await(format!("require buffer. uid: {:?}", &partition_id))
+            .instrument_await(format!(
+                "require buffer. uid: {:?}. partition_ids: {:?}",
+                &partition_id, &req.partition_ids
+            ))
             .await;
 
         let res = match app {
