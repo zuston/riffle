@@ -648,6 +648,7 @@ mod test {
                 partition_id: 0,
             },
             size: 10000,
+            partition_ids: vec![],
         };
         match runtime.default_runtime.block_on(store.require_buffer(ctx)) {
             Ok(_) => {
@@ -679,7 +680,7 @@ mod test {
         // the buffer requested
 
         let _buffer = runtime
-            .wait(store.require_buffer(RequireBufferContext::new(uid.clone(), 40)))
+            .wait(store.require_buffer(RequireBufferContext::create_for_test(uid.clone(), 40)))
             .expect("");
 
         let writing_ctx = WritingViewContext::create_for_test(

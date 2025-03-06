@@ -34,7 +34,7 @@ impl RejectionPolicy for HugePartitionRejectionPolicy {
             return Err(WorkerError::APP_IS_NOT_FOUND);
         }
         let app = app.unwrap();
-        if app.is_backpressure_for_huge_partition(request).await? {
+        if app.is_backpressure_of_partition(request).await? {
             Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION)
         } else {
             Ok(())
