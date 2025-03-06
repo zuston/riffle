@@ -424,8 +424,8 @@ impl App {
         let memory_used = self.store.get_memory_buffer_size(uid).await?;
         if memory_used > huge_partition_memory {
             info!(
-                "[{:?}] with huge partition, it has been limited of writing speed.",
-                uid
+                "[{:?}] with huge partition (used/limited: {}/{}), it has been limited of writing speed",
+                uid, memory_used, huge_partition_memory
             );
             TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED.inc();
             Ok(true)
