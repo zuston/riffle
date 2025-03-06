@@ -60,15 +60,10 @@ async fn jemalloc_pprof_handler(req: &Request) -> poem::Result<impl IntoResponse
     Ok(pprof)
 }
 
-pub struct JeProfHandler {}
+#[derive(Default)]
+pub struct HeapProfHandler;
 
-impl Default for JeProfHandler {
-    fn default() -> Self {
-        JeProfHandler {}
-    }
-}
-
-impl Handler for JeProfHandler {
+impl Handler for HeapProfHandler {
     fn get_route_method(&self) -> RouteMethod {
         RouteMethod::new().get(jemalloc_pprof_handler)
     }
@@ -78,9 +73,30 @@ impl Handler for JeProfHandler {
     }
 }
 
+#[derive(Default)]
+pub struct HeapProfFlameGraphHandler;
+impl Handler for HeapProfFlameGraphHandler {
+    fn get_route_method(&self) -> RouteMethod {
+        RouteMethod::new().get(handle_get_heap_flamegraph)
+    }
+
+    fn get_route_path(&self) -> String {
+        "/debug/heap/profile/flamegraph".to_string()
+    }
+}
+#[poem::handler]
+async fn handle_get_heap_flamegraph(req: &Request) -> poem::Result<impl IntoResponse> {
+    let svg = dump_heap_flamegraph().await?;
+    let response = poem::Response::builder()
+        .status(StatusCode::OK)
+        .content_type("image/svg+xml")
+        .body(svg);
+    Ok(response)
+}
+
 #[cfg(test)]
 mod test {
-    use crate::http::jeprof::JeProfHandler;
+    use crate::http::jeprof::HeapProfHandler;
     use crate::http::Handler;
     use poem::test::TestClient;
     use poem::Route;
@@ -89,7 +105,7 @@ mod test {
     #[tokio::test]
     #[ignore]
     async fn test_router() {
-        let handler = JeProfHandler::default();
+        let handler = HeapProfHandler::default();
         let app = Route::new().at(handler.get_route_path(), handler.get_route_method());
         let cli = TestClient::new(app);
         let resp = cli

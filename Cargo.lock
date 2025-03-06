@@ -824,6 +824,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "6.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
+]
+
+[[package]]
 name = "debugid"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -950,6 +964,16 @@ dependencies = [
  "log",
  "regex",
  "termcolor",
+]
+
+[[package]]
+name = "env_logger"
+version = "0.11.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dcaee3d8e3cfc3fd92428d477bc97fc29ec8716d180c0d74c643bb26166660e0"
+dependencies = [
+ "env_filter",
+ "log",
 ]
 
 [[package]]
@@ -1915,7 +1939,29 @@ dependencies = [
  "log",
  "num-format",
  "once_cell",
- "quick-xml",
+ "quick-xml 0.26.0",
+ "rgb",
+ "str_stack",
+]
+
+[[package]]
+name = "inferno"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "692eda1cc790750b9f5a5e3921ef9c117fd5498b97cfacbc910693e5b29002dc"
+dependencies = [
+ "ahash",
+ "clap",
+ "crossbeam-channel",
+ "crossbeam-utils",
+ "dashmap 6.1.0",
+ "env_logger 0.11.6",
+ "indexmap 2.6.0",
+ "itoa",
+ "log",
+ "num-format",
+ "once_cell",
+ "quick-xml 0.37.2",
  "rgb",
  "str_stack",
 ]
@@ -1987,8 +2033,9 @@ dependencies = [
 
 [[package]]
 name = "jemalloc_pprof"
-version = "0.6.0"
-source = "git+https://github.com/erikgrinaker/rust-jemalloc-pprof.git?branch=symbolize#0b146a1e2013bbc7fc8dc45f208f868c0b8ed193"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5622af6d21ff86ed7797ef98e11b8f302da25ec69a7db9f6cde8e2e1c8df9992"
 dependencies = [
  "anyhow",
  "libc",
@@ -2158,8 +2205,9 @@ dependencies = [
 
 [[package]]
 name = "mappings"
-version = "0.6.0"
-source = "git+https://github.com/erikgrinaker/rust-jemalloc-pprof.git?branch=symbolize#0b146a1e2013bbc7fc8dc45f208f868c0b8ed193"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e434981a332777c2b3062652d16a55f8e74fa78e6b1882633f0d77399c84fc2a"
 dependencies = [
  "anyhow",
  "libc",
@@ -2701,7 +2749,7 @@ dependencies = [
  "backtrace",
  "cfg-if",
  "findshlibs",
- "inferno",
+ "inferno 0.11.21",
  "libc",
  "log",
  "nix 0.26.4",
@@ -2717,12 +2765,14 @@ dependencies = [
 
 [[package]]
 name = "pprof_util"
-version = "0.6.0"
-source = "git+https://github.com/erikgrinaker/rust-jemalloc-pprof.git?branch=symbolize#0b146a1e2013bbc7fc8dc45f208f868c0b8ed193"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9fa015c78eed2130951e22c58d2095849391e73817ab2e74f71b0b9f63dd8416"
 dependencies = [
  "anyhow",
  "backtrace",
  "flate2",
+ "inferno 0.12.1",
  "num",
  "paste",
  "prost 0.13.3",
@@ -2946,6 +2996,15 @@ name = "quick-xml"
 version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f50b1c63b38611e7d4d7f68b82d3ad0cc71a2ad2e7f61fc10f1328d917c93cd"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.37.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "165859e9e55f79d67b96c5d96f4e88b6f2695a1972849c15a6a3f5c59fc2c003"
 dependencies = [
  "memchr",
 ]
@@ -3203,8 +3262,8 @@ dependencies = [
  "crossbeam",
  "crossbeam-channel",
  "crossbeam-utils",
- "dashmap",
- "env_logger",
+ "dashmap 5.5.3",
+ "env_logger 0.10.2",
  "fastrace",
  "fastrace-jaeger",
  "fs2",

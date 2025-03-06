@@ -25,6 +25,10 @@ pub async fn dump_prof(_path: &str) -> ProfResult<Vec<u8>> {
     Err(ProfError::MemProfilingNotEnabled)
 }
 
+pub async fn dump_heap_flamegraph() -> ProfResult<Vec<u8>> {
+    Err(ProfError::MemProfilingNotEnabled)
+}
+
 pub fn activate_prof() -> ProfResult<()> {
     Err(ProfError::MemProfilingNotEnabled)
 }
