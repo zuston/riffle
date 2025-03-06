@@ -109,8 +109,8 @@ async fn handle_spill_failure_whatever_error(
         TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND.inc();
     } else {
         warn!(
-            "Dropping the spill event for uid: {:?}. Attention: this will make data lost!",
-            &message.ctx.uid
+            "Dropping the spill event for uid: {:?}. Attention: this will make data lost! error: {}",
+            &message.ctx.uid, flush_error
         );
         if let Err(err) = store_ref
             .release_memory_buffer(message.size, &message)
