@@ -94,7 +94,7 @@ mod tests {
         };
         let offset = 0;
 
-        let index_block: IndexBlock = (raw_block, offset).into();
+        let index_block: IndexBlock = (&raw_block, offset).into();
         let mut bytes_holder = BytesMut::new();
         IndexCodec::encode(&index_block, &mut bytes_holder)?;
 
