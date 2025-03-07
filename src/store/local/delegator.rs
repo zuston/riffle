@@ -11,7 +11,7 @@ use crate::metric::{
 };
 use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
-use crate::store::local::scheduler::{IoScheduler, IoType};
+use crate::store::local::scheduler::{IoPermit, IoScheduler, IoType};
 use crate::store::local::sync_io::SyncLocalIO;
 use crate::store::local::{DiskStat, FileStat, LocalDiskStorage, LocalIO};
 use crate::store::BytesWrapper;
@@ -19,6 +19,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
+use clap::error::ErrorKind::Io;
 use log::{error, warn};
 use once_cell::sync::OnceCell;
 use std::str::FromStr;
@@ -51,7 +52,7 @@ struct Inner {
     capacity_ref: OnceCell<Arc<AtomicU64>>,
     available_ref: OnceCell<Arc<AtomicU64>>,
 
-    io_scheduler: IoScheduler,
+    io_scheduler: Option<IoScheduler>,
 
     io_duration_threshold_sec: u64,
 }
@@ -75,6 +76,11 @@ impl LocalDiskDelegator {
             Some(read_capacity.as_bytes() as usize),
         );
 
+        let io_scheduler = match &config.io_scheduler_config {
+            Some(conf) => Some(IoScheduler::new(root, &Some(conf.clone()))),
+            _ => None,
+        };
+
         let delegator = Self {
             inner: Arc::new(Inner {
                 root: root.to_owned(),
@@ -86,7 +92,7 @@ impl LocalDiskDelegator {
                 healthy_check_interval_sec: config.disk_healthy_check_interval_sec,
                 capacity_ref: Default::default(),
                 available_ref: Default::default(),
-                io_scheduler: IoScheduler::new(root, &config.io_scheduler_config),
+                io_scheduler,
                 io_duration_threshold_sec: config.io_duration_threshold_sec as u64,
             }),
         };
@@ -105,6 +111,20 @@ impl LocalDiskDelegator {
         });
 
         delegator
+    }
+
+    pub async fn get_permit(&self, io_type: IoType, len: usize) -> Result<Option<IoPermit<'_>>> {
+        let permit = if let Some(scheduler) = self.inner.io_scheduler.as_ref() {
+            let p = scheduler
+                .acquire(io_type, len)
+                .instrument_await("io scheduler read waiting...")
+                .await?;
+            Some(p)
+        } else {
+            None
+        };
+
+        Ok(permit)
     }
 
     pub fn with_capacity(&self, capacity_ref: Arc<AtomicU64>) {
@@ -364,12 +384,8 @@ impl LocalIO for LocalDiskDelegator {
         data: BytesWrapper,
     ) -> Result<(), WorkerError> {
         let len = data.len();
-        let _permit = self
-            .inner
-            .io_scheduler
-            .acquire(IoType::APPEND, len)
-            .instrument_await("io scheduler append waiting...")
-            .await?;
+        let permit = self.get_permit(IoType::APPEND, len).await?;
+
         let timer = LOCALFILE_DISK_DIRECT_APPEND_OPERATION_DURATION
             .with_label_values(&[&self.inner.root])
             .start_timer();
@@ -400,12 +416,8 @@ impl LocalIO for LocalDiskDelegator {
         offset: i64,
         length: i64,
     ) -> Result<Bytes, WorkerError> {
-        let _permit = self
-            .inner
-            .io_scheduler
-            .acquire(IoType::READ, 14 * 1024 * 1024)
-            .instrument_await("io scheduler read waiting...")
-            .await?;
+        let permit = self.get_permit(IoType::READ, 14 * 1024 * 1024).await?;
+
         let timer = LOCALFILE_DISK_DIRECT_READ_OPERATION_DURATION
             .with_label_values(&[&self.inner.root])
             .start_timer();
