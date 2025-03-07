@@ -326,6 +326,17 @@ impl LocalFileStore {
         Ok(())
     }
 
+    fn delete_all_files(dir: &Path) -> Result<()> {
+        let entries = fs::read_dir(dir)?;
+        for entry in entries {
+            let path = entry?.path();
+            if path.is_file() {
+                fs::remove_file(&path)?;
+            }
+        }
+        Ok(())
+    }
+
     // To detect the index consistency with data file len for debug.
     pub(crate) fn detect_index_inconsistency(
         data: &Bytes,
@@ -343,11 +354,13 @@ impl LocalFileStore {
                     let timestamp = util::now_timestamp_as_millis();
                     warn!("Attention: index indicated data len:{} != recorded data len:{}. root: {}. index path: {}. data path: {}. timestamp: {}",
                             index_indicated_data_len, data_file_len, root, &index_file_path, &data_file_path, timestamp);
-                    // cp the inconsistent data into the trash dir
                     let main_dir = Path::new("/tmp/riffle-detection");
                     if !main_dir.exists() {
                         fs::create_dir(main_dir)?;
                     }
+                    // clear the previous file.
+                    LocalFileStore::delete_all_files(main_dir)?;
+
                     let index_target_file_name = format!(
                         "{}/{}-{}",
                         &main_dir.to_string_lossy(),
@@ -365,10 +378,15 @@ impl LocalFileStore {
                         &Path::new(&format!("{}/{}", root, index_file_path)),
                         &Path::new(index_target_file_name.as_str()),
                     )?;
-                    fs::copy(
-                        &Path::new(&format!("{}/{}", root, data_file_path)),
-                        &Path::new(data_target_file_name.as_str()),
-                    )?;
+                    if data_file_len < 1024 * 1024 * 1024 {
+                        fs::copy(
+                            &Path::new(&format!("{}/{}", root, data_file_path)),
+                            &Path::new(data_target_file_name.as_str()),
+                        )?;
+                    } else {
+                        error!("Ignore copying data file due to the too large file. data_file_path: {}", &data_file_path);
+                    }
+
                     return Ok(false);
                 }
             }
