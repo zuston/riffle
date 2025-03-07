@@ -634,6 +634,14 @@ pub static TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND: Lazy<IntCounter> = Laz
     .expect("")
 });
 
+pub static TOTAL_DETECTED_LOCALFILE_IN_CONSISTENCY: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new(
+        "total_localfile_detected_in_consistency",
+        "total_localfile_detected_in_consistency",
+    )
+    .expect("")
+});
+
 // total timeout tickets
 pub static TOTAL_EVICT_TIMEOUT_TICKETS_NUM: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new(
@@ -984,6 +992,9 @@ fn register_custom_metrics() {
         .expect("");
     REGISTRY
         .register(Box::new(TOTAL_EVICT_TIMEOUT_TICKETS_NUM.clone()))
+        .expect("");
+    REGISTRY
+        .register(Box::new(TOTAL_DETECTED_LOCALFILE_IN_CONSISTENCY.clone()))
         .expect("");
 }
 

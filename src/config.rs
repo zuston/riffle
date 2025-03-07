@@ -16,6 +16,7 @@
 // under the License.
 
 use crate::block_id_manager::BlockIdManagerType;
+use crate::store::ResponseDataIndex::Local;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -128,6 +129,16 @@ pub struct LocalfileStoreConfig {
 
     #[serde(default = "as_default_io_duration_threshold_sec")]
     pub io_duration_threshold_sec: usize,
+
+    // default is false!
+    #[serde(default = "bool::default")]
+    pub index_consistency_detection_enable: bool,
+}
+
+impl Default for LocalfileStoreConfig {
+    fn default() -> Self {
+        LocalfileStoreConfig::new(Vec::new())
+    }
 }
 
 fn as_default_io_duration_threshold_sec() -> usize {
@@ -185,6 +196,7 @@ impl LocalfileStoreConfig {
             direct_io_read_enable: as_default_direct_io_read_enable(),
             direct_io_append_enable: as_default_direct_io_append_enable(),
             io_duration_threshold_sec: as_default_io_duration_threshold_sec(),
+            index_consistency_detection_enable: false,
         }
     }
 }
