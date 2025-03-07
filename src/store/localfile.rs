@@ -85,6 +85,8 @@ pub struct LocalFileStore {
     direct_io_enable: bool,
     direct_io_read_enable: bool,
     direct_io_append_enable: bool,
+
+    conf: LocalfileStoreConfig,
 }
 
 impl Persistent for LocalFileStore {}
@@ -109,6 +111,7 @@ impl LocalFileStore {
             direct_io_enable: config.direct_io_enable,
             direct_io_read_enable: config.direct_io_read_enable,
             direct_io_append_enable: config.direct_io_append_enable,
+            conf: Default::default(),
         }
     }
 
@@ -160,6 +163,7 @@ impl LocalFileStore {
             direct_io_enable: localfile_config.direct_io_enable,
             direct_io_read_enable: localfile_config.direct_io_read_enable,
             direct_io_append_enable: localfile_config.direct_io_append_enable,
+            conf: localfile_config.clone(),
         }
     }
 
@@ -506,7 +510,7 @@ impl Store for LocalFileStore {
             .await?;
 
         // Detect inconsistent data
-        if data.len() > INDEX_BLOCK_SIZE {
+        if self.conf.index_consistency_detection_enable && data.len() > INDEX_BLOCK_SIZE {
             if let Err(e) = LocalFileStore::detect_index_inconsistency(
                 &data,
                 len,
