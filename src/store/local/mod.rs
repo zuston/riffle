@@ -22,8 +22,10 @@ use async_trait::async_trait;
 use bytes::Bytes;
 
 pub mod delegator;
+pub mod index_codec;
 mod scheduler;
 pub mod sync_io;
+
 pub struct FileStat {
     pub content_length: u64,
 }
