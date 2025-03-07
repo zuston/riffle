@@ -329,7 +329,7 @@ impl LocalFileStore {
         root: &String,
         index_file_path: &String,
         data_file_path: &String,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let last_block_raw_bytes = data.slice(data.len() - INDEX_BLOCK_SIZE..);
         match IndexCodec::decode(last_block_raw_bytes) {
             Ok(index_block) => {
@@ -365,14 +365,16 @@ impl LocalFileStore {
                         &Path::new(&format!("{}/{}", root, data_file_path)),
                         &Path::new(data_target_file_name.as_str()),
                     )?;
+                    return Ok(false);
                 }
             }
             Err(err) => {
                 error!("Errors on decoding the raw block. {:?}", err);
+                return Ok(false);
             }
         }
 
-        Ok(())
+        Ok(true)
     }
 }
 
@@ -600,6 +602,8 @@ impl Store for LocalFileStore {
 
 #[cfg(test)]
 mod test {
+    use std::path::Path;
+
     use crate::app::{
         PartitionedUId, PurgeDataContext, PurgeReason, ReadingIndexViewContext, ReadingOptions,
         ReadingViewContext, WritingViewContext,
@@ -607,6 +611,7 @@ mod test {
     use crate::store::localfile::LocalFileStore;
 
     use crate::error::WorkerError;
+    use crate::store::local::index_codec::{IndexBlock, IndexCodec};
     use crate::store::local::LocalDiskStorage;
     use crate::store::{Block, ResponseData, ResponseDataIndex, Store};
     use bytes::{Buf, Bytes, BytesMut};
@@ -899,6 +904,57 @@ mod test {
 
     #[test]
     fn test_index_consistency() -> anyhow::Result<()> {
+        let temp_dir = tempdir::TempDir::new("test_index_consistency").unwrap();
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        info!("init local file path: {}", temp_path);
+
+        let raw_bytes = IndexCodec::encode(&IndexBlock {
+            offset: 0,
+            length: 10,
+            uncompress_length: 0,
+            crc: 0,
+            block_id: 0,
+            task_attempt_id: 0,
+        })?;
+        let data_file_len = 10;
+
+        // case1: legal pass
+        assert_eq!(
+            true,
+            LocalFileStore::detect_index_inconsistency(
+                &raw_bytes,
+                data_file_len,
+                &"/".to_owned(),
+                &"i.1".to_owned(),
+                &"d.1".to_owned()
+            )?
+        );
+
+        // case2: Illegal
+        let data_file_len = 9;
+        // create the index file in the dir of temp_path
+        let index_file_path = "app-1/patition-1.index";
+        let data_file_path = "app-1/partition-1.data";
+
+        let abs_index_file_path = format!("{}/{}", &temp_path, index_file_path);
+        let abs_data_file_path = format!("{}/{}", &temp_path, data_file_path);
+        // create the empty file for the abs_index_file_path. empty file
+        std::fs::create_dir_all(Path::new(&abs_index_file_path).parent().unwrap())?;
+        std::fs::create_dir_all(Path::new(&abs_data_file_path).parent().unwrap())?;
+        std::fs::write(&abs_index_file_path, &raw_bytes)?;
+        std::fs::write(&abs_data_file_path, &raw_bytes)?;
+
+        assert_eq!(
+            false,
+            LocalFileStore::detect_index_inconsistency(
+                &raw_bytes,
+                data_file_len,
+                &temp_path,
+                &index_file_path.to_owned(),
+                &data_file_path.to_owned()
+            )?
+        );
+
         Ok(())
     }
 }
