@@ -16,6 +16,7 @@ use crate::store::local::scheduler::{IoPermit, IoScheduler, IoType};
 use crate::store::local::sync_io::SyncLocalIO;
 use crate::store::local::{DiskStat, FileStat, LocalDiskStorage, LocalIO};
 use crate::store::BytesWrapper;
+use crate::util;
 use anyhow::Result;
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
@@ -78,12 +79,16 @@ impl LocalDiskDelegator {
         );
 
         let io_limiter = match config.io_limiter.as_ref() {
-            Some(conf) => Some(TokenBucketLimiter::new(
-                &runtime_manager,
-                conf.capacity,
-                conf.fill_rate_of_per_second,
-                Duration::from_millis(conf.refill_interval_of_milliseconds),
-            )),
+            Some(conf) => {
+                let capacity = util::parse_raw_to_bytesize(&conf.capacity) as usize;
+                let rate = util::parse_raw_to_bytesize(&conf.fill_rate_of_per_second) as usize;
+                Some(TokenBucketLimiter::new(
+                    &runtime_manager,
+                    capacity,
+                    rate,
+                    Duration::from_millis(conf.refill_interval_of_milliseconds),
+                ))
+            }
             _ => None,
         };
 
