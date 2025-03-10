@@ -81,12 +81,17 @@ impl LocalDiskDelegator {
             Some(conf) => {
                 let capacity = util::parse_raw_to_bytesize(&conf.capacity) as usize;
                 let rate = util::parse_raw_to_bytesize(&conf.fill_rate_of_per_second) as usize;
-                Some(TokenBucketLimiter::new(
+                let v = Some(TokenBucketLimiter::new(
                     &runtime_manager,
                     capacity,
                     rate,
                     Duration::from_millis(conf.refill_interval_of_milliseconds),
-                ))
+                ));
+                info!(
+                    "TokenBucket limiter has been initialized for root[{}]",
+                    root
+                );
+                v
             }
             _ => None,
         };
