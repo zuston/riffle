@@ -24,7 +24,6 @@ use bytes::Bytes;
 pub mod delegator;
 pub mod index_codec;
 mod limiter;
-mod scheduler;
 pub mod sync_io;
 
 pub struct FileStat {

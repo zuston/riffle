@@ -12,7 +12,6 @@ use crate::metric::{
 use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::local::limiter::TokenBucketLimiter;
-use crate::store::local::scheduler::{IoPermit, IoScheduler, IoType};
 use crate::store::local::sync_io::SyncLocalIO;
 use crate::store::local::{DiskStat, FileStat, LocalDiskStorage, LocalIO};
 use crate::store::BytesWrapper;
