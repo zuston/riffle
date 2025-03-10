@@ -125,7 +125,10 @@ impl LocalDiskDelegator {
 
     pub async fn get_permit(&self, len: usize) -> Result<()> {
         if let Some(limiter) = self.inner.io_limiter.as_ref() {
-            limiter.acquire(len);
+            limiter
+                .acquire(len)
+                .instrument_await(format!("getting io limiter's permit. {}", len))
+                .await;
         }
         Ok(())
     }
