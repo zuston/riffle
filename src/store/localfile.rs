@@ -188,7 +188,7 @@ impl LocalFileStore {
     }
 
     fn gen_relative_path_for_shuffle(app_id: &str, shuffle_id: i32) -> String {
-        format!("{}/{}", app_id, shuffle_id)
+        format!("{}/{}/", app_id, shuffle_id)
     }
 
     fn gen_relative_path_for_partition(uid: &PartitionedUId) -> (String, String) {
