@@ -48,6 +48,7 @@ impl TokenBucketLimiter {
         limiter
     }
 
+    // todo: if the acquire amount > capacity, this will hang!
     // blocking acquire
     pub async fn acquire(&self, amount: usize) {
         let mut inner = self
