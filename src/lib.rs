@@ -54,6 +54,7 @@ pub mod id_layout;
 pub mod lazy_initializer;
 
 pub mod disk_explorer;
+pub mod historical_apps;
 
 use crate::app::{AppManager, AppManagerRef};
 use crate::common::init_global_variable;

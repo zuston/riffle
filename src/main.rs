@@ -88,6 +88,8 @@ pub mod util;
 
 pub mod disk_explorer;
 
+pub mod historical_apps;
+
 const MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY: &str = "MAX_MEMORY_ALLOCATION_LIMIT_SIZE";
 
 #[derive(Parser, Debug)]

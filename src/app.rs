@@ -49,6 +49,7 @@ use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::block_id_manager::{get_block_id_manager, BlockIdManager};
 use crate::constant::ALL_LABEL;
 use crate::grpc::protobuf::uniffle::{BlockIdLayout, RemoteStorage};
+use crate::historical_apps::HistoricalAppStatistics;
 use crate::id_layout::IdLayout;
 use crate::storage::HybridStorage;
 use crate::store::local::LocalfileStoreStat;
@@ -501,6 +502,19 @@ impl App {
         Ok(())
     }
 
+    pub async fn dump_all_huge_partitions_size(&self) -> Result<Vec<u64>> {
+        let mut records = vec![];
+        let view = self.partition_meta_infos.clone().into_read_only();
+        for entry in view.iter() {
+            let val = entry.1;
+            if val.is_huge_partition() {
+                let size = val.get_size()?;
+                records.push(size);
+            }
+        }
+        Ok(records)
+    }
+
     pub async fn purge(&self, reason: &PurgeReason) -> Result<()> {
         let (app_id, shuffle_id) = reason.extract();
         let removed_size = self.store.purge(&PurgeDataContext::new(reason)).await?;
@@ -741,12 +755,21 @@ pub struct AppManager {
     app_heartbeat_timeout_min: u32,
     config: Config,
     runtime_manager: RuntimeManager,
+    historical_app_statistics: Option<HistoricalAppStatistics>,
 }
 
 impl AppManager {
     fn new(runtime_manager: RuntimeManager, config: Config, storage: &HybridStorage) -> Self {
         let (sender, receiver) = async_channel::unbounded();
         let app_heartbeat_timeout_min = config.app_config.app_heartbeat_timeout_min;
+
+        let historical_app_statistics: Option<HistoricalAppStatistics> =
+            if config.app_config.historical_apps_record_enable {
+                Some(HistoricalAppStatistics::new(&runtime_manager, 24 * 60 * 60))
+            } else {
+                None
+            };
+
         let manager = AppManager {
             apps: DashMap::new(),
             receiver,
@@ -755,6 +778,7 @@ impl AppManager {
             app_heartbeat_timeout_min,
             config,
             runtime_manager: runtime_manager.clone(),
+            historical_app_statistics,
         };
         manager
     }
@@ -864,6 +888,10 @@ impl AppManager {
         app_ref
     }
 
+    pub fn get_historical_statistics(&self) -> Option<&HistoricalAppStatistics> {
+        self.historical_app_statistics.as_ref()
+    }
+
     pub fn app_is_exist(&self, app_id: &str) -> bool {
         self.apps.contains_key(app_id)
     }
@@ -904,6 +932,11 @@ impl AppManager {
                 app_id.as_str(),
                 format!("{:?}", StorageType::HDFS).as_str(),
             ]);
+
+            // record into the historical app list
+            if let Some(historical_manager) = self.historical_app_statistics.as_ref() {
+                historical_manager.save(&app).await?;
+            }
         }
         app.purge(reason).await?;
         Ok(())

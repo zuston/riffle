@@ -417,6 +417,9 @@ pub struct AppConfig {
 
     #[serde(default = "as_default_block_id_manager_type")]
     pub block_id_manager_type: BlockIdManagerType,
+
+    #[serde(default = "bool::default")]
+    pub historical_apps_record_enable: bool,
 }
 
 fn as_default_block_id_manager_type() -> BlockIdManagerType {
@@ -429,6 +432,7 @@ fn as_default_app_config() -> AppConfig {
         huge_partition_marked_threshold: None,
         huge_partition_memory_limit_percent: None,
         block_id_manager_type: as_default_block_id_manager_type(),
+        historical_apps_record_enable: false,
     }
 }
 
