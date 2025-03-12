@@ -20,7 +20,9 @@ pub struct HealthService {
     alive_app_number_limit: Option<usize>,
     disk_used_ratio_health_threshold: Option<f64>,
     memory_allocated_threshold: Option<u64>,
-    long_term_memory_used_size_without_change_threshold_seconds: Option<usize>,
+
+    service_hang_of_mem_continuous_unchange_sec: Option<usize>,
+    service_hang_of_app_valid_number: Option<usize>,
 
     health_stat: Arc<HealthStat>,
 }
@@ -86,8 +88,9 @@ impl HealthService {
             alive_app_number_limit: conf.alive_app_number_max_limit,
             disk_used_ratio_health_threshold: conf.disk_used_ratio_health_threshold,
             memory_allocated_threshold,
-            long_term_memory_used_size_without_change_threshold_seconds: conf
-                .service_mem_used_without_change_time_window_sec,
+            service_hang_of_mem_continuous_unchange_sec: conf
+                .service_hang_of_mem_continuous_unchange_sec,
+            service_hang_of_app_valid_number: conf.service_hang_of_app_valid_number,
             health_stat: Arc::new(Default::default()),
         }
     }
@@ -154,17 +157,25 @@ impl HealthService {
 
         // Once the size of memory used is always not changed in 5min, mark it unhealthy.
         // Because the server may be hang due to unknown causes
+        // 1. exclude the value always 0
+        // 2. ignore when app number is 0
         let used = self.app_manager_ref.store_memory_snapshot().await?.used();
+        let running_app_num = self.app_manager_ref.get_alive_app_number();
         let mut mem_stat = self.health_stat.memory_used_size_stat.lock();
         if mem_stat.is_marked_unhealthy {
             return Ok(false);
         }
         let now = util::now_timestamp_as_millis();
 
-        if used == mem_stat.prev_val && used != 0 {
+        // todo: ugly running_app_num threshold!
+        // to solve potential decommission list being marked as unhealthy
+        if used == mem_stat.prev_val
+            && used != 0
+            && running_app_num >= self.service_hang_of_app_valid_number.unwrap_or(50)
+        {
             if now - mem_stat.prev_timestamp
                 > self
-                    .long_term_memory_used_size_without_change_threshold_seconds
+                    .service_hang_of_mem_continuous_unchange_sec
                     .unwrap_or(5 * 60 * 1000) as u128
             {
                 mem_stat.is_marked_unhealthy = true;
@@ -194,7 +205,11 @@ mod tests {
         let mut config = mock_config();
         config
             .health_service_config
-            .service_mem_used_without_change_time_window_sec = Some(1);
+            .service_hang_of_mem_continuous_unchange_sec = Some(1);
+        // to bypass running app number check
+        config
+            .health_service_config
+            .service_hang_of_app_valid_number = Some(0);
         let config = config;
 
         let runtime_manager: RuntimeManager = Default::default();
