@@ -17,6 +17,7 @@
 
 mod apps;
 mod await_tree;
+mod historical_apps;
 mod http_service;
 mod jeprof;
 mod metrics;
