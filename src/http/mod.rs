@@ -33,6 +33,7 @@ use crate::runtime::manager::RuntimeManager;
 
 use crate::app::AppManagerRef;
 use crate::http::apps::{ApplicationsJsonHandler, ApplicationsTableHandler};
+use crate::http::historical_apps::HistoricalAppsHandler;
 use log::info;
 use poem::RouteMethod;
 
@@ -69,6 +70,7 @@ fn new_server() -> Box<PoemHTTPServer> {
     server.register_handler(HeapProfFlameGraphHandler::default());
     server.register_handler(ApplicationsTableHandler::default());
     server.register_handler(ApplicationsJsonHandler::default());
+    server.register_handler(HistoricalAppsHandler::default());
 
     Box::new(server)
 }
