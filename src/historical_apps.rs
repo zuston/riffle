@@ -42,12 +42,10 @@ impl HistoricalAppStatistics {
         let s_c = statistics.clone();
         rtm.default_runtime
             .spawn_with_await_tree("Historical app statistics", async move {
+                let interval = 300;
                 loop {
-                    tokio::time::sleep(Duration::from_secs(60 * 5))
-                        .instrument_await(format!(
-                            "sleeping for {} sec...",
-                            window_duration_seconds
-                        ))
+                    tokio::time::sleep(Duration::from_secs(interval))
+                        .instrument_await(format!("sleeping for {} sec...", interval))
                         .await;
 
                     let start = Instant::now();
@@ -102,6 +100,11 @@ impl HistoricalAppStatistics {
         let partition_num = app.partition_number();
         let huge_partition_num = app.huge_partition_number() as usize;
 
+        // Only reserved for those huge partitions apps.
+        if huge_partition_num <= 0 {
+            return Ok(());
+        }
+
         let huge_partition_size_list = app.dump_all_huge_partitions_size().await?;
 
         let mut max_size = 0u64;
@@ -117,7 +120,11 @@ impl HistoricalAppStatistics {
             }
             total += huge_partition_size;
         }
-        let avg = total / huge_partition_size_list.len() as u64;
+        let avg = if huge_partition_size_list.is_empty() {
+            0
+        } else {
+            total / huge_partition_size_list.len() as u64
+        };
 
         let historical_app = HistoricalAppInfo {
             app_id: app_id.to_owned(),

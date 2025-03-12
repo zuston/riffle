@@ -765,6 +765,7 @@ impl AppManager {
 
         let historical_app_statistics: Option<HistoricalAppStatistics> =
             if config.app_config.historical_apps_record_enable {
+                info!("Historical apps recorder has been initialized.");
                 Some(HistoricalAppStatistics::new(&runtime_manager, 24 * 60 * 60))
             } else {
                 None
@@ -935,7 +936,14 @@ impl AppManager {
 
             // record into the historical app list
             if let Some(historical_manager) = self.historical_app_statistics.as_ref() {
-                historical_manager.save(&app).await?;
+                info!(
+                    "Saving timeout app into the historical list.. app_id: {}",
+                    app_id.as_str()
+                );
+                historical_manager
+                    .save(&app)
+                    .instrument_await("Saving to historical app list...")
+                    .await?;
             }
         }
         app.purge(reason).await?;
