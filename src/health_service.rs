@@ -154,14 +154,19 @@ impl HealthService {
 
         // Once the size of memory used is always not changed in 5min, mark it unhealthy.
         // Because the server may be hang due to unknown causes
+        // 1. exclude the value always 0
+        // 2. ignore when app number is 0
         let used = self.app_manager_ref.store_memory_snapshot().await?.used();
+        let running_app_num = self.app_manager_ref.get_alive_app_number();
         let mut mem_stat = self.health_stat.memory_used_size_stat.lock();
         if mem_stat.is_marked_unhealthy {
             return Ok(false);
         }
         let now = util::now_timestamp_as_millis();
 
-        if used == mem_stat.prev_val && used != 0 {
+        // todo: ugly running_app_num threshold!
+        // to solve potential decommission list being marked as unhealthy
+        if used == mem_stat.prev_val && used != 0 && running_app_num > 50 {
             if now - mem_stat.prev_timestamp
                 > self
                     .long_term_memory_used_size_without_change_threshold_seconds
