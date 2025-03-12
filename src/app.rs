@@ -158,6 +158,10 @@ pub struct App {
 
     // key: (shuffle_id, partition_id)
     partition_meta_infos: DashMap<(i32, i32), PartitionedMeta>,
+
+    // partition split
+    partition_split_enable: bool,
+    partition_split_threshold: u64,
 }
 
 #[derive(Clone)]
@@ -265,6 +269,10 @@ impl App {
             huge_partition_number: Default::default(),
             registry_timestamp: now_timestamp_as_millis(),
             block_id_manager,
+            partition_split_enable: config.app_config.partition_split_enable,
+            partition_split_threshold: util::parse_raw_to_bytesize(
+                &config.app_config.partition_split_threshold,
+            ),
         }
     }
 
@@ -451,11 +459,27 @@ impl App {
 
         let app_id = &ctx.uid.app_id;
         let shuffle_id = &ctx.uid.shuffle_id;
+
+        let mut partitionSplitCandidates = HashSet::new();
         for partition_id in &ctx.partition_ids {
             let puid = PartitionedUId::from(app_id.to_owned(), *shuffle_id, *partition_id);
-            if self.is_backpressure_of_partition(&puid).await? {
-                TOTAL_REQUIRE_BUFFER_FAILED.inc();
-                return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
+            let mut split_hit = false;
+
+            // partition split
+            if self.partition_split_enable {
+                let psize = self.get_partition_meta(&puid).get_size()?;
+                if psize > self.partition_split_threshold {
+                    partitionSplitCandidates.insert(partition_id);
+                    split_hit = true;
+                }
+            }
+
+            if !split_hit {
+                // huge partition limitation
+                if self.is_backpressure_of_partition(&puid).await? {
+                    TOTAL_REQUIRE_BUFFER_FAILED.inc();
+                    return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
+                }
             }
         }
 

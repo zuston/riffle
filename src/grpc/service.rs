@@ -735,6 +735,7 @@ impl ShuffleServer for DefaultShuffleServer {
                 require_buffer_id: 0,
                 status: StatusCode::NO_REGISTER.into(),
                 ret_msg: "No such app in this shuffle server".to_string(),
+                need_split_partition_ids: vec![],
             }));
         }
 
@@ -777,6 +778,7 @@ impl ShuffleServer for DefaultShuffleServer {
             require_buffer_id: res.1,
             status: res.0.into(),
             ret_msg: res.2,
+            need_split_partition_ids: vec![],
         }))
     }
 
