@@ -469,7 +469,7 @@ impl App {
             if self.partition_split_enable {
                 let psize = self.get_partition_meta(&puid).get_size()?;
                 if psize > self.partition_split_threshold {
-                    partitionSplitCandidates.insert(partition_id);
+                    partitionSplitCandidates.insert(*partition_id);
                     split_hit = true;
                 }
             }
@@ -483,10 +483,19 @@ impl App {
             }
         }
 
-        self.store.require_buffer(ctx).await.map_err(|err| {
+        if !partitionSplitCandidates.is_empty() {
+            warn!(
+                "Partition split for app_id:{}. shuffle_id:{}. partitions: {:?}",
+                &app_id, shuffle_id, &partitionSplitCandidates
+            );
+        }
+
+        let mut required = self.store.require_buffer(ctx).await.map_err(|err| {
             TOTAL_REQUIRE_BUFFER_FAILED.inc();
             err
-        })
+        })?;
+        required.split_partitions = partitionSplitCandidates.iter().map(|data| *data).collect();
+        Ok(required)
     }
 
     pub async fn release_ticket(&self, ticket_id: i64) -> Result<i64, WorkerError> {
