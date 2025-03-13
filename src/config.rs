@@ -409,7 +409,7 @@ fn as_default_grpc_port() -> i32 {
 
 // ===========
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
     #[serde(default = "as_default_app_heartbeat_timeout_min")]
     pub app_heartbeat_timeout_min: u32,
@@ -428,6 +428,12 @@ pub struct AppConfig {
 
     #[serde(default = "as_default_partition_split_threshold")]
     pub partition_split_threshold: String,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        as_default_app_config()
+    }
 }
 
 fn as_default_partition_split_threshold() -> String {
