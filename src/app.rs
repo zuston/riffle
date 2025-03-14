@@ -193,11 +193,11 @@ impl PartitionedMeta {
             return Ok(true);
         }
 
-        if (threshold > meta.total_size) {
+        if (meta.total_size > threshold) {
             meta.is_split = true;
             warn!(
-                "Split partition for app:{}. shuffle_id:{}. partition_id:{}",
-                uid.app_id, uid.shuffle_id, uid.partition_id
+                "Split partition(actual/threshold: {}/{}) for app:{}. shuffle_id:{}. partition_id:{}",
+                meta.total_size, threshold, uid.app_id, uid.shuffle_id, uid.partition_id
             );
             return Ok(true);
         }
