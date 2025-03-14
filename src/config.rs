@@ -409,7 +409,7 @@ fn as_default_grpc_port() -> i32 {
 
 // ===========
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
     #[serde(default = "as_default_app_heartbeat_timeout_min")]
     pub app_heartbeat_timeout_min: u32,
@@ -422,6 +422,22 @@ pub struct AppConfig {
 
     #[serde(default = "bool::default")]
     pub historical_apps_record_enable: bool,
+
+    #[serde(default = "bool::default")]
+    pub partition_split_enable: bool,
+
+    #[serde(default = "as_default_partition_split_threshold")]
+    pub partition_split_threshold: String,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        as_default_app_config()
+    }
+}
+
+fn as_default_partition_split_threshold() -> String {
+    "40G".to_owned()
 }
 
 fn as_default_block_id_manager_type() -> BlockIdManagerType {
@@ -435,6 +451,8 @@ fn as_default_app_config() -> AppConfig {
         huge_partition_memory_limit_percent: None,
         block_id_manager_type: as_default_block_id_manager_type(),
         historical_apps_record_enable: false,
+        partition_split_enable: false,
+        partition_split_threshold: as_default_partition_split_threshold(),
     }
 }
 

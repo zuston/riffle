@@ -158,6 +158,10 @@ pub struct App {
 
     // key: (shuffle_id, partition_id)
     partition_meta_infos: DashMap<(i32, i32), PartitionedMeta>,
+
+    // partition split
+    partition_split_enable: bool,
+    partition_split_threshold: u64,
 }
 
 #[derive(Clone)]
@@ -168,6 +172,8 @@ struct PartitionedMeta {
 struct PartitionedMetaInner {
     total_size: u64,
     is_huge_partition: bool,
+
+    is_split: bool,
 }
 
 impl PartitionedMeta {
@@ -176,8 +182,27 @@ impl PartitionedMeta {
             inner: Arc::new(RwLock::new(PartitionedMetaInner {
                 total_size: 0,
                 is_huge_partition: false,
+                is_split: false,
             })),
         }
+    }
+
+    fn is_split(&self, uid: &PartitionedUId, threshold: u64) -> Result<bool> {
+        let mut meta = self.inner.write();
+        if meta.is_split {
+            return Ok(true);
+        }
+
+        if (meta.total_size > threshold) {
+            meta.is_split = true;
+            warn!(
+                "Split partition(actual/threshold: {}/{}) for app:{}. shuffle_id:{}. partition_id:{}",
+                meta.total_size, threshold, uid.app_id, uid.shuffle_id, uid.partition_id
+            );
+            return Ok(true);
+        }
+
+        Ok(false)
     }
 
     fn get_size(&self) -> Result<u64> {
@@ -265,6 +290,10 @@ impl App {
             huge_partition_number: Default::default(),
             registry_timestamp: now_timestamp_as_millis(),
             block_id_manager,
+            partition_split_enable: config.app_config.partition_split_enable,
+            partition_split_threshold: util::parse_raw_to_bytesize(
+                &config.app_config.partition_split_threshold,
+            ),
         }
     }
 
@@ -451,18 +480,37 @@ impl App {
 
         let app_id = &ctx.uid.app_id;
         let shuffle_id = &ctx.uid.shuffle_id;
+
+        let mut partitionSplitCandidates = HashSet::new();
         for partition_id in &ctx.partition_ids {
             let puid = PartitionedUId::from(app_id.to_owned(), *shuffle_id, *partition_id);
-            if self.is_backpressure_of_partition(&puid).await? {
-                TOTAL_REQUIRE_BUFFER_FAILED.inc();
-                return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
+            let mut split_hit = false;
+
+            // partition split
+            if self.partition_split_enable
+                && self
+                    .get_partition_meta(&puid)
+                    .is_split(&puid, self.partition_split_threshold)?
+            {
+                partitionSplitCandidates.insert(*partition_id);
+                split_hit = true;
+            }
+
+            if !split_hit {
+                // huge partition limitation
+                if self.is_backpressure_of_partition(&puid).await? {
+                    TOTAL_REQUIRE_BUFFER_FAILED.inc();
+                    return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
+                }
             }
         }
 
-        self.store.require_buffer(ctx).await.map_err(|err| {
+        let mut required = self.store.require_buffer(ctx).await.map_err(|err| {
             TOTAL_REQUIRE_BUFFER_FAILED.inc();
             err
-        })
+        })?;
+        required.split_partitions = partitionSplitCandidates.iter().map(|data| *data).collect();
+        Ok(required)
     }
 
     pub async fn release_ticket(&self, ticket_id: i64) -> Result<i64, WorkerError> {

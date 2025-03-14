@@ -58,6 +58,7 @@ message RequireBufferResponse {
   int64 requireBufferId = 1;
   StatusCode status = 2;
   string retMsg = 3;
+  repeated int32 needSplitPartitionIds = 4;
 }
 
 message ShuffleDataBlockSegment {

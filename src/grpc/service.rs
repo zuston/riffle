@@ -735,6 +735,7 @@ impl ShuffleServer for DefaultShuffleServer {
                 require_buffer_id: 0,
                 status: StatusCode::NO_REGISTER.into(),
                 ret_msg: "No such app in this shuffle server".to_string(),
+                need_split_partition_ids: vec![],
             }));
         }
 
@@ -762,13 +763,15 @@ impl ShuffleServer for DefaultShuffleServer {
                 StatusCode::SUCCESS,
                 required_buffer_res.ticket_id,
                 "".to_string(),
+                required_buffer_res.split_partitions,
             ),
             Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION) => (
                 StatusCode::NO_BUFFER_FOR_HUGE_PARTITION,
                 -1i64,
                 "".to_string(),
+                vec![],
             ),
-            Err(err) => (StatusCode::NO_BUFFER, -1i64, format!("{:?}", err)),
+            Err(err) => (StatusCode::NO_BUFFER, -1i64, format!("{:?}", err), vec![]),
         };
 
         timer.observe_duration();
@@ -777,6 +780,7 @@ impl ShuffleServer for DefaultShuffleServer {
             require_buffer_id: res.1,
             status: res.0.into(),
             ret_msg: res.2,
+            need_split_partition_ids: res.3,
         }))
     }
 
