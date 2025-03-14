@@ -188,7 +188,7 @@ impl PartitionedMeta {
     }
 
     fn is_split(&self, uid: &PartitionedUId, threshold: u64) -> Result<bool> {
-        let meta = self.inner.read();
+        let mut meta = self.inner.write();
         if meta.is_split {
             return Ok(true);
         }
