@@ -172,6 +172,8 @@ struct PartitionedMeta {
 struct PartitionedMetaInner {
     total_size: u64,
     is_huge_partition: bool,
+
+    is_split: bool,
 }
 
 impl PartitionedMeta {
@@ -180,8 +182,27 @@ impl PartitionedMeta {
             inner: Arc::new(RwLock::new(PartitionedMetaInner {
                 total_size: 0,
                 is_huge_partition: false,
+                is_split: false,
             })),
         }
+    }
+
+    fn is_split(&self, uid: &PartitionedUId, threshold: u64) -> Result<bool> {
+        let meta = self.inner.read();
+        if meta.is_split {
+            return Ok(true);
+        }
+
+        if (threshold > meta.total_size) {
+            meta.is_split = true;
+            warn!(
+                "Split partition for app:{}. shuffle_id:{}. partition_id:{}",
+                uid.app_id, uid.shuffle_id, uid.partition_id
+            );
+            return Ok(true);
+        }
+
+        Ok(false)
     }
 
     fn get_size(&self) -> Result<u64> {
@@ -466,12 +487,13 @@ impl App {
             let mut split_hit = false;
 
             // partition split
-            if self.partition_split_enable {
-                let psize = self.get_partition_meta(&puid).get_size()?;
-                if psize > self.partition_split_threshold {
-                    partitionSplitCandidates.insert(*partition_id);
-                    split_hit = true;
-                }
+            if self.partition_split_enable
+                && self
+                    .get_partition_meta(&puid)
+                    .is_split(&puid, self.partition_split_threshold)?
+            {
+                partitionSplitCandidates.insert(*partition_id);
+                split_hit = true;
             }
 
             if !split_hit {
@@ -481,13 +503,6 @@ impl App {
                     return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
                 }
             }
-        }
-
-        if !partitionSplitCandidates.is_empty() {
-            warn!(
-                "Partition split for app_id:{}. shuffle_id:{}. partitions: {:?}",
-                &app_id, shuffle_id, &partitionSplitCandidates
-            );
         }
 
         let mut required = self.store.require_buffer(ctx).await.map_err(|err| {
