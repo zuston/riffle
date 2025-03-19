@@ -25,7 +25,7 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: riffle-server-linux-anolisos8-arm64-${{ github.ref_name }}
+          name: riffle-server-linux-arm64-anolisos8-${{ github.ref_name }}
           path: target-docker/release/riffle-server
 
       - name: Upload binaries to release
@@ -34,7 +34,7 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: target-docker/release/riffle-server
-          asset_name: riffle-server-linux-anolisos8-arm64-${{ github.ref_name }}
+          asset_name: riffle-server-linux-arm64-anolisos8-${{ github.ref_name }}
           tag: ${{ github.ref }}
 
   linux-amd64-centos7:
