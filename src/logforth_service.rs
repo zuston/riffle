@@ -3,7 +3,7 @@ use logforth::append::rolling_file::{RollingFileWriter, Rotation};
 use logforth::append::{rolling_file, RollingFile};
 use logforth::non_blocking::WorkerGuard;
 
-const LOG_FILE_NAME: &str = "uniffle-worker";
+const LOG_FILE_NAME: &str = "riffle-server";
 
 pub struct LogService;
 impl LogService {

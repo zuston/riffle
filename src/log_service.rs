@@ -5,7 +5,7 @@ use tracing_subscriber::{fmt, EnvFilter, Registry};
 
 use crate::config::{LogConfig, RotationConfig};
 
-const LOG_FILE_NAME: &str = "uniffle-worker.log";
+const LOG_FILE_NAME: &str = "riffle-server.log";
 
 pub struct LogService;
 impl LogService {
