@@ -26,7 +26,7 @@ debug = 1
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[bin]]
-name = "uniffle-worker"
+name = "riffle-server"
 path = "src/main.rs"
 
 [[bin]]

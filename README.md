@@ -59,7 +59,7 @@ http_thread_num = 10
 default_thread_num = 20
 dispatch_thread_num = 10
 ```
-`GRPC_PARALLELISM=100 WORKER_IP=10.0.0.1 RUST_LOG=info ./uniffle-worker`
+`GRPC_PARALLELISM=100 WORKER_IP=10.0.0.1 RUST_LOG=info ./riffle-server`
 
 #### TeraSort Result
 
@@ -95,7 +95,7 @@ to restore the default behavior. However, before submit your pr, you should fix 
 
 ## Run
 
-`WORKER_IP={ip} RUST_LOG=info WORKER_CONFIG_PATH=./config.toml ./uniffle-worker`
+`WORKER_IP={ip} RUST_LOG=info WORKER_CONFIG_PATH=./config.toml ./riffle-server`
 
 ### HDFS Setup
 
@@ -108,7 +108,7 @@ cargo build --features hdfs --release
 
 ```shell
 # configure the kerberos
-KRB5_CONFIG=/etc/krb5.conf KRB5CCNAME=/tmp/krb5cc_2002 LOG=info ./uniffle-worker
+KRB5_CONFIG=/etc/krb5.conf KRB5CCNAME=/tmp/krb5cc_2002 LOG=info ./riffle-server
 ```
 
 
