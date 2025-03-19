@@ -87,6 +87,7 @@ pub mod tracing;
 pub mod urpc;
 pub mod util;
 
+pub mod deadlock;
 pub mod disk_explorer;
 
 pub mod historical_apps;
