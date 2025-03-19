@@ -127,6 +127,7 @@ libc = "0.2.169"
 allocator-api2 = "0.2"
 bytesize = { version = "1.2.0", features = ["serde"] }
 cc = "1.2.13"
+backtrace = "0.3.48"
 
 [dependencies.logforth]
 version = "0.19.1"
