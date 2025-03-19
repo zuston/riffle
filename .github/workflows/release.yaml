@@ -28,6 +28,15 @@ jobs:
           name: riffle-server-linux-anolisos8-arm64-${{ github.ref_name }}
           path: target-docker/release/riffle-server
 
+      - name: Upload binaries to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: target-docker/release/riffle-server
+          asset_name: riffle-server-linux-anolisos8-arm64-${{ github.ref_name }}
+          tag: ${{ github.ref }}
+
   linux-amd64-centos7:
     name: amd64-centos7
     runs-on: ubuntu-22.04
@@ -56,6 +65,15 @@ jobs:
           name: riffle-server-linux-amd64-centos7-${{ github.ref_name }}
           path: target-docker/release/riffle-server
 
+      - name: Upload binaries to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: target-docker/release/riffle-server
+          asset_name: riffle-server-linux-amd64-centos7-${{ github.ref_name }}
+          tag: ${{ github.ref }}
+
   linux-amd64-anolisos8:
     name: amd64-anolisos8
     runs-on: ubuntu-22.04
@@ -83,3 +101,12 @@ jobs:
         with:
           name: riffle-server-linux-amd64-anolisos8-${{ github.ref_name }}
           path: target-docker/release/riffle-server
+
+      - name: Upload binaries to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: target-docker/release/riffle-server
+          asset_name: riffle-server-linux-amd64-anolisos8-${{ github.ref_name }}
+          tag: ${{ github.ref }}
