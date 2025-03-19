@@ -18,7 +18,9 @@ pub fn set_panic_hook() {
         let backtrace = format!("{backtrace:?}");
         if let Some(location) = panic.location() {
             error!(
-                "[Panic] message: {}. backtrace: {}. file: {}. line: {}. column: {}",
+                "[Panic] ============================================================\
+                \nmessage: {}\n backtrace: {}\n file: {}. line: {}. column: {}\n\
+                ====================================================================",
                 panic,
                 backtrace,
                 location.file(),
@@ -26,7 +28,12 @@ pub fn set_panic_hook() {
                 location.column()
             );
         } else {
-            error!("[Panic] message: {}. backtrace: {}.", panic, backtrace);
+            error!(
+                "[Panic] ============================================================\
+                \nmessage: {}\n backtrace: {}\n\
+                ====================================================================",
+                panic, backtrace,
+            );
         }
 
         PANIC_TAG.store(true, SeqCst);
