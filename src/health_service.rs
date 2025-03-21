@@ -1,5 +1,6 @@
 use crate::app::AppManagerRef;
 use crate::config::HealthServiceConfig;
+use crate::deadlock::DEADLOCK_TAG;
 use crate::mem_allocator::ALLOCATOR;
 use crate::panic_hook::PANIC_TAG;
 use crate::storage::HybridStorage;
@@ -97,6 +98,10 @@ impl HealthService {
     }
 
     pub async fn is_healthy(&self) -> Result<bool> {
+        if (DEADLOCK_TAG.load(SeqCst)) {
+            return Ok(false);
+        }
+
         // Sometimes, panic only happen in the internal background
         // thread pool, it's necessary to mark service unhealthy.
         if (PANIC_TAG.load(SeqCst)) {
@@ -202,13 +207,17 @@ impl HealthService {
 mod tests {
     use crate::app::test::mock_config;
     use crate::app::AppManager;
+    use crate::deadlock::DEADLOCK_TAG;
     use crate::health_service::HealthService;
     use crate::runtime::manager::RuntimeManager;
     use crate::storage::StorageService;
+    use std::sync::atomic::Ordering::SeqCst;
     use std::time::Duration;
 
     #[tokio::test]
     async fn test_stable_memory_used() -> anyhow::Result<()> {
+        DEADLOCK_TAG.store(false, SeqCst);
+
         let mut config = mock_config();
         config
             .health_service_config

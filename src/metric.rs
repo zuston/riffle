@@ -368,6 +368,10 @@ pub static PURGE_FAILED_COUNTER: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new("purge_failed_count", "purge_failed_count").expect("metric should be created")
 });
 
+pub static DEADLOCK_SIGNAL: Lazy<IntGauge> = Lazy::new(|| {
+    IntGauge::new("deadlock_signal", "deadlock_signal").expect("metric should be created")
+});
+
 pub static PANIC_SIGNAL: Lazy<IntGauge> =
     Lazy::new(|| IntGauge::new("panic_signal", "panic_signal").expect("metric should be created"));
 
@@ -729,6 +733,10 @@ pub static IO_SCHEDULER_APPEND_WAIT: Lazy<IntGaugeVec> =
     Lazy::new(|| register_int_gauge_vec!("append_wait", "append_wait", &["root"]).unwrap());
 
 fn register_custom_metrics() {
+    REGISTRY
+        .register(Box::new(DEADLOCK_SIGNAL.clone()))
+        .expect("deadlock_signal must be registered");
+
     REGISTRY
         .register(Box::new(PANIC_SIGNAL.clone()))
         .expect("panic_signal must be registered");
