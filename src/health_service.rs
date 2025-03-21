@@ -207,13 +207,17 @@ impl HealthService {
 mod tests {
     use crate::app::test::mock_config;
     use crate::app::AppManager;
+    use crate::deadlock::DEADLOCK_TAG;
     use crate::health_service::HealthService;
     use crate::runtime::manager::RuntimeManager;
     use crate::storage::StorageService;
+    use std::sync::atomic::Ordering::SeqCst;
     use std::time::Duration;
 
     #[tokio::test]
     async fn test_stable_memory_used() -> anyhow::Result<()> {
+        DEADLOCK_TAG.store(false, SeqCst);
+
         let mut config = mock_config();
         config
             .health_service_config
