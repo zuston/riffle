@@ -3250,6 +3250,7 @@ dependencies = [
  "async-trait",
  "await-tree",
  "awaitility",
+ "backtrace",
  "bytes 1.8.0",
  "bytesize",
  "cap",

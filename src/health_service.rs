@@ -1,6 +1,7 @@
 use crate::app::AppManagerRef;
 use crate::config::HealthServiceConfig;
 use crate::mem_allocator::ALLOCATOR;
+use crate::panic_hook::PANIC_TAG;
 use crate::storage::HybridStorage;
 use crate::util;
 use anyhow::Result;
@@ -96,6 +97,12 @@ impl HealthService {
     }
 
     pub async fn is_healthy(&self) -> Result<bool> {
+        // Sometimes, panic only happen in the internal background
+        // thread pool, it's necessary to mark service unhealthy.
+        if (PANIC_TAG.load(SeqCst)) {
+            return Ok(false);
+        }
+
         if let Some(disk_used_ratio_health_threshold) = self.disk_used_ratio_health_threshold {
             let localfile_stat = self
                 .app_manager_ref

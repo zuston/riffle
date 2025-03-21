@@ -32,6 +32,7 @@ use crate::logforth_service::LogService;
 
 use crate::mem_allocator::ALLOCATOR;
 use crate::metric::MetricService;
+use crate::panic_hook::set_panic_hook;
 use crate::readable_size::ReadableSize;
 use crate::rpc::DefaultRpcService;
 use crate::runtime::manager::RuntimeManager;
@@ -90,6 +91,8 @@ pub mod disk_explorer;
 
 pub mod historical_apps;
 
+pub mod panic_hook;
+
 const MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY: &str = "MAX_MEMORY_ALLOCATION_LIMIT_SIZE";
 
 #[derive(Parser, Debug)]
@@ -115,6 +118,9 @@ fn main() -> Result<()> {
         "Riffle is built on the git commit hash: {}",
         env!("GIT_COMMIT_HASH")
     );
+
+    // Set the system hook
+    set_panic_hook();
 
     init_global_variable(&config);
 

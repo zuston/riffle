@@ -55,6 +55,7 @@ pub mod lazy_initializer;
 
 pub mod disk_explorer;
 pub mod historical_apps;
+pub mod panic_hook;
 
 use crate::app::{AppManager, AppManagerRef};
 use crate::common::init_global_variable;
