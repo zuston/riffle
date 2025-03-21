@@ -40,6 +40,7 @@ pub struct Runtime {
     rt: TokioRuntime,
     metrics: Arc<Metrics>,
     thread_num: usize,
+    name: String,
 }
 
 impl Runtime {
@@ -48,7 +49,7 @@ impl Runtime {
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        let info = info.to_owned();
+        let info = format!("[{}] - {}", self.name, info);
         JoinHandle {
             inner: self.rt.spawn(async move {
                 let await_root = AWAIT_TREE_REGISTRY.clone().register(info).await;
@@ -201,6 +202,7 @@ impl Builder {
             rt,
             metrics,
             thread_num: self.thread_num,
+            name: self.thread_name.to_string(),
         })
     }
 }
