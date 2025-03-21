@@ -30,6 +30,7 @@ use crate::log_service::LogService;
 #[cfg(feature = "logforth")]
 use crate::logforth_service::LogService;
 
+use crate::deadlock::detect_deadlock;
 use crate::mem_allocator::ALLOCATOR;
 use crate::metric::MetricService;
 use crate::panic_hook::set_panic_hook;
@@ -119,6 +120,9 @@ fn main() -> Result<()> {
         "Riffle is built on the git commit hash: {}",
         env!("GIT_COMMIT_HASH")
     );
+
+    // Detect potential deadlock
+    detect_deadlock();
 
     // Set the system hook
     set_panic_hook();

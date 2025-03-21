@@ -1,3 +1,4 @@
+use crate::metric::DEADLOCK_SIGNAL;
 use log::{error, info, warn};
 use once_cell::sync::Lazy;
 use std::sync::atomic::AtomicBool;
@@ -22,6 +23,7 @@ pub fn detect_deadlock() {
                 error!("{:#?}", t.backtrace());
             }
         }
+        DEADLOCK_SIGNAL.set(1);
         DEADLOCK_TAG.store(true, SeqCst);
     });
 }
