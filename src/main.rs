@@ -30,6 +30,7 @@ use crate::log_service::LogService;
 #[cfg(feature = "logforth")]
 use crate::logforth_service::LogService;
 
+use crate::config_reconfigure::{ReconfigurableConfManager, RECONF_MANAGER};
 use crate::deadlock::detect_deadlock;
 use crate::mem_allocator::ALLOCATOR;
 use crate::metric::MetricService;
@@ -93,6 +94,7 @@ pub mod disk_explorer;
 
 pub mod historical_apps;
 
+pub mod config_reconfigure;
 pub mod panic_hook;
 
 const MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY: &str = "MAX_MEMORY_ALLOCATION_LIMIT_SIZE";
@@ -132,6 +134,15 @@ fn main() -> Result<()> {
     info!("The specified config show as follows: \n {:#?}", config);
 
     let runtime_manager = RuntimeManager::from(config.runtime_config.clone());
+
+    // set the reconfigurableConfManager
+    RECONF_MANAGER.set(ReconfigurableConfManager::new(
+        &config,
+        &args.config,
+        60,
+        &runtime_manager.default_runtime,
+    )?);
+
     let storage = StorageService::init(&runtime_manager, &config);
     let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone(), &storage);
     storage.with_app_manager(&app_manager_ref);

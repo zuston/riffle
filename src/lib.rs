@@ -53,6 +53,7 @@ pub mod histogram;
 pub mod id_layout;
 pub mod lazy_initializer;
 
+mod config_reconfigure;
 pub mod deadlock;
 pub mod disk_explorer;
 pub mod historical_apps;
