@@ -4,6 +4,7 @@ mod tests {
     use crate::app::{AppManager, PartitionedUId};
     use crate::config::StorageType::{HDFS, LOCALFILE};
     use crate::config::{Config, StorageType};
+    use crate::config_reconfigure::ReconfigurableConfManager;
     use crate::log_service::LogService;
     use crate::metric::{
         GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES, TOTAL_MEMORY_SPILL_BYTES,
@@ -120,9 +121,10 @@ mod tests {
         );
         config.hybrid_store.memory_spill_high_watermark = 1.0;
 
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
         let store = create_hybrid_store(&config, &warm, None);
         let runtime = store.runtime_manager.clone();
-        let app_manager_ref = AppManager::get_ref(runtime, config, &store);
+        let app_manager_ref = AppManager::get_ref(runtime, config, &store, &reconf_manager);
         store.with_app_manager(&app_manager_ref);
 
         // case1: the app don't exist in the app manager, so the spill will fail.
@@ -237,8 +239,8 @@ mod tests {
         let partition = 0;
 
         let store = create_hybrid_store(&config, &warm, None);
-
-        let app_manager = AppManager::get_ref(Default::default(), config, &store);
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
+        let app_manager = AppManager::get_ref(Default::default(), config, &store, &reconf_manager);
         app_manager.register(app_id.to_string(), shuffle_id, Default::default())?;
         // this will make watermark-spill accumulate in_flight_bytes_of_huge_partition.
         app_manager

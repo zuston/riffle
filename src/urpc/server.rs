@@ -165,6 +165,7 @@ pub async fn run(listener: TcpListener, shutdown: impl Future, app_manager_ref: 
 mod test {
     use crate::app::AppManager;
     use crate::config::Config;
+    use crate::config_reconfigure::ReconfigurableConfManager;
     use crate::rpc::DefaultRpcService;
     use crate::runtime::manager::RuntimeManager;
     use crate::storage::StorageService;
@@ -177,10 +178,15 @@ mod test {
         config.grpc_port = 21100;
         config.urpc_port = Some(21101);
 
+        let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
         let runtime_manager = RuntimeManager::from(config.clone().runtime_config.clone());
         let storage = StorageService::init(&runtime_manager, &config);
-        let app_manager_ref =
-            AppManager::get_ref(runtime_manager.clone(), config.clone(), &storage);
+        let app_manager_ref = AppManager::get_ref(
+            runtime_manager.clone(),
+            config.clone(),
+            &storage,
+            &reconf_manager,
+        );
 
         DefaultRpcService {}.start(&config, runtime_manager.clone(), app_manager_ref.clone())?;
 
