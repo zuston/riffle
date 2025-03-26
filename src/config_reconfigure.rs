@@ -2,9 +2,11 @@ use crate::config::Config;
 use crate::runtime::{Runtime, RuntimeRef};
 use crate::util;
 use anyhow::{anyhow, Result};
+use bytesize::ByteSize;
 use clap::builder::Str;
+use crossbeam_utils::atomic::AtomicCell;
 use dashmap::DashMap;
-use libc::stat;
+use libc::{if_data, stat};
 use log::{error, info, warn};
 use parking_lot::Mutex;
 use serde_json::{json, Value};
@@ -83,10 +85,11 @@ impl ReconfigurableConfManager {
         }
 
         info!("Register reconfiguration key for [{}]", key);
-
+        let val = self.conf_state.get(key).unwrap().clone();
         Ok(ReconfigValueRef {
             manager: self.clone(),
             key: key.to_string(),
+            previous_value: Mutex::new(val),
         })
     }
 
@@ -124,20 +127,46 @@ impl ReconfigurableConfManager {
 pub struct ReconfigValueRef {
     manager: ReconfigurableConfManager,
     key: String,
+    previous_value: Mutex<Value>,
 }
 
 macro_rules! get_typed_config {
     ($func_name:ident, $value_type:ty, $as_func:ident, $type_name:expr) => {
-        pub fn $func_name(&self) -> Result<$value_type> {
+        pub fn $func_name(&self) -> Result<$value_type, anyhow::Error> {
             match self.manager.conf_state.get(&self.key) {
                 Some(val) => match val.$as_func() {
-                    None => Err(anyhow!(format!(
-                        "Unable to cast into {}. config key: {}",
-                        $type_name, &self.key
-                    ))),
-                    Some(v) => Ok(v.to_owned()),
+                    Some(v) => {
+                        // never reset for previous value. always fallback to the initial value
+                        // todo: support resetting in the future
+                        // let mut pre_val = self.previous_value.lock();
+                        // if (*pre_val != *val) {
+                        //     *pre_val = val.clone();
+                        // }
+                        Ok(v.to_owned())
+                    }
+                    None => {
+                        let prev_val = self.previous_value.lock();
+                        if let Some(prev_v) = prev_val.$as_func() {
+                            Ok(prev_v.to_owned())
+                        } else {
+                            Err(anyhow::anyhow!(format!(
+                                "Unable to cast previous value into {}. config key: {}",
+                                $type_name, &self.key
+                            )))
+                        }
+                    }
                 },
-                _ => Err(anyhow!(format!("No such config key: {}", &self.key))),
+                None => {
+                    let prev_val = self.previous_value.lock();
+                    if let Some(prev_v) = prev_val.$as_func() {
+                        Ok(prev_v.to_owned())
+                    } else {
+                        Err(anyhow::anyhow!(format!(
+                            "Unable to cast previous value into {}. config key: {}",
+                            $type_name, &self.key
+                        )))
+                    }
+                }
             }
         }
     };
@@ -151,8 +180,20 @@ impl ReconfigValueRef {
 
     pub fn get_byte_size(&self) -> Result<u64> {
         let raw_byte = self.get_str()?;
-        let val = util::parse_raw_to_bytesize(&raw_byte);
-        Ok(val)
+        let parsed = raw_byte.parse::<ByteSize>();
+        match parsed {
+            Ok(parsed) => Ok(parsed.0),
+            Err(_) => {
+                let prev = self.previous_value.lock();
+                println!("prev: {:?}", &prev);
+                // ensure the previous value legal
+                let prev_str = prev.as_str().ok_or(anyhow!(format!(
+                    "Illegal reconfigurable previous key: {}",
+                    &self.key
+                )))?;
+                Ok(util::parse_raw_to_bytesize(prev_str))
+            }
+        }
     }
 }
 
@@ -165,6 +206,7 @@ mod tests {
     use crate::runtime::{Builder, Runtime};
     use anyhow::Result;
     use clap::builder::Str;
+    use crossbeam_utils::atomic::AtomicCell;
     use fs2::available_space;
     use libc::sleep;
     use log::info;
@@ -177,6 +219,16 @@ mod tests {
     use std::thread;
     use std::time::Duration;
     use tokio::time;
+
+    #[test]
+    fn test_atomic_cell() -> Result<()> {
+        let cell = AtomicCell::new(0);
+        assert_eq!(0, cell.load());
+
+        cell.store(-1);
+        assert_eq!(-1, cell.load());
+        Ok(())
+    }
 
     fn write_conf_into_file(target_file: String, content: String) -> Result<()> {
         let mut file = OpenOptions::new()
@@ -202,12 +254,68 @@ mod tests {
         [hybrid_store]
         memory_spill_low_watermark = 0.2
         memory_single_buffer_max_spill_size = "256M"
+        memory_spill_to_localfile_concurrency = 100
         "#;
 
         format!(
             "{}\nmemory_spill_high_watermark = {}",
             toml_str, memory_spill_high_watermark_ratio
         )
+    }
+
+    #[test]
+    fn test_reconf_wrong_but_fallback() -> Result<()> {
+        let temp_dir = tempdir::TempDir::new("test_reconf_wrong_but_fallback").unwrap();
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        println!("init local file path: {}", &temp_path);
+
+        let toml_str = create_toml_config(0.8);
+
+        let target_conf_file = format!("{}/{}", &temp_path, "conf.file");
+        write_conf_into_file(target_conf_file.to_owned(), toml_str.to_string())?;
+
+        let config = Config::from(&target_conf_file);
+        let runtime = Builder::default()
+            .worker_threads(1)
+            .thread_name("reload")
+            .enable_all()
+            .build()?;
+        let runtime = Arc::new(runtime);
+
+        let reconf_manager =
+            ReconfigurableConfManager::new(&config, &target_conf_file, 1, &runtime)?;
+
+        let reconf_ref_1 = reconf_manager.register("memory_store#capacity")?;
+        assert_eq!(1024000000, reconf_ref_1.get_byte_size()?);
+
+        let reconf_ref_2 =
+            reconf_manager.register("hybrid_store#memory_spill_to_localfile_concurrency")?;
+        assert_eq!(100, reconf_ref_2.get_u64()?);
+
+        // change but wrongly configure
+        let toml_str = r#"
+        store_type = "MEMORY_LOCALFILE"
+        coordinator_quorum = ["xxxxxxx"]
+
+        [memory_store]
+        capacity = "1024WRONG"
+
+        [localfile_store]
+        data_paths = ["/data1/uniffle"]
+
+        [hybrid_store]
+        memory_spill_low_watermark = 0.2
+        memory_single_buffer_max_spill_size = "256M"
+        memory_spill_to_localfile_concurrency = -1
+        "#;
+        write_conf_into_file(target_conf_file.to_owned(), toml_str.to_string())?;
+
+        thread::sleep(Duration::from_millis(2000));
+        // fallback due to the incorrect conf options
+        assert_eq!(100, reconf_ref_2.get_u64()?);
+        assert_eq!(1024000000, reconf_ref_1.get_byte_size()?);
+
+        Ok(())
     }
 
     #[test]
