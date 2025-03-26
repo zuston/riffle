@@ -7,9 +7,12 @@ use clap::builder::Str;
 use crossbeam_utils::atomic::AtomicCell;
 use dashmap::DashMap;
 use log::{error, info, warn};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -87,18 +90,25 @@ impl ReconfigurableConfManager {
         Ok(manager)
     }
 
-    pub fn register(&self, key: &str) -> Result<ReconfigValueRef> {
+    pub fn register<T>(&self, key: &str) -> Result<ConfRef<T>>
+    where
+        T: DeserializeOwned,
+    {
         if !self.conf_state.contains_key(key) {
             panic!("[ReconfigurableConfManager] No such register-key: {}", key)
         }
 
         info!("Register reconfiguration key for [{}]", key);
         let val = self.conf_state.get(key).unwrap().clone();
-        Ok(ReconfigValueRef {
+        let val: T = serde_json::from_value(val)?;
+        let conf_ref = ConfRef {
             manager: self.clone(),
             key: key.to_string(),
-            previous_value: Mutex::new(val),
-        })
+            value: RwLock::new(val),
+            last_update_timestamp: AtomicU64::new(util::now_timestamp_as_sec()),
+            refresh_interval: 1,
+        };
+        Ok(conf_ref)
     }
 
     fn reload(&self, path: &str) -> Result<()> {
@@ -132,83 +142,71 @@ impl ReconfigurableConfManager {
     }
 }
 
-pub struct ReconfigValueRef {
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct ByteString {
+    val: String,
+}
+
+impl ByteString {
+    pub fn as_u64(&self) -> u64 {
+        util::parse_raw_to_bytesize(&self.val)
+    }
+}
+
+impl<'de> Deserialize<'de> for ByteString {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(ByteString { val: s })
+    }
+}
+
+impl Into<u64> for ByteString {
+    fn into(self) -> u64 {
+        util::parse_raw_to_bytesize(&self.val)
+    }
+}
+
+pub struct ConfRef<T> {
     manager: ReconfigurableConfManager,
     key: String,
-    previous_value: Mutex<Value>,
+    value: RwLock<T>,
+    last_update_timestamp: AtomicU64,
+    refresh_interval: u64,
 }
 
-macro_rules! get_typed_config {
-    ($func_name:ident, $value_type:ty, $as_func:ident, $type_name:expr) => {
-        pub fn $func_name(&self) -> Result<$value_type, anyhow::Error> {
-            match self.manager.conf_state.get(&self.key) {
-                Some(val) => match val.$as_func() {
-                    Some(v) => {
-                        // never reset for previous value. always fallback to the initial value
-                        // todo: support resetting in the future
-                        // let mut pre_val = self.previous_value.lock();
-                        // if (*pre_val != *val) {
-                        //     *pre_val = val.clone();
-                        // }
-                        Ok(v.to_owned())
-                    }
-                    None => {
-                        let prev_val = self.previous_value.lock();
-                        if let Some(prev_v) = prev_val.$as_func() {
-                            Ok(prev_v.to_owned())
-                        } else {
-                            Err(anyhow::anyhow!(format!(
-                                "Unable to cast previous value into {}. config key: {}",
-                                $type_name, &self.key
-                            )))
-                        }
-                    }
-                },
-                None => {
-                    let prev_val = self.previous_value.lock();
-                    if let Some(prev_v) = prev_val.$as_func() {
-                        Ok(prev_v.to_owned())
-                    } else {
-                        Err(anyhow::anyhow!(format!(
-                            "Unable to cast previous value into {}. config key: {}",
-                            $type_name, &self.key
-                        )))
-                    }
+impl<T> ConfRef<T>
+where
+    T: DeserializeOwned + Clone,
+{
+    pub fn get(&self) -> Result<T> {
+        if util::now_timestamp_as_sec() - self.last_update_timestamp.load(Ordering::Relaxed)
+            > self.refresh_interval
+        {
+            if let Some(val) = self.manager.conf_state.get(&self.key) {
+                if let Ok(val) = serde_json::from_value::<T>(val.clone()) {
+                    let mut internal_val = self.value.write();
+                    *internal_val = val;
+                } else {
+                    // fallback
                 }
             }
+            self.last_update_timestamp
+                .store(util::now_timestamp_as_sec(), Ordering::Relaxed);
         }
-    };
-}
-
-impl ReconfigValueRef {
-    get_typed_config!(get_i64, i64, as_i64, "i64");
-    get_typed_config!(get_f64, f64, as_f64, "f64");
-    get_typed_config!(get_u64, u64, as_u64, "u64");
-    get_typed_config!(get_str, String, as_str, "str");
-
-    pub fn get_byte_size(&self) -> Result<u64> {
-        let raw_byte = self.get_str()?;
-        let parsed = raw_byte.parse::<ByteSize>();
-        match parsed {
-            Ok(parsed) => Ok(parsed.0),
-            Err(_) => {
-                let prev = self.previous_value.lock();
-                println!("prev: {:?}", &prev);
-                // ensure the previous value legal
-                let prev_str = prev.as_str().ok_or(anyhow!(format!(
-                    "Illegal reconfigurable previous key: {}",
-                    &self.key
-                )))?;
-                Ok(util::parse_raw_to_bytesize(prev_str))
-            }
-        }
+        let val = self.value.read();
+        Ok(val.clone())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::config::Config;
-    use crate::config_reconfigure::{flatten_json_value, ReconfigurableConfManager, ReloadOptions};
+    use crate::config_reconfigure::{
+        flatten_json_value, ByteString, ConfRef, ReconfigurableConfManager, ReloadOptions,
+    };
     use crate::runtime::{Builder, Runtime};
     use anyhow::Result;
     use clap::builder::Str;
@@ -216,15 +214,46 @@ mod tests {
     use fs2::available_space;
     use libc::sleep;
     use log::info;
+    use parking_lot::lock_api::RwLock;
     use serde_json::{json, Value};
     use std::collections::HashMap;
     use std::fs::OpenOptions;
     use std::io::Write;
-    use std::sync::atomic::Ordering;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
     use tokio::time;
+
+    #[test]
+    fn test_conf_ref() -> Result<()> {
+        let config = Config::create_simple_config();
+        let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
+        let conf_ref = ConfRef {
+            manager: reconf_manager.clone(),
+            key: "grpc_port".to_owned(),
+            value: RwLock::new(0),
+            last_update_timestamp: AtomicU64::new(0),
+            refresh_interval: 1,
+        };
+        let val = conf_ref.get()?;
+        assert_eq!(19999, val);
+
+        let conf_ref: ConfRef<ByteString> = ConfRef {
+            manager: reconf_manager,
+            key: "memory_store#capacity".to_owned(),
+            value: RwLock::new(ByteString {
+                val: "2M".to_string(),
+            }),
+            last_update_timestamp: AtomicU64::new(0),
+            refresh_interval: 1,
+        };
+        let val = conf_ref.get()?;
+        assert_eq!("1M", val.val);
+        let val: u64 = conf_ref.get()?.into();
+
+        Ok(())
+    }
 
     #[test]
     fn test_atomic_cell() -> Result<()> {
@@ -270,6 +299,31 @@ mod tests {
     }
 
     #[test]
+    fn test_casting_fast_fail() -> Result<()> {
+        let toml_str = r#"
+        store_type = "MEMORY"
+        coordinator_quorum = [""]
+        grpc_port = -100
+
+        [memory_store]
+        capacity = "1XXXXXXXXX"
+
+        [hybrid_store]
+        memory_spill_high_watermark = 0.8
+        memory_spill_low_watermark = 0.2
+        memory_single_buffer_max_spill_size = "256M"
+        "#;
+
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
+
+        // fast fail when registering rather than invoking side.
+        assert!(reconf_manager.register::<u64>("grpc_port").is_err());
+
+        Ok(())
+    }
+
+    #[test]
     fn test_reconf_wrong_but_fallback() -> Result<()> {
         let temp_dir = tempdir::TempDir::new("test_reconf_wrong_but_fallback").unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
@@ -293,12 +347,15 @@ mod tests {
             Some((target_conf_file.as_str(), 1, &runtime).into()),
         )?;
 
-        let reconf_ref_1 = reconf_manager.register("memory_store#capacity")?;
-        assert_eq!(1024000000, reconf_ref_1.get_byte_size()?);
+        let reconf_ref_1: ConfRef<ByteString> = reconf_manager.register("memory_store#capacity")?;
+        assert_eq!(
+            1024000000,
+            <ByteString as Into<u64>>::into(reconf_ref_1.get()?)
+        );
 
-        let reconf_ref_2 =
+        let reconf_ref_2: ConfRef<u32> =
             reconf_manager.register("hybrid_store#memory_spill_to_localfile_concurrency")?;
-        assert_eq!(100, reconf_ref_2.get_u64()?);
+        assert_eq!(100, reconf_ref_2.get()?);
 
         // change but wrongly configure
         let toml_str = r#"
@@ -320,8 +377,7 @@ mod tests {
 
         thread::sleep(Duration::from_millis(2000));
         // fallback due to the incorrect conf options
-        assert_eq!(100, reconf_ref_2.get_u64()?);
-        assert_eq!(1024000000, reconf_ref_1.get_byte_size()?);
+        assert_eq!(100, reconf_ref_2.get()?);
 
         Ok(())
     }
@@ -350,18 +406,18 @@ mod tests {
             Some((target_conf_file.as_str(), 1, &runtime).into()),
         )?;
 
-        let reconf_ref_1 = reconf_manager.register("hybrid_store#memory_spill_high_watermark")?;
-        assert_eq!(0.8, reconf_ref_1.get_f64()?);
+        let reconf_ref_1: ConfRef<f64> =
+            reconf_manager.register("hybrid_store#memory_spill_high_watermark")?;
+        assert_eq!(0.8, reconf_ref_1.get()?);
 
-        let reconf_ref_2 = reconf_manager.register("memory_store#capacity")?;
-        assert_eq!(1024000000, reconf_ref_2.get_byte_size()?);
+        let reconf_ref_2: ConfRef<ByteString> = reconf_manager.register("memory_store#capacity")?;
+        assert_eq!(1024000000, reconf_ref_2.get()?.as_u64());
 
         // refresh to 0.2
         let toml_conf = create_toml_config(0.2);
         write_conf_into_file(target_conf_file.to_owned(), toml_conf.to_string())?;
 
-        awaitility::at_most(Duration::from_secs(2))
-            .until(|| reconf_ref_1.get_f64().unwrap() == 0.2);
+        awaitility::at_most(Duration::from_secs(2)).until(|| reconf_ref_1.get().unwrap() == 0.2);
 
         Ok(())
     }

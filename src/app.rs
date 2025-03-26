@@ -47,7 +47,7 @@ use std::str::FromStr;
 
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::block_id_manager::{get_block_id_manager, BlockIdManager};
-use crate::config_reconfigure::{ReconfigValueRef, ReconfigurableConfManager};
+use crate::config_reconfigure::{ByteString, ConfRef, ReconfigurableConfManager};
 use crate::constant::ALL_LABEL;
 use crate::grpc::protobuf::uniffle::{BlockIdLayout, RemoteStorage};
 use crate::historical_apps::HistoricalAppStatistics;
@@ -162,7 +162,7 @@ pub struct App {
 
     // partition split
     partition_split_enable: bool,
-    partition_split_threshold: ReconfigValueRef,
+    partition_split_threshold: ConfRef<ByteString>,
 
     // reconfiguration manager
     reconf_manager: ReconfigurableConfManager,
@@ -496,7 +496,7 @@ impl App {
             if self.partition_split_enable
                 && self
                     .get_partition_meta(&puid)
-                    .is_split(&puid, self.partition_split_threshold.get_byte_size()?)?
+                    .is_split(&puid, self.partition_split_threshold.get()?.into())?
             {
                 partitionSplitCandidates.insert(*partition_id);
                 split_hit = true;
