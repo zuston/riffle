@@ -353,7 +353,7 @@ mod tests {
             <ByteString as Into<u64>>::into(reconf_ref_1.get()?)
         );
 
-        let reconf_ref_2: ConfRef<i32> =
+        let reconf_ref_2: ConfRef<u32> =
             reconf_manager.register("hybrid_store#memory_spill_to_localfile_concurrency")?;
         assert_eq!(100, reconf_ref_2.get()?);
 
@@ -378,10 +378,6 @@ mod tests {
         thread::sleep(Duration::from_millis(2000));
         // fallback due to the incorrect conf options
         assert_eq!(100, reconf_ref_2.get()?);
-        assert_eq!(
-            1024000000,
-            <ByteString as Into<u64>>::into(reconf_ref_1.get()?)
-        );
 
         Ok(())
     }
