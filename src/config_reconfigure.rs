@@ -107,6 +107,7 @@ impl ReconfigurableConfManager {
             value: RwLock::new(val),
             last_update_timestamp: AtomicU64::new(util::now_timestamp_as_sec()),
             refresh_interval: 1,
+            lock: Default::default(),
         };
         Ok(conf_ref)
     }
@@ -180,6 +181,8 @@ pub struct ConfRef<T> {
     value: RwLock<T>,
     last_update_timestamp: AtomicU64,
     refresh_interval: u64,
+
+    lock: Mutex<()>,
 }
 
 impl<T> ConfRef<T>
@@ -187,19 +190,20 @@ where
     T: DeserializeOwned + Clone,
 {
     pub fn get(&self) -> Result<T> {
-        if util::now_timestamp_as_sec() - self.last_update_timestamp.load(Ordering::Relaxed)
-            > self.refresh_interval
-        {
-            if let Some(val) = self.manager.conf_state.get(&self.key) {
-                if let Ok(val) = serde_json::from_value::<T>(val.clone()) {
-                    let mut internal_val = self.value.write();
-                    *internal_val = val;
-                } else {
-                    // fallback
+        if self.lock.try_lock().is_some() {
+            let now_sec = util::now_timestamp_as_sec();
+            let last = self.last_update_timestamp.load(Ordering::Relaxed);
+            if now_sec - last > self.refresh_interval {
+                if let Some(val) = self.manager.conf_state.get(&self.key) {
+                    if let Ok(val) = serde_json::from_value::<T>(val.clone()) {
+                        let mut internal_val = self.value.write();
+                        *internal_val = val;
+                    } else {
+                        // fallback
+                    }
                 }
+                self.last_update_timestamp.store(now_sec, Ordering::Relaxed);
             }
-            self.last_update_timestamp
-                .store(util::now_timestamp_as_sec(), Ordering::Relaxed);
         }
         let val = self.value.read();
         Ok(val.clone())
@@ -240,6 +244,7 @@ mod tests {
             value: RwLock::new(0),
             last_update_timestamp: AtomicU64::new(0),
             refresh_interval: 1,
+            lock: Default::default(),
         };
         let val = conf_ref.get()?;
         assert_eq!(19999, val);
@@ -253,6 +258,7 @@ mod tests {
             }),
             last_update_timestamp: AtomicU64::new(0),
             refresh_interval: 1,
+            lock: Default::default(),
         };
         let val = conf_ref.get()?;
         assert_eq!("1M", val.val);
