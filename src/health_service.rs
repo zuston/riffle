@@ -207,6 +207,7 @@ impl HealthService {
 mod tests {
     use crate::app::test::mock_config;
     use crate::app::AppManager;
+    use crate::config_reconfigure::ReconfigurableConfManager;
     use crate::deadlock::DEADLOCK_TAG;
     use crate::health_service::HealthService;
     use crate::runtime::manager::RuntimeManager;
@@ -228,10 +229,16 @@ mod tests {
             .service_hang_of_app_valid_number = Some(0);
         let config = config;
 
+        let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
         let runtime_manager: RuntimeManager = Default::default();
         let storage = StorageService::init(&runtime_manager, &config);
-        let app_manager_ref =
-            AppManager::get_ref(Default::default(), config.clone(), &storage).clone();
+        let app_manager_ref = AppManager::get_ref(
+            Default::default(),
+            config.clone(),
+            &storage,
+            &reconf_manager,
+        )
+        .clone();
 
         let health_service =
             HealthService::new(&app_manager_ref, &storage, &config.health_service_config);

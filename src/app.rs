@@ -47,6 +47,7 @@ use std::str::FromStr;
 
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::block_id_manager::{get_block_id_manager, BlockIdManager};
+use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::constant::ALL_LABEL;
 use crate::grpc::protobuf::uniffle::{BlockIdLayout, RemoteStorage};
 use crate::historical_apps::HistoricalAppStatistics;
@@ -162,6 +163,9 @@ pub struct App {
     // partition split
     partition_split_enable: bool,
     partition_split_threshold: u64,
+
+    // reconfiguration manager
+    reconf_manager: ReconfigurableConfManager,
 }
 
 #[derive(Clone)]
@@ -233,6 +237,7 @@ impl App {
         store: Arc<HybridStore>,
         runtime_manager: RuntimeManager,
         config: &Config,
+        reconf_manager: &ReconfigurableConfManager,
     ) -> Self {
         // todo: should throw exception if register failed.
         let copy_app_id = app_id.to_string();
@@ -294,6 +299,7 @@ impl App {
             partition_split_threshold: util::parse_raw_to_bytesize(
                 &config.app_config.partition_split_threshold,
             ),
+            reconf_manager: reconf_manager.clone(),
         }
     }
 
@@ -804,10 +810,16 @@ pub struct AppManager {
     config: Config,
     runtime_manager: RuntimeManager,
     historical_app_statistics: Option<HistoricalAppStatistics>,
+    reconf_manager: ReconfigurableConfManager,
 }
 
 impl AppManager {
-    fn new(runtime_manager: RuntimeManager, config: Config, storage: &HybridStorage) -> Self {
+    fn new(
+        runtime_manager: RuntimeManager,
+        config: Config,
+        storage: &HybridStorage,
+        reconf_manager: &ReconfigurableConfManager,
+    ) -> Self {
         let (sender, receiver) = async_channel::unbounded();
         let app_heartbeat_timeout_min = config.app_config.app_heartbeat_timeout_min;
 
@@ -828,6 +840,7 @@ impl AppManager {
             config,
             runtime_manager: runtime_manager.clone(),
             historical_app_statistics,
+            reconf_manager: reconf_manager.clone(),
         };
         manager
     }
@@ -838,8 +851,14 @@ impl AppManager {
         runtime_manager: RuntimeManager,
         config: Config,
         storage: &HybridStorage,
+        reconf_manager: &ReconfigurableConfManager,
     ) -> AppManagerRef {
-        let app_ref = Arc::new(AppManager::new(runtime_manager.clone(), config, storage));
+        let app_ref = Arc::new(AppManager::new(
+            runtime_manager.clone(),
+            config,
+            storage,
+            reconf_manager,
+        ));
         let app_manager_ref_cloned = app_ref.clone();
 
         runtime_manager.default_runtime.spawn_with_await_tree("App heartbeat checker", async move {
@@ -1030,6 +1049,7 @@ impl AppManager {
                     self.store.clone(),
                     self.runtime_manager.clone(),
                     &self.config,
+                    &self.reconf_manager,
                 ))
             })
             .clone();
@@ -1093,6 +1113,7 @@ pub(crate) mod test {
         RequireBufferContext, WritingViewContext,
     };
     use crate::config::{Config, HybridStoreConfig, LocalfileStoreConfig, MemoryStoreConfig};
+    use crate::config_reconfigure::ReconfigurableConfManager;
     use crate::error::WorkerError;
     use crate::id_layout::{to_layout, IdLayout, DEFAULT_BLOCK_ID_LAYOUT};
     use crate::runtime::manager::RuntimeManager;
@@ -1190,9 +1211,10 @@ pub(crate) mod test {
         app_config.huge_partition_marked_threshold = Some("10B".to_string());
         app_config.huge_partition_memory_limit_percent = Some(0.4);
 
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
         let storage = StorageService::init(&runtime_manager, &config);
         let app_manager_ref =
-            AppManager::get_ref(runtime_manager.clone(), config, &storage).clone();
+            AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
         app_manager_ref
             .register(app_id.clone().into(), 1, Default::default())
             .unwrap();
@@ -1226,9 +1248,10 @@ pub(crate) mod test {
 
         let runtime_manager: RuntimeManager = Default::default();
         let config = mock_config();
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
         let storage = StorageService::init(&runtime_manager, &config);
         let app_manager_ref =
-            AppManager::get_ref(runtime_manager.clone(), config, &storage).clone();
+            AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
         app_manager_ref
             .register(app_id.clone().into(), 1, Default::default())
             .unwrap();
@@ -1287,8 +1310,10 @@ pub(crate) mod test {
     fn app_manager_test() {
         let config = mock_config();
         let runtime_manager: RuntimeManager = Default::default();
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
         let storage = StorageService::init(&runtime_manager, &config);
-        let app_manager_ref = AppManager::get_ref(Default::default(), config, &storage).clone();
+        let app_manager_ref =
+            AppManager::get_ref(Default::default(), config, &storage, &reconf_manager).clone();
 
         app_manager_ref
             .register("app_id".into(), 1, Default::default())
@@ -1304,9 +1329,10 @@ pub(crate) mod test {
 
         let runtime_manager: RuntimeManager = Default::default();
         let config = mock_config();
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
         let storage = StorageService::init(&runtime_manager, &config);
         let app_manager_ref =
-            AppManager::get_ref(runtime_manager.clone(), config, &storage).clone();
+            AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
         app_manager_ref
             .register(app_id.clone().into(), 1, Default::default())
             .unwrap();

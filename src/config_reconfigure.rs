@@ -43,37 +43,46 @@ fn flatten_json_value(
     }
 }
 
-pub static RECONF_MANAGER: OnceLock<ReconfigurableConfManager> = OnceLock::new();
-
 #[derive(Debug, Clone)]
 pub struct ReconfigurableConfManager {
-    conf_path: String,
     conf_state: Arc<DashMap<String, Value>>,
+}
+
+pub struct ReloadOptions(String, u64, RuntimeRef);
+impl Into<ReloadOptions> for (&str, u64, &RuntimeRef) {
+    fn into(self) -> ReloadOptions {
+        ReloadOptions(self.0.to_string(), self.1, self.2.clone())
+    }
 }
 
 impl ReconfigurableConfManager {
     pub fn new(
         config: &Config,
-        conf_path: &str,
-        reload_interval: u64,
-        rt: &RuntimeRef,
+        reload_options: Option<ReloadOptions>,
     ) -> Result<ReconfigurableConfManager> {
         let state = Self::to_internal_state(config);
         let manager = ReconfigurableConfManager {
-            conf_path: conf_path.to_string(),
             conf_state: Arc::new(state?),
         };
 
-        let manager_fork = manager.clone();
-        rt.clone()
-            .spawn_with_await_tree("Config reload", async move {
-                loop {
-                    tokio::time::sleep(Duration::from_secs(reload_interval)).await;
-                    if let Err(e) = manager_fork.reload() {
-                        error!("Errors on reloading config. err: {:?}", e);
+        if reload_options.is_some() {
+            let options = reload_options.unwrap();
+            let conf_path = options.0;
+            let interval = options.1;
+            let rt = options.2;
+
+            let manager_fork = manager.clone();
+            rt.clone()
+                .spawn_with_await_tree("Config reload", async move {
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(interval)).await;
+                        if let Err(e) = manager_fork.reload(conf_path.as_str()) {
+                            error!("Errors on reloading config. err: {:?}", e);
+                        }
                     }
-                }
-            });
+                });
+            info!("ReconfigurableConfManager starting reload thread...");
+        }
 
         Ok(manager)
     }
@@ -92,8 +101,8 @@ impl ReconfigurableConfManager {
         })
     }
 
-    fn reload(&self) -> Result<()> {
-        let config_struct = Config::from(&self.conf_path);
+    fn reload(&self, path: &str) -> Result<()> {
+        let config_struct = Config::from(path);
         let new_state = Self::to_internal_state(&config_struct)?;
 
         for (k, v) in new_state {
@@ -199,9 +208,7 @@ impl ReconfigValueRef {
 #[cfg(test)]
 mod tests {
     use crate::config::Config;
-    use crate::config_reconfigure::{
-        flatten_json_value, ReconfigurableConfManager, RECONF_MANAGER,
-    };
+    use crate::config_reconfigure::{flatten_json_value, ReconfigurableConfManager, ReloadOptions};
     use crate::runtime::{Builder, Runtime};
     use anyhow::Result;
     use clap::builder::Str;
@@ -281,8 +288,10 @@ mod tests {
             .build()?;
         let runtime = Arc::new(runtime);
 
-        let reconf_manager =
-            ReconfigurableConfManager::new(&config, &target_conf_file, 1, &runtime)?;
+        let reconf_manager = ReconfigurableConfManager::new(
+            &config,
+            Some((target_conf_file.as_str(), 1, &runtime).into()),
+        )?;
 
         let reconf_ref_1 = reconf_manager.register("memory_store#capacity")?;
         assert_eq!(1024000000, reconf_ref_1.get_byte_size()?);
@@ -336,8 +345,10 @@ mod tests {
             .build()?;
         let runtime = Arc::new(runtime);
 
-        let reconf_manager =
-            ReconfigurableConfManager::new(&config, &target_conf_file, 1, &runtime)?;
+        let reconf_manager = ReconfigurableConfManager::new(
+            &config,
+            Some((target_conf_file.as_str(), 1, &runtime).into()),
+        )?;
 
         let reconf_ref_1 = reconf_manager.register("hybrid_store#memory_spill_high_watermark")?;
         assert_eq!(0.8, reconf_ref_1.get_f64()?);
