@@ -47,7 +47,7 @@ use std::str::FromStr;
 
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::block_id_manager::{get_block_id_manager, BlockIdManager};
-use crate::config_reconfigure::ReconfigurableConfManager;
+use crate::config_reconfigure::{ReconfigValueRef, ReconfigurableConfManager};
 use crate::constant::ALL_LABEL;
 use crate::grpc::protobuf::uniffle::{BlockIdLayout, RemoteStorage};
 use crate::historical_apps::HistoricalAppStatistics;
@@ -162,7 +162,7 @@ pub struct App {
 
     // partition split
     partition_split_enable: bool,
-    partition_split_threshold: u64,
+    partition_split_threshold: ReconfigValueRef,
 
     // reconfiguration manager
     reconf_manager: ReconfigurableConfManager,
@@ -296,9 +296,9 @@ impl App {
             registry_timestamp: now_timestamp_as_millis(),
             block_id_manager,
             partition_split_enable: config.app_config.partition_split_enable,
-            partition_split_threshold: util::parse_raw_to_bytesize(
-                &config.app_config.partition_split_threshold,
-            ),
+            partition_split_threshold: reconf_manager
+                .register("app_config#partition_split_threshold")
+                .unwrap(),
             reconf_manager: reconf_manager.clone(),
         }
     }
@@ -496,7 +496,7 @@ impl App {
             if self.partition_split_enable
                 && self
                     .get_partition_meta(&puid)
-                    .is_split(&puid, self.partition_split_threshold)?
+                    .is_split(&puid, self.partition_split_threshold.get_byte_size()?)?
             {
                 partitionSplitCandidates.insert(*partition_id);
                 split_hit = true;
