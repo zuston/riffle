@@ -496,7 +496,7 @@ impl App {
             if self.partition_split_enable
                 && self
                     .get_partition_meta(&puid)
-                    .is_split(&puid, self.partition_split_threshold.get()?.into())?
+                    .is_split(&puid, self.partition_split_threshold.get().into())?
             {
                 partitionSplitCandidates.insert(*partition_id);
                 split_hit = true;

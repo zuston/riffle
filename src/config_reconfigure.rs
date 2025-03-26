@@ -189,7 +189,7 @@ impl<T> ConfRef<T>
 where
     T: DeserializeOwned + Clone,
 {
-    pub fn get(&self) -> Result<T> {
+    pub fn get(&self) -> T {
         if self.lock.try_lock().is_some() {
             let now_sec = util::now_timestamp_as_sec();
             let last = self.last_update_timestamp.load(Ordering::Relaxed);
@@ -206,7 +206,7 @@ where
             }
         }
         let val = self.value.read();
-        Ok(val.clone())
+        val.clone()
     }
 }
 
@@ -246,7 +246,7 @@ mod tests {
             refresh_interval: 1,
             lock: Default::default(),
         };
-        let val = conf_ref.get()?;
+        let val = conf_ref.get();
         assert_eq!(19999, val);
 
         let conf_ref: ConfRef<ByteString> = ConfRef {
@@ -260,9 +260,9 @@ mod tests {
             refresh_interval: 1,
             lock: Default::default(),
         };
-        let val = conf_ref.get()?;
+        let val = conf_ref.get();
         assert_eq!("1M", val.val);
-        let val: u64 = conf_ref.get()?.into();
+        let val: u64 = conf_ref.get().into();
 
         Ok(())
     }
@@ -365,12 +365,12 @@ mod tests {
         let reconf_ref_1: ConfRef<ByteString> = reconf_manager.register("memory_store#capacity")?;
         assert_eq!(
             1024000000,
-            <ByteString as Into<u64>>::into(reconf_ref_1.get()?)
+            <ByteString as Into<u64>>::into(reconf_ref_1.get())
         );
 
         let reconf_ref_2: ConfRef<u32> =
             reconf_manager.register("hybrid_store#memory_spill_to_localfile_concurrency")?;
-        assert_eq!(100, reconf_ref_2.get()?);
+        assert_eq!(100, reconf_ref_2.get());
 
         // change but wrongly configure
         let toml_str = r#"
@@ -392,8 +392,8 @@ mod tests {
 
         thread::sleep(Duration::from_millis(2000));
         // fallback due to the incorrect conf options
-        assert_eq!(100, reconf_ref_2.get()?);
-        assert_eq!(1024000000, reconf_ref_1.get()?.as_u64());
+        assert_eq!(100, reconf_ref_2.get());
+        assert_eq!(1024000000, reconf_ref_1.get().as_u64());
 
         Ok(())
     }
@@ -424,16 +424,16 @@ mod tests {
 
         let reconf_ref_1: ConfRef<f64> =
             reconf_manager.register("hybrid_store#memory_spill_high_watermark")?;
-        assert_eq!(0.8, reconf_ref_1.get()?);
+        assert_eq!(0.8, reconf_ref_1.get());
 
         let reconf_ref_2: ConfRef<ByteString> = reconf_manager.register("memory_store#capacity")?;
-        assert_eq!(1024000000, reconf_ref_2.get()?.as_u64());
+        assert_eq!(1024000000, reconf_ref_2.get().as_u64());
 
         // refresh to 0.2
         let toml_conf = create_toml_config(0.2);
         write_conf_into_file(target_conf_file.to_owned(), toml_conf.to_string())?;
 
-        awaitility::at_most(Duration::from_secs(2)).until(|| reconf_ref_1.get().unwrap() == 0.2);
+        awaitility::at_most(Duration::from_secs(2)).until(|| reconf_ref_1.get() == 0.2);
 
         Ok(())
     }
