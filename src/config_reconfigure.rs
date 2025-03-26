@@ -6,7 +6,6 @@ use bytesize::ByteSize;
 use clap::builder::Str;
 use crossbeam_utils::atomic::AtomicCell;
 use dashmap::DashMap;
-use libc::{if_data, stat};
 use log::{error, info, warn};
 use parking_lot::Mutex;
 use serde_json::{json, Value};
