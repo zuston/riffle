@@ -227,7 +227,7 @@ impl MemoryStore {
         blocks: Vec<&'a Block>,
         fetched_size_limit: i64,
         serialized_expected_task_ids_bitmap: Option<Treemap>,
-    ) -> (Vec<&Block>, i64) {
+    ) -> (Vec<&'a Block>, i64) {
         let mut fetched = vec![];
         let mut fetched_size = 0;
 

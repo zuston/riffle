@@ -63,12 +63,12 @@ pub trait LocalDiskStorage: LocalIO {
     fn mark_corrupted(&self) -> Result<()>;
 }
 
-pub(crate) struct DiskStat {
+pub struct DiskStat {
     pub(crate) root: String,
     pub(crate) used_ratio: f64,
 }
 
-pub(crate) struct LocalfileStoreStat {
+pub struct LocalfileStoreStat {
     pub(crate) stats: Vec<DiskStat>,
 }
 
