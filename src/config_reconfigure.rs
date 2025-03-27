@@ -12,6 +12,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -148,6 +149,12 @@ impl ReconfigurableConfManager {
 pub struct ByteString {
     val: String,
     parsed_val: u64,
+}
+
+impl Display for ByteString {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", &self.val)
+    }
 }
 
 impl ByteString {

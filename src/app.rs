@@ -1204,8 +1204,9 @@ pub(crate) mod test {
             },
         );
         let mut app_config = &mut config.app_config;
-        app_config.huge_partition_marked_threshold = Some("10B".to_string());
-        app_config.huge_partition_memory_limit_percent = Some(0.4);
+        app_config.partition_limit_enable = true;
+        app_config.partition_limit_threshold = "10B".to_string();
+        app_config.partition_limit_memory_backpressure_ratio = 0.4;
 
         let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
         let storage = StorageService::init(&runtime_manager, &config);

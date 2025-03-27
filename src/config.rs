@@ -424,9 +424,6 @@ pub struct AppConfig {
     #[serde(default = "as_default_partition_limit_memory_backpressure_ratio")]
     pub partition_limit_memory_backpressure_ratio: f64,
 
-    pub huge_partition_marked_threshold: Option<String>,
-    pub huge_partition_memory_limit_percent: Option<f64>,
-
     #[serde(default = "as_default_block_id_manager_type")]
     pub block_id_manager_type: BlockIdManagerType,
 
@@ -469,8 +466,10 @@ fn as_default_block_id_manager_type() -> BlockIdManagerType {
 fn as_default_app_config() -> AppConfig {
     AppConfig {
         app_heartbeat_timeout_min: as_default_app_heartbeat_timeout_min(),
-        huge_partition_marked_threshold: None,
-        huge_partition_memory_limit_percent: None,
+        partition_limit_enable: false,
+        partition_limit_threshold: as_default_partition_limit_threshold(),
+        partition_limit_memory_backpressure_ratio:
+            as_default_partition_limit_memory_backpressure_ratio(),
         block_id_manager_type: as_default_block_id_manager_type(),
         historical_apps_record_enable: false,
         partition_split_enable: false,
