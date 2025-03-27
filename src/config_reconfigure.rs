@@ -12,6 +12,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -100,6 +101,7 @@ impl ReconfigurableConfManager {
 
         info!("Register reconfiguration key for [{}]", key);
         let val = self.conf_state.get(key).unwrap().clone();
+        // fast fail on any parsing failure
         let val: T = serde_json::from_value(val)?;
         let conf_ref = ConfRef {
             manager: self.clone(),
@@ -147,6 +149,12 @@ impl ReconfigurableConfManager {
 pub struct ByteString {
     val: String,
     parsed_val: u64,
+}
+
+impl Display for ByteString {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", &self.val)
+    }
 }
 
 impl ByteString {
