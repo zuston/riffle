@@ -487,7 +487,7 @@ impl App {
         let app_id = &ctx.uid.app_id;
         let shuffle_id = &ctx.uid.shuffle_id;
 
-        let mut partitionSplitCandidates = HashSet::new();
+        let mut partition_split_candidates = HashSet::new();
         for partition_id in &ctx.partition_ids {
             let puid = PartitionedUId::from(app_id.to_owned(), *shuffle_id, *partition_id);
             let mut split_hit = false;
@@ -498,7 +498,7 @@ impl App {
                     .get_partition_meta(&puid)
                     .is_split(&puid, self.partition_split_threshold.get().into())?
             {
-                partitionSplitCandidates.insert(*partition_id);
+                partition_split_candidates.insert(*partition_id);
                 split_hit = true;
             }
 
@@ -515,7 +515,10 @@ impl App {
             TOTAL_REQUIRE_BUFFER_FAILED.inc();
             err
         })?;
-        required.split_partitions = partitionSplitCandidates.iter().map(|data| *data).collect();
+        required.split_partitions = partition_split_candidates
+            .iter()
+            .map(|data| *data)
+            .collect();
         Ok(required)
     }
 

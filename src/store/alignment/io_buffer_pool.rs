@@ -20,7 +20,7 @@ use crossbeam::queue::ArrayQueue;
 use std::ops::{Deref, DerefMut};
 
 #[derive(Debug)]
-enum Buffer {
+pub enum Buffer {
     IoBuffer(IoBuffer),
     IoBytes(IoBytes),
 }

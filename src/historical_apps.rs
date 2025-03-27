@@ -59,7 +59,6 @@ impl HistoricalAppStatistics {
                             removed_app_ids.push(app.app_id.to_owned());
                         }
                     }
-                    drop(apps);
 
                     for app_id in removed_app_ids.iter() {
                         s_c.historical_app_list.remove(app_id);
