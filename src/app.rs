@@ -58,6 +58,7 @@ use crate::store::mem::capacity::CapacitySnapshot;
 use crate::util;
 use await_tree::InstrumentAwait;
 use crossbeam::epoch::Atomic;
+use futures::future::ok;
 use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
 use prometheus::core::Collector;
@@ -144,12 +145,17 @@ pub struct App {
     latest_heartbeat_time: AtomicU64,
     store: Arc<HybridStore>,
 
-    huge_partition_marked_threshold: Option<u64>,
-    huge_partition_memory_backpressure_threshold: Option<u64>,
+    memory_capacity: u64,
+
+    // partition limitation
+    partition_limit_enable: bool,
+    partition_limit_threshold: ConfRef<ByteString>,
+    partition_limit_mem_backpressure_ratio: ConfRef<f64>,
 
     total_received_data_size: AtomicU64,
     total_resident_data_size: AtomicU64,
 
+    // when exceeding the partition-limit-threshold, it will be marked as huge partition
     huge_partition_number: AtomicU64,
 
     pub(crate) registry_timestamp: u128,
@@ -252,53 +258,46 @@ impl App {
             _ => {}
         }
 
-        let huge_partition_marked_threshold =
-            match &config.app_config.huge_partition_marked_threshold {
-                Some(v) => Some(
-                    ReadableSize::from_str(v.clone().as_str())
-                        .unwrap()
-                        .as_bytes(),
-                ),
-                _ => None,
-            };
+        let memory_capacity =
+            util::parse_raw_to_bytesize(&config.memory_store.as_ref().unwrap().capacity);
 
-        let mem_capacity = ReadableSize::from_str(&config.memory_store.clone().unwrap().capacity)
-            .unwrap()
-            .as_bytes();
-        let huge_partition_backpressure_size =
-            match &config.app_config.huge_partition_memory_limit_percent {
-                Some(v) => Some(((mem_capacity as f64) * *v) as u64),
-                _ => None,
-            };
+        let partition_limit_enable = config.app_config.partition_limit_enable;
+        let partition_limit_threshold: ConfRef<ByteString> = reconf_manager
+            .register("app_config.partition_limit_threshold")
+            .unwrap();
+        let partition_limit_mem_backpressure_ratio: ConfRef<f64> = reconf_manager
+            .register("app_config.partition_limit_memory_backpressure_ratio")
+            .unwrap();
 
-        if huge_partition_backpressure_size.is_some() && huge_partition_marked_threshold.is_some() {
-            info!(
-                "Huge partition limitation is enabled for app: {}. Marked threshold: {}, memory backpressure bytes: {}",
-                app_id.as_str(), huge_partition_marked_threshold.unwrap(), huge_partition_backpressure_size.unwrap()
-            );
-        }
+        let partition_split_enable = config.app_config.partition_split_enable;
+        let partition_split_threshold: ConfRef<ByteString> = reconf_manager
+            .register("app_config.partition_split_threshold")
+            .unwrap();
+
         let block_id_manager = get_block_id_manager(&config.app_config.block_id_manager_type);
-        info!(
-            "Using the block id manager: {} for app: {}",
-            &config.app_config.block_id_manager_type, &app_id
-        );
+
+        info!("App=[{}]. block_manager_type: {}. partition_limit/threshold/ratio: {}/{}/{}. partition_split/threshold: {}/{}",
+                &app_id, &config.app_config.block_id_manager_type,
+                partition_limit_enable, partition_limit_threshold.get(), partition_limit_mem_backpressure_ratio.get(),
+                partition_split_enable, partition_split_threshold.get());
+
         App {
             app_id,
             app_config_options: config_options,
             latest_heartbeat_time: AtomicU64::new(now_timestamp_as_sec()),
             store,
+            memory_capacity,
+            partition_limit_enable,
+            partition_limit_threshold,
+            partition_limit_mem_backpressure_ratio,
             partition_meta_infos: DashMap::new(),
-            huge_partition_marked_threshold,
-            huge_partition_memory_backpressure_threshold: huge_partition_backpressure_size,
             total_received_data_size: Default::default(),
             total_resident_data_size: Default::default(),
             huge_partition_number: Default::default(),
             registry_timestamp: now_timestamp_as_millis(),
             block_id_manager,
-            partition_split_enable: config.app_config.partition_split_enable,
-            partition_split_threshold: reconf_manager
-                .register("app_config.partition_split_threshold")
-                .unwrap(),
+            partition_split_enable,
+            partition_split_threshold,
             reconf_manager: reconf_manager.clone(),
         }
     }
@@ -398,21 +397,18 @@ impl App {
     }
 
     pub fn is_huge_partition(&self, uid: &PartitionedUId) -> Result<bool> {
-        // is configured with the associated huge_partition config options
-        if self.huge_partition_marked_threshold.is_none() {
-            return Ok(false);
-        }
-        if self.huge_partition_memory_backpressure_threshold.is_none() {
+        // always mark false when partition limit is not enabled
+        if !self.partition_limit_enable {
             return Ok(false);
         }
 
-        let huge_partition_threshold = self.huge_partition_marked_threshold.unwrap();
+        let partition_limit_threshold = self.partition_limit_threshold.get().as_u64();
         let mut meta = self.get_partition_meta(uid);
         if meta.is_huge_partition() {
             Ok(true)
         } else {
             let data_size = meta.get_size()?;
-            if data_size > huge_partition_threshold {
+            if data_size > partition_limit_threshold {
                 meta.mark_as_huge_partition();
                 self.add_huge_partition_metric();
                 warn!("Partition is marked as huge partition. uid: {:?}", uid);
@@ -454,14 +450,14 @@ impl App {
         if !self.is_huge_partition(uid)? {
             return Ok(false);
         }
-        let huge_partition_memory_used = &self.huge_partition_memory_backpressure_threshold;
-        let huge_partition_memory = *(&huge_partition_memory_used.unwrap());
+        let ratio = self.partition_limit_mem_backpressure_ratio.get();
+        let threshold = (self.memory_capacity as f64 * ratio) as u64;
+        let used = self.store.get_memory_buffer_size(uid).await?;
 
-        let memory_used = self.store.get_memory_buffer_size(uid).await?;
-        if memory_used > huge_partition_memory {
+        if used > threshold {
             info!(
                 "[{:?}] with huge partition (used/limited: {}/{}), it has been limited of writing speed",
-                uid, memory_used, huge_partition_memory
+                uid, used, threshold
             );
             TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED.inc();
             Ok(true)

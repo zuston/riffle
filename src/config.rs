@@ -414,6 +414,16 @@ pub struct AppConfig {
     #[serde(default = "as_default_app_heartbeat_timeout_min")]
     pub app_heartbeat_timeout_min: u32,
 
+    // for the partition limit mechanism
+    #[serde(default = "bool::default")]
+    pub partition_limit_enable: bool,
+
+    #[serde(default = "as_default_partition_limit_threshold")]
+    pub partition_limit_threshold: String,
+
+    #[serde(default = "as_default_partition_limit_memory_backpressure_ratio")]
+    pub partition_limit_memory_backpressure_ratio: f64,
+
     pub huge_partition_marked_threshold: Option<String>,
     pub huge_partition_memory_limit_percent: Option<f64>,
 
@@ -423,11 +433,23 @@ pub struct AppConfig {
     #[serde(default = "bool::default")]
     pub historical_apps_record_enable: bool,
 
+    // for the partition split mechanism
     #[serde(default = "bool::default")]
     pub partition_split_enable: bool,
 
     #[serde(default = "as_default_partition_split_threshold")]
     pub partition_split_threshold: String,
+}
+
+fn as_default_partition_limit_memory_backpressure_ratio() -> f64 {
+    0.2
+}
+
+fn as_default_partition_limit_threshold() -> String {
+    "20G".to_owned()
+}
+fn as_default_partition_limit_enable() -> bool {
+    true
 }
 
 impl Default for AppConfig {

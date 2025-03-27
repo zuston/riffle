@@ -231,8 +231,9 @@ mod tests {
         config
             .hybrid_store
             .huge_partition_memory_spill_to_hdfs_threshold_size = "1B".to_string();
-        config.app_config.huge_partition_marked_threshold = Some("20B".to_string());
-        config.app_config.huge_partition_memory_limit_percent = Some(0.2);
+        config.app_config.partition_limit_enable = true;
+        config.app_config.partition_limit_threshold = "20B".to_string();
+        config.app_config.partition_limit_memory_backpressure_ratio = 0.2;
 
         let app_id = "app_1";
         let shuffle_id = 1;

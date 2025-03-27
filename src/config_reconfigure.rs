@@ -100,6 +100,7 @@ impl ReconfigurableConfManager {
 
         info!("Register reconfiguration key for [{}]", key);
         let val = self.conf_state.get(key).unwrap().clone();
+        // fast fail on any parsing failure
         let val: T = serde_json::from_value(val)?;
         let conf_ref = ConfRef {
             manager: self.clone(),
