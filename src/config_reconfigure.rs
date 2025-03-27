@@ -134,7 +134,7 @@ impl ReconfigurableConfManager {
         flatten_json_value(
             "".to_string(),
             &serde_json::from_str(&json)?,
-            "#",
+            ".",
             &mut state,
         );
 
@@ -251,7 +251,7 @@ mod tests {
 
         let conf_ref: ConfRef<ByteString> = ConfRef {
             manager: reconf_manager,
-            key: "memory_store#capacity".to_owned(),
+            key: "memory_store.capacity".to_owned(),
             value: RwLock::new(ByteString {
                 val: "2M".to_string(),
                 parsed_val: 2 * 1000 * 1000,
@@ -332,7 +332,7 @@ mod tests {
         // fast fail when registering rather than invoking side.
         assert!(reconf_manager.register::<u64>("grpc_port").is_err());
         assert!(reconf_manager
-            .register::<ByteString>("memory_store#capacity")
+            .register::<ByteString>("memory_store.capacity")
             .is_err());
 
         Ok(())
@@ -362,14 +362,14 @@ mod tests {
             Some((target_conf_file.as_str(), 1, &runtime).into()),
         )?;
 
-        let reconf_ref_1: ConfRef<ByteString> = reconf_manager.register("memory_store#capacity")?;
+        let reconf_ref_1: ConfRef<ByteString> = reconf_manager.register("memory_store.capacity")?;
         assert_eq!(
             1024000000,
             <ByteString as Into<u64>>::into(reconf_ref_1.get())
         );
 
         let reconf_ref_2: ConfRef<u32> =
-            reconf_manager.register("hybrid_store#memory_spill_to_localfile_concurrency")?;
+            reconf_manager.register("hybrid_store.memory_spill_to_localfile_concurrency")?;
         assert_eq!(100, reconf_ref_2.get());
 
         // change but wrongly configure
@@ -423,10 +423,10 @@ mod tests {
         )?;
 
         let reconf_ref_1: ConfRef<f64> =
-            reconf_manager.register("hybrid_store#memory_spill_high_watermark")?;
+            reconf_manager.register("hybrid_store.memory_spill_high_watermark")?;
         assert_eq!(0.8, reconf_ref_1.get());
 
-        let reconf_ref_2: ConfRef<ByteString> = reconf_manager.register("memory_store#capacity")?;
+        let reconf_ref_2: ConfRef<ByteString> = reconf_manager.register("memory_store.capacity")?;
         assert_eq!(1024000000, reconf_ref_2.get().as_u64());
 
         // refresh to 0.2
