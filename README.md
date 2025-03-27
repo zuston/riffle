@@ -177,8 +177,9 @@ rotation = "Daily"
 
 [app_config]
 app_heartbeat_timeout_min = 5
-huge_partition_marked_threshold = "1G"
-huge_partition_memory_limit_percent = 0.75
+partition_limit_enable = true
+partition_limit_threshold = "20G"
+partition_limit_memory_backpressure_ratio = 0.2
 
 [tracing]
 jaeger_reporter_endpoint = "http://jaeger:14268"

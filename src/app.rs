@@ -58,7 +58,6 @@ use crate::store::mem::capacity::CapacitySnapshot;
 use crate::util;
 use await_tree::InstrumentAwait;
 use crossbeam::epoch::Atomic;
-use futures::future::ok;
 use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
 use prometheus::core::Collector;
