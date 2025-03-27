@@ -297,7 +297,7 @@ impl App {
             block_id_manager,
             partition_split_enable: config.app_config.partition_split_enable,
             partition_split_threshold: reconf_manager
-                .register("app_config#partition_split_threshold")
+                .register("app_config.partition_split_threshold")
                 .unwrap(),
             reconf_manager: reconf_manager.clone(),
         }
@@ -496,7 +496,7 @@ impl App {
             if self.partition_split_enable
                 && self
                     .get_partition_meta(&puid)
-                    .is_split(&puid, self.partition_split_threshold.get()?.into())?
+                    .is_split(&puid, self.partition_split_threshold.get().into())?
             {
                 partitionSplitCandidates.insert(*partition_id);
                 split_hit = true;

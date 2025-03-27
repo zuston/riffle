@@ -107,6 +107,7 @@ impl ReconfigurableConfManager {
             value: RwLock::new(val),
             last_update_timestamp: AtomicU64::new(util::now_timestamp_as_sec()),
             refresh_interval: 1,
+            lock: Default::default(),
         };
         Ok(conf_ref)
     }
@@ -133,7 +134,7 @@ impl ReconfigurableConfManager {
         flatten_json_value(
             "".to_string(),
             &serde_json::from_str(&json)?,
-            "#",
+            ".",
             &mut state,
         );
 
@@ -145,11 +146,12 @@ impl ReconfigurableConfManager {
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct ByteString {
     val: String,
+    parsed_val: u64,
 }
 
 impl ByteString {
     pub fn as_u64(&self) -> u64 {
-        util::parse_raw_to_bytesize(&self.val)
+        self.parsed_val
     }
 }
 
@@ -158,8 +160,12 @@ impl<'de> Deserialize<'de> for ByteString {
     where
         D: Deserializer<'de>,
     {
-        let s = String::deserialize(deserializer)?;
-        Ok(ByteString { val: s })
+        let raw = String::deserialize(deserializer)?;
+        let val = raw.parse::<ByteSize>().map_err(serde::de::Error::custom)?.0;
+        Ok(ByteString {
+            val: raw,
+            parsed_val: val,
+        })
     }
 }
 
@@ -175,29 +181,32 @@ pub struct ConfRef<T> {
     value: RwLock<T>,
     last_update_timestamp: AtomicU64,
     refresh_interval: u64,
+
+    lock: Mutex<()>,
 }
 
 impl<T> ConfRef<T>
 where
     T: DeserializeOwned + Clone,
 {
-    pub fn get(&self) -> Result<T> {
-        if util::now_timestamp_as_sec() - self.last_update_timestamp.load(Ordering::Relaxed)
-            > self.refresh_interval
-        {
-            if let Some(val) = self.manager.conf_state.get(&self.key) {
-                if let Ok(val) = serde_json::from_value::<T>(val.clone()) {
-                    let mut internal_val = self.value.write();
-                    *internal_val = val;
-                } else {
-                    // fallback
+    pub fn get(&self) -> T {
+        if self.lock.try_lock().is_some() {
+            let now_sec = util::now_timestamp_as_sec();
+            let last = self.last_update_timestamp.load(Ordering::Relaxed);
+            if now_sec - last > self.refresh_interval {
+                if let Some(val) = self.manager.conf_state.get(&self.key) {
+                    if let Ok(val) = serde_json::from_value::<T>(val.clone()) {
+                        let mut internal_val = self.value.write();
+                        *internal_val = val;
+                    } else {
+                        // fallback
+                    }
                 }
+                self.last_update_timestamp.store(now_sec, Ordering::Relaxed);
             }
-            self.last_update_timestamp
-                .store(util::now_timestamp_as_sec(), Ordering::Relaxed);
         }
         let val = self.value.read();
-        Ok(val.clone())
+        val.clone()
     }
 }
 
@@ -235,22 +244,25 @@ mod tests {
             value: RwLock::new(0),
             last_update_timestamp: AtomicU64::new(0),
             refresh_interval: 1,
+            lock: Default::default(),
         };
-        let val = conf_ref.get()?;
+        let val = conf_ref.get();
         assert_eq!(19999, val);
 
         let conf_ref: ConfRef<ByteString> = ConfRef {
             manager: reconf_manager,
-            key: "memory_store#capacity".to_owned(),
+            key: "memory_store.capacity".to_owned(),
             value: RwLock::new(ByteString {
                 val: "2M".to_string(),
+                parsed_val: 2 * 1000 * 1000,
             }),
             last_update_timestamp: AtomicU64::new(0),
             refresh_interval: 1,
+            lock: Default::default(),
         };
-        let val = conf_ref.get()?;
+        let val = conf_ref.get();
         assert_eq!("1M", val.val);
-        let val: u64 = conf_ref.get()?.into();
+        let val: u64 = conf_ref.get().into();
 
         Ok(())
     }
@@ -319,6 +331,9 @@ mod tests {
 
         // fast fail when registering rather than invoking side.
         assert!(reconf_manager.register::<u64>("grpc_port").is_err());
+        assert!(reconf_manager
+            .register::<ByteString>("memory_store.capacity")
+            .is_err());
 
         Ok(())
     }
@@ -347,15 +362,15 @@ mod tests {
             Some((target_conf_file.as_str(), 1, &runtime).into()),
         )?;
 
-        let reconf_ref_1: ConfRef<ByteString> = reconf_manager.register("memory_store#capacity")?;
+        let reconf_ref_1: ConfRef<ByteString> = reconf_manager.register("memory_store.capacity")?;
         assert_eq!(
             1024000000,
-            <ByteString as Into<u64>>::into(reconf_ref_1.get()?)
+            <ByteString as Into<u64>>::into(reconf_ref_1.get())
         );
 
         let reconf_ref_2: ConfRef<u32> =
-            reconf_manager.register("hybrid_store#memory_spill_to_localfile_concurrency")?;
-        assert_eq!(100, reconf_ref_2.get()?);
+            reconf_manager.register("hybrid_store.memory_spill_to_localfile_concurrency")?;
+        assert_eq!(100, reconf_ref_2.get());
 
         // change but wrongly configure
         let toml_str = r#"
@@ -377,7 +392,8 @@ mod tests {
 
         thread::sleep(Duration::from_millis(2000));
         // fallback due to the incorrect conf options
-        assert_eq!(100, reconf_ref_2.get()?);
+        assert_eq!(100, reconf_ref_2.get());
+        assert_eq!(1024000000, reconf_ref_1.get().as_u64());
 
         Ok(())
     }
@@ -407,17 +423,17 @@ mod tests {
         )?;
 
         let reconf_ref_1: ConfRef<f64> =
-            reconf_manager.register("hybrid_store#memory_spill_high_watermark")?;
-        assert_eq!(0.8, reconf_ref_1.get()?);
+            reconf_manager.register("hybrid_store.memory_spill_high_watermark")?;
+        assert_eq!(0.8, reconf_ref_1.get());
 
-        let reconf_ref_2: ConfRef<ByteString> = reconf_manager.register("memory_store#capacity")?;
-        assert_eq!(1024000000, reconf_ref_2.get()?.as_u64());
+        let reconf_ref_2: ConfRef<ByteString> = reconf_manager.register("memory_store.capacity")?;
+        assert_eq!(1024000000, reconf_ref_2.get().as_u64());
 
         // refresh to 0.2
         let toml_conf = create_toml_config(0.2);
         write_conf_into_file(target_conf_file.to_owned(), toml_conf.to_string())?;
 
-        awaitility::at_most(Duration::from_secs(2)).until(|| reconf_ref_1.get().unwrap() == 0.2);
+        awaitility::at_most(Duration::from_secs(2)).until(|| reconf_ref_1.get() == 0.2);
 
         Ok(())
     }
