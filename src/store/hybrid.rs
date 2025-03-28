@@ -970,7 +970,8 @@ pub(crate) mod tests {
         let read_data = read_data.unwrap();
         match read_data {
             Mem(mem_data) => {
-                assert_eq!(0, mem_data.shuffle_data_block_segments.len());
+                awaitility::at_most(Duration::from_secs(2))
+                    .until(|| mem_data.shuffle_data_block_segments.len() == 0);
             }
             _ => panic!(),
         }
