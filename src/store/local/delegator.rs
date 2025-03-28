@@ -253,13 +253,13 @@ impl LocalDiskDelegator {
     async fn write_read_check(&self) -> Result<()> {
         // Bound the server_id to ensure unique if having another instance in the same machine
         let shuffle_server_id = SHUFFLE_SERVER_ID.get().unwrap();
-        let temp_path = format!("corruption_check.file.{}", shuffle_server_id).as_str();
+        let detection_file = format!("corruption_check.file.{}", shuffle_server_id);
 
-        self.delete(temp_path).await?;
+        self.delete(&detection_file).await?;
 
         let written_data = Bytes::copy_from_slice(b"hello world");
-        self.write(temp_path, written_data.clone()).await?;
-        let read_data = self.read(temp_path, 0, None).await?;
+        self.write(&detection_file, written_data.clone()).await?;
+        let read_data = self.read(&detection_file, 0, None).await?;
 
         if written_data != read_data {
             error!(
