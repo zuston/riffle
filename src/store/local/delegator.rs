@@ -1,3 +1,4 @@
+use crate::app::SHUFFLE_SERVER_ID;
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::config::LocalfileStoreConfig;
 use crate::error::WorkerError;
@@ -250,7 +251,10 @@ impl LocalDiskDelegator {
     }
 
     async fn write_read_check(&self) -> Result<()> {
-        let temp_path = "corruption_check.file";
+        // Bound the server_id to ensure unique if having another instance in the same machine
+        let shuffle_server_id = SHUFFLE_SERVER_ID.get().unwrap();
+        let temp_path = format!("corruption_check.file.{}", shuffle_server_id).as_str();
+
         self.delete(temp_path).await?;
 
         let written_data = Bytes::copy_from_slice(b"hello world");
