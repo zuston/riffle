@@ -1014,6 +1014,10 @@ fn register_custom_metrics() {
         .expect("");
 }
 
+const JOB_NAME: &str = "uniffle-worker";
+const WORKER_ID: &str = "worker_id";
+const VERSION: &str = "version";
+
 pub struct MetricService;
 impl MetricService {
     pub fn init(config: &Config, runtime_manager: RuntimeManager) {
@@ -1024,7 +1028,6 @@ impl MetricService {
 
         register_custom_metrics();
 
-        let job_name = "uniffle-worker";
         let cfg = config.metrics.clone().unwrap();
 
         let push_gateway_endpoint = cfg.push_gateway_endpoint;
@@ -1053,19 +1056,19 @@ impl MetricService {
                         metrics.extend_from_slice(&custom_metrics);
                         metrics.extend_from_slice(&general_metrics);
 
-                        let mut all_labels = HashMap::new();
-                        all_labels.insert(
-                            "worker_id".to_owned(),
-                            SHUFFLE_SERVER_ID.get().unwrap().to_string(),
-                        );
-                        all_labels.insert("cpu_arch".to_owned(), CPU_ARCH.to_owned());
+                        let mut all_labels = HashMap::from([
+                            (
+                                WORKER_ID.to_owned(),
+                                SHUFFLE_SERVER_ID.get().unwrap().to_owned(),
+                            ),
+                            (VERSION.to_owned(), env!("CARGO_PKG_VERSION").to_owned()),
+                        ]);
                         if let Some(labels) = &cfg.labels {
-                            let labels = labels.clone();
-                            all_labels.extend(labels);
+                            all_labels.extend(labels.clone());
                         }
 
                         let pushed_result = prometheus::push_add_metrics(
-                            job_name,
+                            JOB_NAME,
                             all_labels,
                             &push_gateway_endpoint.to_owned().unwrap().to_owned(),
                             metrics,
