@@ -55,6 +55,7 @@ pub mod lazy_initializer;
 
 mod config_reconfigure;
 pub mod deadlock;
+pub mod decommission;
 pub mod disk_explorer;
 pub mod historical_apps;
 pub mod panic_hook;
@@ -62,6 +63,7 @@ pub mod panic_hook;
 use crate::app::{AppManager, AppManagerRef};
 use crate::common::init_global_variable;
 use crate::config_reconfigure::ReconfigurableConfManager;
+use crate::decommission::DecommissionManager;
 use crate::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
 use crate::grpc::protobuf::uniffle::{
     GetLocalShuffleDataRequest, GetLocalShuffleIndexRequest, GetMemoryShuffleDataRequest,
@@ -103,8 +105,14 @@ pub async fn start_uniffle_worker(config: config::Config) -> Result<AppManagerRe
 
     let app_manager_ref_cloned = app_manager_ref.clone();
     let rm_cloned = runtime_manager.clone();
+    let decommission_manager = DecommissionManager::new(&app_manager_ref);
     runtime_manager.default_runtime.spawn(async move {
-        DefaultRpcService {}.start(&config, rm_cloned, app_manager_ref_cloned)
+        DefaultRpcService {}.start(
+            &config,
+            rm_cloned,
+            app_manager_ref_cloned,
+            &decommission_manager,
+        )
     });
 
     runtime_manager.default_runtime.spawn(async move {
