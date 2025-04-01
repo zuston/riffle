@@ -26,7 +26,6 @@ mod pprof;
 use crate::config::Config;
 use crate::http::await_tree::AwaitTreeHandler;
 use crate::http::http_service::PoemHTTPServer;
-use crate::http::jeprof::{HeapProfFlameGraphHandler, HeapProfHandler};
 use crate::http::metrics::MetricsHTTPHandler;
 use crate::http::pprof::PProfHandler;
 use crate::runtime::manager::RuntimeManager;
@@ -34,6 +33,7 @@ use crate::runtime::manager::RuntimeManager;
 use crate::app::AppManagerRef;
 use crate::http::apps::{ApplicationsJsonHandler, ApplicationsTableHandler};
 use crate::http::historical_apps::HistoricalAppsHandler;
+use crate::http::jeprof::HeapProfFlameGraphHandler;
 use log::info;
 use poem::RouteMethod;
 
@@ -66,7 +66,6 @@ fn new_server() -> Box<PoemHTTPServer> {
     server.register_handler(PProfHandler::default());
     server.register_handler(MetricsHTTPHandler::default());
     server.register_handler(AwaitTreeHandler::default());
-    server.register_handler(HeapProfHandler::default());
     server.register_handler(HeapProfFlameGraphHandler::default());
     server.register_handler(ApplicationsTableHandler::default());
     server.register_handler(ApplicationsJsonHandler::default());
