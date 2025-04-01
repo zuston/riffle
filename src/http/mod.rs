@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+mod admin;
 mod apps;
 mod await_tree;
 mod historical_apps;
@@ -32,6 +33,7 @@ use crate::http::pprof::PProfHandler;
 use crate::runtime::manager::RuntimeManager;
 
 use crate::app::AppManagerRef;
+use crate::http::admin::AdminHandler;
 use crate::http::apps::{ApplicationsJsonHandler, ApplicationsTableHandler};
 use crate::http::historical_apps::HistoricalAppsHandler;
 use log::info;
@@ -71,6 +73,7 @@ fn new_server() -> Box<PoemHTTPServer> {
     server.register_handler(ApplicationsTableHandler::default());
     server.register_handler(ApplicationsJsonHandler::default());
     server.register_handler(HistoricalAppsHandler::default());
+    server.register_handler(AdminHandler::default());
 
     Box::new(server)
 }

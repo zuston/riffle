@@ -32,7 +32,7 @@ use crate::logforth_service::LogService;
 
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::deadlock::detect_deadlock;
-use crate::decommission::DecommissionManager;
+use crate::decommission::{DecommissionManager, DECOMMISSION_MANAGER_REF};
 use crate::mem_allocator::ALLOCATOR;
 use crate::metric::MetricService;
 use crate::panic_hook::set_panic_hook;
@@ -157,6 +157,7 @@ fn main() -> Result<()> {
         HealthService::new(&app_manager_ref, &storage, &config.health_service_config);
 
     let decommission_manager = DecommissionManager::new(&app_manager_ref);
+    let _ = DECOMMISSION_MANAGER_REF.set(decommission_manager.clone());
 
     MetricService::init(&config, runtime_manager.clone());
     FastraceWrapper::init(config.clone());
