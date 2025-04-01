@@ -127,13 +127,15 @@ impl LocalFileStore {
     pub fn from(localfile_config: LocalfileStoreConfig, runtime_manager: RuntimeManager) -> Self {
         let mut local_disk_instances = vec![];
         for path in &localfile_config.data_paths {
-            // clear up all previous disk data
-            if let Err(e) = LocalFileStore::remove_dir_children(path.as_str()) {
-                panic!(
-                    "Errors on clear up children files of path: {:?}. err: {:#?}",
-                    path.as_str(),
-                    e
-                );
+            if localfile_config.launch_purge_enable {
+                info!("Launch purging for [{}]...", path.as_str());
+                if let Err(e) = LocalFileStore::remove_dir_children(path.as_str()) {
+                    panic!(
+                        "Errors on clear up children files of path: {:?}. err: {:#?}",
+                        path.as_str(),
+                        e
+                    );
+                }
             }
             local_disk_instances.push(LocalDiskDelegator::new(
                 &runtime_manager,

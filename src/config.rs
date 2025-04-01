@@ -107,6 +107,10 @@ pub struct KerberosSecurityConfig {
 pub struct LocalfileStoreConfig {
     pub data_paths: Vec<String>,
     pub min_number_of_available_disks: Option<i32>,
+
+    #[serde(default = "bool::default")]
+    pub launch_purge_enable: bool,
+
     #[serde(default = "as_default_disk_high_watermark")]
     pub disk_high_watermark: f32,
     #[serde(default = "as_default_disk_low_watermark")]
@@ -184,6 +188,7 @@ impl LocalfileStoreConfig {
         LocalfileStoreConfig {
             data_paths,
             min_number_of_available_disks: Some(1),
+            launch_purge_enable: false,
             disk_high_watermark: as_default_disk_high_watermark(),
             disk_low_watermark: as_default_disk_low_watermark(),
             disk_write_buf_capacity: as_default_disk_write_buf_capacity(),
