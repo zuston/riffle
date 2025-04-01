@@ -1,6 +1,7 @@
 use crate::app::AppManagerRef;
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::config::Config;
+use crate::decommission::DecommissionManager;
 use crate::grpc::layer::awaittree::AwaitTreeMiddlewareLayer;
 use crate::grpc::layer::metric::MetricsMiddlewareLayer;
 use crate::grpc::layer::tracing::TracingMiddleWareLayer;
@@ -95,6 +96,7 @@ impl DefaultRpcService {
         tx: Sender<()>,
         app_manager_ref: AppManagerRef,
         rejection_gateway: &RejectionPolicyGateway,
+        decommission_manager: &DecommissionManager,
     ) -> Result<()> {
         let grpc_port = config.grpc_port;
 
@@ -104,8 +106,11 @@ impl DefaultRpcService {
 
         let core_ids = core_affinity::get_core_ids().unwrap();
         for (_, core_id) in core_ids.into_iter().enumerate() {
-            let shuffle_server =
-                DefaultShuffleServer::from(app_manager_ref.clone(), rejection_gateway);
+            let shuffle_server = DefaultShuffleServer::from(
+                app_manager_ref.clone(),
+                rejection_gateway,
+                decommission_manager,
+            );
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), grpc_port as u16);
             let service = ShuffleServerServer::new(shuffle_server)
                 .max_decoding_message_size(usize::MAX)
@@ -137,6 +142,7 @@ impl DefaultRpcService {
         config: &Config,
         runtime_manager: RuntimeManager,
         app_manager_ref: AppManagerRef,
+        decommission_manager: &DecommissionManager,
     ) -> Result<()> {
         let rejection_gateway = RejectionPolicyGateway::new(&app_manager_ref, config);
 
@@ -153,6 +159,7 @@ impl DefaultRpcService {
             tx.clone(),
             app_manager_ref.clone(),
             &rejection_gateway,
+            decommission_manager,
         )?;
 
         let urpc_port = config.urpc_port;

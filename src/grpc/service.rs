@@ -22,18 +22,22 @@ use crate::app::{
     WritingViewContext,
 };
 use crate::constant::StatusCode;
+use crate::decommission::{DecommissionManager, DecommissionState};
 use crate::error::WorkerError;
+use crate::grpc::protobuf::uniffle::shuffle_server_internal_server::ShuffleServerInternal;
 use crate::grpc::protobuf::uniffle::shuffle_server_server::ShuffleServer;
 use crate::grpc::protobuf::uniffle::{
-    AppHeartBeatRequest, AppHeartBeatResponse, FinishShuffleRequest, FinishShuffleResponse,
-    GetLocalShuffleDataRequest, GetLocalShuffleDataResponse, GetLocalShuffleIndexRequest,
-    GetLocalShuffleIndexResponse, GetMemoryShuffleDataRequest, GetMemoryShuffleDataResponse,
-    GetShuffleResultForMultiPartRequest, GetShuffleResultForMultiPartResponse,
-    GetShuffleResultRequest, GetShuffleResultResponse, ReportShuffleResultRequest,
-    ReportShuffleResultResponse, RequireBufferRequest, RequireBufferResponse,
-    SendShuffleDataRequest, SendShuffleDataResponse, ShuffleCommitRequest, ShuffleCommitResponse,
-    ShuffleRegisterRequest, ShuffleRegisterResponse, ShuffleUnregisterByAppIdRequest,
-    ShuffleUnregisterByAppIdResponse, ShuffleUnregisterRequest, ShuffleUnregisterResponse,
+    AppHeartBeatRequest, AppHeartBeatResponse, CancelDecommissionRequest,
+    CancelDecommissionResponse, DecommissionRequest, DecommissionResponse, FinishShuffleRequest,
+    FinishShuffleResponse, GetLocalShuffleDataRequest, GetLocalShuffleDataResponse,
+    GetLocalShuffleIndexRequest, GetLocalShuffleIndexResponse, GetMemoryShuffleDataRequest,
+    GetMemoryShuffleDataResponse, GetShuffleResultForMultiPartRequest,
+    GetShuffleResultForMultiPartResponse, GetShuffleResultRequest, GetShuffleResultResponse,
+    ReportShuffleResultRequest, ReportShuffleResultResponse, RequireBufferRequest,
+    RequireBufferResponse, SendShuffleDataRequest, SendShuffleDataResponse, ShuffleCommitRequest,
+    ShuffleCommitResponse, ShuffleRegisterRequest, ShuffleRegisterResponse,
+    ShuffleUnregisterByAppIdRequest, ShuffleUnregisterByAppIdResponse, ShuffleUnregisterRequest,
+    ShuffleUnregisterResponse,
 };
 use crate::id_layout::to_layout;
 use crate::metric::{
@@ -66,17 +70,47 @@ pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
 pub struct DefaultShuffleServer {
     app_manager_ref: AppManagerRef,
     rejection_policy_gateway: RejectionPolicyGateway,
+    decommission_manager: DecommissionManager,
 }
 
 impl DefaultShuffleServer {
     pub fn from(
         app_manager_ref: AppManagerRef,
         rejection_policy_gateway: &RejectionPolicyGateway,
+        decommission_manager: &DecommissionManager,
     ) -> DefaultShuffleServer {
         DefaultShuffleServer {
             app_manager_ref,
             rejection_policy_gateway: rejection_policy_gateway.clone(),
+            decommission_manager: decommission_manager.clone(),
         }
+    }
+}
+
+#[tonic::async_trait]
+impl ShuffleServerInternal for DefaultShuffleServer {
+    async fn decommission(
+        &self,
+        request: Request<DecommissionRequest>,
+    ) -> Result<Response<DecommissionResponse>, Status> {
+        self.decommission_manager
+            .as_state(DecommissionState::DECOMMISSIONING);
+        Ok(Response::new(DecommissionResponse {
+            status: StatusCode::SUCCESS.into(),
+            ret_msg: "".to_string(),
+        }))
+    }
+
+    async fn cancel_decommission(
+        &self,
+        request: Request<CancelDecommissionRequest>,
+    ) -> Result<Response<CancelDecommissionResponse>, Status> {
+        self.decommission_manager
+            .as_state(DecommissionState::CANCEL_DECOMMISSION);
+        Ok(Response::new(CancelDecommissionResponse {
+            status: StatusCode::SUCCESS.into(),
+            ret_msg: "".to_string(),
+        }))
     }
 }
 
