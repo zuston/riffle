@@ -223,7 +223,7 @@ labels = { env = "production", service = "my_service" }
     ```
 2. Paste following command to get cpu profile flamegraph
     ```shell
-    go tool pprof -http="0.0.0.0:8081" http://{remote_ip}:8080/debug/pprof/profile?seconds=30
+    go tool pprof -http="0.0.0.0:8081" http://{remote_ip}:8080/debug/pprof/profile?format=pprof
     ```
    - localhost:8080: riffle server.
    - remote_ip: pprof server address.
