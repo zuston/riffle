@@ -127,13 +127,15 @@ impl LocalFileStore {
     pub fn from(localfile_config: LocalfileStoreConfig, runtime_manager: RuntimeManager) -> Self {
         let mut local_disk_instances = vec![];
         for path in &localfile_config.data_paths {
-            // clear up all previous disk data
-            if let Err(e) = LocalFileStore::remove_dir_children(path.as_str()) {
-                panic!(
-                    "Errors on clear up children files of path: {:?}. err: {:#?}",
-                    path.as_str(),
-                    e
-                );
+            if localfile_config.launch_purge_enable {
+                info!("Launch purging for [{}]...", path.as_str());
+                if let Err(e) = LocalFileStore::remove_dir_children(path.as_str()) {
+                    panic!(
+                        "Errors on clear up children files of path: {:?}. err: {:#?}",
+                        path.as_str(),
+                        e
+                    );
+                }
             }
             local_disk_instances.push(LocalDiskDelegator::new(
                 &runtime_manager,
@@ -188,7 +190,7 @@ impl LocalFileStore {
     }
 
     fn gen_relative_path_for_shuffle(app_id: &str, shuffle_id: i32) -> String {
-        format!("{}/{}", app_id, shuffle_id)
+        format!("{}/{}/", app_id, shuffle_id)
     }
 
     fn gen_relative_path_for_partition(uid: &PartitionedUId) -> (String, String) {
@@ -722,22 +724,7 @@ mod test {
         Ok(())
     }
 
-    #[test]
-    fn purge_test() -> anyhow::Result<()> {
-        let temp_dir = tempdir::TempDir::new("test_local_store").unwrap();
-        let temp_path = temp_dir.path().to_str().unwrap().to_string();
-        println!("init local file path: {}", &temp_path);
-        let local_store = LocalFileStore::new(vec![temp_path.clone()]);
-
-        let runtime = local_store.runtime_manager.clone();
-
-        let app_id = "purge_test-app-id".to_string();
-        let uid = PartitionedUId {
-            app_id: app_id.clone(),
-            shuffle_id: 0,
-            partition_id: 0,
-        };
-
+    fn create_writing_ctx_by_uid(uid: &PartitionedUId) -> WritingViewContext {
         let data = b"hello world!hello china!";
         let size = data.len();
         let writing_ctx = WritingViewContext::create_for_test(
@@ -761,8 +748,37 @@ mod test {
                 },
             ],
         );
+        writing_ctx
+    }
 
-        let insert_result = runtime.wait(local_store.insert(writing_ctx));
+    #[test]
+    fn purge_test() -> anyhow::Result<()> {
+        let temp_dir = tempdir::TempDir::new("test_local_store").unwrap();
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        println!("init local file path: {}", &temp_path);
+        let local_store = LocalFileStore::new(vec![temp_path.clone()]);
+
+        let runtime = local_store.runtime_manager.clone();
+
+        let app_id = "purge_test-app-id".to_string();
+
+        let shuffle_id_1 = 1;
+        let shuffle_id_2 = 13;
+
+        let uid_1 = PartitionedUId {
+            app_id: app_id.clone(),
+            shuffle_id: shuffle_id_1,
+            partition_id: 0,
+        };
+        let uid_2 = PartitionedUId {
+            app_id: app_id.to_owned(),
+            shuffle_id: shuffle_id_2,
+            partition_id: 0,
+        };
+
+        // for shuffle_id = 1
+        let writing_ctx_1 = create_writing_ctx_by_uid(&uid_1);
+        let insert_result = runtime.wait(local_store.insert(writing_ctx_1));
         if insert_result.is_err() {
             println!("{:?}", insert_result.err());
             panic!()
@@ -771,23 +787,46 @@ mod test {
             true,
             runtime.wait(tokio::fs::try_exists(format!(
                 "{}/{}/{}/partition-{}.data",
-                &temp_path, &app_id, "0", "0"
+                &temp_path, &app_id, shuffle_id_1, "0"
+            )))?
+        );
+
+        // for shuffle_id = 13
+        let writing_ctx_2 = create_writing_ctx_by_uid(&uid_2);
+        let insert_result = runtime.wait(local_store.insert(writing_ctx_2));
+        if insert_result.is_err() {
+            println!("{:?}", insert_result.err());
+            panic!()
+        }
+        assert_eq!(
+            true,
+            runtime.wait(tokio::fs::try_exists(format!(
+                "{}/{}/{}/partition-{}.data",
+                &temp_path, &app_id, shuffle_id_2, "0"
             )))?
         );
 
         // shuffle level purge
         runtime
             .wait(local_store.purge(&PurgeDataContext::new(
-                &PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(app_id.to_owned(), 0),
+                &PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(app_id.to_owned(), shuffle_id_1),
             )))
             .expect("");
         assert_eq!(
             false,
             runtime.wait(tokio::fs::try_exists(format!(
                 "{}/{}/{}",
-                &temp_path, &app_id, 0
+                &temp_path, &app_id, shuffle_id_1
             )))?
         );
+        // the shuffle_id = 1 deletion will not effect shuffle_id = 13
+        let reading_ctx = ReadingIndexViewContext {
+            partition_id: uid_2.clone(),
+        };
+        let reading_result = runtime.wait(local_store.get_index(reading_ctx)).expect("");
+        if let ResponseDataIndex::Local(index) = reading_result {
+            assert!(index.data_file_len > 0);
+        }
 
         // app level purge
         runtime.wait(local_store.purge(&PurgeDataContext {

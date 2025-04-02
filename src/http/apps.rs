@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 #[handler]
+#[allow(deprecated)]
 fn table() -> Html<String> {
     let mut html_content = r#"
     <!DOCTYPE html>

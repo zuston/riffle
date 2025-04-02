@@ -215,6 +215,7 @@ impl Into<ShuffleDataBlockSegment> for DataSegment {
 pub struct RequireBufferResponse {
     pub ticket_id: i64,
     pub allocated_timestamp: u64,
+    pub split_partitions: Vec<i32>,
 }
 
 impl RequireBufferResponse {
@@ -222,6 +223,7 @@ impl RequireBufferResponse {
         Self {
             ticket_id,
             allocated_timestamp: now_timestamp_as_sec(),
+            split_partitions: vec![],
         }
     }
 }

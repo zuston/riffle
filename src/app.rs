@@ -47,8 +47,10 @@ use std::str::FromStr;
 
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::block_id_manager::{get_block_id_manager, BlockIdManager};
+use crate::config_reconfigure::{ByteString, ConfRef, ReconfigurableConfManager};
 use crate::constant::ALL_LABEL;
 use crate::grpc::protobuf::uniffle::{BlockIdLayout, RemoteStorage};
+use crate::historical_apps::HistoricalAppStatistics;
 use crate::id_layout::IdLayout;
 use crate::storage::HybridStorage;
 use crate::store::local::LocalfileStoreStat;
@@ -142,12 +144,17 @@ pub struct App {
     latest_heartbeat_time: AtomicU64,
     store: Arc<HybridStore>,
 
-    huge_partition_marked_threshold: Option<u64>,
-    huge_partition_memory_backpressure_threshold: Option<u64>,
+    memory_capacity: u64,
+
+    // partition limitation
+    partition_limit_enable: bool,
+    partition_limit_threshold: ConfRef<ByteString>,
+    partition_limit_mem_backpressure_ratio: ConfRef<f64>,
 
     total_received_data_size: AtomicU64,
     total_resident_data_size: AtomicU64,
 
+    // when exceeding the partition-limit-threshold, it will be marked as huge partition
     huge_partition_number: AtomicU64,
 
     pub(crate) registry_timestamp: u128,
@@ -157,6 +164,13 @@ pub struct App {
 
     // key: (shuffle_id, partition_id)
     partition_meta_infos: DashMap<(i32, i32), PartitionedMeta>,
+
+    // partition split
+    partition_split_enable: bool,
+    partition_split_threshold: ConfRef<ByteString>,
+
+    // reconfiguration manager
+    reconf_manager: ReconfigurableConfManager,
 }
 
 #[derive(Clone)]
@@ -167,6 +181,8 @@ struct PartitionedMeta {
 struct PartitionedMetaInner {
     total_size: u64,
     is_huge_partition: bool,
+
+    is_split: bool,
 }
 
 impl PartitionedMeta {
@@ -175,8 +191,27 @@ impl PartitionedMeta {
             inner: Arc::new(RwLock::new(PartitionedMetaInner {
                 total_size: 0,
                 is_huge_partition: false,
+                is_split: false,
             })),
         }
+    }
+
+    fn is_split(&self, uid: &PartitionedUId, threshold: u64) -> Result<bool> {
+        let mut meta = self.inner.write();
+        if meta.is_split {
+            return Ok(true);
+        }
+
+        if (meta.total_size > threshold) {
+            meta.is_split = true;
+            warn!(
+                "Split partition(actual/threshold: {}/{}) for app:{}. shuffle_id:{}. partition_id:{}",
+                meta.total_size, threshold, uid.app_id, uid.shuffle_id, uid.partition_id
+            );
+            return Ok(true);
+        }
+
+        Ok(false)
     }
 
     fn get_size(&self) -> Result<u64> {
@@ -207,6 +242,7 @@ impl App {
         store: Arc<HybridStore>,
         runtime_manager: RuntimeManager,
         config: &Config,
+        reconf_manager: &ReconfigurableConfManager,
     ) -> Self {
         // todo: should throw exception if register failed.
         let copy_app_id = app_id.to_string();
@@ -221,49 +257,47 @@ impl App {
             _ => {}
         }
 
-        let huge_partition_marked_threshold =
-            match &config.app_config.huge_partition_marked_threshold {
-                Some(v) => Some(
-                    ReadableSize::from_str(v.clone().as_str())
-                        .unwrap()
-                        .as_bytes(),
-                ),
-                _ => None,
-            };
+        let memory_capacity =
+            util::parse_raw_to_bytesize(&config.memory_store.as_ref().unwrap().capacity);
 
-        let mem_capacity = ReadableSize::from_str(&config.memory_store.clone().unwrap().capacity)
-            .unwrap()
-            .as_bytes();
-        let huge_partition_backpressure_size =
-            match &config.app_config.huge_partition_memory_limit_percent {
-                Some(v) => Some(((mem_capacity as f64) * *v) as u64),
-                _ => None,
-            };
+        let partition_limit_enable = config.app_config.partition_limit_enable;
+        let partition_limit_threshold: ConfRef<ByteString> = reconf_manager
+            .register("app_config.partition_limit_threshold")
+            .unwrap();
+        let partition_limit_mem_backpressure_ratio: ConfRef<f64> = reconf_manager
+            .register("app_config.partition_limit_memory_backpressure_ratio")
+            .unwrap();
 
-        if huge_partition_backpressure_size.is_some() && huge_partition_marked_threshold.is_some() {
-            info!(
-                "Huge partition limitation is enabled for app: {}. Marked threshold: {}, memory backpressure bytes: {}",
-                app_id.as_str(), huge_partition_marked_threshold.unwrap(), huge_partition_backpressure_size.unwrap()
-            );
-        }
+        let partition_split_enable = config.app_config.partition_split_enable;
+        let partition_split_threshold: ConfRef<ByteString> = reconf_manager
+            .register("app_config.partition_split_threshold")
+            .unwrap();
+
         let block_id_manager = get_block_id_manager(&config.app_config.block_id_manager_type);
-        info!(
-            "Using the block id manager: {} for app: {}",
-            &config.app_config.block_id_manager_type, &app_id
-        );
+
+        info!("App=[{}]. block_manager_type: {}. partition_limit/threshold/ratio: {}/{}/{}. partition_split/threshold: {}/{}",
+                &app_id, &config.app_config.block_id_manager_type,
+                partition_limit_enable, partition_limit_threshold.get(), partition_limit_mem_backpressure_ratio.get(),
+                partition_split_enable, partition_split_threshold.get());
+
         App {
             app_id,
             app_config_options: config_options,
             latest_heartbeat_time: AtomicU64::new(now_timestamp_as_sec()),
             store,
+            memory_capacity,
+            partition_limit_enable,
+            partition_limit_threshold,
+            partition_limit_mem_backpressure_ratio,
             partition_meta_infos: DashMap::new(),
-            huge_partition_marked_threshold,
-            huge_partition_memory_backpressure_threshold: huge_partition_backpressure_size,
             total_received_data_size: Default::default(),
             total_resident_data_size: Default::default(),
             huge_partition_number: Default::default(),
             registry_timestamp: now_timestamp_as_millis(),
             block_id_manager,
+            partition_split_enable,
+            partition_split_threshold,
+            reconf_manager: reconf_manager.clone(),
         }
     }
 
@@ -362,21 +396,18 @@ impl App {
     }
 
     pub fn is_huge_partition(&self, uid: &PartitionedUId) -> Result<bool> {
-        // is configured with the associated huge_partition config options
-        if self.huge_partition_marked_threshold.is_none() {
-            return Ok(false);
-        }
-        if self.huge_partition_memory_backpressure_threshold.is_none() {
+        // always mark false when partition limit is not enabled
+        if !self.partition_limit_enable {
             return Ok(false);
         }
 
-        let huge_partition_threshold = self.huge_partition_marked_threshold.unwrap();
+        let partition_limit_threshold = self.partition_limit_threshold.get().as_u64();
         let mut meta = self.get_partition_meta(uid);
         if meta.is_huge_partition() {
             Ok(true)
         } else {
             let data_size = meta.get_size()?;
-            if data_size > huge_partition_threshold {
+            if data_size > partition_limit_threshold {
                 meta.mark_as_huge_partition();
                 self.add_huge_partition_metric();
                 warn!("Partition is marked as huge partition. uid: {:?}", uid);
@@ -418,14 +449,14 @@ impl App {
         if !self.is_huge_partition(uid)? {
             return Ok(false);
         }
-        let huge_partition_memory_used = &self.huge_partition_memory_backpressure_threshold;
-        let huge_partition_memory = *(&huge_partition_memory_used.unwrap());
+        let ratio = self.partition_limit_mem_backpressure_ratio.get();
+        let threshold = (self.memory_capacity as f64 * ratio) as u64;
+        let used = self.store.get_memory_buffer_size(uid).await?;
 
-        let memory_used = self.store.get_memory_buffer_size(uid).await?;
-        if memory_used > huge_partition_memory {
+        if used > threshold {
             info!(
                 "[{:?}] with huge partition (used/limited: {}/{}), it has been limited of writing speed",
-                uid, memory_used, huge_partition_memory
+                uid, used, threshold
             );
             TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED.inc();
             Ok(true)
@@ -450,18 +481,40 @@ impl App {
 
         let app_id = &ctx.uid.app_id;
         let shuffle_id = &ctx.uid.shuffle_id;
+
+        let mut partition_split_candidates = HashSet::new();
         for partition_id in &ctx.partition_ids {
             let puid = PartitionedUId::from(app_id.to_owned(), *shuffle_id, *partition_id);
-            if self.is_backpressure_of_partition(&puid).await? {
-                TOTAL_REQUIRE_BUFFER_FAILED.inc();
-                return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
+            let mut split_hit = false;
+
+            // partition split
+            if self.partition_split_enable
+                && self
+                    .get_partition_meta(&puid)
+                    .is_split(&puid, self.partition_split_threshold.get().into())?
+            {
+                partition_split_candidates.insert(*partition_id);
+                split_hit = true;
+            }
+
+            if !split_hit {
+                // huge partition limitation
+                if self.is_backpressure_of_partition(&puid).await? {
+                    TOTAL_REQUIRE_BUFFER_FAILED.inc();
+                    return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
+                }
             }
         }
 
-        self.store.require_buffer(ctx).await.map_err(|err| {
+        let mut required = self.store.require_buffer(ctx).await.map_err(|err| {
             TOTAL_REQUIRE_BUFFER_FAILED.inc();
             err
-        })
+        })?;
+        required.split_partitions = partition_split_candidates
+            .iter()
+            .map(|data| *data)
+            .collect();
+        Ok(required)
     }
 
     pub async fn release_ticket(&self, ticket_id: i64) -> Result<i64, WorkerError> {
@@ -499,6 +552,19 @@ impl App {
         let number = self.block_id_manager.report_multi_block_ids(ctx).await?;
         BLOCK_ID_NUMBER.add(number as i64);
         Ok(())
+    }
+
+    pub async fn dump_all_huge_partitions_size(&self) -> Result<Vec<u64>> {
+        let mut records = vec![];
+        let view = self.partition_meta_infos.clone().into_read_only();
+        for entry in view.iter() {
+            let val = entry.1;
+            if val.is_huge_partition() {
+                let size = val.get_size()?;
+                records.push(size);
+            }
+        }
+        Ok(records)
     }
 
     pub async fn purge(&self, reason: &PurgeReason) -> Result<()> {
@@ -741,12 +807,28 @@ pub struct AppManager {
     app_heartbeat_timeout_min: u32,
     config: Config,
     runtime_manager: RuntimeManager,
+    historical_app_statistics: Option<HistoricalAppStatistics>,
+    reconf_manager: ReconfigurableConfManager,
 }
 
 impl AppManager {
-    fn new(runtime_manager: RuntimeManager, config: Config, storage: &HybridStorage) -> Self {
+    fn new(
+        runtime_manager: RuntimeManager,
+        config: Config,
+        storage: &HybridStorage,
+        reconf_manager: &ReconfigurableConfManager,
+    ) -> Self {
         let (sender, receiver) = async_channel::unbounded();
         let app_heartbeat_timeout_min = config.app_config.app_heartbeat_timeout_min;
+
+        let historical_app_statistics: Option<HistoricalAppStatistics> =
+            if config.app_config.historical_apps_record_enable {
+                info!("Historical apps recorder has been initialized.");
+                Some(HistoricalAppStatistics::new(&runtime_manager, 24 * 60 * 60))
+            } else {
+                None
+            };
+
         let manager = AppManager {
             apps: DashMap::new(),
             receiver,
@@ -755,6 +837,8 @@ impl AppManager {
             app_heartbeat_timeout_min,
             config,
             runtime_manager: runtime_manager.clone(),
+            historical_app_statistics,
+            reconf_manager: reconf_manager.clone(),
         };
         manager
     }
@@ -765,8 +849,14 @@ impl AppManager {
         runtime_manager: RuntimeManager,
         config: Config,
         storage: &HybridStorage,
+        reconf_manager: &ReconfigurableConfManager,
     ) -> AppManagerRef {
-        let app_ref = Arc::new(AppManager::new(runtime_manager.clone(), config, storage));
+        let app_ref = Arc::new(AppManager::new(
+            runtime_manager.clone(),
+            config,
+            storage,
+            reconf_manager,
+        ));
         let app_manager_ref_cloned = app_ref.clone();
 
         runtime_manager.default_runtime.spawn_with_await_tree("App heartbeat checker", async move {
@@ -864,6 +954,10 @@ impl AppManager {
         app_ref
     }
 
+    pub fn get_historical_statistics(&self) -> Option<&HistoricalAppStatistics> {
+        self.historical_app_statistics.as_ref()
+    }
+
     pub fn app_is_exist(&self, app_id: &str) -> bool {
         self.apps.contains_key(app_id)
     }
@@ -904,6 +998,18 @@ impl AppManager {
                 app_id.as_str(),
                 format!("{:?}", StorageType::HDFS).as_str(),
             ]);
+
+            // record into the historical app list
+            if let Some(historical_manager) = self.historical_app_statistics.as_ref() {
+                info!(
+                    "Saving timeout app into the historical list.. app_id: {}",
+                    app_id.as_str()
+                );
+                historical_manager
+                    .save(&app)
+                    .instrument_await("Saving to historical app list...")
+                    .await?;
+            }
         }
         app.purge(reason).await?;
         Ok(())
@@ -941,6 +1047,7 @@ impl AppManager {
                     self.store.clone(),
                     self.runtime_manager.clone(),
                     &self.config,
+                    &self.reconf_manager,
                 ))
             })
             .clone();
@@ -1004,6 +1111,7 @@ pub(crate) mod test {
         RequireBufferContext, WritingViewContext,
     };
     use crate::config::{Config, HybridStoreConfig, LocalfileStoreConfig, MemoryStoreConfig};
+    use crate::config_reconfigure::ReconfigurableConfManager;
     use crate::error::WorkerError;
     use crate::id_layout::{to_layout, IdLayout, DEFAULT_BLOCK_ID_LAYOUT};
     use crate::runtime::manager::RuntimeManager;
@@ -1098,12 +1206,14 @@ pub(crate) mod test {
             },
         );
         let mut app_config = &mut config.app_config;
-        app_config.huge_partition_marked_threshold = Some("10B".to_string());
-        app_config.huge_partition_memory_limit_percent = Some(0.4);
+        app_config.partition_limit_enable = true;
+        app_config.partition_limit_threshold = "10B".to_string();
+        app_config.partition_limit_memory_backpressure_ratio = 0.4;
 
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
         let storage = StorageService::init(&runtime_manager, &config);
         let app_manager_ref =
-            AppManager::get_ref(runtime_manager.clone(), config, &storage).clone();
+            AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
         app_manager_ref
             .register(app_id.clone().into(), 1, Default::default())
             .unwrap();
@@ -1137,9 +1247,10 @@ pub(crate) mod test {
 
         let runtime_manager: RuntimeManager = Default::default();
         let config = mock_config();
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
         let storage = StorageService::init(&runtime_manager, &config);
         let app_manager_ref =
-            AppManager::get_ref(runtime_manager.clone(), config, &storage).clone();
+            AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
         app_manager_ref
             .register(app_id.clone().into(), 1, Default::default())
             .unwrap();
@@ -1198,8 +1309,10 @@ pub(crate) mod test {
     fn app_manager_test() {
         let config = mock_config();
         let runtime_manager: RuntimeManager = Default::default();
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
         let storage = StorageService::init(&runtime_manager, &config);
-        let app_manager_ref = AppManager::get_ref(Default::default(), config, &storage).clone();
+        let app_manager_ref =
+            AppManager::get_ref(Default::default(), config, &storage, &reconf_manager).clone();
 
         app_manager_ref
             .register("app_id".into(), 1, Default::default())
@@ -1215,9 +1328,10 @@ pub(crate) mod test {
 
         let runtime_manager: RuntimeManager = Default::default();
         let config = mock_config();
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
         let storage = StorageService::init(&runtime_manager, &config);
         let app_manager_ref =
-            AppManager::get_ref(runtime_manager.clone(), config, &storage).clone();
+            AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
         app_manager_ref
             .register(app_id.clone().into(), 1, Default::default())
             .unwrap();

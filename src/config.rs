@@ -107,6 +107,10 @@ pub struct KerberosSecurityConfig {
 pub struct LocalfileStoreConfig {
     pub data_paths: Vec<String>,
     pub min_number_of_available_disks: Option<i32>,
+
+    #[serde(default = "bool::default")]
+    pub launch_purge_enable: bool,
+
     #[serde(default = "as_default_disk_high_watermark")]
     pub disk_high_watermark: f32,
     #[serde(default = "as_default_disk_low_watermark")]
@@ -117,8 +121,6 @@ pub struct LocalfileStoreConfig {
     pub disk_read_buf_capacity: String,
     #[serde(default = "as_default_disk_healthy_check_interval_sec")]
     pub disk_healthy_check_interval_sec: u64,
-
-    pub io_scheduler_config: Option<IoSchedulerConfig>,
 
     #[serde(default = "as_default_direct_io_enable")]
     pub direct_io_enable: bool,
@@ -133,6 +135,15 @@ pub struct LocalfileStoreConfig {
     // default is false!
     #[serde(default = "bool::default")]
     pub index_consistency_detection_enable: bool,
+
+    pub io_limiter: Option<IoLimiterConfig>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct IoLimiterConfig {
+    pub capacity: String,
+    pub fill_rate_of_per_second: String,
+    pub refill_interval_of_milliseconds: u64,
 }
 
 impl Default for LocalfileStoreConfig {
@@ -156,15 +167,6 @@ fn as_default_direct_io_append_enable() -> bool {
     true
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct IoSchedulerConfig {
-    pub disk_bandwidth: Option<String>,
-
-    pub read_buffer_ratio: f64,
-    pub append_buffer_ratio: f64,
-    pub shared_buffer_ratio: f64,
-}
-
 fn as_default_disk_healthy_check_interval_sec() -> u64 {
     60
 }
@@ -186,17 +188,18 @@ impl LocalfileStoreConfig {
         LocalfileStoreConfig {
             data_paths,
             min_number_of_available_disks: Some(1),
+            launch_purge_enable: false,
             disk_high_watermark: as_default_disk_high_watermark(),
             disk_low_watermark: as_default_disk_low_watermark(),
             disk_write_buf_capacity: as_default_disk_write_buf_capacity(),
             disk_read_buf_capacity: as_default_disk_read_buf_capacity(),
             disk_healthy_check_interval_sec: as_default_disk_healthy_check_interval_sec(),
-            io_scheduler_config: None,
             direct_io_enable: as_default_direct_io_enable(),
             direct_io_read_enable: as_default_direct_io_read_enable(),
             direct_io_append_enable: as_default_direct_io_append_enable(),
             io_duration_threshold_sec: as_default_io_duration_threshold_sec(),
             index_consistency_detection_enable: false,
+            io_limiter: None,
         }
     }
 }
@@ -235,7 +238,9 @@ pub struct HealthServiceConfig {
     pub disk_used_ratio_health_threshold: Option<f64>,
     // the threshold of the memory allocated from allocator
     pub memory_allocated_threshold: Option<String>,
-    pub service_mem_used_without_change_time_window_sec: Option<usize>,
+
+    pub service_hang_of_mem_continuous_unchange_sec: Option<usize>,
+    pub service_hang_of_app_valid_number: Option<usize>,
 }
 
 // =========================================================
@@ -409,16 +414,54 @@ fn as_default_grpc_port() -> i32 {
 
 // ===========
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
     #[serde(default = "as_default_app_heartbeat_timeout_min")]
     pub app_heartbeat_timeout_min: u32,
 
-    pub huge_partition_marked_threshold: Option<String>,
-    pub huge_partition_memory_limit_percent: Option<f64>,
+    // for the partition limit mechanism
+    #[serde(default = "bool::default")]
+    pub partition_limit_enable: bool,
+
+    #[serde(default = "as_default_partition_limit_threshold")]
+    pub partition_limit_threshold: String,
+
+    #[serde(default = "as_default_partition_limit_memory_backpressure_ratio")]
+    pub partition_limit_memory_backpressure_ratio: f64,
 
     #[serde(default = "as_default_block_id_manager_type")]
     pub block_id_manager_type: BlockIdManagerType,
+
+    #[serde(default = "bool::default")]
+    pub historical_apps_record_enable: bool,
+
+    // for the partition split mechanism
+    #[serde(default = "bool::default")]
+    pub partition_split_enable: bool,
+
+    #[serde(default = "as_default_partition_split_threshold")]
+    pub partition_split_threshold: String,
+}
+
+fn as_default_partition_limit_memory_backpressure_ratio() -> f64 {
+    0.2
+}
+
+fn as_default_partition_limit_threshold() -> String {
+    "20G".to_owned()
+}
+fn as_default_partition_limit_enable() -> bool {
+    true
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        as_default_app_config()
+    }
+}
+
+fn as_default_partition_split_threshold() -> String {
+    "40G".to_owned()
 }
 
 fn as_default_block_id_manager_type() -> BlockIdManagerType {
@@ -428,9 +471,14 @@ fn as_default_block_id_manager_type() -> BlockIdManagerType {
 fn as_default_app_config() -> AppConfig {
     AppConfig {
         app_heartbeat_timeout_min: as_default_app_heartbeat_timeout_min(),
-        huge_partition_marked_threshold: None,
-        huge_partition_memory_limit_percent: None,
+        partition_limit_enable: false,
+        partition_limit_threshold: as_default_partition_limit_threshold(),
+        partition_limit_memory_backpressure_ratio:
+            as_default_partition_limit_memory_backpressure_ratio(),
         block_id_manager_type: as_default_block_id_manager_type(),
+        historical_apps_record_enable: false,
+        partition_split_enable: false,
+        partition_split_threshold: as_default_partition_split_threshold(),
     }
 }
 

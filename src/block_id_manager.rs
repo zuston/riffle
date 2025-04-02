@@ -179,7 +179,6 @@ mod tests {
     use crate::id_layout::{to_layout, DEFAULT_BLOCK_ID_LAYOUT};
     use anyhow::Result;
     use croaring::{JvmLegacy, Treemap};
-    use futures::future::ok;
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
 

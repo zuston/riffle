@@ -20,6 +20,7 @@ use crate::config::Config;
 use crate::constant::CPU_ARCH;
 use crate::histogram;
 use crate::mem_allocator::ALLOCATOR;
+use crate::panic_hook::PANIC_TAG;
 use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
 use await_tree::InstrumentAwait;
@@ -28,7 +29,7 @@ use once_cell::sync::Lazy;
 use prometheus::{
     histogram_opts, labels, register_gauge_vec, register_histogram_vec,
     register_histogram_vec_with_registry, register_int_counter_vec, register_int_gauge,
-    register_int_gauge_vec, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounter,
+    register_int_gauge_vec, Gauge, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounter,
     IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
 use std::collections::HashMap;
@@ -366,6 +367,13 @@ pub static URPC_CONNECTION_NUMBER: Lazy<IntGauge> =
 pub static PURGE_FAILED_COUNTER: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new("purge_failed_count", "purge_failed_count").expect("metric should be created")
 });
+
+pub static DEADLOCK_SIGNAL: Lazy<IntGauge> = Lazy::new(|| {
+    IntGauge::new("deadlock_signal", "deadlock_signal").expect("metric should be created")
+});
+
+pub static PANIC_SIGNAL: Lazy<IntGauge> =
+    Lazy::new(|| IntGauge::new("panic_signal", "panic_signal").expect("metric should be created"));
 
 // ===========
 
@@ -726,6 +734,14 @@ pub static IO_SCHEDULER_APPEND_WAIT: Lazy<IntGaugeVec> =
 
 fn register_custom_metrics() {
     REGISTRY
+        .register(Box::new(DEADLOCK_SIGNAL.clone()))
+        .expect("deadlock_signal must be registered");
+
+    REGISTRY
+        .register(Box::new(PANIC_SIGNAL.clone()))
+        .expect("panic_signal must be registered");
+
+    REGISTRY
         .register(Box::new(RESIDENT_BYTES.clone()))
         .expect("resident_bytes must be registered");
 
@@ -998,6 +1014,10 @@ fn register_custom_metrics() {
         .expect("");
 }
 
+const JOB_NAME: &str = "uniffle-worker";
+const WORKER_ID: &str = "worker_id";
+const VERSION: &str = "version";
+
 pub struct MetricService;
 impl MetricService {
     pub fn init(config: &Config, runtime_manager: RuntimeManager) {
@@ -1008,7 +1028,6 @@ impl MetricService {
 
         register_custom_metrics();
 
-        let job_name = "uniffle-worker";
         let cfg = config.metrics.clone().unwrap();
 
         let push_gateway_endpoint = cfg.push_gateway_endpoint;
@@ -1037,19 +1056,19 @@ impl MetricService {
                         metrics.extend_from_slice(&custom_metrics);
                         metrics.extend_from_slice(&general_metrics);
 
-                        let mut all_labels = HashMap::new();
-                        all_labels.insert(
-                            "worker_id".to_owned(),
-                            SHUFFLE_SERVER_ID.get().unwrap().to_string(),
-                        );
-                        all_labels.insert("cpu_arch".to_owned(), CPU_ARCH.to_owned());
+                        let mut all_labels = HashMap::from([
+                            (
+                                WORKER_ID.to_owned(),
+                                SHUFFLE_SERVER_ID.get().unwrap().to_owned(),
+                            ),
+                            (VERSION.to_owned(), env!("CARGO_PKG_VERSION").to_owned()),
+                        ]);
                         if let Some(labels) = &cfg.labels {
-                            let labels = labels.clone();
-                            all_labels.extend(labels);
+                            all_labels.extend(labels.clone());
                         }
 
                         let pushed_result = prometheus::push_add_metrics(
-                            job_name,
+                            JOB_NAME,
                             all_labels,
                             &push_gateway_endpoint.to_owned().unwrap().to_owned(),
                             metrics,

@@ -272,22 +272,12 @@ impl GetLocalDataIndexRequestCommand {
                 data_index: Default::default(),
             },
             Ok(index) => {
-                if let Local(result) = index {
-                    GetLocalDataIndexResponseCommand {
-                        request_id,
-                        status_code: StatusCode::SUCCESS.into(),
-                        ret_msg: "".to_string(),
-                        data_index: result,
-                    }
-                } else {
-                    GetLocalDataIndexResponseCommand {
-                        request_id,
-                        status_code: StatusCode::INTERNAL_ERROR.into(),
-                        ret_msg: format!(
-                            "Errors on getting non local index. this should not happen."
-                        ),
-                        data_index: Default::default(),
-                    }
+                let Local(result) = index;
+                GetLocalDataIndexResponseCommand {
+                    request_id,
+                    status_code: StatusCode::SUCCESS.into(),
+                    ret_msg: "".to_string(),
+                    data_index: result,
                 }
             }
         };

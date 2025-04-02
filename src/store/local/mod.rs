@@ -22,7 +22,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 
 pub mod delegator;
-mod scheduler;
+pub mod index_codec;
+mod limiter;
 pub mod sync_io;
 
 pub struct FileStat {
@@ -62,12 +63,12 @@ pub trait LocalDiskStorage: LocalIO {
     fn mark_corrupted(&self) -> Result<()>;
 }
 
-pub(crate) struct DiskStat {
+pub struct DiskStat {
     pub(crate) root: String,
     pub(crate) used_ratio: f64,
 }
 
-pub(crate) struct LocalfileStoreStat {
+pub struct LocalfileStoreStat {
     pub(crate) stats: Vec<DiskStat>,
 }
 

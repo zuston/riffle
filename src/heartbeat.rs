@@ -1,5 +1,6 @@
 use crate::app::{AppManagerRef, SHUFFLE_SERVER_ID, SHUFFLE_SERVER_IP};
 use crate::config::Config;
+use crate::decommission::DecommissionManager;
 use crate::grpc::protobuf::uniffle::coordinator_server_client::CoordinatorServerClient;
 use crate::grpc::protobuf::uniffle::{ShuffleServerHeartBeatRequest, ShuffleServerId};
 use crate::health_service::HealthService;
@@ -20,10 +21,12 @@ impl HeartbeatTask {
         runtime_manager: &RuntimeManager,
         app_manager: &AppManagerRef,
         health_service: &HealthService,
+        decommission_manager: &DecommissionManager,
     ) {
         let runtime_manager = runtime_manager.clone();
         let app_manager = app_manager.clone();
         let health_service = health_service.clone();
+        let decommission_manager = decommission_manager.clone();
 
         let coordinator_quorum = config.coordinator_quorum.clone();
         let tags = config.tags.clone().unwrap_or(vec![]);
@@ -73,6 +76,8 @@ impl HeartbeatTask {
                     let memory_spill_event_num =
                         app_manager.store_memory_spill_event_num().unwrap_or(0) as i32;
 
+                    let decommission_state = decommission_manager.get_server_status();
+
                     let heartbeat_req = ShuffleServerHeartBeatRequest {
                         server_id: Some(shuffle_server_id.clone()),
                         used_memory: memory_snapshot.used(),
@@ -81,7 +86,7 @@ impl HeartbeatTask {
                         event_num_in_flush: memory_spill_event_num,
                         tags: all_tags,
                         is_healthy: Some(healthy),
-                        status: 0,
+                        status: decommission_state.into(),
                         storage_info: Default::default(),
                     };
 

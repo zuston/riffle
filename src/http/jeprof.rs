@@ -31,45 +31,10 @@ use crate::mem_allocator::error::ProfError;
 use crate::mem_allocator::error::ProfError::IoError;
 use crate::mem_allocator::*;
 
-#[derive(Deserialize, Serialize)]
-#[serde(default)]
-pub struct JeProfRequest {
-    pub(crate) duration: u64,
-    pub(crate) keep_profiling: bool,
-}
-
-impl Default for JeProfRequest {
-    fn default() -> Self {
-        JeProfRequest {
-            duration: 15,
-            keep_profiling: false,
-        }
-    }
-}
-
 // converts profiling error to http error
 impl ResponseError for ProfError {
     fn status(&self) -> StatusCode {
         StatusCode::INTERNAL_SERVER_ERROR
-    }
-}
-
-#[poem::handler]
-async fn jemalloc_pprof_handler(req: &Request) -> poem::Result<impl IntoResponse> {
-    let pprof = dump_prof("").await?;
-    Ok(pprof)
-}
-
-#[derive(Default)]
-pub struct HeapProfHandler;
-
-impl Handler for HeapProfHandler {
-    fn get_route_method(&self) -> RouteMethod {
-        RouteMethod::new().get(jemalloc_pprof_handler)
-    }
-
-    fn get_route_path(&self) -> String {
-        "/debug/heap/profile".to_string()
     }
 }
 
@@ -81,9 +46,10 @@ impl Handler for HeapProfFlameGraphHandler {
     }
 
     fn get_route_path(&self) -> String {
-        "/debug/heap/profile/flamegraph".to_string()
+        "/debug/heap/profile".to_string()
     }
 }
+
 #[poem::handler]
 async fn handle_get_heap_flamegraph(req: &Request) -> poem::Result<impl IntoResponse> {
     let svg = dump_heap_flamegraph().await?;
@@ -92,31 +58,4 @@ async fn handle_get_heap_flamegraph(req: &Request) -> poem::Result<impl IntoResp
         .content_type("image/svg+xml")
         .body(svg);
     Ok(response)
-}
-
-#[cfg(test)]
-mod test {
-    use crate::http::jeprof::HeapProfHandler;
-    use crate::http::Handler;
-    use poem::test::TestClient;
-    use poem::Route;
-    use tonic::codegen::http::StatusCode;
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_router() {
-        let handler = HeapProfHandler::default();
-        let app = Route::new().at(handler.get_route_path(), handler.get_route_method());
-        let cli = TestClient::new(app);
-        let resp = cli
-            .get("/debug/heap/profile")
-            .query("seconds", &10)
-            .send()
-            .await;
-
-        #[cfg(feature = "mem-profiling")]
-        resp.assert_status_is_ok();
-        #[cfg(not(feature = "mem-profiling"))]
-        resp.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
-    }
 }

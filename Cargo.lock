@@ -3242,7 +3242,7 @@ dependencies = [
 
 [[package]]
 name = "riffle"
-version = "0.7.1"
+version = "0.8.2"
 dependencies = [
  "allocator-api2",
  "anyhow",
@@ -3250,6 +3250,7 @@ dependencies = [
  "async-trait",
  "await-tree",
  "awaitility",
+ "backtrace",
  "bytes 1.8.0",
  "bytesize",
  "cap",
@@ -3290,6 +3291,7 @@ dependencies = [
  "prost-build",
  "rand 0.8.5",
  "serde",
+ "serde_json",
  "signal-hook",
  "socket2 0.4.10",
  "spin 0.9.8",

@@ -30,8 +30,12 @@ use crate::log_service::LogService;
 #[cfg(feature = "logforth")]
 use crate::logforth_service::LogService;
 
+use crate::config_reconfigure::ReconfigurableConfManager;
+use crate::deadlock::detect_deadlock;
+use crate::decommission::{DecommissionManager, DECOMMISSION_MANAGER_REF};
 use crate::mem_allocator::ALLOCATOR;
 use crate::metric::MetricService;
+use crate::panic_hook::set_panic_hook;
 use crate::readable_size::ReadableSize;
 use crate::rpc::DefaultRpcService;
 use crate::runtime::manager::RuntimeManager;
@@ -61,8 +65,8 @@ pub mod kerberos;
 
 pub mod id_layout;
 
+pub mod decommission;
 pub mod lazy_initializer;
-
 #[cfg(not(feature = "logforth"))]
 mod log_service;
 
@@ -86,7 +90,13 @@ pub mod tracing;
 pub mod urpc;
 pub mod util;
 
+pub mod deadlock;
 pub mod disk_explorer;
+
+pub mod historical_apps;
+
+pub mod config_reconfigure;
+pub mod panic_hook;
 
 const MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY: &str = "MAX_MEMORY_ALLOCATION_LIMIT_SIZE";
 
@@ -114,13 +124,31 @@ fn main() -> Result<()> {
         env!("GIT_COMMIT_HASH")
     );
 
+    // Detect potential deadlock
+    detect_deadlock();
+
+    // Set the system hook
+    set_panic_hook();
+
     init_global_variable(&config);
 
     info!("The specified config show as follows: \n {:#?}", config);
 
     let runtime_manager = RuntimeManager::from(config.runtime_config.clone());
+
+    // init the reconfigurableConfManager
+    let reconf_manager = ReconfigurableConfManager::new(
+        &config,
+        Some((args.config.as_str(), 60, &runtime_manager.default_runtime).into()),
+    )?;
+
     let storage = StorageService::init(&runtime_manager, &config);
-    let app_manager_ref = AppManager::get_ref(runtime_manager.clone(), config.clone(), &storage);
+    let app_manager_ref = AppManager::get_ref(
+        runtime_manager.clone(),
+        config.clone(),
+        &storage,
+        &reconf_manager,
+    );
     storage.with_app_manager(&app_manager_ref);
 
     let _ = APP_MANAGER_REF.set(app_manager_ref.clone());
@@ -128,12 +156,26 @@ fn main() -> Result<()> {
     let health_service =
         HealthService::new(&app_manager_ref, &storage, &config.health_service_config);
 
+    let decommission_manager = DecommissionManager::new(&app_manager_ref);
+    let _ = DECOMMISSION_MANAGER_REF.set(decommission_manager.clone());
+
     MetricService::init(&config, runtime_manager.clone());
     FastraceWrapper::init(config.clone());
-    HeartbeatTask::run(&config, &runtime_manager, &app_manager_ref, &health_service);
+    HeartbeatTask::run(
+        &config,
+        &runtime_manager,
+        &app_manager_ref,
+        &health_service,
+        &decommission_manager,
+    );
     HttpMonitorService::init(&config, runtime_manager.clone());
 
-    DefaultRpcService {}.start(&config, runtime_manager, app_manager_ref)?;
+    DefaultRpcService {}.start(
+        &config,
+        runtime_manager,
+        app_manager_ref,
+        &decommission_manager,
+    )?;
 
     Ok(())
 }
