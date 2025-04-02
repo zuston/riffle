@@ -3,12 +3,15 @@ use crate::grpc::protobuf::uniffle::ServerStatus;
 use crate::util;
 use libc::{send, stat};
 use log::{info, warn};
+use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 
 const INTERVAL: u64 = 60 * 10;
+
+pub static DECOMMISSION_MANAGER_REF: OnceCell<DecommissionManager> = OnceCell::new();
 
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq)]
