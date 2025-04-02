@@ -69,6 +69,7 @@ fn new_server() -> Box<PoemHTTPServer> {
 
     server.register_handler(ProfileCpuHandler::default());
     server.register_handler(ProfileHeapHandler::default());
+
     server.register_handler(MetricsHTTPHandler::default());
     server.register_handler(AwaitTreeHandler::default());
     server.register_handler(ApplicationsTableHandler::default());
