@@ -94,7 +94,7 @@ crc32fast = "1.3.2"
 fs2 = "0.4.3"
 url = "2.4.0"
 await-tree = "0.1.1"
-poem = { version = "1.3.56", features = ["rustls", "test"] }
+poem = { version = "1.3.56", features = ["rustls", "test", "anyhow"] }
 pprof = { version = "0.11.1", features = [
     "flamegraph",
     "protobuf-codec",
