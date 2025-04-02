@@ -20,9 +20,9 @@ mod apps;
 mod await_tree;
 mod historical_apps;
 mod http_service;
-mod jeprof;
 mod metrics;
 mod profile_cpu;
+mod profile_heap;
 
 use crate::config::Config;
 use crate::http::await_tree::AwaitTreeHandler;
@@ -35,7 +35,7 @@ use crate::app::AppManagerRef;
 use crate::http::admin::AdminHandler;
 use crate::http::apps::{ApplicationsJsonHandler, ApplicationsTableHandler};
 use crate::http::historical_apps::HistoricalAppsHandler;
-use crate::http::jeprof::HeapProfFlameGraphHandler;
+use crate::http::profile_heap::ProfileHeapHandler;
 use log::info;
 use poem::RouteMethod;
 use serde::{Deserialize, Serialize};
@@ -66,10 +66,12 @@ pub trait HTTPServer: Send + Sync {
 
 fn new_server() -> Box<PoemHTTPServer> {
     let server = PoemHTTPServer::new();
+
     server.register_handler(ProfileCpuHandler::default());
+    server.register_handler(ProfileHeapHandler::default());
+
     server.register_handler(MetricsHTTPHandler::default());
     server.register_handler(AwaitTreeHandler::default());
-    server.register_handler(HeapProfFlameGraphHandler::default());
     server.register_handler(ApplicationsTableHandler::default());
     server.register_handler(ApplicationsJsonHandler::default());
     server.register_handler(HistoricalAppsHandler::default());
