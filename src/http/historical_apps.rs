@@ -13,7 +13,7 @@ impl Handler for HistoricalAppsHandler {
     }
 
     fn get_route_path(&self) -> String {
-        "/historical/apps/json".to_string()
+        "/apps/history".to_string()
     }
 }
 
