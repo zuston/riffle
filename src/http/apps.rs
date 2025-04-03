@@ -1,15 +1,25 @@
 use crate::app::{self, App, APP_MANAGER_REF};
-use crate::http::Handler;
+use crate::http::{Format, Handler};
 use crate::util;
 use chrono::{Local, TimeZone, Utc};
+use clap::builder::Str;
+use hyper::{Body, StatusCode};
 use poem::web::{Html, Json};
-use poem::{handler, RouteMethod};
+use poem::{handler, Request, Response, RouteMethod};
 use serde::{Deserialize, Serialize};
+use std::num::NonZeroI32;
 use std::sync::Arc;
+use tonic::IntoRequest;
 
-#[handler]
-#[allow(deprecated)]
-fn table() -> Html<String> {
+fn milliseconds_to_minutes(milliseconds: u128) -> f64 {
+    (milliseconds / 1000 / 60) as f64
+}
+
+fn bytes_to_gb(bytes: u64) -> f64 {
+    (bytes / 1024 / 1024 / 1024) as f64
+}
+
+fn table() -> String {
     let mut html_content = r#"
     <!DOCTYPE html>
     <html lang="en">
@@ -87,27 +97,18 @@ fn table() -> Html<String> {
     "#,
     );
 
-    Html(html_content.to_string())
+    html_content.to_string()
 }
 
-fn milliseconds_to_minutes(milliseconds: u128) -> f64 {
-    (milliseconds / 1000 / 60) as f64
-}
-
-fn bytes_to_gb(bytes: u64) -> f64 {
-    (bytes / 1024 / 1024 / 1024) as f64
-}
-
-#[derive(Default)]
-pub struct ApplicationsTableHandler {}
-impl Handler for ApplicationsTableHandler {
-    fn get_route_method(&self) -> RouteMethod {
-        RouteMethod::new().get(table)
-    }
-
-    fn get_route_path(&self) -> String {
-        "/apps".to_string()
-    }
+fn json() -> anyhow::Result<String> {
+    let manager_ref = APP_MANAGER_REF.get().unwrap();
+    let apps = &manager_ref.apps;
+    let data = apps
+        .iter()
+        .map(|entry| AppInfo::from(entry.value()))
+        .collect::<Vec<AppInfo>>();
+    let data = serde_json::to_string(&data)?;
+    Ok(data)
 }
 
 #[derive(Serialize)]
@@ -141,24 +142,58 @@ impl From<&Arc<App>> for AppInfo {
 }
 
 #[derive(Default)]
-pub struct ApplicationsJsonHandler {}
-impl Handler for ApplicationsJsonHandler {
+pub struct AppsHandler {}
+impl Handler for AppsHandler {
     fn get_route_method(&self) -> RouteMethod {
-        RouteMethod::new().get(json)
+        RouteMethod::new().get(request_handler)
     }
 
     fn get_route_path(&self) -> String {
-        "/apps/json".to_string()
+        "/apps".to_string()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+enum FormatType {
+    Json,
+    Html,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(default)]
+struct AppsRequest {
+    format: FormatType,
+}
+
+impl Default for AppsRequest {
+    fn default() -> Self {
+        Self {
+            format: FormatType::Html,
+        }
     }
 }
 
 #[handler]
-fn json() -> Json<Vec<AppInfo>> {
-    let manager_ref = APP_MANAGER_REF.get().unwrap();
-    let apps = &manager_ref.apps;
-    Json(
-        apps.iter()
-            .map(|entry| AppInfo::from(entry.value()))
-            .collect(),
-    )
+async fn request_handler(req: &Request) -> poem::Result<Response> {
+    let app_request = req.params::<AppsRequest>()?;
+    let format = app_request.format;
+
+    let response = match format {
+        FormatType::Json => {
+            let data = json()?;
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "application/json")
+                .body(Body::from(data))
+        }
+        FormatType::Html => {
+            let data = table();
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "text/html")
+                .body(Body::from(data))
+        }
+    };
+
+    Ok(response)
 }
