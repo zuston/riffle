@@ -17,7 +17,7 @@ use crate::store::local::sync_io::SyncLocalIO;
 use crate::store::local::{DiskStat, FileStat, LocalDiskStorage, LocalIO};
 use crate::store::BytesWrapper;
 use crate::util;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
@@ -297,7 +297,8 @@ impl LocalIO for LocalDiskDelegator {
             future,
         )
         .instrument_await(format!("create directory to disk: {}", &self.inner.root))
-        .await??;
+        .await
+        .with_context(|| format!("Errors on creating dir on disk: {}", &self.inner.root))??;
         Ok(())
     }
 
@@ -313,7 +314,8 @@ impl LocalIO for LocalDiskDelegator {
             future,
         )
         .instrument_await(format!("append to disk: {}", &self.inner.root))
-        .await??;
+        .await
+        .with_context(|| format!("Errors on appending on disk: {}", &self.inner.root))??;
 
         timer.observe_duration();
         TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER
@@ -341,7 +343,8 @@ impl LocalIO for LocalDiskDelegator {
             future,
         )
         .instrument_await(format!("read from disk: {}", &self.inner.root))
-        .await??;
+        .await
+        .with_context(|| format!("Errors on reading on disk: {}", &self.inner.root))??;
 
         timer.observe_duration();
         TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER
@@ -364,7 +367,8 @@ impl LocalIO for LocalDiskDelegator {
             future,
         )
         .instrument_await(format!("delete from disk: {}", &self.inner.root))
-        .await??;
+        .await
+        .with_context(|| format!("Errors on deleting on disk: {}", &self.inner.root))??;
 
         timer.observe_duration();
 
@@ -378,7 +382,8 @@ impl LocalIO for LocalDiskDelegator {
             future,
         )
         .instrument_await(format!("write to disk: {}", &self.inner.root))
-        .await??;
+        .await
+        .with_context(|| format!("Errors on writing on disk: {}", &self.inner.root))??;
         Ok(())
     }
 
@@ -389,7 +394,8 @@ impl LocalIO for LocalDiskDelegator {
             future,
         )
         .instrument_await(format!("state disk: {}", &self.inner.root))
-        .await??;
+        .await
+        .with_context(|| format!("Errors on file stating on disk: {}", &self.inner.root))??;
         Ok(file_stat)
     }
 
@@ -415,7 +421,8 @@ impl LocalIO for LocalDiskDelegator {
             future,
         )
         .instrument_await(format!("direct_append to disk: {}", &path))
-        .await??;
+        .await
+        .with_context(|| format!("Errors on direct appending on disk: {}", &path))??;
 
         TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER
             .with_label_values(&[&self.inner.root])
@@ -443,8 +450,9 @@ impl LocalIO for LocalDiskDelegator {
             Duration::from_secs(self.inner.io_duration_threshold_sec),
             future,
         )
-        .instrument_await(format!("direct_read from disk: {}", path))
-        .await??;
+        .instrument_await(format!("direct_read from disk: {}", &path))
+        .await
+        .with_context(|| format!("Errors on direct reading on disk: {}", &path))??;
 
         TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER
             .with_label_values(&[&self.inner.root])
