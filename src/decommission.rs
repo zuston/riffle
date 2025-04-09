@@ -46,8 +46,13 @@ impl DecommissionManager {
 
     pub fn as_state(&self, state: DecommissionState) {
         let mut internal_state = self.state.write();
+        if *internal_state == state {
+            warn!("Decommission is already in progress. Ignoring");
+            return;
+        }
         *internal_state = state;
         self.state_time.store(util::now_timestamp_as_sec(), SeqCst);
+        info!("Making state: {:?}", &internal_state);
     }
 
     fn get_state(&self) -> DecommissionState {
