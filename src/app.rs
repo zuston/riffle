@@ -273,6 +273,14 @@ impl App {
             .register("app_config.partition_split_threshold")
             .unwrap();
 
+        // pre-check partition features values.
+        // the partition-split threshold should always be less than the partition-limit threshold
+        if partition_limit_enable && partition_split_enable {
+            if partition_split_enable.get().as_u64() >= partition_limit_threshold.get().as_u64() {
+                panic!("The value of partition-split threshold should always be less than the partition-limit threshold value!")
+            }
+        }
+
         let block_id_manager = get_block_id_manager(&config.app_config.block_id_manager_type);
 
         info!("App=[{}]. block_manager_type: {}. partition_limit/threshold/ratio: {}/{}/{}. partition_split/threshold: {}/{}",
