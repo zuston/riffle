@@ -483,6 +483,7 @@ impl App {
         let shuffle_id = &ctx.uid.shuffle_id;
 
         let mut partition_split_candidates = HashSet::new();
+
         for partition_id in &ctx.partition_ids {
             let puid = PartitionedUId::from(app_id.to_owned(), *shuffle_id, *partition_id);
             let mut split_hit = false;
@@ -497,12 +498,10 @@ impl App {
                 split_hit = true;
             }
 
-            if !split_hit {
-                // huge partition limitation
-                if self.is_backpressure_of_partition(&puid).await? {
-                    TOTAL_REQUIRE_BUFFER_FAILED.inc();
-                    return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
-                }
+            // huge partition limitation
+            if self.is_backpressure_of_partition(&puid).await? {
+                TOTAL_REQUIRE_BUFFER_FAILED.inc();
+                return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
             }
         }
 
@@ -1176,10 +1175,68 @@ pub(crate) mod test {
     }
 
     #[test]
-    fn app_backpressure_of_huge_partition() {
-        let app_id = "backpressure_of_huge_partition";
+    fn app_partition_split_test() {
+        let app_id = "app_partition_split_test";
         let runtime_manager: RuntimeManager = Default::default();
 
+        let mut config = create_config_for_partition_features();
+        let mut app_config = &mut config.app_config;
+        app_config.partition_split_enable = true;
+        app_config.partition_split_threshold = "5B".to_string();
+
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
+        let storage = StorageService::init(&runtime_manager, &config);
+        let app_manager_ref =
+            AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
+        app_manager_ref
+            .register(app_id.clone().into(), 1, Default::default())
+            .unwrap();
+
+        // case1: exceeding the partition split, but not exceeding the partition limit.
+        let app = app_manager_ref.get_app(app_id.as_ref()).unwrap();
+        let ctx = mock_writing_context(&app_id, 1, 0, 2, 3);
+        let f = app.insert(ctx);
+        if runtime_manager.wait(f).is_err() {
+            panic!()
+        }
+
+        let require_buffer_ctx = RequireBufferContext {
+            uid: PartitionedUId {
+                app_id: app_id.to_string(),
+                shuffle_id: 1,
+                partition_id: 0,
+            },
+            size: 10,
+            partition_ids: vec![0],
+        };
+        let f = app.require_buffer(require_buffer_ctx.clone());
+        match runtime_manager.wait(f) {
+            Err(_) => panic!(),
+            Ok(response) => {
+                let split_list = response.split_partitions;
+                assert_eq!(1, split_list.len());
+                assert_eq!(0, *split_list.get(0).unwrap());
+            }
+        }
+
+        // case2: exceeding the partition split and also exceeding the partition limit.
+        // this happens when the client is not responded to.
+        // now the partition=0 data len = 6 * 2 = 12
+        let ctx = mock_writing_context(&app_id, 1, 0, 2, 3);
+        let f = app.insert(ctx.clone());
+        if runtime_manager.wait(f).is_err() {
+            panic!()
+        }
+        let f = app.require_buffer(require_buffer_ctx);
+        match runtime_manager.wait(f) {
+            Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION) => {
+                // ignore
+            }
+            _ => panic!(),
+        }
+    }
+
+    fn create_config_for_partition_features() -> Config {
         let mut config = mock_config();
         let _ = std::mem::replace(
             &mut config.memory_store,
@@ -1209,6 +1266,16 @@ pub(crate) mod test {
         app_config.partition_limit_enable = true;
         app_config.partition_limit_threshold = "10B".to_string();
         app_config.partition_limit_memory_backpressure_ratio = 0.4;
+
+        config
+    }
+
+    #[test]
+    fn app_backpressure_of_huge_partition() {
+        let app_id = "backpressure_of_huge_partition";
+        let runtime_manager: RuntimeManager = Default::default();
+
+        let config = create_config_for_partition_features();
 
         let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
         let storage = StorageService::init(&runtime_manager, &config);
