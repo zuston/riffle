@@ -1,6 +1,6 @@
 Another high-performance implementation of Apache Uniffle shuffle server
 
-> Production ready, this project has been used for online shuffle storage service
+> The product is production-ready and has been extensively utilized for [iQIYI](https://github.com/iqiyi)'s hyperscale Spark jobs.
 
 <details>
 
