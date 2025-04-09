@@ -17,7 +17,7 @@
 
 [package]
 name = "riffle"
-version = "0.8.2"
+version = "0.9.0"
 edition = "2021"
 
 [profile.release]
