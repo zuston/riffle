@@ -273,6 +273,15 @@ impl App {
             .register("app_config.partition_split_threshold")
             .unwrap();
 
+        // pre-check partition features values.
+        // the partition-split threshold should always be less than the partition-limit threshold
+        if partition_limit_enable && partition_split_enable {
+            if partition_split_threshold.get().as_u64() >= partition_limit_threshold.get().as_u64()
+            {
+                panic!("The value of partition-split threshold should always be less than the partition-limit threshold value!")
+            }
+        }
+
         let block_id_manager = get_block_id_manager(&config.app_config.block_id_manager_type);
 
         info!("App=[{}]. block_manager_type: {}. partition_limit/threshold/ratio: {}/{}/{}. partition_split/threshold: {}/{}",
@@ -1234,6 +1243,27 @@ pub(crate) mod test {
             }
             _ => panic!(),
         }
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_partition_related_config_value_valid() {
+        let app_id = "test_partition_related_config_value_valid";
+        let runtime_manager: RuntimeManager = Default::default();
+
+        // the default value of partition-limit is 10B
+        let mut config = create_config_for_partition_features();
+        let mut app_config = &mut config.app_config;
+        app_config.partition_split_enable = true;
+        app_config.partition_split_threshold = "20B".to_string();
+
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
+        let storage = StorageService::init(&runtime_manager, &config);
+        let app_manager_ref =
+            AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
+        app_manager_ref
+            .register(app_id.clone().into(), 1, Default::default())
+            .unwrap();
     }
 
     fn create_config_for_partition_features() -> Config {
