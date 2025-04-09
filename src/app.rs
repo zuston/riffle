@@ -276,7 +276,7 @@ impl App {
         // pre-check partition features values.
         // the partition-split threshold should always be less than the partition-limit threshold
         if partition_limit_enable && partition_split_enable {
-            if partition_split_enable.get().as_u64() >= partition_limit_threshold.get().as_u64() {
+            if partition_split_threshold.get().as_u64() >= partition_limit_threshold.get().as_u64() {
                 panic!("The value of partition-split threshold should always be less than the partition-limit threshold value!")
             }
         }
