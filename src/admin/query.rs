@@ -162,8 +162,9 @@ mod tests {
     use crate::admin::query::SessionContextExtend;
 
     #[tokio::test]
+    #[ignore]
     async fn test_connect_with_real_coordinator() {
-        let coordinator_url = "http://journalnode01-bdxs-g1.qiyi.hadoop:21001";
+        let coordinator_url = "http://xxx:21001";
         let context = SessionContextExtend::new(coordinator_url).await.unwrap();
         let df = context.sql("select * from apps").await.unwrap();
         df.show().await.unwrap();
