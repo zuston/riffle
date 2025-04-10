@@ -65,9 +65,9 @@ pub mod kerberos;
 
 pub mod id_layout;
 
+pub mod admin;
 pub mod decommission;
 pub mod lazy_initializer;
-pub mod admin;
 #[cfg(not(feature = "logforth"))]
 mod log_service;
 
