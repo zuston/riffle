@@ -30,7 +30,7 @@ name = "riffle-server"
 path = "src/main.rs"
 
 [[bin]]
-# the riffle admin
+# the riffle ctl
 name = "riffle-ctl"
 path = "src/ctl.rs"
 

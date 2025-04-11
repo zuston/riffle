@@ -1,4 +1,4 @@
-use crate::admin::discovery::{Discovery, ServerInfo, ServerStatus};
+use crate::actions::discovery::{Discovery, ServerInfo, ServerStatus};
 use crate::util;
 use anyhow::Result;
 use csv::Writer;
@@ -158,8 +158,8 @@ impl SessionContextExtend {
 
 #[cfg(test)]
 mod tests {
-    use crate::admin::discovery::tests::FakeCoordinator;
-    use crate::admin::query::SessionContextExtend;
+    use crate::actions::discovery::tests::FakeCoordinator;
+    use crate::actions::query::SessionContextExtend;
 
     #[tokio::test]
     #[ignore]
