@@ -134,6 +134,11 @@ impl NodeUpdateAction {
 #[async_trait::async_trait]
 impl Action for NodeUpdateAction {
     async fn act(&self) -> anyhow::Result<()> {
-        todo!()
+        let url = format!(
+            "http://{}:20010/admin?operation={}",
+            self.ip, self.target_status
+        );
+        reqwest::get(url.as_str()).await?.text().await?;
+        Ok(())
     }
 }

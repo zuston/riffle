@@ -13,7 +13,7 @@ impl Handler for AdminHandler {
         RouteMethod::new().get(adminHandler)
     }
 
-    /// request with /actions?operation=DECOMMISSION
+    /// request with /admin?operation=DECOMMISSION
     fn get_route_path(&self) -> String {
         "/actions".to_string()
     }
