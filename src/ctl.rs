@@ -3,7 +3,9 @@
 use bytes::{Buf, Bytes};
 use clap::builder::Str;
 use clap::{Parser, Subcommand};
+use datafusion::prelude::SessionContext;
 use std::fs;
+use uniffle_worker::admin::{Action, CtlContext, OutputFormat, QueryAction};
 use uniffle_worker::util::get_crc;
 
 #[derive(Parser)]
@@ -21,9 +23,24 @@ enum Commands {
         #[arg(short, long)]
         data_file_path: String,
     },
+    Admin {
+        #[command(subcommand)]
+        admin_command: Option<AdminCommands>,
+        #[arg(short, long)]
+        coordinator_http_url: String,
+    },
 }
 
-fn main() -> anyhow::Result<()> {
+#[derive(Subcommand)]
+enum AdminCommands {
+    Query {
+        #[arg(short, long)]
+        sql: String,
+    },
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     if args.command.is_none() {
         return Ok(());
@@ -37,8 +54,30 @@ fn main() -> anyhow::Result<()> {
         } => {
             do_check_data_consistency(index_file_path, data_file_path)?;
         }
-        _ => {}
+        Commands::Admin {
+            admin_command,
+            coordinator_http_url,
+        } => {
+            let ctl_context = CtlContext {
+                coordinator_http_url,
+            };
+            match admin_command {
+                Some(AdminCommands::Query { sql }) => {
+                    let query_action = QueryAction::new(ctl_context, sql, OutputFormat::TABLE);
+                    query_action.act().await?;
+                }
+                None => {
+                    println!("No any admin command provided");
+                }
+            }
+        }
     }
+
+    Ok(())
+}
+
+fn do_query(sql: String) -> anyhow::Result<()> {
+    let mut ctx = SessionContext::new();
 
     Ok(())
 }
