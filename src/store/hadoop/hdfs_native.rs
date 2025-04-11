@@ -1,5 +1,5 @@
 use crate::error::WorkerError;
-use crate::store::hadoop::{FileStatus, HdfsDelegator};
+use crate::store::hadoop::{FileStatus, HdfsClient};
 use crate::store::BytesWrapper;
 use anyhow::{Error, Result};
 use async_trait::async_trait;
@@ -54,7 +54,7 @@ impl HdfsNativeClient {
 }
 
 #[async_trait]
-impl HdfsDelegator for HdfsNativeClient {
+impl HdfsClient for HdfsNativeClient {
     async fn touch(&self, file_path: &str) -> Result<()> {
         let file_path = &self.with_root(file_path)?;
         self.inner

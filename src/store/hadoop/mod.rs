@@ -1,3 +1,4 @@
+mod delegator;
 #[cfg(feature = "hdfs")]
 mod hdfs_native;
 #[cfg(feature = "hdrs")]
@@ -9,6 +10,7 @@ use crate::store::hadoop::hdfs_native::HdfsNativeClient;
 use crate::store::hadoop::hdrs::HdrsClient;
 
 use crate::error::WorkerError;
+use crate::store::hadoop::delegator::HdfsClientDelegator;
 use crate::store::BytesWrapper;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -16,7 +18,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[async_trait]
-pub(crate) trait HdfsDelegator: Send + Sync {
+pub(crate) trait HdfsClient: Send + Sync {
     async fn touch(&self, file_path: &str) -> Result<()>;
     async fn append(&self, file_path: &str, data: BytesWrapper) -> Result<(), WorkerError>;
     async fn len(&self, file_path: &str) -> Result<u64>;
@@ -52,15 +54,20 @@ pub(crate) trait HdfsDelegator: Send + Sync {
 }
 
 #[cfg(feature = "hdfs")]
-pub fn get_hdfs_delegator(
+pub fn get_hdfs_client(
     root: &str,
     configs: HashMap<String, String>,
-) -> Result<Box<dyn HdfsDelegator>> {
+) -> Result<Box<dyn HdfsClient>> {
     #[cfg(not(feature = "hdrs"))]
-    return Ok(Box::new(HdfsNativeClient::new(root.to_owned(), configs)?));
+    let client = Box::new(HdfsNativeClient::new(root.to_owned(), configs)?);
 
     #[cfg(feature = "hdrs")]
-    return Ok(Box::new(HdrsClient::new(root.to_owned(), configs)?));
+    let client = Box::new(HdrsClient::new(root.to_owned(), configs)?);
+
+    const duration: u64 = 10 * 60;
+
+    let client = Box::new(HdfsClientDelegator::new(root, duration, client));
+    Ok(client)
 }
 
 pub struct FileStatus {

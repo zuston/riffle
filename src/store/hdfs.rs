@@ -44,7 +44,7 @@ use crate::kerberos::KerberosTask;
 use crate::lazy_initializer::LazyInit;
 use crate::runtime::manager::RuntimeManager;
 use crate::semaphore_with_index::SemaphoreWithIndex;
-use crate::store::hadoop::{get_hdfs_delegator, HdfsDelegator};
+use crate::store::hadoop::{get_hdfs_client, HdfsClient};
 use libc::stat;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::SeqCst;
@@ -83,7 +83,7 @@ pub struct HdfsStore {
     concurrency_access_limiter: Semaphore,
 
     // key: app_id, value: hdfs_native_client
-    pub(crate) app_remote_clients: DashMap<String, Arc<LazyInit<Box<dyn HdfsDelegator>>>>,
+    pub(crate) app_remote_clients: DashMap<String, Arc<LazyInit<Box<dyn HdfsClient>>>>,
 
     // key: data_file_path
     partition_file_locks: DashMap<String, Arc<SemaphoreWithIndex>>,
@@ -303,7 +303,7 @@ impl HdfsStore {
 
     async fn write_data_and_index(
         &self,
-        filesystem: &Box<dyn HdfsDelegator>,
+        filesystem: &Box<dyn HdfsClient>,
         data_file_path: &String,
         data_bytes_holder: BytesWrapper,
         index_file_path: &String,
@@ -338,7 +338,7 @@ impl HdfsStore {
 
     async fn delete_recursively(
         &self,
-        filesystem: &Box<dyn HdfsDelegator>,
+        filesystem: &Box<dyn HdfsClient>,
         path: &str,
         file_prefix: &str,
     ) -> Result<(), WorkerError> {
@@ -507,7 +507,7 @@ impl Store for HdfsStore {
 
         let remote_storage_conf = remote_storage_conf_option.unwrap();
         let client = LazyInit::new(move || {
-            get_hdfs_delegator(
+            get_hdfs_client(
                 remote_storage_conf.root.as_str(),
                 remote_storage_conf.configs,
             )
@@ -551,7 +551,7 @@ mod tests {
     use crate::lazy_initializer::LazyInit;
     use crate::runtime::manager::RuntimeManager;
     use crate::semaphore_with_index::SemaphoreWithIndex;
-    use crate::store::hadoop::{FileStatus, HdfsDelegator};
+    use crate::store::hadoop::{FileStatus, HdfsClient};
     use crate::store::hdfs::HdfsStore;
     use crate::store::{Block, BytesWrapper, Store};
     use anyhow::anyhow;
@@ -592,7 +592,7 @@ mod tests {
     unsafe impl Send for FakedHdfsClient {}
     unsafe impl Sync for FakedHdfsClient {}
     #[async_trait]
-    impl HdfsDelegator for FakedHdfsClient {
+    impl HdfsClient for FakedHdfsClient {
         async fn touch(&self, file_path: &str) -> anyhow::Result<()> {
             Ok(())
         }
@@ -650,7 +650,7 @@ mod tests {
         let hdfs_store = HdfsStore::from(config, &runtime_manager);
 
         let client = Arc::new(LazyInit::new(|| {
-            let client: Box<dyn HdfsDelegator> = Box::new(FakedHdfsClient {
+            let client: Box<dyn HdfsClient> = Box::new(FakedHdfsClient {
                 mark_failure: Arc::new(AtomicBool::new(false)),
                 oom_failure: Arc::new(AtomicBool::new(true)),
             });
@@ -703,7 +703,7 @@ mod tests {
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("init local file path: {}", temp_path);
         #[async_trait]
-        impl HdfsDelegator for MockedHdfsClient {
+        impl HdfsClient for MockedHdfsClient {
             async fn touch(&self, file_path: &str) -> anyhow::Result<()> {
                 let path = self.with_root(file_path)?;
                 File::create(path)?;
@@ -764,7 +764,7 @@ mod tests {
 
         let root_internal = temp_path.to_string();
         let client = Arc::new(LazyInit::new(move || {
-            let client: Box<dyn HdfsDelegator> = Box::new(MockedHdfsClient {
+            let client: Box<dyn HdfsClient> = Box::new(MockedHdfsClient {
                 root: root_internal,
             });
             client
@@ -881,7 +881,7 @@ mod tests {
         let mark_failure_tag = Arc::new(AtomicBool::new(false));
         let tag_fork = mark_failure_tag.clone();
         let client = Arc::new(LazyInit::new(move || {
-            let client: Box<dyn HdfsDelegator> = Box::new(FakedHdfsClient {
+            let client: Box<dyn HdfsClient> = Box::new(FakedHdfsClient {
                 mark_failure: tag_fork,
                 oom_failure: Arc::new(AtomicBool::new(false)),
             });
