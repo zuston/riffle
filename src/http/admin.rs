@@ -15,7 +15,7 @@ impl Handler for AdminHandler {
 
     /// request with /admin?operation=DECOMMISSION
     fn get_route_path(&self) -> String {
-        "/actions".to_string()
+        "/admin".to_string()
     }
 }
 
