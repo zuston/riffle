@@ -4,6 +4,7 @@ use anyhow::{anyhow, Result};
 use futures::future::try_join_all;
 use libc::iovec;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 struct AppsBody {
@@ -43,6 +44,23 @@ pub enum ServerStatus {
     UNHEALTHY,
     EXCLUDED,
     UNKNOWN,
+}
+
+impl FromStr for ServerStatus {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "ACTIVE" => Ok(ServerStatus::ACTIVE),
+            "DECOMMISSIONING" => Ok(ServerStatus::DECOMMISSIONING),
+            "DECOMMISSIONED" => Ok(ServerStatus::DECOMMISSIONED),
+            "LOST" => Ok(ServerStatus::LOST),
+            "UNHEALTHY" => Ok(ServerStatus::UNHEALTHY),
+            "EXCLUDED" => Ok(ServerStatus::EXCLUDED),
+            "UNKNOWN" => Ok(ServerStatus::UNKNOWN),
+            _ => Err(()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -148,7 +166,7 @@ impl Discovery {
 
 #[cfg(test)]
 pub mod tests {
-    use crate::admin::discovery::{Discovery, NodesBody, ServerInfo, ServerStatus};
+    use crate::actions::discovery::{Discovery, NodesBody, ServerInfo, ServerStatus};
     use crate::http::Handler;
     use crate::mem_allocator::dump_heap_flamegraph;
     use anyhow::Result;

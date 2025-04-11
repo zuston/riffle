@@ -60,7 +60,7 @@ pub mod disk_explorer;
 pub mod historical_apps;
 pub mod panic_hook;
 
-pub mod admin;
+pub mod actions;
 
 use crate::app::{AppManager, AppManagerRef};
 use crate::common::init_global_variable;
