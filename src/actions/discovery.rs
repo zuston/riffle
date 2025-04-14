@@ -3,16 +3,25 @@ use crate::runtime::{Runtime, RuntimeRef};
 use anyhow::{anyhow, Result};
 use futures::future::try_join_all;
 use libc::iovec;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
+const HTTP_API_PORT: usize = 20010;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-struct AppsBody {
-    apps: Vec<HistoryAppInfo>,
+pub struct ActiveAppInfo {
+    pub app_id: String,
+    pub registry_timestamp: u128,
+    pub duration_minutes: f64,
+    pub resident_bytes: u64,
+    pub partition_number: usize,
+    pub huge_partition_number: u64,
+    pub reported_block_id_number: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct HistoryAppInfo {
+pub struct HistoricalAppInfo {
     pub app_id: String,
     pub partition_num: usize,
     pub huge_partition_num: usize,
@@ -134,7 +143,18 @@ impl Discovery {
         Ok(resp.data.clone())
     }
 
-    pub async fn list_apps_history(&self) -> Result<Vec<HistoryAppInfo>> {
+    pub async fn list_active_apps(&self) -> Result<Vec<ActiveAppInfo>> {
+        self.fetch_from_node_api("/apps?format=Json").await
+    }
+
+    pub async fn list_historical_apps(&self) -> Result<Vec<HistoricalAppInfo>> {
+        self.fetch_from_node_api("/apps/history").await
+    }
+
+    async fn fetch_from_node_api<T>(&self, url_prefix: &str) -> Result<Vec<T>>
+    where
+        T: DeserializeOwned + Send + Sync + 'static,
+    {
         let server_infos = self.list_nodes().await?;
         let ips = server_infos
             .into_iter()
@@ -144,10 +164,11 @@ impl Discovery {
         let mut future_list = vec![];
         for ip in ips.iter() {
             let ip = ip.to_string();
+            let prefix = url_prefix.to_string();
             let future = async move {
-                let url = format!("http://{}:20010/apps/history", ip);
+                let url = format!("http://{}:{}{}", &ip, HTTP_API_PORT, prefix);
                 let response = reqwest::get(&url).await?;
-                let apps = response.json::<Vec<HistoryAppInfo>>().await?;
+                let apps = response.json::<Vec<T>>().await?;
                 Result::<_, reqwest::Error>::Ok(apps)
             };
             future_list.push(tokio::spawn(future));
@@ -159,17 +180,20 @@ impl Discovery {
             .into_iter()
             .filter_map(Result::ok)
             .flatten()
-            .collect::<Vec<HistoryAppInfo>>();
+            .collect::<Vec<T>>();
         Ok(all_apps)
     }
 }
 
 #[cfg(test)]
 pub mod tests {
-    use crate::actions::discovery::{Discovery, NodesBody, ServerInfo, ServerStatus};
+    use crate::actions::discovery::{
+        ActiveAppInfo, Discovery, NodesBody, ServerInfo, ServerStatus, HTTP_API_PORT,
+    };
     use crate::http::Handler;
     use crate::mem_allocator::dump_heap_flamegraph;
-    use anyhow::Result;
+    use anyhow::{anyhow, Result};
+    use futures::future::try_join_all;
     use hyper::StatusCode;
     use poem::listener::TcpListener;
     use poem::web::Json;
