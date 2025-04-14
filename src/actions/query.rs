@@ -13,7 +13,8 @@ use std::path::PathBuf;
 use tempfile::TempDir;
 
 const INSTANCES_TABLE_NAME: &str = "instances";
-const APPS_TABLE_NAME: &str = "apps";
+const HISTORICAL_APPS_TABLE_NAME: &str = "historical_apps";
+const ACTIVE_APPS_TABLE_NAME: &str = "active_apps";
 
 pub struct SessionContextExtend {
     ctx: SessionContext,
@@ -76,7 +77,8 @@ impl SessionContextExtend {
             discovery: Discovery::new(&[coordinator_url]),
         };
         self_me.register_table_instances().await.unwrap();
-        self_me.register_table_apps().await.unwrap();
+        self_me.register_table_active_apps().await.unwrap();
+        self_me.register_table_historical_apps().await.unwrap();
         Ok(self_me)
     }
 
@@ -105,15 +107,30 @@ impl SessionContextExtend {
         Ok(file_path)
     }
 
-    async fn register_table_apps(&self) -> Result<()> {
-        let apps = self.discovery.list_apps_history().await?;
+    async fn register_table_active_apps(&self) -> Result<()> {
+        let apps = self.discovery.list_active_apps().await?;
+        const CSV_FILE_NAME: &str = "riffle.active.app.csv";
+        let path = self.write_csv(apps, CSV_FILE_NAME)?;
+        self.ctx
+            .register_csv(
+                ACTIVE_APPS_TABLE_NAME,
+                path.to_str().unwrap(),
+                CsvReadOptions::default().has_header(true),
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    async fn register_table_historical_apps(&self) -> Result<()> {
+        let apps = self.discovery.list_historical_apps().await?;
         const CSV_FILE_NAME: &str = "riffle.history.app.csv";
 
         let path = self.write_csv(apps, CSV_FILE_NAME)?;
 
         self.ctx
             .register_csv(
-                APPS_TABLE_NAME,
+                HISTORICAL_APPS_TABLE_NAME,
                 path.to_str().unwrap(),
                 CsvReadOptions::default().has_header(true),
             )
@@ -166,7 +183,7 @@ mod tests {
     async fn test_connect_with_real_coordinator() {
         let coordinator_url = "http://xxx:21001";
         let context = SessionContextExtend::new(coordinator_url).await.unwrap();
-        let df = context.sql("select * from apps").await.unwrap();
+        let df = context.sql("select * from active_apps").await.unwrap();
         df.show().await.unwrap();
     }
 
