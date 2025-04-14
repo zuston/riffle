@@ -42,6 +42,17 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+      - name: Maximize build space
+        uses: gmij/max-build-space@main
+        with:
+          root-reserve-mb: 512
+          swap-size-mb: 1024
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-docker-images: 'true'
+          remove-codeql: 'true'
+          remove-large-packages: 'true'
+          remove-tool-cache: 'true'
       - uses: actions/checkout@v4
 
       - uses: prompt/actions-commit-hash@v3
