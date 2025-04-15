@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "master"
+      - "cifailure2"
     tags:
       - "v*.*.*"
 
@@ -45,8 +46,6 @@ jobs:
       - name: Maximize build space
         uses: gmij/max-build-space@main
         with:
-          root-reserve-mb: 512
-          swap-size-mb: 1024
           remove-android: 'true'
           remove-haskell: 'true'
           remove-docker-images: 'true'
