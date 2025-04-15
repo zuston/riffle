@@ -43,7 +43,7 @@ use serde::{Deserialize, Serialize};
 pub struct HttpMonitorService;
 impl HttpMonitorService {
     pub fn init(config: &Config, runtime_manager: RuntimeManager) {
-        let http_port = config.http_monitor_service_port;
+        let http_port = config.http_port;
         info!(
             "Starting http monitor service with port:[{}] ......",
             http_port

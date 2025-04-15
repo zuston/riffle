@@ -22,7 +22,6 @@ use crate::app::{
     WritingViewContext,
 };
 use crate::constant::StatusCode;
-use crate::decommission::{DecommissionManager, DecommissionState};
 use crate::error::WorkerError;
 use crate::grpc::protobuf::uniffle::shuffle_server_internal_server::ShuffleServerInternal;
 use crate::grpc::protobuf::uniffle::shuffle_server_server::ShuffleServer;
@@ -48,6 +47,7 @@ use crate::metric::{
     GRPC_SEND_DATA_PROCESS_TIME, GRPC_SEND_DATA_TRANSPORT_TIME,
 };
 use crate::reject::RejectionPolicyGateway;
+use crate::server_state_manager::{ServerState, ServerStateManager};
 use crate::store::{PartitionedData, ResponseDataIndex};
 use crate::util;
 use await_tree::InstrumentAwait;
@@ -70,19 +70,19 @@ pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
 pub struct DefaultShuffleServer {
     app_manager_ref: AppManagerRef,
     rejection_policy_gateway: RejectionPolicyGateway,
-    decommission_manager: DecommissionManager,
+    server_state_manager: ServerStateManager,
 }
 
 impl DefaultShuffleServer {
     pub fn from(
         app_manager_ref: AppManagerRef,
         rejection_policy_gateway: &RejectionPolicyGateway,
-        decommission_manager: &DecommissionManager,
+        server_state_manager: &ServerStateManager,
     ) -> DefaultShuffleServer {
         DefaultShuffleServer {
             app_manager_ref,
             rejection_policy_gateway: rejection_policy_gateway.clone(),
-            decommission_manager: decommission_manager.clone(),
+            server_state_manager: server_state_manager.clone(),
         }
     }
 }
@@ -93,8 +93,8 @@ impl ShuffleServerInternal for DefaultShuffleServer {
         &self,
         request: Request<DecommissionRequest>,
     ) -> Result<Response<DecommissionResponse>, Status> {
-        self.decommission_manager
-            .as_state(DecommissionState::DECOMMISSIONING);
+        self.server_state_manager
+            .as_state(ServerState::DECOMMISSIONING);
         Ok(Response::new(DecommissionResponse {
             status: StatusCode::SUCCESS.into(),
             ret_msg: "".to_string(),
@@ -105,8 +105,8 @@ impl ShuffleServerInternal for DefaultShuffleServer {
         &self,
         request: Request<CancelDecommissionRequest>,
     ) -> Result<Response<CancelDecommissionResponse>, Status> {
-        self.decommission_manager
-            .as_state(DecommissionState::CANCEL_DECOMMISSION);
+        self.server_state_manager
+            .as_state(ServerState::CANCEL_DECOMMISSION);
         Ok(Response::new(CancelDecommissionResponse {
             status: StatusCode::SUCCESS.into(),
             ret_msg: "".to_string(),

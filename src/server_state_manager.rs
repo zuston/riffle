@@ -8,35 +8,37 @@ use parking_lot::RwLock;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
+use strum_macros::Display;
 
 const INTERVAL: u64 = 60 * 10;
 
-pub static DECOMMISSION_MANAGER_REF: OnceCell<DecommissionManager> = OnceCell::new();
+pub static SERVER_STATE_MANAGER_REF: OnceCell<ServerStateManager> = OnceCell::new();
 
 #[allow(non_camel_case_types)]
-#[derive(Debug, Clone, PartialEq)]
-pub enum DecommissionState {
-    NOOP,
+#[derive(Debug, Clone, PartialEq, Display)]
+pub enum ServerState {
+    ACTIVE,
     DECOMMISSIONING,
     CANCEL_DECOMMISSION,
     DECOMMISSIONED,
+    UNHEALTHY,
+    HEALTHY,
 }
 
 #[derive(Clone)]
-pub struct DecommissionManager {
-    state: Arc<RwLock<DecommissionState>>,
+pub struct ServerStateManager {
+    state: Arc<RwLock<ServerState>>,
     state_time: Arc<AtomicU64>,
     app_manager_ref: AppManagerRef,
 
     kill_interval: Arc<AtomicU64>,
-
     kill_signal_send_enable: Arc<AtomicBool>,
 }
 
-impl DecommissionManager {
-    pub fn new(app_manager: &AppManagerRef) -> DecommissionManager {
-        DecommissionManager {
-            state: Arc::new(RwLock::new(DecommissionState::NOOP)),
+impl ServerStateManager {
+    pub fn new(app_manager: &AppManagerRef) -> ServerStateManager {
+        ServerStateManager {
+            state: Arc::new(RwLock::new(ServerState::ACTIVE)),
             state_time: Arc::new(AtomicU64::new(util::now_timestamp_as_sec())),
             app_manager_ref: app_manager.clone(),
             kill_interval: Arc::new(AtomicU64::new(INTERVAL)),
@@ -44,37 +46,43 @@ impl DecommissionManager {
         }
     }
 
-    pub fn as_state(&self, state: DecommissionState) {
+    pub fn as_state(&self, state: ServerState) {
         let mut internal_state = self.state.write();
         if *internal_state == state {
-            warn!("Decommission is already in progress. Ignoring");
+            warn!("Same with internal server status. Ignoring");
             return;
         }
+        info!("Transition from {} to {}", internal_state, state);
         *internal_state = state;
         self.state_time.store(util::now_timestamp_as_sec(), SeqCst);
-        info!("Making state: {:?}", &internal_state);
     }
 
-    fn get_state(&self) -> DecommissionState {
+    fn get_state(&self) -> ServerState {
         self.state.read().clone()
     }
 
     /// This method will be invoked periodically by heartbeat task
     pub fn get_server_status(&self) -> ServerStatus {
         let internal_state = self.get_state();
+
+        // Due to the bug of uniffle coordinator, the decommissioning status is not valid.
+        // So we have to set it as unhealthy. Tracking this problem in
+        // https://github.com/apache/uniffle/issues/2443
         let server_status = match internal_state {
-            DecommissionState::NOOP => ServerStatus::Active,
-            DecommissionState::DECOMMISSIONING => ServerStatus::Decommissioning,
-            DecommissionState::DECOMMISSIONED => ServerStatus::Decommissioning,
-            DecommissionState::CANCEL_DECOMMISSION => ServerStatus::Active,
+            ServerState::ACTIVE => ServerStatus::Active,
+            ServerState::DECOMMISSIONING => ServerStatus::Unhealthy,
+            ServerState::DECOMMISSIONED => ServerStatus::Unhealthy,
+            ServerState::CANCEL_DECOMMISSION => ServerStatus::Active,
+            ServerState::UNHEALTHY => ServerStatus::Unhealthy,
+            ServerState::HEALTHY => ServerStatus::Active,
         };
 
-        if internal_state == DecommissionState::DECOMMISSIONING
+        if internal_state == ServerState::DECOMMISSIONING
             && self.app_manager_ref.get_alive_app_number() <= 0
             && util::now_timestamp_as_sec() - self.state_time.load(SeqCst)
                 > self.kill_interval.load(SeqCst)
         {
-            self.as_state(DecommissionState::DECOMMISSIONED);
+            self.as_state(ServerState::DECOMMISSIONED);
             info!("Decommission success and then to kill");
 
             if self.kill_signal_send_enable.load(SeqCst) {
@@ -105,9 +113,9 @@ mod tests {
     use crate::app::test::mock_config;
     use crate::app::AppManager;
     use crate::config_reconfigure::ReconfigurableConfManager;
-    use crate::decommission::{DecommissionManager, DecommissionState};
     use crate::grpc::protobuf::uniffle::ServerStatus;
     use crate::runtime::manager::RuntimeManager;
+    use crate::server_state_manager::{ServerState, ServerStateManager};
     use crate::storage::StorageService;
     use anyhow::Result;
     use std::sync::atomic::Ordering;
@@ -125,28 +133,29 @@ mod tests {
         let app_manager_ref =
             AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
 
-        let decommission_manager = DecommissionManager::new(&app_manager_ref);
+        let server_state_manager = ServerStateManager::new(&app_manager_ref);
 
         // case1
-        decommission_manager.as_state(DecommissionState::DECOMMISSIONING);
+        server_state_manager.as_state(ServerState::DECOMMISSIONING);
         assert_eq!(
-            DecommissionState::DECOMMISSIONING,
-            decommission_manager.get_state()
+            ServerState::DECOMMISSIONING,
+            server_state_manager.get_state()
         );
+        // due to the uniffle's bug
         assert_eq!(
-            ServerStatus::Decommissioning,
-            decommission_manager.get_server_status()
+            ServerStatus::Unhealthy,
+            server_state_manager.get_server_status()
         );
 
         // case2
-        decommission_manager.set_kill_interval(1);
-        decommission_manager.disable_kill_signal();
+        server_state_manager.set_kill_interval(1);
+        server_state_manager.disable_kill_signal();
         awaitility::at_most(Duration::from_secs(2)).until(|| {
             assert_eq!(
-                decommission_manager.get_server_status(),
-                ServerStatus::Decommissioning
+                server_state_manager.get_server_status(),
+                ServerStatus::Unhealthy
             );
-            decommission_manager.get_state() == DecommissionState::DECOMMISSIONED
+            server_state_manager.get_state() == ServerState::DECOMMISSIONED
         });
 
         Ok(())

@@ -166,9 +166,9 @@ mod test {
     use crate::app::AppManager;
     use crate::config::Config;
     use crate::config_reconfigure::ReconfigurableConfManager;
-    use crate::decommission::DecommissionManager;
     use crate::rpc::DefaultRpcService;
     use crate::runtime::manager::RuntimeManager;
+    use crate::server_state_manager::ServerStateManager;
     use crate::storage::StorageService;
     use crate::urpc::frame::Frame;
 
@@ -193,7 +193,7 @@ mod test {
             &config,
             runtime_manager.clone(),
             app_manager_ref.clone(),
-            &DecommissionManager::new(&app_manager_ref),
+            &ServerStateManager::new(&app_manager_ref),
         )?;
 
         Ok(())

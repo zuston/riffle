@@ -55,17 +55,16 @@ pub mod lazy_initializer;
 
 mod config_reconfigure;
 pub mod deadlock;
-pub mod decommission;
 pub mod disk_explorer;
 pub mod historical_apps;
 pub mod panic_hook;
+pub mod server_state_manager;
 
 pub mod actions;
 
 use crate::app::{AppManager, AppManagerRef};
 use crate::common::init_global_variable;
 use crate::config_reconfigure::ReconfigurableConfManager;
-use crate::decommission::DecommissionManager;
 use crate::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
 use crate::grpc::protobuf::uniffle::{
     GetLocalShuffleDataRequest, GetLocalShuffleIndexRequest, GetMemoryShuffleDataRequest,
@@ -77,6 +76,7 @@ use crate::id_layout::{IdLayout, DEFAULT_BLOCK_ID_LAYOUT};
 use crate::metric::MetricService;
 use crate::rpc::DefaultRpcService;
 use crate::runtime::manager::RuntimeManager;
+use crate::server_state_manager::ServerStateManager;
 use crate::storage::StorageService;
 use anyhow::Result;
 use bytes::{Buf, Bytes, BytesMut};
@@ -107,13 +107,13 @@ pub async fn start_uniffle_worker(config: config::Config) -> Result<AppManagerRe
 
     let app_manager_ref_cloned = app_manager_ref.clone();
     let rm_cloned = runtime_manager.clone();
-    let decommission_manager = DecommissionManager::new(&app_manager_ref);
+    let server_state_manager = ServerStateManager::new(&app_manager_ref);
     runtime_manager.default_runtime.spawn(async move {
         DefaultRpcService {}.start(
             &config,
             rm_cloned,
             app_manager_ref_cloned,
-            &decommission_manager,
+            &server_state_manager,
         )
     });
 

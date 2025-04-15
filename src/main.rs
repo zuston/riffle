@@ -32,13 +32,13 @@ use crate::logforth_service::LogService;
 
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::deadlock::detect_deadlock;
-use crate::decommission::{DecommissionManager, DECOMMISSION_MANAGER_REF};
 use crate::mem_allocator::ALLOCATOR;
 use crate::metric::MetricService;
 use crate::panic_hook::set_panic_hook;
 use crate::readable_size::ReadableSize;
 use crate::rpc::DefaultRpcService;
 use crate::runtime::manager::RuntimeManager;
+use crate::server_state_manager::{ServerStateManager, SERVER_STATE_MANAGER_REF};
 use crate::storage::StorageService;
 use crate::tracing::FastraceWrapper;
 use anyhow::Result;
@@ -66,10 +66,10 @@ pub mod kerberos;
 pub mod id_layout;
 
 pub mod actions;
-pub mod decommission;
 pub mod lazy_initializer;
 #[cfg(not(feature = "logforth"))]
 mod log_service;
+pub mod server_state_manager;
 
 #[cfg(feature = "logforth")]
 mod logforth_service;
@@ -157,8 +157,8 @@ fn main() -> Result<()> {
     let health_service =
         HealthService::new(&app_manager_ref, &storage, &config.health_service_config);
 
-    let decommission_manager = DecommissionManager::new(&app_manager_ref);
-    let _ = DECOMMISSION_MANAGER_REF.set(decommission_manager.clone());
+    let server_state_manager = ServerStateManager::new(&app_manager_ref);
+    let _ = SERVER_STATE_MANAGER_REF.set(server_state_manager.clone());
 
     MetricService::init(&config, runtime_manager.clone());
     FastraceWrapper::init(config.clone());
@@ -167,7 +167,7 @@ fn main() -> Result<()> {
         &runtime_manager,
         &app_manager_ref,
         &health_service,
-        &decommission_manager,
+        &server_state_manager,
     );
     HttpMonitorService::init(&config, runtime_manager.clone());
 
@@ -175,7 +175,7 @@ fn main() -> Result<()> {
         &config,
         runtime_manager,
         app_manager_ref,
-        &decommission_manager,
+        &server_state_manager,
     )?;
 
     Ok(())
