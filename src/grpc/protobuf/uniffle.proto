@@ -259,6 +259,9 @@ enum ServerStatus {
   DECOMMISSIONING = 1;
   DECOMMISSIONED = 2;
   // todo: more status, such as UPGRADING
+  LOST = 3;
+  UNHEALTHY = 4;
+  EXCLUDED = 5;
 }
 
 message ShuffleServerHeartBeatRequest {
