@@ -59,8 +59,8 @@ impl DecommissionManager {
         let internal_state = self.get_state();
         let server_status = match internal_state {
             DecommissionState::NOOP => ServerStatus::Active,
-            DecommissionState::DECOMMISSIONING => ServerStatus::Decommissioning,
-            DecommissionState::DECOMMISSIONED => ServerStatus::Decommissioning,
+            DecommissionState::DECOMMISSIONING => ServerStatus::Unhealthy,
+            DecommissionState::DECOMMISSIONED => ServerStatus::Unhealthy,
             DecommissionState::CANCEL_DECOMMISSION => ServerStatus::Active,
         };
 
