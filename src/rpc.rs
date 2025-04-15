@@ -1,7 +1,6 @@
 use crate::app::AppManagerRef;
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::config::Config;
-use crate::decommission::DecommissionManager;
 use crate::grpc::layer::awaittree::AwaitTreeMiddlewareLayer;
 use crate::grpc::layer::metric::MetricsMiddlewareLayer;
 use crate::grpc::layer::tracing::TracingMiddleWareLayer;
@@ -10,6 +9,7 @@ use crate::grpc::service::{DefaultShuffleServer, MAX_CONNECTION_WINDOW_SIZE, STR
 use crate::metric::GRPC_LATENCY_TIME_SEC;
 use crate::reject::RejectionPolicyGateway;
 use crate::runtime::manager::RuntimeManager;
+use crate::server_state_manager::ServerStateManager;
 use crate::signal::details::graceful_wait_for_signal;
 use crate::urpc;
 use crate::util::is_port_used;
@@ -96,7 +96,7 @@ impl DefaultRpcService {
         tx: Sender<()>,
         app_manager_ref: AppManagerRef,
         rejection_gateway: &RejectionPolicyGateway,
-        decommission_manager: &DecommissionManager,
+        server_state_manager: &ServerStateManager,
     ) -> Result<()> {
         let grpc_port = config.grpc_port;
 
@@ -109,7 +109,7 @@ impl DefaultRpcService {
             let shuffle_server = DefaultShuffleServer::from(
                 app_manager_ref.clone(),
                 rejection_gateway,
-                decommission_manager,
+                server_state_manager,
             );
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), grpc_port as u16);
             let service = ShuffleServerServer::new(shuffle_server)
@@ -142,7 +142,7 @@ impl DefaultRpcService {
         config: &Config,
         runtime_manager: RuntimeManager,
         app_manager_ref: AppManagerRef,
-        decommission_manager: &DecommissionManager,
+        server_state_manager: &ServerStateManager,
     ) -> Result<()> {
         let rejection_gateway = RejectionPolicyGateway::new(&app_manager_ref, config);
 
@@ -159,7 +159,7 @@ impl DefaultRpcService {
             tx.clone(),
             app_manager_ref.clone(),
             &rejection_gateway,
-            decommission_manager,
+            server_state_manager,
         )?;
 
         let urpc_port = config.urpc_port;

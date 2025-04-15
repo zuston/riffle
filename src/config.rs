@@ -364,6 +364,8 @@ pub struct Config {
     #[serde(default = "as_default_grpc_port")]
     pub grpc_port: i32,
     pub urpc_port: Option<i32>,
+    #[serde(default = "as_default_http_port")]
+    pub http_port: u16,
 
     pub coordinator_quorum: Vec<String>,
     pub tags: Option<Vec<String>>,
@@ -373,9 +375,6 @@ pub struct Config {
 
     #[serde(default = "as_default_app_config")]
     pub app_config: AppConfig,
-
-    #[serde(default = "as_default_http_monitor_port")]
-    pub http_monitor_service_port: u16,
 
     pub tracing: Option<TracingConfig>,
 
@@ -396,7 +395,7 @@ fn as_default_health_service_config() -> HealthServiceConfig {
 fn as_default_hybrid_store_config() -> HybridStoreConfig {
     HybridStoreConfig::default()
 }
-fn as_default_http_monitor_port() -> u16 {
+fn as_default_http_port() -> u16 {
     20010
 }
 

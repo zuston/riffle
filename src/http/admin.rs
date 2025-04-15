@@ -1,5 +1,5 @@
-use crate::decommission::{DecommissionState, DECOMMISSION_MANAGER_REF};
 use crate::http::Handler;
+use crate::server_state_manager::{ServerState, SERVER_STATE_MANAGER_REF};
 use anyhow::Result;
 use clap::builder::Str;
 use poem::{handler, Request, RouteMethod};
@@ -33,14 +33,14 @@ struct OperationParam {
 #[handler]
 fn adminHandler(req: &Request) -> poem::Result<String> {
     let params = req.params::<OperationParam>()?;
-    let decom_manager_ref = DECOMMISSION_MANAGER_REF.get().unwrap();
+    let decom_manager_ref = SERVER_STATE_MANAGER_REF.get().unwrap();
 
     match params.operation {
         Operation::DECOMMISSION => {
-            decom_manager_ref.as_state(DecommissionState::DECOMMISSIONING);
+            decom_manager_ref.as_state(ServerState::DECOMMISSIONING);
         }
         Operation::CANCEL_DECOMMISSION => {
-            decom_manager_ref.as_state(DecommissionState::CANCEL_DECOMMISSION);
+            decom_manager_ref.as_state(ServerState::CANCEL_DECOMMISSION);
         }
     }
 
