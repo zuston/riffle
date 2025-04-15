@@ -1,7 +1,9 @@
 use crate::app::{AppManagerRef, SHUFFLE_SERVER_ID, SHUFFLE_SERVER_IP};
 use crate::config::Config;
 use crate::grpc::protobuf::uniffle::coordinator_server_client::CoordinatorServerClient;
-use crate::grpc::protobuf::uniffle::{ShuffleServerHeartBeatRequest, ShuffleServerId};
+use crate::grpc::protobuf::uniffle::{
+    ServerStatus, ShuffleServerHeartBeatRequest, ShuffleServerId,
+};
 use crate::health_service::HealthService;
 use crate::metric::SERVICE_IS_HEALTHY;
 use crate::runtime::manager::RuntimeManager;
@@ -71,7 +73,7 @@ impl HeartbeatTask {
                     all_tags.push(DEFAULT_SHUFFLE_SERVER_TAG.to_string());
                     all_tags.extend_from_slice(&*tags);
 
-                    let healthy = health_service.is_healthy().await.unwrap_or(false);
+                    let mut healthy = health_service.is_healthy().await.unwrap_or(false);
                     SERVICE_IS_HEALTHY.set(if healthy { 0 } else { 1 });
 
                     let memory_snapshot = app_manager
@@ -82,6 +84,12 @@ impl HeartbeatTask {
                         app_manager.store_memory_spill_event_num().unwrap_or(0) as i32;
 
                     let server_state = server_state_manager.get_server_status();
+
+                    // Compatible with uniffle coordinator's logic
+                    // https://github.com/apache/uniffle/blob/6843c06b1b1e4fe8c8c2be84e6a15f831c4b9a4c/coordinator/src/main/java/org/apache/uniffle/coordinator/CoordinatorGrpcService.java#L512
+                    if server_state != ServerStatus::Active {
+                        healthy = false;
+                    }
 
                     let heartbeat_req = ShuffleServerHeartBeatRequest {
                         server_id: Some(shuffle_server_id.clone()),
