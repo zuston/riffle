@@ -4,6 +4,7 @@ use crate::config::Config;
 use crate::grpc::layer::awaittree::AwaitTreeMiddlewareLayer;
 use crate::grpc::layer::metric::MetricsMiddlewareLayer;
 use crate::grpc::layer::tracing::TracingMiddleWareLayer;
+use crate::grpc::protobuf::uniffle::shuffle_server_internal_server::ShuffleServerInternalServer;
 use crate::grpc::protobuf::uniffle::shuffle_server_server::ShuffleServerServer;
 use crate::grpc::service::{DefaultShuffleServer, MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use crate::metric::GRPC_LATENCY_TIME_SEC;
@@ -112,10 +113,12 @@ impl DefaultRpcService {
                 server_state_manager,
             );
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), grpc_port as u16);
-            let service = ShuffleServerServer::new(shuffle_server)
+            let service = ShuffleServerServer::new(shuffle_server.clone())
                 .max_decoding_message_size(usize::MAX)
                 .max_encoding_message_size(usize::MAX);
             let service_tx = tx.subscribe();
+
+            let internal_service = ShuffleServerInternalServer::new(shuffle_server.clone());
 
             // every std::thread to bound the tokio thread to eliminate thread context switch.
             // this has been verified by benchmark of terasort 1TB that the p99 long tail latency
@@ -130,7 +133,7 @@ impl DefaultRpcService {
                     .enable_all()
                     .build()
                     .unwrap()
-                    .block_on(grpc_serve(service, addr, service_tx));
+                    .block_on(grpc_serve(service, internal_service, addr, service_tx));
             });
         }
 
@@ -205,7 +208,8 @@ async fn urpc_serve(addr: SocketAddr, shutdown: impl Future, app_manager_ref: Ap
 }
 
 async fn grpc_serve(
-    service: ShuffleServerServer<DefaultShuffleServer>,
+    main_service: ShuffleServerServer<DefaultShuffleServer>,
+    internal_service: ShuffleServerInternalServer<DefaultShuffleServer>,
     addr: SocketAddr,
     mut rx: broadcast::Receiver<()>,
 ) {
@@ -236,7 +240,8 @@ async fn grpc_serve(
         .layer(AwaitTreeMiddlewareLayer::new_optional(Some(
             AWAIT_TREE_REGISTRY.clone(),
         )))
-        .add_service(service)
+        .add_service(main_service)
+        .add_service(internal_service)
         .serve_with_incoming_shutdown(incoming, async {
             if let Err(err) = rx.recv().await {
                 error!("Errors on stopping the GRPC service, err: {:?}.", err);
