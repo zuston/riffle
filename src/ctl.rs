@@ -1,17 +1,9 @@
 #![allow(dead_code, unused)]
 
-use bytes::{Buf, Bytes};
-use clap::builder::Str;
 use clap::{Parser, Subcommand};
-use datafusion::prelude::{pi, SessionContext};
-use datafusion::sql::sqlparser::ast::Use::Default;
-use std::fs;
-use tonic::Status;
-use uniffle_worker::actions::discovery::ServerStatus;
 use uniffle_worker::actions::{
     Action, NodeUpdateAction, OutputFormat, QueryAction, ValidateAction,
 };
-use uniffle_worker::util::get_crc;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]

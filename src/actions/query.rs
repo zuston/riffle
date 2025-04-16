@@ -2,7 +2,7 @@ use crate::actions::discovery::{Discovery, ServerInfo, ServerStatus};
 use crate::util;
 use anyhow::Result;
 use csv::Writer;
-use datafusion::prelude::{CsvReadOptions, NdJsonReadOptions, SessionConfig, SessionContext};
+use datafusion::prelude::{CsvReadOptions, SessionConfig, SessionContext};
 use indicatif::HumanBytes;
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
