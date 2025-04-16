@@ -2,9 +2,8 @@ use crate::actions::discovery::{Discovery, ServerInfo, ServerStatus};
 use crate::util;
 use anyhow::Result;
 use csv::Writer;
-use datafusion::prelude::{CsvReadOptions, NdJsonReadOptions, SessionConfig, SessionContext};
-use human_size::Any::{Byte, Gigabyte};
-use human_size::{Size, SpecificSize};
+use datafusion::prelude::{CsvReadOptions, SessionConfig, SessionContext};
+use indicatif::HumanBytes;
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -49,12 +48,8 @@ impl From<&ServerInfo> for TableInstance {
             ip: info.ip.to_string(),
             grpc_port: info.grpc_port,
             netty_port: info.netty_port,
-            total_memory: SpecificSize::new(info.total_memory as f64, Byte)
-                .unwrap()
-                .to_string(),
-            used_memory: SpecificSize::new(info.used_memory as f64, Byte)
-                .unwrap()
-                .to_string(),
+            total_memory: HumanBytes(info.total_memory as u64).to_string(),
+            used_memory: HumanBytes(info.used_memory as u64).to_string(),
             event_num_in_flush: info.event_num_in_flush,
             tags: info
                 .tags

@@ -1,17 +1,9 @@
 #![allow(dead_code, unused)]
 
-use bytes::{Buf, Bytes};
-use clap::builder::Str;
 use clap::{Parser, Subcommand};
-use datafusion::prelude::SessionContext;
-use datafusion::sql::sqlparser::ast::Use::Default;
-use std::fs;
-use tonic::Status;
-use uniffle_worker::actions::discovery::ServerStatus;
 use uniffle_worker::actions::{
     Action, NodeUpdateAction, OutputFormat, QueryAction, ValidateAction,
 };
-use uniffle_worker::util::get_crc;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -22,21 +14,26 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Commands {
+    #[command(about = "Validate internal index/data file")]
     Validate {
         #[arg(short, long)]
         index_file_path: String,
         #[arg(short, long)]
         data_file_path: String,
     },
+    #[command(about = "Use sql to query instances/active_apps/historical_apps table")]
     Query {
         #[arg(short, long)]
         sql: String,
         #[arg(short, long)]
         coordinator_http_url: String,
+        #[arg(short)]
+        pipeline: bool,
     },
-    UPDATE {
+    #[command(about = "Update server status to make it decommission (pipeline mode supported)")]
+    Update {
         #[arg(short, long)]
-        instance: String,
+        instance: Option<String>,
         #[arg(short, long)]
         status: String,
     },
@@ -56,13 +53,17 @@ async fn main() -> anyhow::Result<()> {
         Commands::Query {
             sql,
             coordinator_http_url,
-        } => Box::new(QueryAction::new(
-            sql,
-            OutputFormat::TABLE,
-            coordinator_http_url,
-        )),
+            pipeline,
+        } => {
+            let table_format = if pipeline {
+                OutputFormat::JSON
+            } else {
+                OutputFormat::TABLE
+            };
+            Box::new(QueryAction::new(sql, table_format, coordinator_http_url))
+        }
 
-        Commands::UPDATE { instance, status } => Box::new(NodeUpdateAction::new(instance, status)),
+        Commands::Update { instance, status } => Box::new(NodeUpdateAction::new(instance, status)),
 
         _ => panic!("Unknown command"),
     };
