@@ -3,7 +3,7 @@
 use bytes::{Buf, Bytes};
 use clap::builder::Str;
 use clap::{Parser, Subcommand};
-use datafusion::prelude::SessionContext;
+use datafusion::prelude::{pi, SessionContext};
 use datafusion::sql::sqlparser::ast::Use::Default;
 use std::fs;
 use tonic::Status;
@@ -33,10 +33,12 @@ enum Commands {
         sql: String,
         #[arg(short, long)]
         coordinator_http_url: String,
+        #[arg(short)]
+        pipeline: bool,
     },
-    UPDATE {
+    UpdateServerStatus {
         #[arg(short, long)]
-        instance: String,
+        instance: Option<String>,
         #[arg(short, long)]
         status: String,
     },
@@ -56,13 +58,19 @@ async fn main() -> anyhow::Result<()> {
         Commands::Query {
             sql,
             coordinator_http_url,
-        } => Box::new(QueryAction::new(
-            sql,
-            OutputFormat::TABLE,
-            coordinator_http_url,
-        )),
+            pipeline,
+        } => {
+            let table_format = if pipeline {
+                OutputFormat::JSON
+            } else {
+                OutputFormat::TABLE
+            };
+            Box::new(QueryAction::new(sql, table_format, coordinator_http_url))
+        }
 
-        Commands::UPDATE { instance, status } => Box::new(NodeUpdateAction::new(instance, status)),
+        Commands::UpdateServerStatus { instance, status } => {
+            Box::new(NodeUpdateAction::new(instance, status))
+        }
 
         _ => panic!("Unknown command"),
     };

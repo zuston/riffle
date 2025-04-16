@@ -6,6 +6,7 @@ use libc::iovec;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
+use strum_macros::Display;
 
 const HTTP_API_PORT: usize = 20010;
 
@@ -44,7 +45,7 @@ struct NodesBody {
     data: Vec<ServerInfo>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Display)]
 pub enum ServerStatus {
     ACTIVE,
     DECOMMISSIONING,
