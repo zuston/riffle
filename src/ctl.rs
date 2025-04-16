@@ -14,12 +14,14 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Commands {
+    #[command(about = "Validate internal index/data file")]
     Validate {
         #[arg(short, long)]
         index_file_path: String,
         #[arg(short, long)]
         data_file_path: String,
     },
+    #[command(about = "Use sql to query instances/active_apps/historical_apps table")]
     Query {
         #[arg(short, long)]
         sql: String,
@@ -28,7 +30,8 @@ enum Commands {
         #[arg(short)]
         pipeline: bool,
     },
-    UpdateServerStatus {
+    #[command(about = "Update server status to make it decommission (pipeline mode supported)")]
+    Update {
         #[arg(short, long)]
         instance: Option<String>,
         #[arg(short, long)]
@@ -60,9 +63,7 @@ async fn main() -> anyhow::Result<()> {
             Box::new(QueryAction::new(sql, table_format, coordinator_http_url))
         }
 
-        Commands::UpdateServerStatus { instance, status } => {
-            Box::new(NodeUpdateAction::new(instance, status))
-        }
+        Commands::Update { instance, status } => Box::new(NodeUpdateAction::new(instance, status)),
 
         _ => panic!("Unknown command"),
     };
