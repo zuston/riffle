@@ -22,7 +22,6 @@ use std::process::Command;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Inject build time
     let output = Command::new("date")
-        .arg("+%Y-%m-%d %H:%M")
         .output()
         .expect("Failed to execute `date` command");
     let build_datetime = String::from_utf8(output.stdout).expect("Failed to parse date output");
