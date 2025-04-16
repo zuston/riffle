@@ -67,6 +67,7 @@ pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
 /// as we don't rely on this for back-pressure.
 pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
 
+#[derive(Clone)]
 pub struct DefaultShuffleServer {
     app_manager_ref: AppManagerRef,
     rejection_policy_gateway: RejectionPolicyGateway,
