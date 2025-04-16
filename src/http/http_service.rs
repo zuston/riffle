@@ -36,15 +36,26 @@ impl ResponseError for WorkerError {
     }
 }
 
+fn format_kv_pairs(data: Vec<(&str, &str)>) -> String {
+    let max_key_length = data.iter().map(|(key, _)| key.len()).max().unwrap_or(0);
+    let formatted_lines: Vec<String> = data
+        .iter()
+        .map(|(key, value)| format!("{:<width$}: {}", key, value, width = max_key_length))
+        .collect();
+    formatted_lines.join("\n")
+}
+
 struct IndexPageHandler {}
 impl Handler for IndexPageHandler {
     fn get_route_method(&self) -> RouteMethod {
         get(make_sync(|_| {
-            format!(
-                "Riffle\nGit commit id [{}]\ncpu arch [{}]",
-                env!("GIT_COMMIT_HASH"),
-                CPU_ARCH
-            )
+            let infos = vec![
+                ("git_commit_id", env!("GIT_COMMIT_HASH")),
+                ("cpu_arch", CPU_ARCH),
+                ("version", env!("CARGO_PKG_VERSION")),
+                ("build_date", env!("BUILD_DATE")),
+            ];
+            format_kv_pairs(infos)
         }))
     }
 
