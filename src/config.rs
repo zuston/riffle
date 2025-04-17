@@ -362,8 +362,8 @@ pub struct Config {
     pub metrics: Option<MetricsConfig>,
 
     #[serde(default = "as_default_grpc_port")]
-    pub grpc_port: i32,
-    pub urpc_port: Option<i32>,
+    pub grpc_port: u16,
+    pub urpc_port: Option<u16>,
     #[serde(default = "as_default_http_port")]
     pub http_port: u16,
 
@@ -383,6 +383,13 @@ pub struct Config {
 
     #[serde(default = "as_default_heartbeat_interval_seconds")]
     pub heartbeat_interval_seconds: u32,
+
+    #[serde(default = "as_default_fallback_random_ports_enable")]
+    pub fallback_random_ports_enable: bool,
+}
+
+fn as_default_fallback_random_ports_enable() -> bool {
+    true
 }
 
 // ====
@@ -407,7 +414,7 @@ fn as_default_storage_type() -> StorageType {
     StorageType::MEMORY
 }
 
-fn as_default_grpc_port() -> i32 {
+fn as_default_grpc_port() -> u16 {
     19999
 }
 
