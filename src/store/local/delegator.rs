@@ -12,7 +12,7 @@ use crate::metric::{
 };
 use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
-use crate::store::local::limiter::TokenBucketLimiter;
+use crate::store::local::io_layer_throttle::TokenBucketLimiter;
 use crate::store::local::sync_io::SyncLocalIO;
 use crate::store::local::{DiskStat, FileStat, LocalDiskStorage, LocalIO};
 use crate::store::BytesWrapper;
@@ -40,7 +40,7 @@ pub struct LocalDiskDelegator {
 struct Inner {
     root: String,
 
-    io_handler: SyncLocalIO,
+    io_handler: Arc<Box<dyn LocalIO>>,
 
     is_healthy: Arc<AtomicBool>,
     is_corrupted: Arc<AtomicBool>,
@@ -77,6 +77,7 @@ impl LocalDiskDelegator {
             Some(write_capacity.as_bytes() as usize),
             Some(read_capacity.as_bytes() as usize),
         );
+        let io_handler = Arc::new(Box::new(io_handler) as Box<dyn LocalIO>);
 
         let io_limiter = match config.io_limiter.as_ref() {
             Some(conf) => {

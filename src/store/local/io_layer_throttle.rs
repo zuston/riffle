@@ -110,7 +110,7 @@ impl TokenBucketLimiter {
 #[cfg(test)]
 mod tests {
     use crate::runtime::manager::RuntimeManager;
-    use crate::store::local::limiter::TokenBucketLimiter;
+    use crate::store::local::io_layer_throttle::TokenBucketLimiter;
     use std::sync::atomic::Ordering::SeqCst;
     use std::time::Duration;
     use tokio::time::Instant;
