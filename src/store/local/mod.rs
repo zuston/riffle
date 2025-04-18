@@ -20,9 +20,14 @@ use crate::store::BytesWrapper;
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
+use std::sync::Arc;
 
 pub mod delegator;
-mod limiter;
+mod io_layer_await_tree;
+mod io_layer_metrics;
+mod io_layer_throttle;
+mod io_layer_timeout;
+mod layers;
 pub mod sync_io;
 
 pub struct FileStat {
@@ -30,7 +35,7 @@ pub struct FileStat {
 }
 
 #[async_trait]
-pub trait LocalIO: Clone {
+pub trait LocalIO {
     async fn create_dir(&self, dir: &str) -> Result<(), WorkerError>;
     async fn append(&self, path: &str, data: BytesWrapper) -> Result<(), WorkerError>;
     async fn read(
@@ -53,7 +58,7 @@ pub trait LocalIO: Clone {
         -> Result<Bytes, WorkerError>;
 }
 
-pub trait LocalDiskStorage: LocalIO {
+pub trait LocalDiskStorage {
     fn is_healthy(&self) -> Result<bool>;
     fn is_corrupted(&self) -> Result<bool>;
 
