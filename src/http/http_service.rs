@@ -26,7 +26,7 @@ use poem::{get, Route, RouteMethod, Server};
 use crate::constant::CPU_ARCH;
 use crate::http::{HTTPServer, Handler};
 use crate::runtime::manager::RuntimeManager;
-use crate::util::is_port_used;
+use crate::util::is_port_in_used;
 use await_tree::InstrumentAwait;
 use std::sync::Mutex;
 
@@ -82,7 +82,7 @@ impl PoemHTTPServer {
 
 impl HTTPServer for PoemHTTPServer {
     fn start(&self, runtime_manager: RuntimeManager, port: u16) {
-        if is_port_used(port) {
+        if is_port_in_used(port) {
             panic!("The http service port:{:?} has been used.", port);
         }
         let mut app = Route::new();

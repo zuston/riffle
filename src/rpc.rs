@@ -13,7 +13,7 @@ use crate::runtime::manager::RuntimeManager;
 use crate::server_state_manager::ServerStateManager;
 use crate::signal::details::graceful_wait_for_signal;
 use crate::urpc;
-use crate::util::is_port_used;
+use crate::util::is_port_in_used;
 use anyhow::Result;
 use async_trait::async_trait;
 use log::{debug, error, info};
@@ -152,7 +152,7 @@ impl DefaultRpcService {
         let (tx, _) = broadcast::channel(1);
 
         let grpc_port = config.grpc_port;
-        if is_port_used(grpc_port as u16) {
+        if is_port_in_used(grpc_port as u16) {
             panic!("The grpc port of {:?} has been used.", grpc_port);
         }
 
@@ -167,7 +167,7 @@ impl DefaultRpcService {
 
         let urpc_port = config.urpc_port;
         if urpc_port.is_some() {
-            if is_port_used(urpc_port.unwrap() as u16) {
+            if is_port_in_used(urpc_port.unwrap() as u16) {
                 panic!("The urpc port of {:?} has been used.", urpc_port.unwrap());
             }
 

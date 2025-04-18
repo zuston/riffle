@@ -19,7 +19,7 @@ use bytes::Bytes;
 use crc32fast::Hasher;
 
 use crate::config::Config;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -83,7 +83,7 @@ pub fn now_timestamp_as_sec() -> u64 {
     timestamp
 }
 
-pub fn is_port_used(port: u16) -> bool {
+pub fn is_port_in_used(port: u16) -> bool {
     match std::net::TcpListener::bind(SocketAddr::new(
         IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
         port as u16,
@@ -93,13 +93,19 @@ pub fn is_port_used(port: u16) -> bool {
     }
 }
 
+pub fn find_available_port() -> Option<u16> {
+    TcpListener::bind("0.0.0.0:0")
+        .ok()
+        .and_then(|listener| listener.local_addr().ok().map(|addr| addr.port()))
+}
+
 pub fn parse_raw_to_bytesize(s: &str) -> u64 {
     s.parse::<ByteSize>().unwrap().0
 }
 
 #[cfg(test)]
 mod test {
-    use crate::util::{get_crc, is_port_used, now_timestamp_as_sec};
+    use crate::util::{get_crc, is_port_in_used, now_timestamp_as_sec};
     use bytes::Bytes;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
@@ -111,9 +117,9 @@ mod test {
             port as u16,
         ));
 
-        assert_eq!(true, is_port_used(port));
+        assert_eq!(true, is_port_in_used(port));
         drop(socket);
-        assert_eq!(false, is_port_used(port));
+        assert_eq!(false, is_port_in_used(port));
     }
 
     #[test]

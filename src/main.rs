@@ -112,7 +112,7 @@ fn main() -> Result<()> {
     setup_max_memory_allocation();
 
     let args = Args::parse();
-    let config = Config::from(&args.config);
+    let mut config = Config::from(&args.config);
 
     #[cfg(not(feature = "logforth"))]
     let _guard = LogService::init(&config.log);
@@ -134,6 +134,11 @@ fn main() -> Result<()> {
     init_global_variable(&config);
 
     info!("The specified config show as follows: \n {:#?}", config);
+
+    // check the port availability
+    if config.fallback_random_ports_enable {
+        check_and_update_ports(&mut config);
+    }
 
     let runtime_manager = RuntimeManager::from(config.runtime_config.clone());
 
@@ -177,6 +182,30 @@ fn main() -> Result<()> {
         app_manager_ref,
         &server_state_manager,
     )?;
+
+    Ok(())
+}
+
+fn check_and_update_ports(config: &mut Config) -> Result<()> {
+    fn op(port: u16) -> u16 {
+        if util::is_port_in_used(port) {
+            let port = util::find_available_port().unwrap_or(port);
+            port
+        } else {
+            port
+        }
+    }
+
+    config.grpc_port = op(config.grpc_port);
+    config.http_port = op(config.http_port);
+    if let Some(urpc_port) = config.urpc_port {
+        config.urpc_port = Some(op(urpc_port))
+    }
+
+    info!(
+        "Service ports. grpc: {}. http: {}. urpc: {:?}",
+        config.grpc_port, config.http_port, config.urpc_port
+    );
 
     Ok(())
 }

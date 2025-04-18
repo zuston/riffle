@@ -46,8 +46,8 @@ impl HeartbeatTask {
         let shuffle_server_id = ShuffleServerId {
             id,
             ip,
-            port: grpc_port,
-            netty_port: urpc_port,
+            port: grpc_port as i32,
+            netty_port: urpc_port as i32,
             jetty_port: http_port as i32,
         };
         let start_time = std::time::Instant::now();
