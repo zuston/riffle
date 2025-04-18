@@ -36,7 +36,7 @@ pub struct FileStat {
 }
 
 #[async_trait]
-pub trait LocalIO: Clone {
+pub trait LocalIO {
     async fn create_dir(&self, dir: &str) -> Result<(), WorkerError>;
     async fn append(&self, path: &str, data: BytesWrapper) -> Result<(), WorkerError>;
     async fn read(

@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use crate::store::local::LocalIO;
 
 pub type Handler = Box<dyn LocalIO>;
@@ -11,7 +12,7 @@ impl OperatorBuilder {
         OperatorBuilder { handler }
     }
 
-    fn layer<L: Layer>(self, layer: L) -> OperatorBuilder {
+    fn layer(self, layer: impl Layer) -> OperatorBuilder {
         OperatorBuilder {
             handler: layer.wrap(self.handler),
         }

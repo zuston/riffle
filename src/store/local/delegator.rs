@@ -40,7 +40,7 @@ pub struct LocalDiskDelegator {
 struct Inner {
     root: String,
 
-    io_handler: Arc<Box<dyn LocalIO>>,
+    io_handler: SyncLocalIO,
 
     is_healthy: Arc<AtomicBool>,
     is_corrupted: Arc<AtomicBool>,
@@ -77,7 +77,6 @@ impl LocalDiskDelegator {
             Some(write_capacity.as_bytes() as usize),
             Some(read_capacity.as_bytes() as usize),
         );
-        let io_handler = Arc::new(Box::new(io_handler) as Box<dyn LocalIO>);
 
         let io_limiter = match config.io_limiter.as_ref() {
             Some(conf) => {
