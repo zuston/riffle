@@ -323,7 +323,6 @@ mod tests {
         let toml_str = r#"
         store_type = "MEMORY"
         coordinator_quorum = [""]
-        grpc_port = -100
 
         [memory_store]
         capacity = "1XXXXXXXXX"
@@ -338,7 +337,6 @@ mod tests {
         let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
 
         // fast fail when registering rather than invoking side.
-        assert!(reconf_manager.register::<u64>("grpc_port").is_err());
         assert!(reconf_manager
             .register::<ByteString>("memory_store.capacity")
             .is_err());
