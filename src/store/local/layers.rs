@@ -1,7 +1,7 @@
-use std::sync::Arc;
 use crate::store::local::LocalIO;
+use std::sync::Arc;
 
-pub type Handler = Box<dyn LocalIO>;
+pub type Handler = Arc<Box<dyn LocalIO>>;
 
 pub struct OperatorBuilder {
     handler: Handler,

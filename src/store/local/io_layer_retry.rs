@@ -16,7 +16,7 @@
 // impl Layer for RetryIoLayer {
 //     fn wrap(&self, handler: Handler) -> Handler {
 //         let layer = RetryIoLayerWrapper {
-//             inner: Arc::new(handler),
+//             inner: handler,
 //             retry_times: self.retry_times,
 //         };
 //         Arc::new(Box::new(layer))
@@ -25,9 +25,12 @@
 //
 // #[derive(Clone)]
 // struct RetryIoLayerWrapper {
-//     inner: Arc<Box<dyn LocalIO>>,
+//     inner: Handler,
 //     retry_times: u32,
 // }
+//
+// unsafe impl Send for RetryIoLayerWrapper {}
+// unsafe impl Sync for RetryIoLayerWrapper {}
 //
 // #[async_trait]
 // impl LocalIO for RetryIoLayerWrapper {
@@ -53,7 +56,7 @@
 //             .delete(path)
 //             .retry(
 //                 ExponentialBuilder::new()
-//                     .with_max_times(self.retry_times)
+//                     .with_max_times(self.retry_times as usize)
 //                     .build(),
 //             )
 //             .await
