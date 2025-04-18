@@ -18,6 +18,14 @@ pub struct MetricsLayer {
     root: String,
 }
 
+impl MetricsLayer {
+    pub fn new(root: &str) -> Self {
+        Self {
+            root: root.to_string(),
+        }
+    }
+}
+
 impl Layer for MetricsLayer {
     fn wrap(&self, handler: Handler) -> Handler {
         Arc::new(Box::new(MetricsLayerWrapper {

@@ -8,17 +8,17 @@ pub struct OperatorBuilder {
 }
 
 impl OperatorBuilder {
-    fn new(handler: Handler) -> Self {
+    pub fn new(handler: Handler) -> Self {
         OperatorBuilder { handler }
     }
 
-    fn layer(self, layer: impl Layer) -> OperatorBuilder {
+    pub fn layer(self, layer: impl Layer) -> OperatorBuilder {
         OperatorBuilder {
             handler: layer.wrap(self.handler),
         }
     }
 
-    fn build(self) -> Handler {
+    pub fn build(self) -> Handler {
         self.handler
     }
 }

@@ -12,7 +12,11 @@ use crate::metric::{
 };
 use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
-use crate::store::local::io_layer_throttle::TokenBucketLimiter;
+use crate::store::local::io_layer_await_tree::AwaitTreeLayer;
+use crate::store::local::io_layer_metrics::MetricsLayer;
+use crate::store::local::io_layer_throttle::{ThrottleLayer, TokenBucketLimiter};
+use crate::store::local::io_layer_timeout::TimeoutLayer;
+use crate::store::local::layers::{Handler, OperatorBuilder};
 use crate::store::local::sync_io::SyncLocalIO;
 use crate::store::local::{DiskStat, FileStat, LocalDiskStorage, LocalIO};
 use crate::store::BytesWrapper;
@@ -24,6 +28,7 @@ use bytes::Bytes;
 use clap::error::ErrorKind::Io;
 use log::{error, warn};
 use once_cell::sync::OnceCell;
+use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -37,10 +42,21 @@ pub struct LocalDiskDelegator {
     inner: Arc<Inner>,
 }
 
+impl Deref for LocalDiskDelegator {
+    type Target = Handler;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner.io_handler
+    }
+}
+
+unsafe impl Send for LocalDiskDelegator {}
+unsafe impl Sync for LocalDiskDelegator {}
+
 struct Inner {
     root: String,
 
-    io_handler: SyncLocalIO,
+    io_handler: Handler,
 
     is_healthy: Arc<AtomicBool>,
     is_corrupted: Arc<AtomicBool>,
@@ -53,10 +69,6 @@ struct Inner {
     // only for the test case
     capacity_ref: OnceCell<Arc<AtomicU64>>,
     available_ref: OnceCell<Arc<AtomicU64>>,
-
-    io_limiter: Option<TokenBucketLimiter>,
-
-    io_duration_threshold_sec: u64,
 }
 
 impl LocalDiskDelegator {
@@ -70,7 +82,7 @@ impl LocalDiskDelegator {
         let write_capacity = ReadableSize::from_str(&config.disk_write_buf_capacity).unwrap();
         let read_capacity = ReadableSize::from_str(&config.disk_read_buf_capacity).unwrap();
 
-        let io_handler = SyncLocalIO::new(
+        let underlying_io_handler = SyncLocalIO::new(
             &runtime_manager.read_runtime,
             &runtime_manager.localfile_write_runtime,
             root,
@@ -78,24 +90,22 @@ impl LocalDiskDelegator {
             Some(read_capacity.as_bytes() as usize),
         );
 
-        let io_limiter = match config.io_limiter.as_ref() {
-            Some(conf) => {
-                let capacity = util::parse_raw_to_bytesize(&conf.capacity) as usize;
-                let rate = util::parse_raw_to_bytesize(&conf.fill_rate_of_per_second) as usize;
-                let v = Some(TokenBucketLimiter::new(
-                    &runtime_manager,
-                    capacity,
-                    rate,
-                    Duration::from_millis(conf.refill_interval_of_milliseconds),
-                ));
-                info!(
-                    "TokenBucket limiter has been initialized for root[{}]",
-                    root
-                );
-                v
-            }
-            _ => None,
-        };
+        let mut operator_builder = OperatorBuilder::new(Arc::new(Box::new(underlying_io_handler)));
+        if let Some(conf) = config.io_limiter.as_ref() {
+            let capacity = util::parse_raw_to_bytesize(&conf.capacity) as usize;
+            let rate = util::parse_raw_to_bytesize(&conf.fill_rate_of_per_second) as usize;
+            operator_builder = operator_builder.layer(ThrottleLayer::new(
+                &runtime_manager,
+                capacity,
+                rate,
+                Duration::from_millis(conf.refill_interval_of_milliseconds),
+            ));
+        }
+        let io_handler = operator_builder
+            .layer(TimeoutLayer::new(config.io_duration_threshold_sec))
+            .layer(AwaitTreeLayer::new(root))
+            .layer(MetricsLayer::new(root))
+            .build();
 
         let delegator = Self {
             inner: Arc::new(Inner {
@@ -108,8 +118,6 @@ impl LocalDiskDelegator {
                 healthy_check_interval_sec: config.disk_healthy_check_interval_sec,
                 capacity_ref: Default::default(),
                 available_ref: Default::default(),
-                io_limiter,
-                io_duration_threshold_sec: config.io_duration_threshold_sec as u64,
             }),
         };
 
@@ -127,16 +135,6 @@ impl LocalDiskDelegator {
         });
 
         delegator
-    }
-
-    pub async fn get_permit(&self, len: usize) -> Result<()> {
-        if let Some(limiter) = self.inner.io_limiter.as_ref() {
-            limiter
-                .acquire(len)
-                .instrument_await(format!("getting io limiter's permit. {}", len))
-                .await;
-        }
-        Ok(())
     }
 
     pub fn with_capacity(&self, capacity_ref: Arc<AtomicU64>) {
@@ -285,182 +283,6 @@ impl LocalDiskDelegator {
             return Ok(available.load(SeqCst));
         }
         Ok(fs2::available_space(&self.inner.root)?)
-    }
-}
-
-#[async_trait]
-impl LocalIO for LocalDiskDelegator {
-    async fn create_dir(&self, dir: &str) -> Result<(), WorkerError> {
-        let future = self.inner.io_handler.create_dir(dir);
-        timeout(
-            Duration::from_secs(self.inner.io_duration_threshold_sec),
-            future,
-        )
-        .instrument_await(format!("create directory to disk: {}", &self.inner.root))
-        .await
-        .with_context(|| format!("Errors on creating dir on disk: {}", &self.inner.root))??;
-        Ok(())
-    }
-
-    async fn append(&self, path: &str, data: BytesWrapper) -> Result<(), WorkerError> {
-        let timer = LOCALFILE_DISK_APPEND_OPERATION_DURATION
-            .with_label_values(&[&self.inner.root])
-            .start_timer();
-        let len = data.len();
-
-        let future = self.inner.io_handler.append(path, data);
-        timeout(
-            Duration::from_secs(self.inner.io_duration_threshold_sec),
-            future,
-        )
-        .instrument_await(format!("append to disk: {}", &self.inner.root))
-        .await
-        .with_context(|| format!("Errors on appending on disk: {}", &self.inner.root))??;
-
-        timer.observe_duration();
-        TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER
-            .with_label_values(&[&self.inner.root])
-            .inc_by(len as u64);
-        TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER
-            .with_label_values(&[&self.inner.root])
-            .inc();
-        Ok(())
-    }
-
-    async fn read(
-        &self,
-        path: &str,
-        offset: i64,
-        length: Option<i64>,
-    ) -> Result<Bytes, WorkerError> {
-        let timer = LOCALFILE_DISK_READ_OPERATION_DURATION
-            .with_label_values(&[&self.inner.root])
-            .start_timer();
-
-        let future = self.inner.io_handler.read(path, offset, length);
-        let data = timeout(
-            Duration::from_secs(self.inner.io_duration_threshold_sec),
-            future,
-        )
-        .instrument_await(format!("read from disk: {}", &self.inner.root))
-        .await
-        .with_context(|| format!("Errors on reading on disk: {}", &self.inner.root))??;
-
-        timer.observe_duration();
-        TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER
-            .with_label_values(&[&self.inner.root])
-            .inc_by(data.len() as u64);
-        TOTAL_LOCAL_DISK_READ_OPERATION_COUNTER
-            .with_label_values(&[&self.inner.root])
-            .inc();
-        Ok(data)
-    }
-
-    async fn delete(&self, path: &str) -> Result<(), WorkerError> {
-        let timer = LOCALFILE_DISK_DELETE_OPERATION_DURATION
-            .with_label_values(&[&self.inner.root])
-            .start_timer();
-
-        let future = self.inner.io_handler.delete(path);
-        timeout(
-            Duration::from_secs(self.inner.io_duration_threshold_sec),
-            future,
-        )
-        .instrument_await(format!("delete from disk: {}", &self.inner.root))
-        .await
-        .with_context(|| format!("Errors on deleting on disk: {}", &self.inner.root))??;
-
-        timer.observe_duration();
-
-        Ok(())
-    }
-
-    async fn write(&self, path: &str, data: Bytes) -> Result<(), WorkerError> {
-        let future = self.inner.io_handler.write(path, data);
-        timeout(
-            Duration::from_secs(self.inner.io_duration_threshold_sec),
-            future,
-        )
-        .instrument_await(format!("write to disk: {}", &self.inner.root))
-        .await
-        .with_context(|| format!("Errors on writing on disk: {}", &self.inner.root))??;
-        Ok(())
-    }
-
-    async fn file_stat(&self, path: &str) -> Result<FileStat, WorkerError> {
-        let future = self.inner.io_handler.file_stat(path);
-        let file_stat = timeout(
-            Duration::from_secs(self.inner.io_duration_threshold_sec),
-            future,
-        )
-        .instrument_await(format!("state disk: {}", &self.inner.root))
-        .await
-        .with_context(|| format!("Errors on file stating on disk: {}", &self.inner.root))??;
-        Ok(file_stat)
-    }
-
-    async fn direct_append(
-        &self,
-        path: &str,
-        written_bytes: usize,
-        data: BytesWrapper,
-    ) -> Result<(), WorkerError> {
-        let len = data.len();
-        self.get_permit(len).await?;
-
-        let timer = LOCALFILE_DISK_DIRECT_APPEND_OPERATION_DURATION
-            .with_label_values(&[&self.inner.root])
-            .start_timer();
-
-        let future = self
-            .inner
-            .io_handler
-            .direct_append(path, written_bytes, data);
-        timeout(
-            Duration::from_secs(self.inner.io_duration_threshold_sec),
-            future,
-        )
-        .instrument_await(format!("direct_append to disk: {}", &path))
-        .await
-        .with_context(|| format!("Errors on direct appending on disk: {}", &path))??;
-
-        TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER
-            .with_label_values(&[&self.inner.root])
-            .inc_by(len as u64);
-        TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER
-            .with_label_values(&[&self.inner.root])
-            .inc();
-        Ok(())
-    }
-
-    async fn direct_read(
-        &self,
-        path: &str,
-        offset: i64,
-        length: i64,
-    ) -> Result<Bytes, WorkerError> {
-        self.get_permit(14 * 1024 * 1024).await?;
-
-        let timer = LOCALFILE_DISK_DIRECT_READ_OPERATION_DURATION
-            .with_label_values(&[&self.inner.root])
-            .start_timer();
-
-        let future = self.inner.io_handler.direct_read(path, offset, length);
-        let data = timeout(
-            Duration::from_secs(self.inner.io_duration_threshold_sec),
-            future,
-        )
-        .instrument_await(format!("direct_read from disk: {}", &path))
-        .await
-        .with_context(|| format!("Errors on direct reading on disk: {}", &path))??;
-
-        TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER
-            .with_label_values(&[&self.inner.root])
-            .inc_by(data.len() as u64);
-        TOTAL_LOCAL_DISK_READ_OPERATION_COUNTER
-            .with_label_values(&[&self.inner.root])
-            .inc();
-        Ok(data)
     }
 }
 

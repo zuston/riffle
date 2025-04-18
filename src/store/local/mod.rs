@@ -59,7 +59,7 @@ pub trait LocalIO {
         -> Result<Bytes, WorkerError>;
 }
 
-pub trait LocalDiskStorage: LocalIO {
+pub trait LocalDiskStorage {
     fn is_healthy(&self) -> Result<bool>;
     fn is_corrupted(&self) -> Result<bool>;
 

@@ -13,6 +13,14 @@ pub struct AwaitTreeLayer {
     root: String,
 }
 
+impl AwaitTreeLayer {
+    pub fn new(root: &str) -> Self {
+        Self {
+            root: root.to_string(),
+        }
+    }
+}
+
 impl Layer for AwaitTreeLayer {
     fn wrap(&self, handler: Handler) -> Handler {
         Arc::new(Box::new(AwaitTreeLayerWrapper {

@@ -1,5 +1,11 @@
+use crate::error::WorkerError;
 use crate::runtime::manager::RuntimeManager;
+use crate::store::local::layers::{Handler, Layer};
+use crate::store::local::{FileStat, LocalIO};
+use crate::store::BytesWrapper;
+use async_trait::async_trait;
 use await_tree::InstrumentAwait;
+use bytes::Bytes;
 use std::cmp::min;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
@@ -137,5 +143,111 @@ mod tests {
             let l_c = limiter.clone();
             rt.block_on(async move { l_c.inner.lock().await.tokens }) == 4
         });
+    }
+}
+
+pub struct ThrottleLayer {
+    runtime_manager: RuntimeManager,
+    capacity: usize,
+    fill_rate: usize,
+    refill_interval: Duration,
+}
+
+impl ThrottleLayer {
+    pub fn new(
+        runtime_manager: &RuntimeManager,
+        capacity: usize,
+        fill_rate: usize,
+        refill_interval: Duration,
+    ) -> Self {
+        Self {
+            runtime_manager: runtime_manager.clone(),
+            capacity,
+            fill_rate,
+            refill_interval,
+        }
+    }
+}
+
+impl Layer for ThrottleLayer {
+    fn wrap(&self, handler: Handler) -> Handler {
+        Arc::new(Box::new(ThrottleLayerWrapper {
+            limiter: TokenBucketLimiter::new(
+                &self.runtime_manager,
+                self.capacity,
+                self.fill_rate,
+                self.refill_interval,
+            ),
+            handler,
+        }))
+    }
+}
+
+struct ThrottleLayerWrapper {
+    limiter: TokenBucketLimiter,
+    handler: Handler,
+}
+
+unsafe impl Send for ThrottleLayerWrapper {}
+unsafe impl Sync for ThrottleLayerWrapper {}
+
+#[async_trait]
+impl LocalIO for ThrottleLayerWrapper {
+    async fn create_dir(&self, dir: &str) -> anyhow::Result<(), WorkerError> {
+        self.handler.create_dir(dir).await
+    }
+
+    async fn append(&self, path: &str, data: BytesWrapper) -> anyhow::Result<(), WorkerError> {
+        self.handler.append(path, data).await
+    }
+
+    async fn read(
+        &self,
+        path: &str,
+        offset: i64,
+        length: Option<i64>,
+    ) -> anyhow::Result<Bytes, WorkerError> {
+        self.handler.read(path, offset, length).await
+    }
+
+    async fn delete(&self, path: &str) -> anyhow::Result<(), WorkerError> {
+        self.handler.delete(path).await
+    }
+
+    async fn write(&self, path: &str, data: Bytes) -> anyhow::Result<(), WorkerError> {
+        self.handler.write(path, data).await
+    }
+
+    async fn file_stat(&self, path: &str) -> anyhow::Result<FileStat, WorkerError> {
+        self.handler.file_stat(path).await
+    }
+
+    async fn direct_append(
+        &self,
+        path: &str,
+        written_bytes: usize,
+        data: BytesWrapper,
+    ) -> anyhow::Result<(), WorkerError> {
+        self.limiter
+            .acquire(written_bytes)
+            .instrument_await(format!("Getting IO limiter permits: {}", written_bytes))
+            .await;
+
+        self.handler.direct_append(path, written_bytes, data).await
+    }
+
+    async fn direct_read(
+        &self,
+        path: &str,
+        offset: i64,
+        length: i64,
+    ) -> anyhow::Result<Bytes, WorkerError> {
+        let len = 14 * 1024 * 1024;
+        self.limiter
+            .acquire(len as usize)
+            .instrument_await(format!("Getting IO limiter permits: {}", len))
+            .await;
+
+        self.handler.direct_read(path, offset, length).await
     }
 }

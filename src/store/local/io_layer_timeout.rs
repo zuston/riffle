@@ -14,6 +14,12 @@ pub struct TimeoutLayer {
     threshold_seconds: usize,
 }
 
+impl TimeoutLayer {
+    pub fn new(threshold_seconds: usize) -> TimeoutLayer {
+        Self { threshold_seconds }
+    }
+}
+
 impl Layer for TimeoutLayer {
     fn wrap(&self, handler: Handler) -> Handler {
         let layer = TimeoutLayerWrapper {
