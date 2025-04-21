@@ -33,7 +33,8 @@ impl Deref for SessionContextExtend {
 pub struct TableInstance {
     pub ip: String,
     pub grpc_port: u16,
-    pub netty_port: i32,
+    pub urpc_port: i32,
+    pub http_port: i32,
 
     pub total_memory: String,
     pub used_memory: String,
@@ -47,7 +48,8 @@ impl From<&ServerInfo> for TableInstance {
         Self {
             ip: info.ip.to_string(),
             grpc_port: info.grpc_port,
-            netty_port: info.netty_port,
+            urpc_port: info.netty_port,
+            http_port: info.jetty_port as i32,
             total_memory: HumanBytes(info.total_memory as u64).to_string(),
             used_memory: HumanBytes(info.used_memory as u64).to_string(),
             event_num_in_flush: info.event_num_in_flush,

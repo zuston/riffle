@@ -8,8 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use strum_macros::Display;
 
-const HTTP_API_PORT: usize = 20010;
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ActiveAppInfo {
     pub app_id: String,
@@ -108,6 +106,14 @@ pub struct ServerInfo {
     pub tags: Vec<String>,
 
     pub status: ServerStatus,
+
+    #[serde(rename = "jettyPort")]
+    #[serde(default = "default_jetty_port")]
+    pub jetty_port: usize,
+}
+
+fn default_jetty_port() -> usize {
+    0
 }
 
 fn raw_tags<S>(values: &Vec<String>, serializer: S) -> Result<S::Ok, S::Error>
@@ -159,15 +165,15 @@ impl Discovery {
         let server_infos = self.list_nodes().await?;
         let ips = server_infos
             .into_iter()
-            .map(|x| x.ip.to_string())
+            .map(|x| (x.ip.to_string(), x.jetty_port))
             .collect::<Vec<_>>();
 
         let mut future_list = vec![];
-        for ip in ips.iter() {
+        for (ip, http_port) in ips.into_iter() {
             let ip = ip.to_string();
             let prefix = url_prefix.to_string();
             let future = async move {
-                let url = format!("http://{}:{}{}", &ip, HTTP_API_PORT, prefix);
+                let url = format!("http://{}:{}{}", &ip, http_port, prefix);
                 let response = reqwest::get(&url).await?;
                 let apps = response.json::<Vec<T>>().await?;
                 Result::<_, reqwest::Error>::Ok(apps)
@@ -189,7 +195,7 @@ impl Discovery {
 #[cfg(test)]
 pub mod tests {
     use crate::actions::discovery::{
-        ActiveAppInfo, Discovery, NodesBody, ServerInfo, ServerStatus, HTTP_API_PORT,
+        ActiveAppInfo, Discovery, NodesBody, ServerInfo, ServerStatus,
     };
     use crate::http::Handler;
     use crate::mem_allocator::dump_heap_flamegraph;
@@ -229,7 +235,8 @@ pub mod tests {
 
             },
             "nettyPort": -1,
-            "totalMemory": 21474020261
+            "totalMemory": 21474020261,
+            "jettyPort": 1000
         }
     ]
 }
