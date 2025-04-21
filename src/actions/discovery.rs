@@ -107,6 +107,7 @@ pub struct ServerInfo {
 
     pub status: ServerStatus,
 
+    #[serde(rename = "jettyPort")]
     pub jetty_port: usize,
 }
 
@@ -229,7 +230,8 @@ pub mod tests {
 
             },
             "nettyPort": -1,
-            "totalMemory": 21474020261
+            "totalMemory": 21474020261,
+            "jettyPort": 1000
         }
     ]
 }
