@@ -513,6 +513,37 @@ message FetchRemoteStorageResponse {
 service ShuffleServerInternal {
   rpc decommission(DecommissionRequest) returns (DecommissionResponse);
   rpc cancelDecommission(CancelDecommissionRequest) returns (CancelDecommissionResponse);
+  rpc getServerInfo(GetServerInfoRequest) returns (GetServerInfoResponse);
+}
+
+message GetServerInfoRequest {
+}
+
+message GetServerInfoResponse {
+  int32 grpcPort = 1;
+  int32 urpcPort = 2;
+  int32 httpPort = 3;
+
+  repeated ActiveAppInfo activeApps = 4;
+  repeated HistoricalAppInfo historicalApps = 5;
+}
+
+message HistoricalAppInfo {
+  string appId = 1;
+  int64 partitionNum = 2;
+  int64 hugePartitionNum = 3;
+  int64 avgHugePartitionBytes = 4;
+  int64 maxHugePartitionBytes = 5;
+  int64 minHugePartitionBytes = 6;
+  int64 recordTimestamp = 7;
+}
+
+message ActiveAppInfo {
+  string appId = 1;
+  int64 residentBytes = 4;
+  int32 partitionNumber = 5;
+  int64 hugePartitionNumber = 6;
+  int64 reportedBlockIdNumber = 7;
 }
 
 message DecommissionRequest {

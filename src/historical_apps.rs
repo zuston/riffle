@@ -21,7 +21,7 @@ pub struct HistoricalAppStatistics {
 
 #[derive(Serialize)]
 pub struct HistoricalAppInfo {
-    app_id: String,
+    pub app_id: String,
     pub partition_num: usize,
     pub huge_partition_num: usize,
 

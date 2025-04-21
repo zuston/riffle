@@ -16,22 +16,23 @@
 // under the License.
 
 use crate::app::{
-    AppConfigOptions, AppManagerRef, DataDistribution, GetBlocksContext, GetMultiBlockIdsContext,
-    PartitionedUId, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
-    RemoteStorageConfig, ReportBlocksContext, ReportMultiBlockIdsContext, RequireBufferContext,
-    WritingViewContext,
+    App, AppConfigOptions, AppManagerRef, DataDistribution, GetBlocksContext,
+    GetMultiBlockIdsContext, PartitionedUId, ReadingIndexViewContext, ReadingOptions,
+    ReadingViewContext, RemoteStorageConfig, ReportBlocksContext, ReportMultiBlockIdsContext,
+    RequireBufferContext, WritingViewContext,
 };
 use crate::constant::StatusCode;
 use crate::error::WorkerError;
 use crate::grpc::protobuf::uniffle::shuffle_server_internal_server::ShuffleServerInternal;
 use crate::grpc::protobuf::uniffle::shuffle_server_server::ShuffleServer;
 use crate::grpc::protobuf::uniffle::{
-    AppHeartBeatRequest, AppHeartBeatResponse, CancelDecommissionRequest,
+    ActiveAppInfo, AppHeartBeatRequest, AppHeartBeatResponse, CancelDecommissionRequest,
     CancelDecommissionResponse, DecommissionRequest, DecommissionResponse, FinishShuffleRequest,
     FinishShuffleResponse, GetLocalShuffleDataRequest, GetLocalShuffleDataResponse,
     GetLocalShuffleIndexRequest, GetLocalShuffleIndexResponse, GetMemoryShuffleDataRequest,
-    GetMemoryShuffleDataResponse, GetShuffleResultForMultiPartRequest,
-    GetShuffleResultForMultiPartResponse, GetShuffleResultRequest, GetShuffleResultResponse,
+    GetMemoryShuffleDataResponse, GetServerInfoRequest, GetServerInfoResponse,
+    GetShuffleResultForMultiPartRequest, GetShuffleResultForMultiPartResponse,
+    GetShuffleResultRequest, GetShuffleResultResponse, HistoricalAppInfo,
     ReportShuffleResultRequest, ReportShuffleResultResponse, RequireBufferRequest,
     RequireBufferResponse, SendShuffleDataRequest, SendShuffleDataResponse, ShuffleCommitRequest,
     ShuffleCommitResponse, ShuffleRegisterRequest, ShuffleRegisterResponse,
@@ -57,6 +58,7 @@ use fastrace::future::FutureExt;
 use fastrace::trace;
 use log::{debug, error, info, warn};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::time::Instant;
 use tonic::{Request, Response, Status};
 
@@ -88,6 +90,33 @@ impl DefaultShuffleServer {
     }
 }
 
+impl From<&Arc<App>> for ActiveAppInfo {
+    fn from(app: &Arc<App>) -> ActiveAppInfo {
+        let app_id = app.app_id.to_string();
+        ActiveAppInfo {
+            app_id,
+            resident_bytes: app.total_resident_data_size() as i64,
+            partition_number: app.partition_number() as i32,
+            huge_partition_number: app.huge_partition_number() as i64,
+            reported_block_id_number: app.reported_block_id_number() as i64,
+        }
+    }
+}
+
+impl From<&crate::historical_apps::HistoricalAppInfo> for HistoricalAppInfo {
+    fn from(app: &crate::historical_apps::HistoricalAppInfo) -> Self {
+        Self {
+            app_id: app.app_id.to_string(),
+            partition_num: app.partition_num as i64,
+            huge_partition_num: app.huge_partition_num as i64,
+            avg_huge_partition_bytes: app.avg_huge_partition_bytes as i64,
+            max_huge_partition_bytes: app.max_huge_partition_bytes as i64,
+            min_huge_partition_bytes: app.min_huge_partition_bytes as i64,
+            record_timestamp: app.record_timestamp as i64,
+        }
+    }
+}
+
 #[tonic::async_trait]
 impl ShuffleServerInternal for DefaultShuffleServer {
     async fn decommission(
@@ -112,6 +141,39 @@ impl ShuffleServerInternal for DefaultShuffleServer {
             status: StatusCode::SUCCESS.into(),
             ret_msg: "".to_string(),
         }))
+    }
+
+    async fn get_server_info(
+        &self,
+        request: Request<GetServerInfoRequest>,
+    ) -> Result<Response<GetServerInfoResponse>, Status> {
+        let raw_apps = &self.app_manager_ref.apps;
+        let active_apps = raw_apps
+            .iter()
+            .map(|entry| ActiveAppInfo::from(entry.value()))
+            .collect::<Vec<ActiveAppInfo>>();
+
+        let mut historical_apps = vec![];
+        if let Some(historical_manager) = self.app_manager_ref.get_historical_statistics() {
+            historical_apps = historical_manager
+                .dump()
+                .iter()
+                .map(|entry| HistoricalAppInfo::from(entry))
+                .collect::<Vec<HistoricalAppInfo>>();
+        }
+
+        let grpc_port = self.app_manager_ref.config.grpc_port as i32;
+        let urpc_port = self.app_manager_ref.config.urpc_port.unwrap_or(0) as i32;
+        let http_port = self.app_manager_ref.config.http_port as i32;
+        let response = GetServerInfoResponse {
+            grpc_port,
+            urpc_port,
+            http_port,
+            active_apps,
+            historical_apps,
+        };
+
+        Ok(Response::new(response))
     }
 }
 

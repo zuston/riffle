@@ -813,7 +813,7 @@ pub struct AppManager {
     sender: async_channel::Sender<PurgeEvent>,
     store: Arc<HybridStore>,
     app_heartbeat_timeout_min: u32,
-    config: Config,
+    pub(crate) config: Config,
     runtime_manager: RuntimeManager,
     historical_app_statistics: Option<HistoricalAppStatistics>,
     reconf_manager: ReconfigurableConfManager,
