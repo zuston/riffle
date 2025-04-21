@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use futures::future::try_join_all;
 use libc::iovec;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::str::FromStr;
 use strum_macros::Display;
 
@@ -108,7 +108,12 @@ pub struct ServerInfo {
     pub status: ServerStatus,
 
     #[serde(rename = "jettyPort")]
+    #[serde(default = "default_jetty_port")]
     pub jetty_port: usize,
+}
+
+fn default_jetty_port() -> usize {
+    0
 }
 
 fn raw_tags<S>(values: &Vec<String>, serializer: S) -> Result<S::Ok, S::Error>
