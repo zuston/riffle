@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use futures::future::try_join_all;
 use libc::iovec;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use strum_macros::Display;
 
