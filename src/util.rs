@@ -17,6 +17,7 @@
 
 use bytes::Bytes;
 use crc32fast::Hasher;
+use std::env;
 
 use crate::config::Config;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
@@ -101,6 +102,12 @@ pub fn find_available_port() -> Option<u16> {
 
 pub fn parse_raw_to_bytesize(s: &str) -> u64 {
     s.parse::<ByteSize>().unwrap().0
+}
+
+pub fn inject_into_env(kvs: Vec<(String, String)>) {
+    for (k, v) in kvs {
+        env::set_var(k, v);
+    }
 }
 
 #[cfg(test)]
