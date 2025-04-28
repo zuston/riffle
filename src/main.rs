@@ -41,6 +41,7 @@ use crate::runtime::manager::RuntimeManager;
 use crate::server_state_manager::{ServerStateManager, SERVER_STATE_MANAGER_REF};
 use crate::storage::StorageService;
 use crate::tracing::FastraceWrapper;
+use crate::util::inject_into_env;
 use anyhow::Result;
 use clap::builder::Str;
 use clap::{Arg, Parser};
@@ -140,6 +141,9 @@ fn main() -> Result<()> {
         check_and_update_ports(&mut config);
     }
 
+    // inject ports into process env
+    inject_ports_into_env(&config);
+
     let runtime_manager = RuntimeManager::from(config.runtime_config.clone());
 
     // init the reconfigurableConfManager
@@ -184,6 +188,13 @@ fn main() -> Result<()> {
     )?;
 
     Ok(())
+}
+
+fn inject_ports_into_env(config: &Config) {
+    inject_into_env(vec![
+        ("GRPC_PORT".to_owned(), config.grpc_port.to_string()),
+        ("HTTP_PORT".to_owned(), config.http_port.to_string()),
+    ]);
 }
 
 fn check_and_update_ports(config: &mut Config) -> Result<()> {
