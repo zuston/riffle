@@ -72,6 +72,7 @@ fn table() -> String {
     for entry in apps.iter() {
         let app_info = AppInfo::from(entry.value());
 
+        #[allow(deprecated)]
         let readable_date = Local
             .timestamp((&app_info.registry_timestamp / 1000) as i64, 0)
             .format("%Y-%m-%d %H:%M:%S")

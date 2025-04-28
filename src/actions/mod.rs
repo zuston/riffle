@@ -157,6 +157,7 @@ struct NodeUpdateInfo {
 
 enum NodeUpdateOperation {
     DECOMMISSION,
+    #[allow(non_camel_case_types)]
     CANCEL_DECOMMISSION,
 }
 

@@ -64,9 +64,9 @@ pub fn get_hdfs_client(
     #[cfg(feature = "hdrs")]
     let client = Box::new(HdrsClient::new(root.to_owned(), configs)?);
 
-    const duration: u64 = 10 * 60;
+    const DURATION: u64 = 10 * 60;
 
-    let client = Box::new(HdfsClientDelegator::new(root, duration, client));
+    let client = Box::new(HdfsClientDelegator::new(root, DURATION, client));
     Ok(client)
 }
 
