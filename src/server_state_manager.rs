@@ -5,6 +5,7 @@ use libc::{send, stat};
 use log::{info, warn};
 use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
+use serde::Deserialize;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
@@ -15,7 +16,7 @@ const INTERVAL: u64 = 60 * 10;
 pub static SERVER_STATE_MANAGER_REF: OnceCell<ServerStateManager> = OnceCell::new();
 
 #[allow(non_camel_case_types)]
-#[derive(Debug, Clone, PartialEq, Display)]
+#[derive(Debug, Clone, PartialEq, Display, Deserialize)]
 pub enum ServerState {
     ACTIVE,
     DECOMMISSIONING,
