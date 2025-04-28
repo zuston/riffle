@@ -148,9 +148,8 @@ version = "0.1.2"
 optional = true
 
 [dependencies.hdfs-native]
-version = "0.7.0"
+version = "0.11.2"
 optional = true
-features = ["kerberos"]
 
 [dependencies.hdrs]
 git = "https://github.com/zuston/hdrs"
