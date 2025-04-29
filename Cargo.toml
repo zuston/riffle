@@ -153,7 +153,7 @@ optional = true
 
 [dependencies.hdrs]
 git = "https://github.com/zuston/hdrs"
-branch = "extended"
+rev = "882ccbbdc4a4c6f850009b7973dc31faf346f87b"
 optional = true
 
 # jemalloc related optional dependencies
