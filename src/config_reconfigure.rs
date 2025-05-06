@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::config_ref::{ConfRef, DynamicConfRef, FixedConfRef};
 use crate::runtime::{Runtime, RuntimeRef};
 use crate::util;
 use anyhow::{anyhow, Result};
@@ -50,6 +51,7 @@ fn flatten_json_value(
 #[derive(Debug, Clone)]
 pub struct ReconfigurableConfManager {
     pub conf_state: Arc<DashMap<String, Value>>,
+    reload_enabled: bool,
 }
 
 pub struct ReloadOptions(String, u64, RuntimeRef);
@@ -67,6 +69,7 @@ impl ReconfigurableConfManager {
         let state = Self::to_internal_state(config);
         let manager = ReconfigurableConfManager {
             conf_state: Arc::new(state?),
+            reload_enabled: reload_options.is_some(),
         };
 
         if reload_options.is_some() {
@@ -91,9 +94,9 @@ impl ReconfigurableConfManager {
         Ok(manager)
     }
 
-    pub fn register<T>(&self, key: &str) -> Result<ConfRef<T>>
+    pub fn register<T>(&self, key: &str) -> Result<Box<dyn ConfRef<T, Output = T>>>
     where
-        T: DeserializeOwned,
+        T: DeserializeOwned + Send + Sync + 'static + Clone,
     {
         if !self.conf_state.contains_key(key) {
             panic!("[ReconfigurableConfManager] No such register-key: {}", key)
@@ -103,15 +106,14 @@ impl ReconfigurableConfManager {
         let val = self.conf_state.get(key).unwrap().clone();
         // fast fail on any parsing failure
         let val: T = serde_json::from_value(val)?;
-        let conf_ref = ConfRef {
-            manager: self.clone(),
-            key: key.to_string(),
-            value: RwLock::new(val),
-            last_update_timestamp: AtomicU64::new(util::now_timestamp_as_sec()),
-            refresh_interval: 1,
-            lock: Default::default(),
+
+        let c_ref: Box<dyn ConfRef<T, Output = T>> = if self.reload_enabled {
+            Box::new(DynamicConfRef::new(&self, key, val, 1))
+        } else {
+            Box::new(FixedConfRef::new(val))
         };
-        Ok(conf_ref)
+
+        Ok(c_ref)
     }
 
     fn reload(&self, path: &str) -> Result<()> {
@@ -145,85 +147,13 @@ impl ReconfigurableConfManager {
     }
 }
 
-#[derive(Clone, Debug, Serialize, PartialEq)]
-pub struct ByteString {
-    val: String,
-    parsed_val: u64,
-}
-
-impl Display for ByteString {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", &self.val)
-    }
-}
-
-impl ByteString {
-    pub fn as_u64(&self) -> u64 {
-        self.parsed_val
-    }
-}
-
-impl<'de> Deserialize<'de> for ByteString {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let raw = String::deserialize(deserializer)?;
-        let val = raw.parse::<ByteSize>().map_err(serde::de::Error::custom)?.0;
-        Ok(ByteString {
-            val: raw,
-            parsed_val: val,
-        })
-    }
-}
-
-impl Into<u64> for ByteString {
-    fn into(self) -> u64 {
-        util::parse_raw_to_bytesize(&self.val)
-    }
-}
-
-pub struct ConfRef<T> {
-    manager: ReconfigurableConfManager,
-    key: String,
-    value: RwLock<T>,
-    last_update_timestamp: AtomicU64,
-    refresh_interval: u64,
-
-    lock: Mutex<()>,
-}
-
-impl<T> ConfRef<T>
-where
-    T: DeserializeOwned + Clone,
-{
-    pub fn get(&self) -> T {
-        if self.lock.try_lock().is_some() {
-            let now_sec = util::now_timestamp_as_sec();
-            let last = self.last_update_timestamp.load(Ordering::Relaxed);
-            if now_sec - last > self.refresh_interval {
-                if let Some(val) = self.manager.conf_state.get(&self.key) {
-                    if let Ok(val) = serde_json::from_value::<T>(val.clone()) {
-                        let mut internal_val = self.value.write();
-                        *internal_val = val;
-                    } else {
-                        // fallback
-                    }
-                }
-                self.last_update_timestamp.store(now_sec, Ordering::Relaxed);
-            }
-        }
-        let val = self.value.read();
-        val.clone()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::config::Config;
     use crate::config_reconfigure::{
-        flatten_json_value, ByteString, ConfRef, ReconfigurableConfManager, ReloadOptions,
+        flatten_json_value, ConfRef, ReconfigurableConfManager, ReloadOptions,
     };
+    use crate::config_ref::{ByteString, DynamicConfRef};
     use crate::runtime::{Builder, Runtime};
     use anyhow::Result;
     use clap::builder::Str;
@@ -246,7 +176,7 @@ mod tests {
     fn test_conf_ref() -> Result<()> {
         let config = Config::create_simple_config();
         let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
-        let conf_ref = ConfRef {
+        let conf_ref = DynamicConfRef {
             manager: reconf_manager.clone(),
             key: "grpc_port".to_owned(),
             value: RwLock::new(0),
@@ -257,7 +187,7 @@ mod tests {
         let val = conf_ref.get();
         assert_eq!(19999, val);
 
-        let conf_ref: ConfRef<ByteString> = ConfRef {
+        let conf_ref: DynamicConfRef<ByteString> = DynamicConfRef {
             manager: reconf_manager,
             key: "memory_store.capacity".to_owned(),
             value: RwLock::new(ByteString {
@@ -368,13 +298,14 @@ mod tests {
             Some((target_conf_file.as_str(), 1, &runtime).into()),
         )?;
 
-        let reconf_ref_1: ConfRef<ByteString> = reconf_manager.register("memory_store.capacity")?;
+        let reconf_ref_1: Box<dyn ConfRef<ByteString, Output = ByteString>> =
+            reconf_manager.register("memory_store.capacity")?;
         assert_eq!(
             1024000000,
             <ByteString as Into<u64>>::into(reconf_ref_1.get())
         );
 
-        let reconf_ref_2: ConfRef<u32> =
+        let reconf_ref_2: Box<dyn ConfRef<u32, Output = u32>> =
             reconf_manager.register("hybrid_store.memory_spill_to_localfile_concurrency")?;
         assert_eq!(100, reconf_ref_2.get());
 
@@ -428,11 +359,12 @@ mod tests {
             Some((target_conf_file.as_str(), 1, &runtime).into()),
         )?;
 
-        let reconf_ref_1: ConfRef<f64> =
+        let reconf_ref_1: Box<dyn ConfRef<f64, Output = f64>> =
             reconf_manager.register("hybrid_store.memory_spill_high_watermark")?;
         assert_eq!(0.8, reconf_ref_1.get());
 
-        let reconf_ref_2: ConfRef<ByteString> = reconf_manager.register("memory_store.capacity")?;
+        let reconf_ref_2: Box<dyn ConfRef<ByteString, Output = ByteString>> =
+            reconf_manager.register("memory_store.capacity")?;
         assert_eq!(1024000000, reconf_ref_2.get().as_u64());
 
         // refresh to 0.2
