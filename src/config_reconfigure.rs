@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::config_ref::{ConfRef, DynamicConfRef, FixedConfRef};
+use crate::config_ref::{ConfRef, ConfigOption, DynamicConfRef, FixedConfRef};
 use crate::runtime::{Runtime, RuntimeRef};
 use crate::util;
 use anyhow::{anyhow, Result};
@@ -94,7 +94,7 @@ impl ReconfigurableConfManager {
         Ok(manager)
     }
 
-    pub fn register<T>(&self, key: &str) -> Result<Box<dyn ConfRef<T, Output = T>>>
+    pub fn register<T>(&self, key: &str) -> Result<ConfigOption<T>>
     where
         T: DeserializeOwned + Send + Sync + 'static + Clone,
     {
@@ -107,7 +107,7 @@ impl ReconfigurableConfManager {
         // fast fail on any parsing failure
         let val: T = serde_json::from_value(val)?;
 
-        let c_ref: Box<dyn ConfRef<T, Output = T>> = if self.reload_enabled {
+        let c_ref: ConfigOption<T> = if self.reload_enabled {
             Box::new(DynamicConfRef::new(&self, key, val, 1))
         } else {
             Box::new(FixedConfRef::new(val))
@@ -153,7 +153,7 @@ mod tests {
     use crate::config_reconfigure::{
         flatten_json_value, ConfRef, ReconfigurableConfManager, ReloadOptions,
     };
-    use crate::config_ref::{ByteString, DynamicConfRef};
+    use crate::config_ref::{ByteString, ConfigOption, DynamicConfRef};
     use crate::runtime::{Builder, Runtime};
     use anyhow::Result;
     use clap::builder::Str;
@@ -298,14 +298,14 @@ mod tests {
             Some((target_conf_file.as_str(), 1, &runtime).into()),
         )?;
 
-        let reconf_ref_1: Box<dyn ConfRef<ByteString, Output = ByteString>> =
+        let reconf_ref_1: ConfigOption<ByteString> =
             reconf_manager.register("memory_store.capacity")?;
         assert_eq!(
             1024000000,
             <ByteString as Into<u64>>::into(reconf_ref_1.get())
         );
 
-        let reconf_ref_2: Box<dyn ConfRef<u32, Output = u32>> =
+        let reconf_ref_2: ConfigOption<u32> =
             reconf_manager.register("hybrid_store.memory_spill_to_localfile_concurrency")?;
         assert_eq!(100, reconf_ref_2.get());
 

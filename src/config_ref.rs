@@ -7,6 +7,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt::{Display, Formatter};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+pub type ConfigOption<T> = Box<dyn ConfRef<T, Output = T>>;
+
 /// The config_ref is to wrap the dynamic value retrieved by the specified key
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
