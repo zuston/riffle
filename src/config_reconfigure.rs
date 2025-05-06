@@ -49,7 +49,7 @@ fn flatten_json_value(
 
 #[derive(Debug, Clone)]
 pub struct ReconfigurableConfManager {
-    conf_state: Arc<DashMap<String, Value>>,
+    pub conf_state: Arc<DashMap<String, Value>>,
 }
 
 pub struct ReloadOptions(String, u64, RuntimeRef);

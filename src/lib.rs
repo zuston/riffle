@@ -61,6 +61,7 @@ pub mod panic_hook;
 pub mod server_state_manager;
 
 pub mod actions;
+pub mod config_ref;
 
 use crate::app::{AppManager, AppManagerRef};
 use crate::common::init_global_variable;
