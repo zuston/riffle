@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::config_ref::{ConfRef, ConfigOption, DynamicConfRef, FixedConfRef};
+use crate::config_ref::{ConfRef, ConfigOption, DynamicConfRef, StaticConfRef};
 use crate::runtime::{Runtime, RuntimeRef};
 use crate::util;
 use anyhow::{anyhow, Result};
@@ -110,7 +110,7 @@ impl ReconfigurableConfManager {
         let c_ref: ConfigOption<T> = if self.reload_enabled {
             Box::new(DynamicConfRef::new(&self, key, val, 1))
         } else {
-            Box::new(FixedConfRef::new(val))
+            Box::new(StaticConfRef::new(val))
         };
 
         Ok(c_ref)

@@ -117,17 +117,17 @@ where
 
 // =======================================================
 
-pub struct FixedConfRef<T> {
+pub struct StaticConfRef<T> {
     val: T,
 }
 
-impl<T> FixedConfRef<T> {
+impl<T> StaticConfRef<T> {
     pub fn new(val: T) -> Self {
         Self { val }
     }
 }
 
-impl<T> ConfRef<T> for FixedConfRef<T>
+impl<T> ConfRef<T> for StaticConfRef<T>
 where
     T: DeserializeOwned + Clone + Send + Sync + 'static,
 {
@@ -140,12 +140,12 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::config_ref::{ConfRef, FixedConfRef};
+    use crate::config_ref::{ConfRef, StaticConfRef};
 
     #[test]
     fn test_fixed_conf_ref() -> anyhow::Result<()> {
         let const_val = 42;
-        let conf_ref = FixedConfRef::new(const_val);
+        let conf_ref = StaticConfRef::new(const_val);
         assert_eq!(conf_ref.get(), const_val);
         Ok(())
     }
