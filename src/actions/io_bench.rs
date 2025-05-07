@@ -73,14 +73,12 @@ impl Action for IoBenchAction {
         let batch_number = self.batch_number;
         let write_size = self.write_size as usize;
 
-        // 计算总数据量
         let total_bytes = (self.concurrency * batch_number * write_size) as u64;
         println!(
             "Total data to write: {}",
             bytesize::to_string(total_bytes, true)
         );
 
-        // 创建总进度条
         let progress = ProgressBar::new((self.concurrency * batch_number) as u64);
         progress.set_style(
             ProgressStyle::default_bar()
@@ -91,8 +89,8 @@ impl Action for IoBenchAction {
         progress.set_message("Writing files...");
         let progress = Arc::new(progress);
 
-        // 记录开始时间
         let start_time = std::time::Instant::now();
+        let written_bytes = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
         let mut handles = Vec::with_capacity(self.concurrency);
         for i in 0..self.concurrency {
@@ -100,22 +98,35 @@ impl Action for IoBenchAction {
             let data = test_data.clone();
             let io_handler = io_handler.clone();
             let progress = progress.clone();
+            let written_bytes = written_bytes.clone();
 
             let handle = self.w_runtime.spawn(async move {
-                let mut written_bytes = 0;
+                let mut file_written_bytes = 0;
                 for batch in 0..batch_number {
                     let bytes = Bytes::copy_from_slice(&data);
                     match io_handler
                         .direct_append(
                             file_path.as_str(),
-                            written_bytes,
+                            file_written_bytes,
                             BytesWrapper::Direct(bytes),
                         )
                         .await
                     {
                         Ok(_) => {
-                            written_bytes += write_size;
+                            file_written_bytes += write_size;
+                            written_bytes
+                                .fetch_add(write_size as u64, std::sync::atomic::Ordering::Relaxed);
                             progress.inc(1);
+
+                            let elapsed = start_time.elapsed().as_secs_f64();
+                            let current_written =
+                                written_bytes.load(std::sync::atomic::Ordering::Relaxed);
+                            let current_speed = current_written as f64 / elapsed;
+
+                            progress.set_message(format!(
+                                "Writing files... Speed: {}/s",
+                                bytesize::to_string(current_speed as u64, true)
+                            ));
                         }
                         Err(e) => eprintln!(
                             "Error writing file {} batch {}: {:?}",
