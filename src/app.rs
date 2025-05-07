@@ -47,7 +47,8 @@ use std::str::FromStr;
 
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::block_id_manager::{get_block_id_manager, BlockIdManager};
-use crate::config_reconfigure::{ByteString, ConfRef, ReconfigurableConfManager};
+use crate::config_reconfigure::ReconfigurableConfManager;
+use crate::config_ref::{ByteString, ConfRef, ConfigOption};
 use crate::constant::ALL_LABEL;
 use crate::grpc::protobuf::uniffle::{BlockIdLayout, RemoteStorage};
 use crate::historical_apps::HistoricalAppStatistics;
@@ -148,8 +149,8 @@ pub struct App {
 
     // partition limitation
     partition_limit_enable: bool,
-    partition_limit_threshold: ConfRef<ByteString>,
-    partition_limit_mem_backpressure_ratio: ConfRef<f64>,
+    partition_limit_threshold: ConfigOption<ByteString>,
+    partition_limit_mem_backpressure_ratio: ConfigOption<f64>,
 
     total_received_data_size: AtomicU64,
     total_resident_data_size: AtomicU64,
@@ -167,7 +168,7 @@ pub struct App {
 
     // partition split
     partition_split_enable: bool,
-    partition_split_threshold: ConfRef<ByteString>,
+    partition_split_threshold: ConfigOption<ByteString>,
 
     // reconfiguration manager
     reconf_manager: ReconfigurableConfManager,
@@ -261,15 +262,15 @@ impl App {
             util::parse_raw_to_bytesize(&config.memory_store.as_ref().unwrap().capacity);
 
         let partition_limit_enable = config.app_config.partition_limit_enable;
-        let partition_limit_threshold: ConfRef<ByteString> = reconf_manager
+        let partition_limit_threshold: ConfigOption<ByteString> = reconf_manager
             .register("app_config.partition_limit_threshold")
             .unwrap();
-        let partition_limit_mem_backpressure_ratio: ConfRef<f64> = reconf_manager
+        let partition_limit_mem_backpressure_ratio = reconf_manager
             .register("app_config.partition_limit_memory_backpressure_ratio")
             .unwrap();
 
         let partition_split_enable = config.app_config.partition_split_enable;
-        let partition_split_threshold: ConfRef<ByteString> = reconf_manager
+        let partition_split_threshold: ConfigOption<ByteString> = reconf_manager
             .register("app_config.partition_split_threshold")
             .unwrap();
 
