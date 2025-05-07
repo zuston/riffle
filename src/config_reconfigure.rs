@@ -187,10 +187,7 @@ mod tests {
         let conf_ref = DynamicConfRef {
             manager: reconf_manager.clone(),
             key: "grpc_port".to_owned(),
-            value: RwLock::new(0),
-            last_update_timestamp: AtomicU64::new(0),
-            refresh_interval: 1,
-            lock: Default::default(),
+            value: RwLock::new(19999),
         };
         let val = conf_ref.get();
         assert_eq!(19999, val);
@@ -199,12 +196,9 @@ mod tests {
             manager: reconf_manager,
             key: "memory_store.capacity".to_owned(),
             value: RwLock::new(ByteString {
-                val: "2M".to_string(),
-                parsed_val: 2 * 1000 * 1000,
+                val: "1M".to_string(),
+                parsed_val: 1 * 1000 * 1000,
             }),
-            last_update_timestamp: AtomicU64::new(0),
-            refresh_interval: 1,
-            lock: Default::default(),
         };
         let val = conf_ref.get();
         assert_eq!("1M", val.val);

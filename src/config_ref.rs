@@ -56,6 +56,8 @@ impl Into<u64> for ByteString {
 
 // =======================================================
 
+// Using a trait object for type erasure to make trait impls could be stored
+// into a container
 pub trait DynConfigOption: Send + Sync {
     fn update(&self, value: &Value);
     fn as_any(&self) -> &dyn std::any::Any;
@@ -85,9 +87,6 @@ pub struct DynamicConfRef<T> {
     pub manager: ReconfigurableConfManager,
     pub key: String,
     pub value: RwLock<T>,
-    pub last_update_timestamp: AtomicU64,
-    pub refresh_interval: u64,
-    pub lock: Mutex<()>,
 }
 
 impl<T> DynamicConfRef<T>
@@ -104,9 +103,6 @@ where
             manager: manager.clone(),
             key: key.to_string(),
             value: RwLock::new(initial_value),
-            last_update_timestamp: AtomicU64::new(util::now_timestamp_as_sec()),
-            refresh_interval,
-            lock: Default::default(),
         }
     }
 }
@@ -118,19 +114,6 @@ where
     type Output = T;
 
     fn get(&self) -> T {
-        if self.lock.try_lock().is_some() {
-            let now_sec = util::now_timestamp_as_sec();
-            let last = self.last_update_timestamp.load(Ordering::Relaxed);
-            if now_sec - last > self.refresh_interval {
-                if let Some(val) = self.manager.conf_state.get(&self.key) {
-                    if let Ok(val) = serde_json::from_value::<T>(val.clone()) {
-                        let mut internal_val = self.value.write();
-                        *internal_val = val;
-                    }
-                }
-                self.last_update_timestamp.store(now_sec, Ordering::Relaxed);
-            }
-        }
         let val = self.value.read();
         val.clone()
     }
