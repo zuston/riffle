@@ -55,8 +55,8 @@ impl DiskProfiler {
             max_concurrency,
             test_duration: Duration::from_secs(test_duration_secs),
             runtime,
-            samples_per_test: 3,        // 每个配置测试3次取平均值
-            throughput_threshold: 0.95, // 当性能下降到最佳值的95%时停止测试
+            samples_per_test: 3,
+            throughput_threshold: 0.95,
         }
     }
 
@@ -68,7 +68,6 @@ impl DiskProfiler {
     ) -> f64 {
         let mut total_throughput = 0.0;
 
-        // 运行多次测试取平均值
         for _ in 0..self.samples_per_test {
             let test_data = vec![0u8; block_size];
             let total_bytes = Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -125,7 +124,6 @@ impl DiskProfiler {
         let mut best_throughput = 0.0;
         let mut best_concurrency = self.min_concurrency;
 
-        // 使用二分查找来快速定位最佳并行度
         let mut left = self.min_concurrency;
         let mut right = self.max_concurrency;
 
@@ -148,7 +146,6 @@ impl DiskProfiler {
                 best_concurrency = mid;
             }
 
-            // 如果性能开始下降，停止增加并行度
             if mid > self.min_concurrency {
                 let prev_throughput = results
                     .iter()
@@ -161,7 +158,6 @@ impl DiskProfiler {
                 }
             }
 
-            // 如果当前并行度的性能比之前的好，继续增加
             if mid > self.min_concurrency {
                 let prev_throughput = results
                     .iter()
@@ -192,9 +188,9 @@ impl DiskProfiler {
             SyncLocalIO::new(&self.runtime, &self.runtime, self.dir.as_str(), None, None);
         let io_handler = Arc::new(io_handler);
 
-        let progress = ProgressBar::new(
-            ((self.max_block_size - self.min_block_size) / self.min_block_size + 1) as u64,
-        );
+        let total_block_sizes =
+            ((self.max_block_size - self.min_block_size) / self.min_block_size + 1) as u64;
+        let progress = ProgressBar::new(total_block_sizes);
         progress.set_style(
             ProgressStyle::default_bar()
                 .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg}")
@@ -211,16 +207,38 @@ impl DiskProfiler {
         };
 
         let mut block_size = self.min_block_size;
+        let mut current_block_size_index = 0;
         while block_size <= self.max_block_size {
+            current_block_size_index += 1;
+            println!(
+                "\nTesting block size {} ({}/{})",
+                bytesize::to_string(block_size as u64, true),
+                current_block_size_index,
+                total_block_sizes
+            );
+
             let block_result = self
                 .find_best_concurrency(block_size, io_handler.clone(), &progress)
                 .await;
             detailed_results.push(block_result.clone());
 
+            println!(
+                "  Best concurrency for {}: {} (throughput: {}/s)",
+                bytesize::to_string(block_size as u64, true),
+                block_result.best_concurrency,
+                bytesize::to_string(block_result.best_throughput as u64, true)
+            );
+
             if block_result.best_throughput > best_result.best_throughput {
                 best_result.best_block_size = block_size;
                 best_result.best_concurrency = block_result.best_concurrency;
                 best_result.best_throughput = block_result.best_throughput;
+                println!(
+                    "  New best configuration found! Block size: {}, Concurrency: {}, Throughput: {}/s",
+                    bytesize::to_string(block_size as u64, true),
+                    block_result.best_concurrency,
+                    bytesize::to_string(block_result.best_throughput as u64, true)
+                );
             }
 
             progress.inc(1);
@@ -230,7 +248,6 @@ impl DiskProfiler {
         best_result.detailed_results = detailed_results;
         progress.finish_with_message("Profiling completed");
 
-        // 打印详细结果
         println!("\nDetailed profiling results:");
         for result in &best_result.detailed_results {
             println!(
@@ -259,7 +276,40 @@ impl DiskProfiler {
 #[async_trait::async_trait]
 impl Action for DiskProfiler {
     async fn act(&self) -> anyhow::Result<()> {
+        println!("Starting disk performance profiling...");
+        println!("Configuration:");
+        println!("  Directory: {}", self.dir);
+        println!(
+            "  Block size range: {} to {}",
+            bytesize::to_string(self.min_block_size as u64, true),
+            bytesize::to_string(self.max_block_size as u64, true)
+        );
+        println!(
+            "  Concurrency range: {} to {}",
+            self.min_concurrency, self.max_concurrency
+        );
+        println!("  Test duration: {} seconds", self.test_duration.as_secs());
+        println!("  Samples per test: {}", self.samples_per_test);
+        println!(
+            "  Throughput threshold: {:.1}%",
+            self.throughput_threshold * 100.0
+        );
+        println!("\nRunning tests...");
+
         let result = self.profile().await;
+
+        println!("\nProfiling completed!");
+        println!("\nBest configuration found:");
+        println!(
+            "  Block size: {}",
+            bytesize::to_string(result.best_block_size as u64, true)
+        );
+        println!("  Concurrency: {}", result.best_concurrency);
+        println!(
+            "  Throughput: {}/s",
+            bytesize::to_string(result.best_throughput as u64, true)
+        );
+
         Ok(())
     }
 }
