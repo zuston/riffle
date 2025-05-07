@@ -1,5 +1,7 @@
 use crate::config::Config;
-use crate::config_ref::{ConfRef, ConfigOption, DynamicConfRef, StaticConfRef};
+use crate::config_ref::{
+    ConfRef, ConfigOption, ConfigOptionWrapper, DynamicConfRef, StaticConfRef,
+};
 use crate::runtime::{Runtime, RuntimeRef};
 use crate::util;
 use anyhow::{anyhow, Result};
@@ -12,6 +14,7 @@ use parking_lot::{Mutex, RwLock};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
+use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -48,10 +51,11 @@ fn flatten_json_value(
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ReconfigurableConfManager {
     pub conf_state: Arc<DashMap<String, Value>>,
     reload_enabled: bool,
+    attachments: Arc<DashMap<String, Arc<dyn ConfigOptionWrapper>>>,
 }
 
 pub struct ReloadOptions(String, u64, RuntimeRef);
@@ -70,6 +74,7 @@ impl ReconfigurableConfManager {
         let manager = ReconfigurableConfManager {
             conf_state: Arc::new(state?),
             reload_enabled: reload_options.is_some(),
+            attachments: Arc::new(Default::default()),
         };
 
         if reload_options.is_some() {
@@ -108,11 +113,12 @@ impl ReconfigurableConfManager {
         let val: T = serde_json::from_value(val)?;
 
         let c_ref: ConfigOption<T> = if self.reload_enabled {
-            Box::new(DynamicConfRef::new(&self, key, val, 1))
+            Arc::new(DynamicConfRef::new(key, val))
         } else {
-            Box::new(StaticConfRef::new(val))
+            Arc::new(StaticConfRef::new(val))
         };
-
+        self.attachments
+            .insert(key.to_string(), Arc::new(c_ref.clone()));
         Ok(c_ref)
     }
 
@@ -124,6 +130,10 @@ impl ReconfigurableConfManager {
             if let Some(mut val_ref) = self.conf_state.get_mut(&k) {
                 // Only numeric val could be refreshed.
                 if *val_ref != v {
+                    if let Some(option) = self.attachments.get(&k) {
+                        let option = option.value();
+                        option.update(&v);
+                    }
                     warn!("Updated [{}] from {:?} to {:?}", &k, &val_ref, &v);
                     *val_ref = v;
                 }
@@ -177,26 +187,18 @@ mod tests {
         let config = Config::create_simple_config();
         let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
         let conf_ref = DynamicConfRef {
-            manager: reconf_manager.clone(),
             key: "grpc_port".to_owned(),
-            value: RwLock::new(0),
-            last_update_timestamp: AtomicU64::new(0),
-            refresh_interval: 1,
-            lock: Default::default(),
+            value: RwLock::new(19999),
         };
         let val = conf_ref.get();
         assert_eq!(19999, val);
 
         let conf_ref: DynamicConfRef<ByteString> = DynamicConfRef {
-            manager: reconf_manager,
             key: "memory_store.capacity".to_owned(),
             value: RwLock::new(ByteString {
-                val: "2M".to_string(),
-                parsed_val: 2 * 1000 * 1000,
+                val: "1M".to_string(),
+                parsed_val: 1 * 1000 * 1000,
             }),
-            last_update_timestamp: AtomicU64::new(0),
-            refresh_interval: 1,
-            lock: Default::default(),
         };
         let val = conf_ref.get();
         assert_eq!("1M", val.val);
@@ -359,11 +361,11 @@ mod tests {
             Some((target_conf_file.as_str(), 1, &runtime).into()),
         )?;
 
-        let reconf_ref_1: Box<dyn ConfRef<f64, Output = f64>> =
+        let reconf_ref_1: ConfigOption<f64> =
             reconf_manager.register("hybrid_store.memory_spill_high_watermark")?;
         assert_eq!(0.8, reconf_ref_1.get());
 
-        let reconf_ref_2: Box<dyn ConfRef<ByteString, Output = ByteString>> =
+        let reconf_ref_2: ConfigOption<ByteString> =
             reconf_manager.register("memory_store.capacity")?;
         assert_eq!(1024000000, reconf_ref_2.get().as_u64());
 
