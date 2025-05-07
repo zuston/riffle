@@ -5,6 +5,7 @@ use crate::store::local::sync_io::SyncLocalIO;
 use crate::store::BytesWrapper;
 use crate::util;
 use bytes::Bytes;
+use bytesize;
 use clap::builder::Str;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::sync::Arc;
@@ -72,6 +73,13 @@ impl Action for IoBenchAction {
         let batch_number = self.batch_number;
         let write_size = self.write_size as usize;
 
+        // 计算总数据量
+        let total_bytes = (self.concurrency * batch_number * write_size) as u64;
+        println!(
+            "Total data to write: {}",
+            bytesize::to_string(total_bytes, true)
+        );
+
         // 创建总进度条
         let progress = ProgressBar::new((self.concurrency * batch_number) as u64);
         progress.set_style(
@@ -82,6 +90,9 @@ impl Action for IoBenchAction {
         );
         progress.set_message("Writing files...");
         let progress = Arc::new(progress);
+
+        // 记录开始时间
+        let start_time = std::time::Instant::now();
 
         let mut handles = Vec::with_capacity(self.concurrency);
         for i in 0..self.concurrency {
@@ -122,7 +133,18 @@ impl Action for IoBenchAction {
             handle.await?;
         }
 
-        progress.finish_with_message("All files completed");
+        let elapsed = start_time.elapsed();
+        let elapsed_secs = elapsed.as_secs_f64();
+        let write_speed = total_bytes as f64 / elapsed_secs;
+
+        let log = format!(
+            "All files completed. Total: {}, Time: {:.2}s, Speed: {}/s",
+            bytesize::to_string(total_bytes, true),
+            elapsed_secs,
+            bytesize::to_string(write_speed as u64, true)
+        );
+        println!("{}", log);
+
         Ok(())
     }
 }
