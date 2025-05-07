@@ -113,7 +113,7 @@ impl ReconfigurableConfManager {
         let val: T = serde_json::from_value(val)?;
 
         let c_ref: ConfigOption<T> = if self.reload_enabled {
-            Arc::new(DynamicConfRef::new(&self, key, val, 1))
+            Arc::new(DynamicConfRef::new(key, val))
         } else {
             Arc::new(StaticConfRef::new(val))
         };
@@ -187,7 +187,6 @@ mod tests {
         let config = Config::create_simple_config();
         let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
         let conf_ref = DynamicConfRef {
-            manager: reconf_manager.clone(),
             key: "grpc_port".to_owned(),
             value: RwLock::new(19999),
         };
@@ -195,7 +194,6 @@ mod tests {
         assert_eq!(19999, val);
 
         let conf_ref: DynamicConfRef<ByteString> = DynamicConfRef {
-            manager: reconf_manager,
             key: "memory_store.capacity".to_owned(),
             value: RwLock::new(ByteString {
                 val: "1M".to_string(),

@@ -83,8 +83,6 @@ pub trait ConfRef<T: Clone + Send + Sync + 'static>: Send + Sync {
 }
 
 pub struct DynamicConfRef<T> {
-    // todo: remove this public modifier for better safety
-    pub manager: ReconfigurableConfManager,
     pub key: String,
     pub value: RwLock<T>,
 }
@@ -93,16 +91,10 @@ impl<T> DynamicConfRef<T>
 where
     T: DeserializeOwned + Clone,
 {
-    pub fn new(
-        manager: &ReconfigurableConfManager,
-        key: &str,
-        initial_value: T,
-        refresh_interval: u64,
-    ) -> Self {
+    pub fn new(key: &str, val: T) -> Self {
         Self {
-            manager: manager.clone(),
             key: key.to_string(),
-            value: RwLock::new(initial_value),
+            value: RwLock::new(val),
         }
     }
 }
