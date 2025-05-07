@@ -2,6 +2,7 @@
 
 use clap::{Parser, Subcommand};
 use tokio::runtime::Runtime;
+use uniffle_worker::actions::disk_profiler::DiskProfiler;
 use uniffle_worker::actions::io_bench::IoBenchAction;
 use uniffle_worker::actions::{
     Action, NodeUpdateAction, OutputFormat, QueryAction, ValidateAction,
@@ -28,6 +29,24 @@ enum Commands {
         write_size: String,
         #[arg(short, long)]
         disk_throughput: String,
+    },
+
+    #[command(
+        about = "Profile disk performance with different block sizes and concurrency levels"
+    )]
+    Diskprofiler {
+        #[arg(short, long)]
+        dir: String,
+        #[arg(short, long, default_value = "4KB")]
+        min_block_size: String,
+        #[arg(short, long, default_value = "64MB")]
+        max_block_size: String,
+        #[arg(short, long, default_value = "1")]
+        min_concurrency: usize,
+        #[arg(short, long, default_value = "16")]
+        max_concurrency: usize,
+        #[arg(short, long, default_value = "10")]
+        test_duration_secs: u64,
     },
 
     #[command(about = "Validate internal index/data file")]
@@ -73,6 +92,25 @@ fn main() -> anyhow::Result<()> {
             concurrency,
             disk_throughput,
         )),
+
+        Commands::Diskprofiler {
+            dir,
+            min_block_size,
+            max_block_size,
+            min_concurrency,
+            max_concurrency,
+            test_duration_secs,
+        } => {
+            let profiler = DiskProfiler::new(
+                dir,
+                min_block_size,
+                max_block_size,
+                min_concurrency,
+                max_concurrency,
+                test_duration_secs,
+            );
+            Box::new(profiler)
+        }
 
         Commands::Validate {
             index_file_path,

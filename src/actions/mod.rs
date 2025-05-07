@@ -17,6 +17,7 @@ use std::{fs, io, thread};
 use url::Url;
 
 pub mod discovery;
+pub mod disk_profiler;
 pub mod io_bench;
 pub mod query;
 
