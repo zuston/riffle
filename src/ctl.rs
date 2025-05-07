@@ -2,8 +2,8 @@
 
 use clap::{Parser, Subcommand};
 use tokio::runtime::Runtime;
+use uniffle_worker::actions::disk_bench::DiskBenchAction;
 use uniffle_worker::actions::disk_profiler::DiskProfiler;
-use uniffle_worker::actions::io_bench::IoBenchAction;
 use uniffle_worker::actions::{
     Action, NodeUpdateAction, OutputFormat, QueryAction, ValidateAction,
 };
@@ -18,7 +18,7 @@ struct Args {
 #[derive(Subcommand)]
 enum Commands {
     #[command(about = "Using the riffle IO scheduler to test local disk IO")]
-    Iobench {
+    DiskBench {
         #[arg(short, long)]
         dir: String,
         #[arg(short, long)]
@@ -34,7 +34,7 @@ enum Commands {
     #[command(
         about = "Profile disk performance with different block sizes and concurrency levels"
     )]
-    Diskprofiler {
+    DiskProfiler {
         #[arg(short, long)]
         dir: String,
         #[arg(short, long, default_value = "4KB")]
@@ -79,13 +79,13 @@ fn main() -> anyhow::Result<()> {
     let command = args.command;
 
     let action: Box<dyn Action> = match command {
-        Commands::Iobench {
+        Commands::DiskBench {
             dir,
             batch_number,
             concurrency,
             write_size,
             disk_throughput,
-        } => Box::new(IoBenchAction::new(
+        } => Box::new(DiskBenchAction::new(
             dir,
             batch_number,
             write_size,
@@ -93,7 +93,7 @@ fn main() -> anyhow::Result<()> {
             disk_throughput,
         )),
 
-        Commands::Diskprofiler {
+        Commands::DiskProfiler {
             dir,
             min_block_size,
             max_block_size,

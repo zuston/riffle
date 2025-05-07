@@ -11,7 +11,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::sync::Arc;
 use std::time::Duration;
 
-pub struct IoBenchAction {
+pub struct DiskBenchAction {
     dir: String,
     concurrency: usize,
     write_size: u64,
@@ -23,7 +23,7 @@ pub struct IoBenchAction {
     r_runtime: RuntimeRef,
 }
 
-impl IoBenchAction {
+impl DiskBenchAction {
     pub fn new(
         dir: String,
         concurrency: usize,
@@ -46,7 +46,7 @@ impl IoBenchAction {
 }
 
 #[async_trait::async_trait]
-impl Action for IoBenchAction {
+impl Action for DiskBenchAction {
     async fn act(&self) -> anyhow::Result<()> {
         let t_runtime = tokio::runtime::Handle::current();
         let underlying_io_handler = SyncLocalIO::new(
