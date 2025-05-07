@@ -4,10 +4,12 @@ use bytesize::ByteSize;
 use parking_lot::{Mutex, RwLock};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 use std::fmt::{Display, Formatter};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
-pub type ConfigOption<T> = Box<dyn ConfRef<T, Output = T>>;
+pub type ConfigOption<T> = Arc<dyn ConfRef<T, Output = T>>;
 
 /// The config_ref is to wrap the dynamic value retrieved by the specified key
 
@@ -54,9 +56,28 @@ impl Into<u64> for ByteString {
 
 // =======================================================
 
+pub trait DynConfigOption: Send + Sync {
+    fn update(&self, value: &Value);
+    fn as_any(&self) -> &dyn std::any::Any;
+}
+
+impl<T> DynConfigOption for ConfigOption<T>
+where
+    T: DeserializeOwned + Clone + Send + Sync + 'static,
+{
+    fn update(&self, value: &Value) {
+        self.on_change(value);
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
 pub trait ConfRef<T: Clone + Send + Sync + 'static>: Send + Sync {
     type Output;
     fn get(&self) -> Self::Output;
+    fn on_change(&self, value: &Value);
 }
 
 pub struct DynamicConfRef<T> {
@@ -113,6 +134,13 @@ where
         let val = self.value.read();
         val.clone()
     }
+
+    fn on_change(&self, val: &Value) {
+        if let Ok(val) = serde_json::from_value::<T>(val.clone()) {
+            let mut internal_val = self.value.write();
+            *internal_val = val;
+        }
+    }
 }
 
 // =======================================================
@@ -135,6 +163,10 @@ where
 
     fn get(&self) -> Self::Output {
         self.val.clone()
+    }
+
+    fn on_change(&self, value: &Value) {
+        // nothing to do
     }
 }
 
