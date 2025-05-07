@@ -25,6 +25,9 @@ pub struct BlockSizeResult {
     pub concurrency_results: Vec<(usize, f64)>,
 }
 
+const MULTIPLY_RATIO: usize = 4;
+const SAMPLES_PER_TEST: usize = 2;
+
 pub struct DiskProfiler {
     dir: String,
     min_block_size: usize,
@@ -55,7 +58,7 @@ impl DiskProfiler {
             max_concurrency,
             test_duration: Duration::from_secs(test_duration_secs),
             runtime,
-            samples_per_test: 3,
+            samples_per_test: SAMPLES_PER_TEST,
             throughput_threshold: 0.95,
         }
     }
@@ -242,7 +245,7 @@ impl DiskProfiler {
             }
 
             progress.inc(1);
-            block_size *= 2;
+            block_size *= MULTIPLY_RATIO;
         }
 
         best_result.detailed_results = detailed_results;
