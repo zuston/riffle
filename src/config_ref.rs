@@ -58,12 +58,12 @@ impl Into<u64> for ByteString {
 
 // Using a trait object for type erasure to make trait impls could be stored
 // into a container
-pub trait DynConfigOption: Send + Sync {
+pub trait ConfigOptionWrapper: Send + Sync {
     fn update(&self, value: &Value);
     fn as_any(&self) -> &dyn std::any::Any;
 }
 
-impl<T> DynConfigOption for ConfigOption<T>
+impl<T> ConfigOptionWrapper for ConfigOption<T>
 where
     T: DeserializeOwned + Clone + Send + Sync + 'static,
 {

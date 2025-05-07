@@ -1,5 +1,7 @@
 use crate::config::Config;
-use crate::config_ref::{ConfRef, ConfigOption, DynConfigOption, DynamicConfRef, StaticConfRef};
+use crate::config_ref::{
+    ConfRef, ConfigOption, ConfigOptionWrapper, DynamicConfRef, StaticConfRef,
+};
 use crate::runtime::{Runtime, RuntimeRef};
 use crate::util;
 use anyhow::{anyhow, Result};
@@ -53,7 +55,7 @@ fn flatten_json_value(
 pub struct ReconfigurableConfManager {
     pub conf_state: Arc<DashMap<String, Value>>,
     reload_enabled: bool,
-    attachments: Arc<DashMap<String, Arc<dyn DynConfigOption>>>,
+    attachments: Arc<DashMap<String, Arc<dyn ConfigOptionWrapper>>>,
 }
 
 pub struct ReloadOptions(String, u64, RuntimeRef);
