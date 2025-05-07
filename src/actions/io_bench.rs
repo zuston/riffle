@@ -138,7 +138,7 @@ impl Action for IoBenchAction {
         let write_speed = total_bytes as f64 / elapsed_secs;
 
         let log = format!(
-            "All files completed. Total: {}, Time: {:.2}s, Speed: {}/s",
+            "Total: {}, Time: {:.2}s, Speed: {}/s",
             bytesize::to_string(total_bytes, true),
             elapsed_secs,
             bytesize::to_string(write_speed as u64, true)
