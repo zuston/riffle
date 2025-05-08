@@ -165,7 +165,7 @@ fn main() -> Result<()> {
     let health_service =
         HealthService::new(&app_manager_ref, &storage, &config.health_service_config);
 
-    let server_state_manager = ServerStateManager::new(&app_manager_ref);
+    let server_state_manager = ServerStateManager::new(&app_manager_ref, &config);
     let _ = SERVER_STATE_MANAGER_REF.set(server_state_manager.clone());
 
     MetricService::init(&config, runtime_manager.clone());

@@ -107,7 +107,7 @@ pub async fn start_uniffle_worker(config: config::Config) -> Result<AppManagerRe
 
     let app_manager_ref_cloned = app_manager_ref.clone();
     let rm_cloned = runtime_manager.clone();
-    let server_state_manager = ServerStateManager::new(&app_manager_ref);
+    let server_state_manager = ServerStateManager::new(&app_manager_ref, &config);
     runtime_manager.default_runtime.spawn(async move {
         DefaultRpcService {}.start(
             &config,

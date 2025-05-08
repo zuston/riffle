@@ -386,6 +386,13 @@ pub struct Config {
 
     #[serde(default = "as_default_fallback_random_ports_enable")]
     pub fallback_random_ports_enable: bool,
+
+    #[serde(default = "as_default_initial_unhealthy_status_enable")]
+    pub initial_unhealthy_status_enable: bool,
+}
+
+fn as_default_initial_unhealthy_status_enable() -> bool {
+    false
 }
 
 fn as_default_fallback_random_ports_enable() -> bool {

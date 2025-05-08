@@ -193,7 +193,7 @@ mod test {
             &config,
             runtime_manager.clone(),
             app_manager_ref.clone(),
-            &ServerStateManager::new(&app_manager_ref),
+            &ServerStateManager::new(&app_manager_ref, &config),
         )?;
 
         Ok(())
