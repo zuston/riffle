@@ -105,6 +105,15 @@ where
     }
 }
 
+impl<T> Into<ConfigOption<T>> for DynamicConfRef<T>
+where
+    T: Clone + Send + Sync + DeserializeOwned + 'static,
+{
+    fn into(self) -> ConfigOption<T> {
+        Arc::new(self)
+    }
+}
+
 impl<T> ConfRef<T> for DynamicConfRef<T>
 where
     T: DeserializeOwned + Clone + Send + Sync + 'static,

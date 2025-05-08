@@ -193,7 +193,7 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
 
 #[cfg(test)]
 mod test {
-    use crate::config_ref::StaticConfRef;
+    use crate::config_ref::{ConfRef, ConfigOption, DynamicConfRef, StaticConfRef};
     use crate::event_bus::{Event, EventBus, Subscriber};
     use crate::metric::{TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE, TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE};
     use crate::runtime::manager::create_runtime;
@@ -201,7 +201,63 @@ mod test {
     use std::sync::atomic::Ordering::{Relaxed, SeqCst};
     use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
     use std::sync::Arc;
+    use std::thread::sleep;
     use std::time::Duration;
+
+    #[test]
+    fn test_dynamic_limiter() -> anyhow::Result<()> {
+        use awaitility::at_most;
+        use std::time::Duration;
+
+        let dyn_conf = DynamicConfRef::new("", 1usize);
+        let dyn_conf: ConfigOption<usize> = dyn_conf.into();
+
+        let runtime = create_runtime(5, "test");
+        let event_bus = EventBus::new(&runtime, "test".to_string(), dyn_conf.clone());
+
+        let flag = Arc::new(AtomicI64::new(0));
+
+        struct SimpleCallback {
+            flag: Arc<AtomicI64>,
+        }
+
+        #[async_trait]
+        impl Subscriber for SimpleCallback {
+            type Input = String;
+
+            async fn on_event(&self, event: Event<Self::Input>) -> bool {
+                println!("SimpleCallback received event: {:?}", event.get_data());
+                self.flag.fetch_add(1, Ordering::SeqCst);
+                sleep(Duration::from_millis(400));
+                true
+            }
+        }
+
+        let flag_cloned = flag.clone();
+        event_bus.subscribe(SimpleCallback { flag: flag_cloned });
+
+        let bus = event_bus.clone();
+        runtime.block_on(async move {
+            bus.publish(Event::new("test_event".to_string()))
+                .await
+                .unwrap();
+        });
+        at_most(Duration::from_secs(1)).until(|| flag.load(Ordering::SeqCst) == 1);
+
+        dyn_conf.on_change(&serde_json::json!(5));
+        for i in 0..5 {
+            let bus = event_bus.clone();
+            runtime.block_on(async move {
+                bus.publish(Event::new(format!("event_{}", i)))
+                    .await
+                    .unwrap();
+            });
+        }
+        // the updated dynamic concurrency will accept all tasks to run. the total
+        // duration will be less than 1 sec.
+        at_most(Duration::from_secs(1)).until(|| flag.load(SeqCst) == 6);
+        Ok(())
+    }
 
     #[test]
     fn test_event_bus() -> anyhow::Result<()> {
