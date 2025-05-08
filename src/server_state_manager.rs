@@ -139,7 +139,7 @@ mod tests {
         let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
         let storage = StorageService::init(&runtime_manager, &config);
         let app_manager_ref =
-            AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
+            AppManager::get_ref(runtime_manager.clone(), config.clone(), &storage, &reconf_manager).clone();
 
         let server_state_manager = ServerStateManager::new(&app_manager_ref, &config);
 
