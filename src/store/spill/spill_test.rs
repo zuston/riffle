@@ -67,9 +67,10 @@ mod tests {
         config: &Config,
         warm: &MockStore,
         cold: Option<&MockStore>,
+        reconf_manager: &ReconfigurableConfManager,
     ) -> Arc<HybridStore> {
         let runtime_manager = RuntimeManager::default();
-        let mut hybrid_store = HybridStore::from(config.clone(), runtime_manager);
+        let mut hybrid_store = HybridStore::from(config.clone(), runtime_manager, reconf_manager);
 
         let warm_wrapper: Option<Box<dyn PersistentStore>> = Some(Box::new(warm.clone()));
         let _ = std::mem::replace(&mut hybrid_store.warm_store, warm_wrapper);
@@ -122,7 +123,7 @@ mod tests {
         config.hybrid_store.memory_spill_high_watermark = 1.0;
 
         let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
-        let store = create_hybrid_store(&config, &warm, None);
+        let store = create_hybrid_store(&config, &warm, None, &reconf_manager);
         let runtime = store.runtime_manager.clone();
         let app_manager_ref = AppManager::get_ref(runtime, config, &store, &reconf_manager);
         store.with_app_manager(&app_manager_ref);
@@ -175,7 +176,8 @@ mod tests {
         );
         config.hybrid_store.memory_spill_high_watermark = 1.0;
 
-        let store = create_hybrid_store(&config, &warm, None);
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
+        let store = create_hybrid_store(&config, &warm, None, &reconf_manager);
 
         let app_id = "test_flush_failed-app";
         let ctx = mock_writing_context(app_id, 1, 0, 1, 20);
@@ -238,9 +240,8 @@ mod tests {
         let app_id = "app_1";
         let shuffle_id = 1;
         let partition = 0;
-
-        let store = create_hybrid_store(&config, &warm, None);
         let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
+        let store = create_hybrid_store(&config, &warm, None, &reconf_manager);
         let app_manager = AppManager::get_ref(Default::default(), config, &store, &reconf_manager);
         app_manager.register(app_id.to_string(), shuffle_id, Default::default())?;
         // this will make watermark-spill accumulate in_flight_bytes_of_huge_partition.

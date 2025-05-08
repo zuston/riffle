@@ -44,6 +44,8 @@ use tokio::sync::Semaphore;
 //                                         |                              |
 //                                         +------------------------------+
 
+const MAX_CONCURRENCY: usize = 1000000;
+
 pub struct HierarchyEventBus<T> {
     parent: EventBus<T>,
     pub(crate) children: DashMap<StorageType, EventBus<T>>,
@@ -83,7 +85,7 @@ impl HierarchyEventBus<SpillMessage> {
         let parent: EventBus<SpillMessage> = EventBus::new(
             &runtime_manager.dispatch_runtime,
             "Hierarchy-Parent".to_string(),
-            StaticConfRef::new(usize::MAX).into(),
+            StaticConfRef::new(MAX_CONCURRENCY).into(),
         );
         let child_localfile: EventBus<SpillMessage> = EventBus::new(
             &runtime_manager.localfile_write_runtime,

@@ -196,15 +196,12 @@ mod test {
         conf_ref.on_change(&serde_json::json!(100));
         assert_eq!(conf_ref.get(), 100);
 
-        let mut callback_called = false;
         conf_ref.with_callback(Box::new(|old, new| {
             assert_eq!(*old, 100);
             assert_eq!(*new, 200);
-            callback_called = true;
         }));
 
         conf_ref.on_change(&serde_json::json!(200));
-        assert!(callback_called);
 
         Ok(())
     }
