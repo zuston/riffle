@@ -1,4 +1,5 @@
 use crate::app::AppManagerRef;
+use crate::config::Config;
 use crate::grpc::protobuf::uniffle::ServerStatus;
 use crate::util;
 use libc::{send, stat};
@@ -37,9 +38,15 @@ pub struct ServerStateManager {
 }
 
 impl ServerStateManager {
-    pub fn new(app_manager: &AppManagerRef) -> ServerStateManager {
+    pub fn new(app_manager: &AppManagerRef, config: &Config) -> ServerStateManager {
+        let initial_status = if config.initial_unhealthy_status_enable {
+            info!("Making server as unhealthy status due to the implicit setting");
+            ServerState::UNHEALTHY
+        } else {
+            ServerState::ACTIVE
+        };
         ServerStateManager {
-            state: Arc::new(RwLock::new(ServerState::ACTIVE)),
+            state: Arc::new(RwLock::new(initial_status)),
             state_time: Arc::new(AtomicU64::new(util::now_timestamp_as_sec())),
             app_manager_ref: app_manager.clone(),
             kill_interval: Arc::new(AtomicU64::new(INTERVAL)),
@@ -134,7 +141,7 @@ mod tests {
         let app_manager_ref =
             AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
 
-        let server_state_manager = ServerStateManager::new(&app_manager_ref);
+        let server_state_manager = ServerStateManager::new(&app_manager_ref, &config);
 
         // case1
         server_state_manager.as_state(ServerState::DECOMMISSIONING);
