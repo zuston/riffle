@@ -195,7 +195,10 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
 mod test {
     use crate::config_ref::{ConfRef, ConfigOption, DynamicConfRef, StaticConfRef};
     use crate::event_bus::{Event, EventBus, Subscriber};
-    use crate::metric::{TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE, TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE};
+    use crate::metric::{
+        TOTAL_APP_FLUSHED_BYTES, TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE,
+        TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE,
+    };
     use crate::runtime::manager::create_runtime;
     use async_trait::async_trait;
     use std::sync::atomic::Ordering::{Relaxed, SeqCst};
@@ -209,11 +212,13 @@ mod test {
         use awaitility::at_most;
         use std::time::Duration;
 
+        const EVENT_BUS_NAME: &str = "test_dynamic_limiter";
+
         let dyn_conf = DynamicConfRef::new("", 1usize);
         let dyn_conf: ConfigOption<usize> = dyn_conf.into();
 
         let runtime = create_runtime(5, "test");
-        let event_bus = EventBus::new(&runtime, "test".to_string(), dyn_conf.clone());
+        let event_bus = EventBus::new(&runtime, EVENT_BUS_NAME.to_string(), dyn_conf.clone());
 
         let flag = Arc::new(AtomicI64::new(0));
 
@@ -261,7 +266,12 @@ mod test {
 
     #[test]
     fn test_event_bus() -> anyhow::Result<()> {
-        let runtime = create_runtime(4, "test");
+        const EVENT_BUS_NAME: &str = "test";
+
+        TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE.remove_label_values(&[EVENT_BUS_NAME]);
+        TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE.remove_label_values(&[EVENT_BUS_NAME]);
+
+        let runtime = create_runtime(4, EVENT_BUS_NAME);
         let mut event_bus = EventBus::new(
             &runtime,
             "test".to_string(),
@@ -298,13 +308,13 @@ mod test {
         assert_eq!(
             1,
             TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE
-                .with_label_values(&["test"])
+                .with_label_values(&[EVENT_BUS_NAME])
                 .get()
         );
         assert_eq!(
             1,
             TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE
-                .with_label_values(&["test"])
+                .with_label_values(&[EVENT_BUS_NAME])
                 .get()
         );
 
