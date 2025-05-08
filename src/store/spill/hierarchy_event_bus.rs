@@ -9,7 +9,7 @@ use anyhow::Result;
 use dashmap::DashMap;
 use tokio::sync::Semaphore;
 // This is the predefined event bus for the spill operations.
-// the parent is the dispatcher, it will firstly get the candidate
+// The parent is the dispatcher, it will firstly get the candidate
 // storage, and then send these concrete storage event into the corresponding
 // child storage specific eventbus.
 //
