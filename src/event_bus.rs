@@ -261,7 +261,7 @@ mod test {
 
     #[test]
     fn test_event_bus() -> anyhow::Result<()> {
-        let runtime = create_runtime(1, "test");
+        let runtime = create_runtime(4, "test");
         let mut event_bus = EventBus::new(
             &runtime,
             "test".to_string(),
