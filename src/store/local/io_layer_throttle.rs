@@ -1,5 +1,6 @@
 use crate::error::WorkerError;
 use crate::runtime::manager::RuntimeManager;
+use crate::runtime::RuntimeRef;
 use crate::store::local::layers::{Handler, Layer};
 use crate::store::local::{FileStat, LocalIO};
 use crate::store::BytesWrapper;
@@ -28,7 +29,7 @@ struct Inner {
 
 impl TokenBucketLimiter {
     pub fn new(
-        runtime_manager: &RuntimeManager,
+        rt: &RuntimeRef,
         capacity: usize,
         fill_rate: usize,
         refill_interval: Duration,
@@ -44,9 +45,7 @@ impl TokenBucketLimiter {
         };
 
         let l_c = limiter.clone();
-        runtime_manager
-            .clone()
-            .localfile_write_runtime
+        rt.clone()
             .spawn_with_await_tree("TokenBucketLimiter periodical refill", async move {
                 l_c.refill_periodically(refill_interval).await;
             });
@@ -124,7 +123,8 @@ mod tests {
     #[test]
     fn test_token_bucket() {
         let rc: RuntimeManager = Default::default();
-        let limiter = TokenBucketLimiter::new(&rc, 4, 1, Duration::from_secs(1));
+        let limiter =
+            TokenBucketLimiter::new(&rc.localfile_write_runtime, 4, 1, Duration::from_secs(1));
 
         let rt = rc.default_runtime.clone();
 
@@ -147,7 +147,7 @@ mod tests {
 }
 
 pub struct ThrottleLayer {
-    runtime_manager: RuntimeManager,
+    runtime: RuntimeRef,
     capacity: usize,
     fill_rate: usize,
     refill_interval: Duration,
@@ -155,13 +155,13 @@ pub struct ThrottleLayer {
 
 impl ThrottleLayer {
     pub fn new(
-        runtime_manager: &RuntimeManager,
+        rt: &RuntimeRef,
         capacity: usize,
         fill_rate: usize,
         refill_interval: Duration,
     ) -> Self {
         Self {
-            runtime_manager: runtime_manager.clone(),
+            runtime: rt.clone(),
             capacity,
             fill_rate,
             refill_interval,
@@ -173,7 +173,7 @@ impl Layer for ThrottleLayer {
     fn wrap(&self, handler: Handler) -> Handler {
         Arc::new(Box::new(ThrottleLayerWrapper {
             limiter: TokenBucketLimiter::new(
-                &self.runtime_manager,
+                &self.runtime,
                 self.capacity,
                 self.fill_rate,
                 self.refill_interval,

@@ -34,6 +34,9 @@ pub struct SyncLocalIO {
     inner: Arc<Inner>,
 }
 
+unsafe impl Sync for SyncLocalIO {}
+unsafe impl Send for SyncLocalIO {}
+
 struct Inner {
     root: String,
 

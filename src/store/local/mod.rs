@@ -26,9 +26,9 @@ pub mod delegator;
 mod io_layer_await_tree;
 mod io_layer_metrics;
 mod io_layer_retry;
-mod io_layer_throttle;
+pub mod io_layer_throttle;
 mod io_layer_timeout;
-mod layers;
+pub mod layers;
 pub mod sync_io;
 
 pub struct FileStat {
@@ -36,7 +36,7 @@ pub struct FileStat {
 }
 
 #[async_trait]
-pub trait LocalIO {
+pub trait LocalIO: Send + Sync {
     async fn create_dir(&self, dir: &str) -> Result<(), WorkerError>;
     async fn append(&self, path: &str, data: BytesWrapper) -> Result<(), WorkerError>;
     async fn read(

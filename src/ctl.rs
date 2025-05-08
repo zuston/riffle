@@ -1,6 +1,9 @@
 #![allow(dead_code, unused)]
 
 use clap::{Parser, Subcommand};
+use tokio::runtime::Runtime;
+use uniffle_worker::actions::disk_bench::DiskBenchAction;
+use uniffle_worker::actions::disk_profiler::DiskProfiler;
 use uniffle_worker::actions::{
     Action, NodeUpdateAction, OutputFormat, QueryAction, ValidateAction,
 };
@@ -14,6 +17,38 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Commands {
+    #[command(about = "Using the riffle IO scheduler to test local disk IO")]
+    DiskBench {
+        #[arg(short, long)]
+        dir: String,
+        #[arg(short, long)]
+        batch_number: usize,
+        #[arg(short, long)]
+        concurrency: usize,
+        #[arg(short, long)]
+        write_size: String,
+        #[arg(short, long)]
+        disk_throughput: String,
+    },
+
+    #[command(
+        about = "Profile disk performance with different block sizes and concurrency levels"
+    )]
+    DiskProfiler {
+        #[arg(short, long)]
+        dir: String,
+        #[arg(short, long, default_value = "4KB")]
+        min_block_size: String,
+        #[arg(short, long, default_value = "64MB")]
+        max_block_size: String,
+        #[arg(short, long, default_value = "1")]
+        min_concurrency: usize,
+        #[arg(short, long, default_value = "16")]
+        max_concurrency: usize,
+        #[arg(short, long, default_value = "10")]
+        test_duration_secs: u64,
+    },
+
     #[command(about = "Validate internal index/data file")]
     Validate {
         #[arg(short, long)]
@@ -39,12 +74,44 @@ enum Commands {
     },
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let command = args.command;
 
     let action: Box<dyn Action> = match command {
+        Commands::DiskBench {
+            dir,
+            batch_number,
+            concurrency,
+            write_size,
+            disk_throughput,
+        } => Box::new(DiskBenchAction::new(
+            dir,
+            batch_number,
+            write_size,
+            concurrency,
+            disk_throughput,
+        )),
+
+        Commands::DiskProfiler {
+            dir,
+            min_block_size,
+            max_block_size,
+            min_concurrency,
+            max_concurrency,
+            test_duration_secs,
+        } => {
+            let profiler = DiskProfiler::new(
+                dir,
+                min_block_size,
+                max_block_size,
+                min_concurrency,
+                max_concurrency,
+                test_duration_secs,
+            );
+            Box::new(profiler)
+        }
+
         Commands::Validate {
             index_file_path,
             data_file_path,
@@ -68,7 +135,10 @@ async fn main() -> anyhow::Result<()> {
         _ => panic!("Unknown command"),
     };
 
-    action.act().await?;
+    let rt = Runtime::new()?;
+    rt.block_on(async {
+        let _ = action.act().await;
+    });
 
     Ok(())
 }
