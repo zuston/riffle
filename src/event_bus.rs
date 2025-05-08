@@ -1,4 +1,5 @@
 use crate::await_tree::AWAIT_TREE_REGISTRY;
+use crate::config_ref::ConfigOption;
 use crate::metric::{
     EVENT_BUS_HANDLE_DURATION, GAUGE_EVENT_BUS_QUEUE_HANDLING_SIZE,
     GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE, TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE,
@@ -7,6 +8,7 @@ use crate::metric::{
 use crate::runtime::RuntimeRef;
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
+use log::info;
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
@@ -57,7 +59,7 @@ struct Inner<T> {
     name: String,
     runtime: RuntimeRef,
 
-    concurrency_num: usize,
+    concurrency_num: ConfigOption<usize>,
     concurrency_limit: Arc<Semaphore>,
 }
 
@@ -65,11 +67,28 @@ unsafe impl<T: Send + Sync + 'static> Send for EventBus<T> {}
 unsafe impl<T: Send + Sync + 'static> Sync for EventBus<T> {}
 
 impl<T: Send + Sync + Clone + 'static> EventBus<T> {
-    pub fn new(runtime: &RuntimeRef, name: String, concurrency_limit: usize) -> EventBus<T> {
-        let runtime = runtime.clone();
-
+    pub fn new(
+        runtime: &RuntimeRef,
+        name: String,
+        concurrency_ref: ConfigOption<usize>,
+    ) -> EventBus<T> {
         let (send, recv) = async_channel::unbounded();
-        let concurrency_limiter = Arc::new(Semaphore::new(concurrency_limit));
+        let concurrency_limiter = Arc::new(Semaphore::new(concurrency_ref.get()));
+
+        // attach the callback into the dynamic concurrency ref
+        let limiter = concurrency_limiter.clone();
+        concurrency_ref.with_callback(Box::new(move |legacy, new| {
+            if new > legacy {
+                limiter.add_permits(new - legacy);
+            } else {
+                limiter.forget_permits(legacy - new);
+            }
+            info!(
+                "The concurrency limiter permits change from {} to {}",
+                legacy, new
+            );
+        }));
+
         let event_bus = EventBus {
             inner: Arc::new(Inner {
                 subscriber: OnceCell::new(),
@@ -77,7 +96,7 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
                 queue_send: send,
                 name: name.to_string(),
                 runtime: runtime.clone(),
-                concurrency_num: concurrency_limit,
+                concurrency_num: concurrency_ref,
                 concurrency_limit: concurrency_limiter,
             }),
         };
@@ -168,12 +187,13 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
     }
 
     pub fn concurrency_limit(&self) -> usize {
-        self.inner.concurrency_num
+        self.inner.concurrency_num.get()
     }
 }
 
 #[cfg(test)]
 mod test {
+    use crate::config_ref::StaticConfRef;
     use crate::event_bus::{Event, EventBus, Subscriber};
     use crate::metric::{TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE, TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE};
     use crate::runtime::manager::create_runtime;
@@ -186,7 +206,11 @@ mod test {
     #[test]
     fn test_event_bus() -> anyhow::Result<()> {
         let runtime = create_runtime(1, "test");
-        let mut event_bus = EventBus::new(&runtime, "test".to_string(), 1usize);
+        let mut event_bus = EventBus::new(
+            &runtime,
+            "test".to_string(),
+            StaticConfRef::new(1usize).into(),
+        );
         let flag = Arc::new(AtomicI64::new(0));
 
         struct SimpleCallback {

@@ -56,6 +56,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 
+use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::local::LocalfileStoreStat;
 use crate::store::mem::buffer::MemoryBuffer;
@@ -121,8 +122,12 @@ unsafe impl Send for HybridStore {}
 unsafe impl Sync for HybridStore {}
 
 impl HybridStore {
-    pub fn from(config: Config, runtime_manager: RuntimeManager) -> Self {
-        let event_bus = HierarchyEventBus::new(&runtime_manager, &config);
+    pub fn from(
+        config: Config,
+        runtime_manager: RuntimeManager,
+        reconf_manager: &ReconfigurableConfManager,
+    ) -> Self {
+        let event_bus = HierarchyEventBus::new(&runtime_manager, &config, reconf_manager);
         let store_type = &config.store_type;
         if !StorageType::contains_memory(&store_type) {
             panic!("Storage type must contains memory.");
@@ -757,6 +762,7 @@ pub(crate) mod tests {
     use std::sync::Arc;
     use std::thread;
 
+    use crate::config_reconfigure::ReconfigurableConfManager;
     use serde::de::Unexpected::Seq;
     use std::time::Duration;
 
@@ -788,7 +794,8 @@ pub(crate) mod tests {
         config.memory_store = Some(MemoryStoreConfig::new("20M".to_string()));
         config.hybrid_store = HybridStoreConfig::new(0.8, 0.2, None);
         config.store_type = StorageType::MEMORY;
-        let store = HybridStore::from(config, Default::default());
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
+        let store = HybridStore::from(config, Default::default(), &reconf_manager);
 
         let runtime = store.runtime_manager.clone();
         assert_eq!(true, runtime.wait(store.is_healthy()).unwrap());
@@ -823,7 +830,12 @@ pub(crate) mod tests {
 
         // The hybrid store will flush the memory data to file when
         // the data reaches the number of 4
-        let store = Arc::new(HybridStore::from(config, Default::default()));
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
+        let store = Arc::new(HybridStore::from(
+            config,
+            Default::default(),
+            &reconf_manager,
+        ));
         store
     }
 

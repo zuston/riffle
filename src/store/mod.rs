@@ -42,6 +42,7 @@ use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
 
 use crate::composed_bytes::ComposedBytes;
+use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::index_codec::IndexCodec;
 use crate::store::spill::SpillWritingViewContext;
@@ -292,7 +293,11 @@ pub trait Persistent {}
 pub struct StoreProvider {}
 
 impl StoreProvider {
-    pub fn get(runtime_manager: RuntimeManager, config: Config) -> HybridStore {
-        HybridStore::from(config, runtime_manager)
+    pub fn get(
+        runtime_manager: RuntimeManager,
+        config: Config,
+        reconf_manager: &ReconfigurableConfManager,
+    ) -> HybridStore {
+        HybridStore::from(config, runtime_manager, reconf_manager)
     }
 }

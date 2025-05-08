@@ -151,7 +151,7 @@ fn main() -> Result<()> {
         Some((args.config.as_str(), 60, &runtime_manager.default_runtime).into()),
     )?;
 
-    let storage = StorageService::init(&runtime_manager, &config);
+    let storage = StorageService::init(&runtime_manager, &config, &reconf_manager);
     let app_manager_ref = AppManager::get_ref(
         runtime_manager.clone(),
         config.clone(),

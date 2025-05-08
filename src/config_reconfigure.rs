@@ -189,6 +189,7 @@ mod tests {
         let conf_ref = DynamicConfRef {
             key: "grpc_port".to_owned(),
             value: RwLock::new(19999),
+            callback: Default::default(),
         };
         let val = conf_ref.get();
         assert_eq!(19999, val);
@@ -199,6 +200,7 @@ mod tests {
                 val: "1M".to_string(),
                 parsed_val: 1 * 1000 * 1000,
             }),
+            callback: Default::default(),
         };
         let val = conf_ref.get();
         assert_eq!("1M", val.val);
