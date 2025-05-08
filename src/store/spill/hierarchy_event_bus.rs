@@ -131,7 +131,7 @@ mod tests {
     use crate::config_reconfigure::ReconfigurableConfManager;
     use crate::event_bus::{Event, Subscriber};
     use crate::runtime::manager::RuntimeManager;
-    use crate::store::spill::hierarchy_event_bus::HierarchyEventBus;
+    use crate::store::spill::hierarchy_event_bus::{HierarchyEventBus, MAX_CONCURRENCY};
     use crate::store::spill::{SpillMessage, SpillWritingViewContext};
     use anyhow::Result;
     use async_trait::async_trait;
@@ -217,7 +217,7 @@ mod tests {
                 .max_blocking_threads_num(),
             hdfs_bus.concurrency_limit()
         );
-        assert_eq!(Semaphore::MAX_PERMITS, event_bus.parent.concurrency_limit());
+        assert_eq!(MAX_CONCURRENCY, event_bus.parent.concurrency_limit());
 
         // case2: set concurrency limit
         let mut config = Config::create_simple_config();
@@ -230,7 +230,7 @@ mod tests {
 
         assert_eq!(10, localfile_bus.concurrency_limit());
         assert_eq!(20, hdfs_bus.concurrency_limit());
-        assert_eq!(Semaphore::MAX_PERMITS, event_bus.parent.concurrency_limit());
+        assert_eq!(MAX_CONCURRENCY, event_bus.parent.concurrency_limit());
 
         Ok(())
     }
