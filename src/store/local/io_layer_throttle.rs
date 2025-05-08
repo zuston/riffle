@@ -7,6 +7,7 @@ use crate::store::BytesWrapper;
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
+use log::warn;
 use std::cmp::min;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
@@ -53,8 +54,6 @@ impl TokenBucketLimiter {
         limiter
     }
 
-    // todo: if the acquire amount > capacity, this will hang!
-    // blocking acquire
     pub async fn acquire(&self, amount: usize) {
         let mut inner = self
             .inner
@@ -62,6 +61,16 @@ impl TokenBucketLimiter {
             .instrument_await("waiting the limiter lock...")
             .await;
         loop {
+            let capacity = inner.capacity;
+            let mut amount = amount;
+            if amount > capacity {
+                warn!(
+                    "Illegal acquiring operation. Acquired val: {} but capacity: {}",
+                    amount, capacity
+                );
+                amount = capacity / 2;
+            }
+
             let tokens = &mut inner.tokens;
             if *tokens >= amount {
                 *tokens -= amount;
@@ -119,6 +128,28 @@ mod tests {
     use std::sync::atomic::Ordering::SeqCst;
     use std::time::Duration;
     use tokio::time::Instant;
+
+    // if the acquired token exceeding the capacity, it will fallback
+    #[test]
+    fn test_token_exceed_capacity() {
+        const capacity: usize = 4;
+        let runtime_manager: RuntimeManager = Default::default();
+        let limiter = TokenBucketLimiter::new(
+            &runtime_manager.localfile_write_runtime,
+            capacity,
+            1,
+            Duration::from_secs(1),
+        );
+
+        let runtime = runtime_manager.default_runtime.clone();
+        runtime.block_on(limiter.acquire(capacity + 1));
+
+        let l_c = limiter.clone();
+        assert_eq!(
+            2,
+            runtime.block_on(async move { l_c.inner.lock().await.tokens })
+        );
+    }
 
     #[test]
     fn test_token_bucket() {
