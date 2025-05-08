@@ -1,14 +1,15 @@
 use crate::config::StorageType::{HDFS, LOCALFILE};
 use crate::config::{Config, StorageType};
+use crate::config_reconfigure::ReconfigurableConfManager;
+use crate::config_ref::StaticConfRef;
 use crate::event_bus::{Event, EventBus, Subscriber};
 use crate::runtime::manager::RuntimeManager;
 use crate::store::spill::SpillMessage;
 use anyhow::Result;
 use dashmap::DashMap;
 use tokio::sync::Semaphore;
-
 // This is the predefined event bus for the spill operations.
-// the parent is the dispatcher, it will firstly get the candidate
+// The parent is the dispatcher, it will firstly get the candidate
 // storage, and then send these concrete storage event into the corresponding
 // child storage specific eventbus.
 //
@@ -43,32 +44,48 @@ use tokio::sync::Semaphore;
 //                                         |                              |
 //                                         +------------------------------+
 
+const MAX_CONCURRENCY: usize = 1000000;
+
 pub struct HierarchyEventBus<T> {
     parent: EventBus<T>,
     pub(crate) children: DashMap<StorageType, EventBus<T>>,
 }
 
 impl HierarchyEventBus<SpillMessage> {
-    pub fn new(runtime_manager: &RuntimeManager, config: &Config) -> Self {
+    pub fn new(
+        runtime_manager: &RuntimeManager,
+        config: &Config,
+        reconf_manager: &ReconfigurableConfManager,
+    ) -> Self {
         let localfile_concurrency = match config.hybrid_store.memory_spill_to_localfile_concurrency
         {
-            Some(value) => value as usize,
-            _ => runtime_manager
-                .localfile_write_runtime
-                .max_blocking_threads_num(),
+            Some(_) => reconf_manager
+                .register("hybrid_store.memory_spill_to_localfile_concurrency")
+                .unwrap(),
+            _ => StaticConfRef::new(
+                runtime_manager
+                    .localfile_write_runtime
+                    .max_blocking_threads_num(),
+            )
+            .into(),
         };
         let hdfs_concurrency = match config.hybrid_store.memory_spill_to_hdfs_concurrency {
-            Some(value) => value as usize,
-            _ => runtime_manager
-                .hdfs_write_runtime
-                .max_blocking_threads_num(),
+            Some(_) => reconf_manager
+                .register("hybrid_store.memory_spill_to_hdfs_concurrency")
+                .unwrap(),
+            _ => StaticConfRef::new(
+                runtime_manager
+                    .hdfs_write_runtime
+                    .max_blocking_threads_num(),
+            )
+            .into(),
         };
 
         // parent is just as a dispatcher, there is no need to do any concurrency limitation
         let parent: EventBus<SpillMessage> = EventBus::new(
             &runtime_manager.dispatch_runtime,
             "Hierarchy-Parent".to_string(),
-            Semaphore::MAX_PERMITS,
+            StaticConfRef::new(MAX_CONCURRENCY).into(),
         );
         let child_localfile: EventBus<SpillMessage> = EventBus::new(
             &runtime_manager.localfile_write_runtime,
@@ -111,9 +128,10 @@ impl HierarchyEventBus<SpillMessage> {
 mod tests {
     use crate::config::Config;
     use crate::config::StorageType::{HDFS, LOCALFILE};
+    use crate::config_reconfigure::ReconfigurableConfManager;
     use crate::event_bus::{Event, Subscriber};
     use crate::runtime::manager::RuntimeManager;
-    use crate::store::spill::hierarchy_event_bus::HierarchyEventBus;
+    use crate::store::spill::hierarchy_event_bus::{HierarchyEventBus, MAX_CONCURRENCY};
     use crate::store::spill::{SpillMessage, SpillWritingViewContext};
     use anyhow::Result;
     use async_trait::async_trait;
@@ -180,7 +198,8 @@ mod tests {
     fn test_concurrency() -> Result<()> {
         let runtime_manager = RuntimeManager::default();
         let config = Config::create_simple_config();
-        let event_bus = HierarchyEventBus::new(&runtime_manager, &config);
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
+        let event_bus = HierarchyEventBus::new(&runtime_manager, &config, &reconf_manager);
 
         let localfile_bus = event_bus.children.get(&LOCALFILE).unwrap();
         let hdfs_bus = event_bus.children.get(&HDFS).unwrap();
@@ -198,19 +217,20 @@ mod tests {
                 .max_blocking_threads_num(),
             hdfs_bus.concurrency_limit()
         );
-        assert_eq!(Semaphore::MAX_PERMITS, event_bus.parent.concurrency_limit());
+        assert_eq!(MAX_CONCURRENCY, event_bus.parent.concurrency_limit());
 
         // case2: set concurrency limit
         let mut config = Config::create_simple_config();
         config.hybrid_store.memory_spill_to_localfile_concurrency = Some(10);
         config.hybrid_store.memory_spill_to_hdfs_concurrency = Some(20);
-        let event_bus = HierarchyEventBus::new(&runtime_manager, &config);
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
+        let event_bus = HierarchyEventBus::new(&runtime_manager, &config, &reconf_manager);
         let localfile_bus = event_bus.children.get(&LOCALFILE).unwrap();
         let hdfs_bus = event_bus.children.get(&HDFS).unwrap();
 
         assert_eq!(10, localfile_bus.concurrency_limit());
         assert_eq!(20, hdfs_bus.concurrency_limit());
-        assert_eq!(Semaphore::MAX_PERMITS, event_bus.parent.concurrency_limit());
+        assert_eq!(MAX_CONCURRENCY, event_bus.parent.concurrency_limit());
 
         Ok(())
     }
@@ -219,7 +239,12 @@ mod tests {
     fn test_event_bus() -> Result<()> {
         let runtime_manager = RuntimeManager::default();
         let config = Config::create_simple_config();
-        let event_bus = Arc::new(HierarchyEventBus::new(&runtime_manager, &config));
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
+        let event_bus = Arc::new(HierarchyEventBus::new(
+            &runtime_manager,
+            &config,
+            &reconf_manager,
+        ));
 
         let select_handler_ops = Arc::new(AtomicU64::new(0));
         let select_handler_result = Arc::new(AtomicBool::new(true));

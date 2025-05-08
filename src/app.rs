@@ -1195,7 +1195,7 @@ pub(crate) mod test {
         app_config.partition_split_threshold = "5B".to_string();
 
         let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
-        let storage = StorageService::init(&runtime_manager, &config);
+        let storage = StorageService::init(&runtime_manager, &config, &reconf_manager);
         let app_manager_ref =
             AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
         app_manager_ref
@@ -1259,7 +1259,7 @@ pub(crate) mod test {
         app_config.partition_split_threshold = "20B".to_string();
 
         let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
-        let storage = StorageService::init(&runtime_manager, &config);
+        let storage = StorageService::init(&runtime_manager, &config, &reconf_manager);
         let app_manager_ref =
             AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
         app_manager_ref
@@ -1309,7 +1309,7 @@ pub(crate) mod test {
         let config = create_config_for_partition_features();
 
         let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
-        let storage = StorageService::init(&runtime_manager, &config);
+        let storage = StorageService::init(&runtime_manager, &config, &reconf_manager);
         let app_manager_ref =
             AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
         app_manager_ref
@@ -1346,7 +1346,7 @@ pub(crate) mod test {
         let runtime_manager: RuntimeManager = Default::default();
         let config = mock_config();
         let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
-        let storage = StorageService::init(&runtime_manager, &config);
+        let storage = StorageService::init(&runtime_manager, &config, &reconf_manager);
         let app_manager_ref =
             AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
         app_manager_ref
@@ -1408,7 +1408,7 @@ pub(crate) mod test {
         let config = mock_config();
         let runtime_manager: RuntimeManager = Default::default();
         let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
-        let storage = StorageService::init(&runtime_manager, &config);
+        let storage = StorageService::init(&runtime_manager, &config, &reconf_manager);
         let app_manager_ref =
             AppManager::get_ref(Default::default(), config, &storage, &reconf_manager).clone();
 
@@ -1427,7 +1427,7 @@ pub(crate) mod test {
         let runtime_manager: RuntimeManager = Default::default();
         let config = mock_config();
         let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
-        let storage = StorageService::init(&runtime_manager, &config);
+        let storage = StorageService::init(&runtime_manager, &config, &reconf_manager);
         let app_manager_ref =
             AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
         app_manager_ref

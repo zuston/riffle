@@ -231,7 +231,7 @@ mod tests {
 
         let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
         let runtime_manager: RuntimeManager = Default::default();
-        let storage = StorageService::init(&runtime_manager, &config);
+        let storage = StorageService::init(&runtime_manager, &config, &reconf_manager);
         let app_manager_ref = AppManager::get_ref(
             Default::default(),
             config.clone(),

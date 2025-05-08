@@ -95,7 +95,7 @@ pub async fn start_uniffle_worker(config: config::Config) -> Result<AppManagerRe
     let (tx, rx) = oneshot::channel::<()>();
 
     let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
-    let storage = StorageService::init(&runtime_manager, &config);
+    let storage = StorageService::init(&runtime_manager, &config, &reconf_manager);
     let app_manager_ref = AppManager::get_ref(
         runtime_manager.clone(),
         config.clone(),

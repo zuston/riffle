@@ -1,11 +1,13 @@
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::util;
 use bytesize::ByteSize;
+use once_cell::sync::OnceCell;
 use parking_lot::{Mutex, RwLock};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::fmt::{Display, Formatter};
+use std::ops::Deref;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -35,7 +37,7 @@ impl Display for ByteString {
 }
 
 impl<'de> Deserialize<'de> for ByteString {
-    fn deserialize<D>(deserializer: D) -> anyhow::Result<Self, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -80,11 +82,14 @@ pub trait ConfRef<T: Clone + Send + Sync + 'static>: Send + Sync {
     type Output;
     fn get(&self) -> Self::Output;
     fn on_change(&self, value: &Value);
+    fn with_callback(&self, callback: Box<dyn Fn(&T, &T) + Send + Sync>);
 }
 
+/// DynamicConfRef: A dynamic configuration reference that supports runtime updates.
 pub struct DynamicConfRef<T> {
     pub key: String,
     pub value: RwLock<T>,
+    pub callback: OnceCell<Box<dyn Fn(&T, &T) + Send + Sync>>,
 }
 
 impl<T> DynamicConfRef<T>
@@ -95,7 +100,17 @@ where
         Self {
             key: key.to_string(),
             value: RwLock::new(val),
+            callback: Default::default(),
         }
+    }
+}
+
+impl<T> Into<ConfigOption<T>> for DynamicConfRef<T>
+where
+    T: Clone + Send + Sync + DeserializeOwned + 'static,
+{
+    fn into(self) -> ConfigOption<T> {
+        Arc::new(self)
     }
 }
 
@@ -113,26 +128,47 @@ where
     fn on_change(&self, val: &Value) {
         if let Ok(val) = serde_json::from_value::<T>(val.clone()) {
             let mut internal_val = self.value.write();
-            *internal_val = val;
+            let pre_val = &internal_val.deref().clone();
+            *internal_val = val.clone();
+            drop(internal_val); // Release the lock before invoking the callback
+
+            if let Some(callback) = self.callback.get() {
+                callback(pre_val, &val);
+            }
         }
+    }
+
+    fn with_callback(&self, callback: Box<dyn Fn(&T, &T) + Send + Sync>) {
+        self.callback.set(callback);
     }
 }
 
-// =======================================================
-
+/// StaticConfRef: A static configuration reference with a fixed value.
 pub struct StaticConfRef<T> {
     val: T,
 }
 
-impl<T> StaticConfRef<T> {
+impl<T> StaticConfRef<T>
+where
+    T: Clone + Send + Sync + DeserializeOwned + 'static,
+{
     pub fn new(val: T) -> Self {
         Self { val }
     }
 }
 
+impl<T> Into<ConfigOption<T>> for StaticConfRef<T>
+where
+    T: Clone + Send + Sync + DeserializeOwned + 'static,
+{
+    fn into(self) -> ConfigOption<T> {
+        Arc::new(self)
+    }
+}
+
 impl<T> ConfRef<T> for StaticConfRef<T>
 where
-    T: DeserializeOwned + Clone + Send + Sync + 'static,
+    T: Clone + Send + Sync + DeserializeOwned + 'static,
 {
     type Output = T;
 
@@ -140,20 +176,42 @@ where
         self.val.clone()
     }
 
-    fn on_change(&self, value: &Value) {
-        // nothing to do
+    fn on_change(&self, _value: &Value) {
+        // No operation for StaticConfRef
+    }
+
+    fn with_callback(&self, _callback: Box<dyn Fn(&T, &T) + Send + Sync>) {
+        // No operation for StaticConfRef
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::config_ref::{ConfRef, StaticConfRef};
+    use super::*;
 
     #[test]
     fn test_fixed_conf_ref() -> anyhow::Result<()> {
         let const_val = 42;
         let conf_ref = StaticConfRef::new(const_val);
         assert_eq!(conf_ref.get(), const_val);
+        Ok(())
+    }
+
+    #[test]
+    fn test_dynamic_conf_ref() -> anyhow::Result<()> {
+        let mut conf_ref = DynamicConfRef::new("test_key", 42);
+        assert_eq!(conf_ref.get(), 42);
+
+        conf_ref.on_change(&serde_json::json!(100));
+        assert_eq!(conf_ref.get(), 100);
+
+        conf_ref.with_callback(Box::new(|old, new| {
+            assert_eq!(*old, 100);
+            assert_eq!(*new, 200);
+        }));
+
+        conf_ref.on_change(&serde_json::json!(200));
+
         Ok(())
     }
 }
