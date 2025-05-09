@@ -109,7 +109,7 @@ pub struct ServerInfo {
 
     #[serde(rename = "jettyPort")]
     #[serde(default = "default_jetty_port")]
-    pub jetty_port: usize,
+    pub http_port: usize,
 }
 
 fn default_jetty_port() -> usize {
@@ -165,7 +165,7 @@ impl Discovery {
         let server_infos = self.list_nodes().await?;
         let ips = server_infos
             .into_iter()
-            .map(|x| (x.ip.to_string(), x.jetty_port))
+            .map(|x| (x.ip.to_string(), x.http_port))
             .collect::<Vec<_>>();
 
         let mut future_list = vec![];

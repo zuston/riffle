@@ -143,9 +143,9 @@ pub struct NodeUpdateAction {
 }
 
 impl NodeUpdateAction {
-    pub fn new(ip_and_port: Option<String>, target_status: String) -> Self {
+    pub fn new(instance: Option<String>, target_status: String) -> Self {
         Self {
-            ip_and_port,
+            ip_and_port: instance,
             target_status,
         }
     }
@@ -154,49 +154,34 @@ impl NodeUpdateAction {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 struct NodeUpdateInfo {
     ip: String,
-    grpc_port: i32,
+    http_port: i32,
 }
 
-enum NodeUpdateOperation {
-    DECOMMISSION,
-    #[allow(non_camel_case_types)]
-    CANCEL_DECOMMISSION,
-}
-
-async fn do_decommission_operation(
-    ip_and_port: String,
-    grpc_port: i32,
-    op: &NodeUpdateOperation,
+async fn update_remote_server_status(
+    ip: String,
+    http_port: usize,
+    target_status: String,
 ) -> anyhow::Result<()> {
-    // thread::sleep(Duration::from_millis(5));
-    // return Ok(());
-
-    let mut client =
-        ShuffleServerInternalClient::connect(format!("http://{}:{}", ip_and_port, grpc_port))
-            .await?;
-    match op {
-        NodeUpdateOperation::DECOMMISSION => {
-            client.decommission(DecommissionRequest::default()).await?;
-        }
-        NodeUpdateOperation::CANCEL_DECOMMISSION => {
-            client
-                .cancel_decommission(CancelDecommissionRequest::default())
-                .await?;
-        }
-    };
-
-    Ok(())
+    let url = format!(
+        "http://{}:{}/admin?update_state={}",
+        ip.as_str(),
+        http_port,
+        target_status.as_str()
+    );
+    let resp = reqwest::get(url).await?;
+    if !resp.status().is_success() {
+        Err(anyhow::anyhow!(
+            "Failed to update remote server status: {}",
+            resp.text().await?
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
 impl Action for NodeUpdateAction {
     async fn act(&self) -> anyhow::Result<()> {
-        let operation = match self.target_status.as_str() {
-            "decommission" => NodeUpdateOperation::DECOMMISSION,
-            "cancel_decommission" => NodeUpdateOperation::CANCEL_DECOMMISSION,
-            _ => panic!("invalid target status: {}", self.target_status),
-        };
-
         // use pipeline mode
         if self.ip_and_port.is_none() {
             let stdin = io::stdin();
@@ -232,7 +217,13 @@ impl Action for NodeUpdateAction {
 
             let mut failed_ips = vec![];
             for info in &infos {
-                match do_decommission_operation(info.ip.clone(), info.grpc_port, &operation).await {
+                match update_remote_server_status(
+                    info.ip.clone(),
+                    info.http_port as usize,
+                    self.target_status.to_string(),
+                )
+                .await
+                {
                     Ok(_) => success_pb.inc(1),
                     Err(_) => {
                         fail_pb.inc(1);
@@ -257,12 +248,12 @@ impl Action for NodeUpdateAction {
         let url = self.ip_and_port.clone().unwrap();
         let splits: Vec<_> = url.split(":").collect();
         if splits.len() != 2 {
-            panic!("Illegal id_and_port: {:?}", self.ip_and_port);
+            panic!("Illegal [id:http_port]={:?}", self.ip_and_port);
         }
-        do_decommission_operation(
+        update_remote_server_status(
             splits.get(0).unwrap().to_string(),
             splits.get(1).unwrap().parse()?,
-            &operation,
+            self.target_status.to_string(),
         )
         .await?;
 
