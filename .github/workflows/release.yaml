@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - "master"
-      - "ctl-build"
     tags:
       - "v*.*.*"
 
