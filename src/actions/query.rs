@@ -49,7 +49,7 @@ impl From<&ServerInfo> for TableInstance {
             ip: info.ip.to_string(),
             grpc_port: info.grpc_port,
             urpc_port: info.netty_port,
-            http_port: info.jetty_port as i32,
+            http_port: info.http_port as i32,
             total_memory: HumanBytes(info.total_memory as u64).to_string(),
             used_memory: HumanBytes(info.used_memory as u64).to_string(),
             event_num_in_flush: info.event_num_in_flush,
