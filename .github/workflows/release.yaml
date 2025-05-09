@@ -4,18 +4,53 @@ on:
   push:
     branches:
       - "master"
+      - "simplifyRelease"
     tags:
       - "v*.*.*"
 
 jobs:
-  macos-arm64-build:
-    name: Build riffle-ctl for macOS ARM64
-    runs-on: macos-latest
+  build-and-upload:
+    name: Build and Upload
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - name: macos-arm64
+            os: macos-latest
+            build_command: cargo build --release --bin riffle-ctl
+            artifact_name: riffle-ctl-macos-arm64-${{ github.ref_name }}
+            artifact_path: target/release/riffle-ctl
+            docker_compose: ""
+          - name: linux-arm64-anolisos8
+            os: ubuntu-22.04-arm
+            build_command: docker compose -f dev/anolisos8/arm64/docker-compose.yml up
+            artifact_name: riffle-server-linux-arm64-anolisos8-${{ github.ref_name }}
+            artifact_path: target-docker/release/riffle-server
+            docker_compose: dev/anolisos8/arm64/docker-compose.yml
+          - name: linux-amd64-centos7
+            os: ubuntu-22.04
+            build_command: docker compose -f dev/centos7/amd64/docker-compose.yml up
+            artifact_name: riffle-server-linux-amd64-centos7-${{ github.ref_name }}
+            artifact_path: target-docker/release/riffle-server
+            docker_compose: dev/centos7/amd64/docker-compose.yml
+          - name: linux-amd64-anolisos8
+            os: ubuntu-22.04
+            build_command: docker compose -f dev/anolisos8/amd64/docker-compose.yml up
+            artifact_name: riffle-server-linux-amd64-anolisos8-${{ github.ref_name }}
+            artifact_path: target-docker/release/riffle-server
+            docker_compose: dev/anolisos8/amd64/docker-compose.yml
 
     steps:
+      - name: Remove unnecessary files (Linux only)
+        if: ${{ matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-22.04-arm' }}
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+
       - uses: actions/checkout@v4
 
-      - name: Set up cache for Cargo
+      - name: Set up cache for Cargo (macOS only)
+        if: ${{ matrix.os == 'macos-latest' }}
         uses: actions/cache@v3
         with:
           path: |
@@ -25,141 +60,34 @@ jobs:
           restore-keys: |
             cargo-cache-${{ runner.os }}-
 
-      - name: Install proto3
+      - name: Install proto3 (macOS only)
+        if: ${{ matrix.os == 'macos-latest' }}
         run: |
           brew install protobuf
           protoc --version
 
-      - name: Set up Rust
+      - name: Set up Rust (macOS only)
+        if: ${{ matrix.os == 'macos-latest' }}
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: nightly
           override: true
 
-      - name: Build riffle-ctl binary
-        run: |
-          cargo build --release --bin riffle-ctl
-
-      - name: Upload riffle-ctl binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: riffle-ctl-macos-arm64-${{ github.ref_name }}
-          path: target/release/riffle-ctl
-
-      - name: Upload binaries to release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: target/release/riffle-ctl
-          asset_name: riffle-ctl-macos-arm64-${{ github.ref_name }}
-          tag: ${{ github.ref }}
-
-  linux-arm64-anolisos8:
-    name: arm64-anolisos8
-    runs-on: ubuntu-22.04-arm
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: prompt/actions-commit-hash@v3
-        id: commit
-
       - name: Build
-        run: |
-          docker compose -f dev/anolisos8/arm64/docker-compose.yml up
+        run: ${{ matrix.build_command }}
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: riffle-server-linux-arm64-anolisos8-${{ github.ref_name }}
-          path: target-docker/release/riffle-server
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_path }}
 
       - name: Upload binaries to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: target-docker/release/riffle-server
-          asset_name: riffle-server-linux-arm64-anolisos8-${{ github.ref_name }}
-          tag: ${{ github.ref }}
-
-  linux-amd64-centos7:
-    name: amd64-centos7
-    runs-on: ubuntu-22.04
-
-    steps:
-      - name: Remove unnecessary files
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-
-      - uses: actions/checkout@v4
-
-      - uses: prompt/actions-commit-hash@v3
-        id: commit
-
-      - uses: ScribeMD/rootless-docker@0.2.2
-        if: steps.cache.outputs.cache-hit != 'true'
-
-      - uses: ScribeMD/docker-cache@0.5.0
-        if: steps.cache.outputs.cache-hit != 'true'
-        with:
-          key: docker-centos7-${{ hashFiles('dev/centos7/amd64/Dockerfile') }}
-
-      - name: Build
-        run: |
-          docker compose -f dev/centos7/amd64/docker-compose.yml up
-
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: riffle-server-linux-amd64-centos7-${{ github.ref_name }}
-          path: target-docker/release/riffle-server
-
-      - name: Upload binaries to release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: target-docker/release/riffle-server
-          asset_name: riffle-server-linux-amd64-centos7-${{ github.ref_name }}
-          tag: ${{ github.ref }}
-
-  linux-amd64-anolisos8:
-    name: amd64-anolisos8
-    runs-on: ubuntu-22.04
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: prompt/actions-commit-hash@v3
-        id: commit
-
-      - uses: ScribeMD/rootless-docker@0.2.2
-        if: steps.cache.outputs.cache-hit != 'true'
-
-      - uses: ScribeMD/docker-cache@0.5.0
-        if: steps.cache.outputs.cache-hit != 'true'
-        with:
-          key: docker-anolisos8-${{ hashFiles('dev/anolisos8/amd64/Dockerfile') }}
-
-      - name: Build
-        run: |
-          docker compose -f dev/anolisos8/amd64/docker-compose.yml up
-
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: riffle-server-linux-amd64-anolisos8-${{ github.ref_name }}
-          path: target-docker/release/riffle-server
-
-      - name: Upload binaries to release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: target-docker/release/riffle-server
-          asset_name: riffle-server-linux-amd64-anolisos8-${{ github.ref_name }}
+          file: ${{ matrix.artifact_path }}
+          asset_name: ${{ matrix.artifact_name }}
           tag: ${{ github.ref }}
