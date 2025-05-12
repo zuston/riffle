@@ -131,14 +131,14 @@ fn main() -> Result<()> {
     // Set the system hook
     set_panic_hook();
 
-    init_global_variable(&config);
-
     info!("The specified config show as follows: \n {:#?}", config);
 
     // check the port availability
     if config.fallback_random_ports_enable {
         check_and_update_ports(&mut config);
     }
+
+    init_global_variable(&config);
 
     // inject ports into process env
     inject_ports_into_env(&config);
