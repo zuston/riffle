@@ -12,20 +12,18 @@ use std::cmp::min;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::Mutex;
 use tokio::time::{self, Duration, Instant};
 
 #[derive(Clone)]
 pub struct TokenBucketLimiter {
     inner: Arc<Mutex<Inner>>,
-    notify: Arc<Notify>,
+    throughput: f64,
 }
 
 struct Inner {
-    capacity: usize,
-    tokens: usize,
-    fill_rate: usize,
-    last_refill: Instant,
+    throughput_quota: f64,
+    last: Instant,
 }
 
 impl TokenBucketLimiter {
@@ -35,145 +33,77 @@ impl TokenBucketLimiter {
         fill_rate: usize,
         refill_interval: Duration,
     ) -> Self {
-        let limiter = TokenBucketLimiter {
+        TokenBucketLimiter {
             inner: Arc::new(Mutex::new(Inner {
-                capacity,
-                tokens: capacity,
-                fill_rate,
-                last_refill: Instant::now(),
+                throughput_quota: 0f64,
+                last: Instant::now(),
             })),
-            notify: Arc::new(Default::default()),
-        };
-
-        let l_c = limiter.clone();
-        rt.clone()
-            .spawn_with_await_tree("TokenBucketLimiter periodical refill", async move {
-                l_c.refill_periodically(refill_interval).await;
-            });
-
-        limiter
+            throughput: capacity as f64,
+        }
     }
 
-    pub async fn acquire(&self, amount: usize) {
-        let mut inner = self
-            .inner
-            .lock()
-            .instrument_await("waiting the limiter lock...")
-            .await;
+    pub async fn acquire(&self, throughput: usize) {
+        let throughput = throughput as f64;
+
         loop {
-            let capacity = inner.capacity;
-            let mut amount = amount;
-            if amount > capacity {
-                warn!(
-                    "Illegal acquiring operation. Acquired val: {} but capacity: {}",
-                    amount, capacity
-                );
-                amount = capacity / 2;
+            let mut inner = self.inner.lock().await;
+            let now = Instant::now();
+            let dur = now.duration_since(inner.last).as_secs_f64();
+            let throughput_refill = dur * self.throughput;
+            inner.last = now;
+            inner.throughput_quota =
+                f64::min(inner.throughput_quota + throughput_refill, self.throughput);
+
+            let throughput_refill_duration =
+                if self.throughput == 0.0 || inner.throughput_quota >= 0.0 {
+                    Duration::ZERO
+                } else {
+                    Duration::from_secs_f64(-inner.throughput_quota / self.throughput)
+                };
+            let wait = throughput_refill_duration;
+            if wait.is_zero() {
+                if self.throughput > 0.0 {
+                    inner.throughput_quota -= throughput;
+                    return;
+                }
             }
 
-            let tokens = &mut inner.tokens;
-            if *tokens >= amount {
-                *tokens -= amount;
-                return;
-            } else {
-                drop(inner);
-                self.notify
-                    .notified()
-                    .instrument_await("waiting the notify")
-                    .await;
-                inner = self
-                    .inner
-                    .lock()
-                    .instrument_await("waiting the inner lock...")
-                    .await;
-            }
-        }
-    }
-
-    async fn refill(&self) {
-        let inner = &mut self
-            .inner
-            .lock()
-            .instrument_await("waiting the limiter lock...")
-            .await;
-        if inner.tokens >= inner.capacity {
-            return;
-        }
-
-        let now = Instant::now();
-        let elapsed = now.duration_since(inner.last_refill);
-
-        let new_tokens = (elapsed.as_secs_f64() * inner.fill_rate as f64) as usize;
-        if new_tokens > 0 {
-            inner.tokens = min(inner.tokens + new_tokens, inner.capacity);
-            inner.last_refill = now;
-            self.notify.notify_waiters();
-        }
-    }
-
-    async fn refill_periodically(&self, period: Duration) {
-        loop {
-            tokio::time::sleep(period)
-                .instrument_await("sleeping...")
-                .await;
-            self.refill().instrument_await("refilling...").await;
+            drop(inner);
+            tokio::time::sleep(wait).await;
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::runtime::manager::RuntimeManager;
-    use crate::store::local::io_layer_throttle::TokenBucketLimiter;
-    use std::sync::atomic::Ordering::SeqCst;
-    use std::time::Duration;
+    use super::*;
     use tokio::time::Instant;
 
-    // if the acquired token exceeding the capacity, it will fallback
-    #[test]
-    fn test_token_exceed_capacity() {
-        const capacity: usize = 4;
-        let runtime_manager: RuntimeManager = Default::default();
-        let limiter = TokenBucketLimiter::new(
-            &runtime_manager.localfile_write_runtime,
-            capacity,
-            1,
-            Duration::from_secs(1),
+    #[tokio::test]
+    async fn test_token_bucket_basic() {
+        let rt = RuntimeRef::default();
+        let capacity = 10;
+        let fill_rate = 10;
+        let refill_interval = Duration::from_secs(1);
+        let limiter = TokenBucketLimiter::new(&rt, capacity, fill_rate, refill_interval);
+
+        // First acquire should not wait
+        let start = Instant::now();
+        limiter.acquire(5).await;
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_millis(10),
+            "First acquire should not wait"
         );
 
-        let runtime = runtime_manager.default_runtime.clone();
-        runtime.block_on(limiter.acquire(capacity + 1));
-
-        let l_c = limiter.clone();
-        assert_eq!(
-            2,
-            runtime.block_on(async move { l_c.inner.lock().await.tokens })
+        // Acquire more than capacity should wait
+        let start = Instant::now();
+        limiter.acquire(20).await;
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(100),
+            "Should wait due to rate limiting"
         );
-    }
-
-    #[test]
-    fn test_token_bucket() {
-        let rc: RuntimeManager = Default::default();
-        let limiter =
-            TokenBucketLimiter::new(&rc.localfile_write_runtime, 4, 1, Duration::from_secs(1));
-
-        let rt = rc.default_runtime.clone();
-
-        // case1
-        rt.block_on(limiter.acquire(4));
-        let l_c = limiter.clone();
-        assert_eq!(0, rt.block_on(async move { l_c.inner.lock().await.tokens }));
-
-        // case2
-        let start_time = Instant::now();
-        rt.block_on(limiter.acquire(2));
-        assert!(start_time.elapsed() >= Duration::from_secs(2));
-
-        // case3
-        awaitility::at_most(Duration::from_secs(5)).until(|| {
-            let l_c = limiter.clone();
-            rt.block_on(async move { l_c.inner.lock().await.tokens }) == 4
-        });
     }
 }
 
