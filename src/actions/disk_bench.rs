@@ -23,6 +23,7 @@ pub struct DiskBenchAction {
     r_runtime: RuntimeRef,
 
     throttle_enabled: bool,
+    throttle_runtime: RuntimeRef,
 }
 
 impl DiskBenchAction {
@@ -36,6 +37,7 @@ impl DiskBenchAction {
     ) -> Self {
         let write_runtime = create_runtime(concurrency, "write pool");
         let read_runtime = create_runtime(concurrency, "read pool");
+        let throttle_runtime = create_runtime(10, "throttle layer pool");
         Self {
             dir,
             concurrency,
@@ -45,6 +47,7 @@ impl DiskBenchAction {
             r_runtime: read_runtime,
             disk_throughput: util::parse_raw_to_bytesize(disk_throughput.as_str()),
             throttle_enabled,
+            throttle_runtime,
         }
     }
 }
@@ -66,9 +69,8 @@ impl Action for DiskBenchAction {
         )));
         if self.throttle_enabled {
             println!("Throttle is enabled.");
-            let throttle_runtime = create_runtime(10, "throttle layer pool");
             builder = builder.layer(crate::store::local::io_layer_throttle::ThrottleLayer::new(
-                &throttle_runtime,
+                &self.throttle_runtime,
                 (self.disk_throughput * 2) as usize,
                 self.disk_throughput as usize,
                 Duration::from_millis(10),
