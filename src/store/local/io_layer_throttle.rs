@@ -8,11 +8,11 @@ use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use log::warn;
+use parking_lot::Mutex;
 use std::cmp::min;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use tokio::time::{self, Duration, Instant};
 
 #[derive(Clone)]
@@ -46,29 +46,30 @@ impl TokenBucketLimiter {
         let throughput = throughput as f64;
 
         loop {
-            let mut inner = self.inner.lock().await;
-            let now = Instant::now();
-            let dur = now.duration_since(inner.last).as_secs_f64();
-            let throughput_refill = dur * self.throughput;
-            inner.last = now;
-            inner.throughput_quota =
-                f64::min(inner.throughput_quota + throughput_refill, self.throughput);
+            let wait = {
+                let mut inner = self.inner.lock();
+                let now = Instant::now();
+                let dur = now.duration_since(inner.last).as_secs_f64();
+                let throughput_refill = dur * self.throughput;
+                inner.last = now;
+                inner.throughput_quota =
+                    f64::min(inner.throughput_quota + throughput_refill, self.throughput);
 
-            let throughput_refill_duration =
-                if self.throughput == 0.0 || inner.throughput_quota >= 0.0 {
-                    Duration::ZERO
-                } else {
-                    Duration::from_secs_f64(-inner.throughput_quota / self.throughput)
-                };
-            let wait = throughput_refill_duration;
-            if wait.is_zero() {
-                if self.throughput > 0.0 {
-                    inner.throughput_quota -= throughput;
-                    return;
+                let throughput_refill_duration =
+                    if self.throughput == 0.0 || inner.throughput_quota >= 0.0 {
+                        Duration::ZERO
+                    } else {
+                        Duration::from_secs_f64(-inner.throughput_quota / self.throughput)
+                    };
+                let wait = throughput_refill_duration;
+                if wait.is_zero() {
+                    if self.throughput > 0.0 {
+                        inner.throughput_quota -= throughput;
+                        return;
+                    }
                 }
-            }
-
-            drop(inner);
+                wait
+            };
             tokio::time::sleep(wait).await;
         }
     }
