@@ -66,8 +66,9 @@ impl Action for DiskBenchAction {
         )));
         if self.throttle_enabled {
             println!("Throttle is enabled.");
+            let throttle_runtime = create_runtime(10, "throttle layer pool");
             builder = builder.layer(crate::store::local::io_layer_throttle::ThrottleLayer::new(
-                &self.w_runtime,
+                &throttle_runtime,
                 (self.disk_throughput * 2) as usize,
                 self.disk_throughput as usize,
                 Duration::from_millis(10),
