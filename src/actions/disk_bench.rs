@@ -21,6 +21,8 @@ pub struct DiskBenchAction {
 
     w_runtime: RuntimeRef,
     r_runtime: RuntimeRef,
+
+    throttle_enabled: bool,
 }
 
 impl DiskBenchAction {
@@ -30,6 +32,7 @@ impl DiskBenchAction {
         write_size: String,
         batch_number: usize,
         disk_throughput: String,
+        throttle_enabled: bool,
     ) -> Self {
         let write_runtime = create_runtime(concurrency, "write pool");
         let read_runtime = create_runtime(concurrency, "read pool");
@@ -41,6 +44,7 @@ impl DiskBenchAction {
             w_runtime: write_runtime,
             r_runtime: read_runtime,
             disk_throughput: util::parse_raw_to_bytesize(disk_throughput.as_str()),
+            throttle_enabled,
         }
     }
 }
@@ -57,17 +61,20 @@ impl Action for DiskBenchAction {
             None,
         );
 
-        let io_handler = crate::store::local::layers::OperatorBuilder::new(Arc::new(Box::new(
+        let mut builder = crate::store::local::layers::OperatorBuilder::new(Arc::new(Box::new(
             underlying_io_handler,
-        )))
-        .layer(crate::store::local::io_layer_throttle::ThrottleLayer::new(
-            &self.w_runtime,
-            (self.disk_throughput * 2) as usize,
-            self.disk_throughput as usize,
-            Duration::from_millis(10),
-        ))
-        .build();
-        let io_handler = Arc::new(io_handler);
+        )));
+        if self.throttle_enabled {
+            println!("Throttle is enabled.");
+            builder = builder.layer(crate::store::local::io_layer_throttle::ThrottleLayer::new(
+                &self.w_runtime,
+                (self.disk_throughput * 2) as usize,
+                self.disk_throughput as usize,
+                Duration::from_millis(10),
+            ));
+        }
+
+        let io_handler = Arc::new(builder.build());
 
         let test_data = vec![0u8; self.write_size as usize];
         let batch_number = self.batch_number;
