@@ -10,6 +10,7 @@ use clap::builder::Str;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::sync::Arc;
 use std::time::Duration;
+use tracing_subscriber::fmt::format;
 use crate::config::{Config, RuntimeConfig};
 use crate::http::HttpMonitorService;
 
@@ -137,7 +138,7 @@ impl Action for DiskBenchAction {
             let written_bytes = written_bytes.clone();
 
             let runtime = self.w_runtimes.get(i).unwrap();
-            let handle = runtime.spawn(async move {
+            let handle = runtime.spawn_with_await_tree(format!("w-{}", i).as_str(), async move {
                 let mut file_written_bytes = 0;
                 for batch in 0..batch_number {
                     let bytes = Bytes::copy_from_slice(&data);

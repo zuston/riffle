@@ -224,7 +224,9 @@ impl LocalIO for ThrottleLayerWrapper {
             .instrument_await(format!("Getting IO limiter permits: {}", written_bytes))
             .await;
 
-        self.handler.direct_append(path, written_bytes, data).await
+        self.handler.direct_append(path, written_bytes, data)
+            .instrument_await("appending...")
+            .await
     }
 
     async fn direct_read(
