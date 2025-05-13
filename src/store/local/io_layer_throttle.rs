@@ -20,6 +20,9 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 use tokio::time::{self, Duration, Instant};
 
+// todo: using real retrieved byte size
+const READ_PER_BYTES: usize = 1024 * 1024 * 14;
+
 #[derive(Clone)]
 pub struct ThroughputBasedRateLimiter {
     limiter: Arc<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
@@ -173,6 +176,14 @@ impl LocalIO for ThrottleLayerWrapper {
         offset: i64,
         length: Option<i64>,
     ) -> anyhow::Result<Bytes, WorkerError> {
+        self.limiter
+            .acquire(READ_PER_BYTES)
+            .instrument_await(format!(
+                "[BUFFER_READ] Getting IO limiter permits: {}",
+                READ_PER_BYTES
+            ))
+            .await;
+
         self.handler.read(path, offset, length).await
     }
 
@@ -197,7 +208,10 @@ impl LocalIO for ThrottleLayerWrapper {
         let acquired = data.len();
         self.limiter
             .acquire(acquired)
-            .instrument_await(format!("Getting IO limiter permits: {}", acquired))
+            .instrument_await(format!(
+                "[DIRECT_APPEND] Getting IO limiter permits: {}",
+                acquired
+            ))
             .await;
 
         self.handler
@@ -212,10 +226,12 @@ impl LocalIO for ThrottleLayerWrapper {
         offset: i64,
         length: i64,
     ) -> anyhow::Result<Bytes, WorkerError> {
-        let len = 14 * 1024 * 1024;
         self.limiter
-            .acquire(len as usize)
-            .instrument_await(format!("Getting IO limiter permits: {}", len))
+            .acquire(READ_PER_BYTES)
+            .instrument_await(format!(
+                "[DIRECT_READ] Getting IO limiter permits: {}",
+                READ_PER_BYTES
+            ))
             .await;
 
         self.handler.direct_read(path, offset, length).await
