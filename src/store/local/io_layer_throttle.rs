@@ -45,7 +45,7 @@ impl TokenBucketLimiter {
     }
 
     pub async fn acquire(&self, throughput: usize) {
-        if throughput <= 0 { 
+        if throughput <= 0 {
             return;
         }
         let throughput = NonZeroU32::new(throughput as u32).unwrap();
@@ -58,7 +58,9 @@ impl TokenBucketLimiter {
                     // Not enough capacity right now, but could be allowed later
                     let wait_duration = wait.wait_time_from(self.clock.now());
                     // Wait and try again...
-                    tokio::time::sleep(wait_duration).await;
+                    tokio::time::sleep(wait_duration)
+                        .instrument_await("Throttle limited. waiting...")
+                        .await;
                 },
                 Err(insufficient) => {
                     // Will never be allowed (requested more than maximum capacity)

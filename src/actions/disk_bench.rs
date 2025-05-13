@@ -1,5 +1,5 @@
 use crate::actions::Action;
-use crate::runtime::manager::create_runtime;
+use crate::runtime::manager::{create_runtime, RuntimeManager};
 use crate::runtime::{Runtime, RuntimeRef};
 use crate::store::local::sync_io::SyncLocalIO;
 use crate::store::BytesWrapper;
@@ -10,6 +10,8 @@ use clap::builder::Str;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::sync::Arc;
 use std::time::Duration;
+use crate::config::{Config, RuntimeConfig};
+use crate::http::HttpMonitorService;
 
 pub struct DiskBenchAction {
     dir: String,
@@ -37,6 +39,18 @@ impl DiskBenchAction {
         disk_throughput: String,
         throttle_enabled: bool,
     ) -> Self {
+        let mut config = Config::create_simple_config();
+        config.http_port = 19999;
+        let runtime_manager = RuntimeManager::from(RuntimeConfig {
+            read_thread_num: 1,
+            localfile_write_thread_num: 1,
+            hdfs_write_thread_num: 1,
+            http_thread_num: 1,
+            default_thread_num: 1,
+            dispatch_thread_num: 1,
+        });
+        HttpMonitorService::init(&config, runtime_manager);
+        
         let write_runtime = create_runtime(concurrency, "write pool");
         let read_runtime = create_runtime(concurrency, "read pool");
         let throttle_runtime = create_runtime(10, "throttle layer pool");
