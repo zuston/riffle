@@ -45,6 +45,9 @@ impl TokenBucketLimiter {
     }
 
     pub async fn acquire(&self, throughput: usize) {
+        if throughput <= 0 { 
+            return;
+        }
         let throughput = NonZeroU32::new(throughput as u32).unwrap();
         loop {
             match self.limiter.check_n(throughput) {
