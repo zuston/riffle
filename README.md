@@ -230,3 +230,43 @@ labels = { env = "production", service = "my_service" }
    - seconds=30: Profiling lasts for 30 seconds.
 
    Then open the URL <your-ip>:8081/ui/flamegraph in your browser to view the flamegraph:
+
+## Disk Throughput and Latency Optimization
+
+### Predictable Performance with Direct I/O Flushes
+
+Buffered I/O in Linux relies on the page cache, which can introduce latency spikes. 
+To achieve predictable performance, flushing via direct I/O is recommended to bypass the page cache.
+However, read requests can benefit from buffered I/O to achieve better long-tail latency performance.
+
+To enable this feature, add the following configuration to your config.toml file.
+
+```shell
+[localfile_store]
+...
+data_paths = ["xxxxx"]
+direct_io_enable = true
+direct_io_read_enable = false
+...
+```
+
+### Disk IO Throttle
+
+To ensure both flush throughput and read latency, limiting read/write concurrency alone is insufficient. 
+Therefore, Riffle introduces a disk throttle mechanism to fully utilize disk throughput.
+
+To validate the effectiveness of this throttle mechanism, the disk-bench command is provided in the riffle-ctl binary. 
+You can apply pressure to the system using the following command:
+
+```shell
+./riffle-ctl disk-bench --dir /data1/bench --batch-number 100 --concurrency 200 --write-size 10M --disk-throughput 100M -t
+```
+
+To enable this feature, add the following configuration to your config.toml file.
+
+```shell
+[io_limiter]
+# Maximum throughput per second for a single disk
+capacity = 1G
+```
+
