@@ -21,12 +21,12 @@ use std::sync::Arc;
 use tokio::time::{self, Duration, Instant};
 
 #[derive(Clone)]
-pub struct TokenBucketLimiter {
+pub struct ThroughputBasedRateLimiter {
     limiter: Arc<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
     clock: DefaultClock,
 }
 
-impl TokenBucketLimiter {
+impl ThroughputBasedRateLimiter {
     pub fn new(capacity: usize) -> Self {
         let clock = DefaultClock::default();
         let capacity = NonZeroU32::new(capacity as u32).unwrap();
@@ -34,7 +34,7 @@ impl TokenBucketLimiter {
             Quota::per_second(capacity),
             clock.clone(),
         ));
-        TokenBucketLimiter { limiter, clock }
+        ThroughputBasedRateLimiter { limiter, clock }
     }
 
     pub async fn acquire(&self, throughput: usize) {
@@ -105,7 +105,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_token_bucket_limiter_rate_limit() {
-        let limiter = TokenBucketLimiter::new(10); // 10 tokens per second
+        let limiter = ThroughputBasedRateLimiter::new(10); // 10 tokens per second
 
         // First acquire(5) should proceed immediately
         limiter.acquire(5).await;
@@ -140,14 +140,14 @@ impl ThrottleLayer {
 impl Layer for ThrottleLayer {
     fn wrap(&self, handler: Handler) -> Handler {
         Arc::new(Box::new(ThrottleLayerWrapper {
-            limiter: TokenBucketLimiter::new(self.capacity),
+            limiter: ThroughputBasedRateLimiter::new(self.capacity),
             handler,
         }))
     }
 }
 
 struct ThrottleLayerWrapper {
-    limiter: TokenBucketLimiter,
+    limiter: ThroughputBasedRateLimiter,
     handler: Handler,
 }
 

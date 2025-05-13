@@ -15,7 +15,7 @@ use crate::runtime::manager::RuntimeManager;
 use crate::store::local::io_layer_await_tree::AwaitTreeLayer;
 use crate::store::local::io_layer_metrics::MetricsLayer;
 use crate::store::local::io_layer_retry::{IoLayerRetry, RETRY_MAX_TIMES};
-use crate::store::local::io_layer_throttle::{ThrottleLayer, TokenBucketLimiter};
+use crate::store::local::io_layer_throttle::{ThrottleLayer, ThroughputBasedRateLimiter};
 use crate::store::local::io_layer_timeout::TimeoutLayer;
 use crate::store::local::layers::{Handler, OperatorBuilder};
 use crate::store::local::sync_io::SyncLocalIO;
