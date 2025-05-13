@@ -27,7 +27,7 @@ use std::time::Instant;
 use std::{fs, io};
 
 static IO_BUFFER_POOL: Lazy<IoBufferPool> =
-    Lazy::new(|| IoBufferPool::new(ALIGN * 1024 * 4, 64 * 4 * 10));
+    Lazy::new(|| IoBufferPool::new(ALIGN * 1024 * 4, 64 * 4));
 
 #[derive(Clone)]
 pub struct SyncLocalIO {

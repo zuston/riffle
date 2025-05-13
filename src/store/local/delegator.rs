@@ -94,12 +94,9 @@ impl LocalDiskDelegator {
         let mut operator_builder = OperatorBuilder::new(Arc::new(Box::new(underlying_io_handler)));
         if let Some(conf) = config.io_limiter.as_ref() {
             let capacity = util::parse_raw_to_bytesize(&conf.capacity) as usize;
-            let rate = util::parse_raw_to_bytesize(&conf.fill_rate_of_per_second) as usize;
             operator_builder = operator_builder.layer(ThrottleLayer::new(
                 &runtime_manager.localfile_write_runtime,
                 capacity,
-                rate,
-                Duration::from_millis(conf.refill_interval_of_milliseconds),
             ));
         }
         let io_handler = operator_builder

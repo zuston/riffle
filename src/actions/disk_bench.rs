@@ -1,4 +1,6 @@
 use crate::actions::Action;
+use crate::config::{Config, RuntimeConfig};
+use crate::http::HttpMonitorService;
 use crate::runtime::manager::{create_runtime, RuntimeManager};
 use crate::runtime::{Runtime, RuntimeRef};
 use crate::store::local::sync_io::SyncLocalIO;
@@ -11,8 +13,8 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing_subscriber::fmt::format;
-use crate::config::{Config, RuntimeConfig};
-use crate::http::HttpMonitorService;
+
+const NUMBER_PER_THREAD_POOL: usize = 10;
 
 pub struct DiskBenchAction {
     dir: String,
@@ -26,7 +28,7 @@ pub struct DiskBenchAction {
 
     throttle_enabled: bool,
     throttle_runtime: RuntimeRef,
-    
+
     http_server: Box<crate::http::http_service::PoemHTTPServer>,
     runtime_manager: RuntimeManager,
 }
@@ -40,6 +42,7 @@ impl DiskBenchAction {
         disk_throughput: String,
         throttle_enabled: bool,
     ) -> Self {
+        // Creating the http service to inspect the await tree stack
         let mut config = Config::create_simple_config();
         let port = util::find_available_port().unwrap();
         config.http_port = port;
@@ -55,13 +58,11 @@ impl DiskBenchAction {
         });
         let http = HttpMonitorService::init(&config, runtime_manager.clone());
 
-        let write_runtime = create_runtime(concurrency, "write pool");
-        let read_runtime = create_runtime(concurrency, "read pool");
         let throttle_runtime = create_runtime(10, "throttle layer pool");
 
         let mut w_runtimes = Vec::new();
         for _ in 0..concurrency {
-            w_runtimes.push(create_runtime(10, "pool"));
+            w_runtimes.push(create_runtime(NUMBER_PER_THREAD_POOL, "writing pool"));
         }
 
         Self {
@@ -98,9 +99,7 @@ impl Action for DiskBenchAction {
             println!("Throttle is enabled.");
             builder = builder.layer(crate::store::local::io_layer_throttle::ThrottleLayer::new(
                 &self.throttle_runtime,
-                (self.disk_throughput * 2) as usize,
                 self.disk_throughput as usize,
-                Duration::from_millis(10),
             ));
         }
 

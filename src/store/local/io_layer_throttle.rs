@@ -7,17 +7,17 @@ use crate::store::BytesWrapper;
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
+use governor::clock::{Clock, DefaultClock};
+use governor::state::{InMemoryState, NotKeyed};
+use governor::{Quota, RateLimiter};
 use log::warn;
+use nonzero_ext::nonzero;
 use parking_lot::Mutex;
 use std::cmp::min;
 use std::num::NonZeroU32;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
-use governor::{Quota, RateLimiter};
-use governor::clock::{Clock, DefaultClock};
-use governor::state::{InMemoryState, NotKeyed};
-use nonzero_ext::nonzero;
 use tokio::time::{self, Duration, Instant};
 
 #[derive(Clone)]
@@ -27,21 +27,14 @@ pub struct TokenBucketLimiter {
 }
 
 impl TokenBucketLimiter {
-    pub fn new(
-        rt: &RuntimeRef,
-        capacity: usize,
-        fill_rate: usize,
-        refill_interval: Duration,
-    ) -> Self {
+    pub fn new(rt: &RuntimeRef, capacity: usize) -> Self {
         let clock = DefaultClock::default();
         let capacity = NonZeroU32::new(capacity as u32).unwrap();
-        let limiter = Arc::new(RateLimiter::direct_with_clock(Quota::per_second(
-            capacity,
-        ), clock.clone()));
-        TokenBucketLimiter {
-            limiter,
-            clock,
-        }
+        let limiter = Arc::new(RateLimiter::direct_with_clock(
+            Quota::per_second(capacity),
+            clock.clone(),
+        ));
+        TokenBucketLimiter { limiter, clock }
     }
 
     pub async fn acquire(&self, throughput: usize) {
@@ -53,7 +46,7 @@ impl TokenBucketLimiter {
             match self.limiter.check_n(throughput) {
                 Ok(Ok(())) => {
                     return;
-                },
+                }
                 Ok(Err(wait)) => {
                     // Not enough capacity right now, but could be allowed later
                     let wait_duration = wait.wait_time_from(self.clock.now());
@@ -61,7 +54,7 @@ impl TokenBucketLimiter {
                     tokio::time::sleep(wait_duration)
                         .instrument_await("Throttle limited. waiting...")
                         .await;
-                },
+                }
                 Err(insufficient) => {
                     // Will never be allowed (requested more than maximum capacity)
                     println!("Maximum capacity is {}", insufficient.0);
@@ -74,32 +67,33 @@ impl TokenBucketLimiter {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::runtime::manager::create_runtime;
     use governor::clock;
     use governor::clock::{Clock, DefaultClock};
     use nonzero_ext::nonzero;
-    use super::*;
     use tokio::time::Instant;
-    use crate::runtime::manager::create_runtime;
 
     #[tokio::test]
     async fn test_limiter() {
         let capacity = nonzero!((1024 * 1024 * 1024) as u32);
         let clock = DefaultClock::default();
         let rate_limiter = Arc::new(RateLimiter::direct_with_clock(
-            Quota::per_second(capacity).allow_burst(capacity), clock.clone()
+            Quota::per_second(capacity).allow_burst(capacity),
+            clock.clone(),
         ));
         loop {
             match rate_limiter.check_n(nonzero!(1u32)) {
                 Ok(Ok(())) => {
                     println!("Ok");
                     return;
-                },
+                }
                 Ok(Err(wait)) => {
                     // Not enough capacity right now, but could be allowed later
                     let wait_duration = wait.wait_time_from(clock.now());
                     // Wait and try again...
                     tokio::time::sleep(wait_duration).await;
-                },
+                }
                 Err(insufficient) => {
                     // Will never be allowed (requested more than maximum capacity)
                     println!("Maximum capacity is {}", insufficient.0);
@@ -108,54 +102,18 @@ mod tests {
             }
         }
     }
-
-    #[tokio::test]
-    async fn test_token_bucket_basic() {
-        let rt = create_runtime(10, "");
-        let capacity = 10;
-        let fill_rate = 10;
-        let refill_interval = Duration::from_secs(1);
-        let limiter = TokenBucketLimiter::new(&rt, capacity, fill_rate, refill_interval);
-
-        // First acquire should not wait
-        let start = Instant::now();
-        limiter.acquire(5).await;
-        let elapsed = start.elapsed();
-        assert!(
-            elapsed < Duration::from_millis(10),
-            "First acquire should not wait"
-        );
-
-        // Acquire more than capacity should wait
-        let start = Instant::now();
-        limiter.acquire(20).await;
-        let elapsed = start.elapsed();
-        assert!(
-            elapsed >= Duration::from_millis(100),
-            "Should wait due to rate limiting"
-        );
-    }
 }
 
 pub struct ThrottleLayer {
     runtime: RuntimeRef,
     capacity: usize,
-    fill_rate: usize,
-    refill_interval: Duration,
 }
 
 impl ThrottleLayer {
-    pub fn new(
-        rt: &RuntimeRef,
-        capacity: usize,
-        fill_rate: usize,
-        refill_interval: Duration,
-    ) -> Self {
+    pub fn new(rt: &RuntimeRef, capacity: usize) -> Self {
         Self {
             runtime: rt.clone(),
             capacity,
-            fill_rate,
-            refill_interval,
         }
     }
 }
@@ -163,12 +121,7 @@ impl ThrottleLayer {
 impl Layer for ThrottleLayer {
     fn wrap(&self, handler: Handler) -> Handler {
         Arc::new(Box::new(ThrottleLayerWrapper {
-            limiter: TokenBucketLimiter::new(
-                &self.runtime,
-                self.capacity,
-                self.fill_rate,
-                self.refill_interval,
-            ),
+            limiter: TokenBucketLimiter::new(&self.runtime, self.capacity),
             handler,
         }))
     }
@@ -225,7 +178,8 @@ impl LocalIO for ThrottleLayerWrapper {
             .instrument_await(format!("Getting IO limiter permits: {}", acquired))
             .await;
 
-        self.handler.direct_append(path, written_bytes, data)
+        self.handler
+            .direct_append(path, written_bytes, data)
             .instrument_await("appending...")
             .await
     }

@@ -44,7 +44,7 @@ pub struct HttpMonitorService;
 impl HttpMonitorService {
     pub fn init(config: &Config, runtime_manager: RuntimeManager) -> Box<PoemHTTPServer> {
         let http_port = config.http_port;
-        println!(
+        info!(
             "Starting http monitor service with port:[{}] ......",
             http_port
         );
