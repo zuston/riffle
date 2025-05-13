@@ -40,7 +40,9 @@ impl DiskBenchAction {
         throttle_enabled: bool,
     ) -> Self {
         let mut config = Config::create_simple_config();
-        config.http_port = 19999;
+        let port = util::find_available_port().unwrap();
+        config.http_port = port;
+        println!("Expose http service with port: {}", port);
         let runtime_manager = RuntimeManager::from(RuntimeConfig {
             read_thread_num: 1,
             localfile_write_thread_num: 1,
@@ -50,7 +52,7 @@ impl DiskBenchAction {
             dispatch_thread_num: 1,
         });
         HttpMonitorService::init(&config, runtime_manager);
-        
+
         let write_runtime = create_runtime(concurrency, "write pool");
         let read_runtime = create_runtime(concurrency, "read pool");
         let throttle_runtime = create_runtime(10, "throttle layer pool");
