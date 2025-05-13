@@ -110,7 +110,8 @@ impl Action for DiskBenchAction {
             let progress = progress.clone();
             let written_bytes = written_bytes.clone();
 
-            let handle = self.w_runtime.spawn(async move {
+            let runtime = create_runtime(4, "write pool");
+            let handle = runtime.spawn(async move {
                 let mut file_written_bytes = 0;
                 for batch in 0..batch_number {
                     let bytes = Bytes::copy_from_slice(&data);
