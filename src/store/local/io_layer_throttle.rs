@@ -27,7 +27,7 @@ pub struct TokenBucketLimiter {
 }
 
 impl TokenBucketLimiter {
-    pub fn new(rt: &RuntimeRef, capacity: usize) -> Self {
+    pub fn new(capacity: usize) -> Self {
         let clock = DefaultClock::default();
         let capacity = NonZeroU32::new(capacity as u32).unwrap();
         let limiter = Arc::new(RateLimiter::direct_with_clock(
@@ -75,7 +75,7 @@ mod tests {
     use tokio::time::Instant;
 
     #[tokio::test]
-    async fn test_limiter() {
+    async fn test_effectiveness() {
         let capacity = nonzero!((1024 * 1024 * 1024) as u32);
         let clock = DefaultClock::default();
         let rate_limiter = Arc::new(RateLimiter::direct_with_clock(
@@ -102,6 +102,25 @@ mod tests {
             }
         }
     }
+
+    #[tokio::test]
+    async fn test_token_bucket_limiter_rate_limit() {
+        let limiter = TokenBucketLimiter::new(10); // 10 tokens per second
+
+        // First acquire(5) should proceed immediately
+        limiter.acquire(5).await;
+
+        let start = Instant::now();
+        // Second acquire(5) should trigger waiting due to rate limit
+        limiter.acquire(6).await;
+        let elapsed = start.elapsed();
+
+        // Assert that elapsed time is greater than 100millis (some small threshold)
+        assert!(
+            elapsed > Duration::from_millis(100),
+            "Expected rate limiting delay"
+        );
+    }
 }
 
 pub struct ThrottleLayer {
@@ -121,7 +140,7 @@ impl ThrottleLayer {
 impl Layer for ThrottleLayer {
     fn wrap(&self, handler: Handler) -> Handler {
         Arc::new(Box::new(ThrottleLayerWrapper {
-            limiter: TokenBucketLimiter::new(&self.runtime, self.capacity),
+            limiter: TokenBucketLimiter::new(self.capacity),
             handler,
         }))
     }
