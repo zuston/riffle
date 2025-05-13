@@ -219,9 +219,10 @@ impl LocalIO for ThrottleLayerWrapper {
         written_bytes: usize,
         data: BytesWrapper,
     ) -> anyhow::Result<(), WorkerError> {
+        let acquired = data.len();
         self.limiter
-            .acquire(written_bytes)
-            .instrument_await(format!("Getting IO limiter permits: {}", written_bytes))
+            .acquire(acquired)
+            .instrument_await(format!("Getting IO limiter permits: {}", acquired))
             .await;
 
         self.handler.direct_append(path, written_bytes, data)
