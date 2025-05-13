@@ -22,6 +22,8 @@ pub struct DiskBenchAction {
     w_runtime: RuntimeRef,
     r_runtime: RuntimeRef,
 
+    w_runtimes: Vec<RuntimeRef>,
+
     throttle_enabled: bool,
     throttle_runtime: RuntimeRef,
 }
@@ -38,6 +40,12 @@ impl DiskBenchAction {
         let write_runtime = create_runtime(concurrency, "write pool");
         let read_runtime = create_runtime(concurrency, "read pool");
         let throttle_runtime = create_runtime(10, "throttle layer pool");
+
+        let mut w_runtimes = Vec::new();
+        for _ in 0..concurrency {
+            w_runtimes.push(create_runtime(10, "pool"));
+        }
+
         Self {
             dir,
             concurrency,
@@ -48,6 +56,7 @@ impl DiskBenchAction {
             disk_throughput: util::parse_raw_to_bytesize(disk_throughput.as_str()),
             throttle_enabled,
             throttle_runtime,
+            w_runtimes,
         }
     }
 }
@@ -110,7 +119,7 @@ impl Action for DiskBenchAction {
             let progress = progress.clone();
             let written_bytes = written_bytes.clone();
 
-            let runtime = create_runtime(4, "write pool");
+            let runtime = self.w_runtimes.get(i).unwrap();
             let handle = runtime.spawn(async move {
                 let mut file_written_bytes = 0;
                 for batch in 0..batch_number {
