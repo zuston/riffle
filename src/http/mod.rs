@@ -19,7 +19,7 @@ mod admin;
 mod apps;
 mod await_tree;
 mod historical_apps;
-mod http_service;
+pub mod http_service;
 mod metrics;
 mod profile_cpu;
 mod profile_heap;
@@ -42,14 +42,15 @@ use serde::{Deserialize, Serialize};
 
 pub struct HttpMonitorService;
 impl HttpMonitorService {
-    pub fn init(config: &Config, runtime_manager: RuntimeManager) {
+    pub fn init(config: &Config, runtime_manager: RuntimeManager) -> Box<PoemHTTPServer> {
         let http_port = config.http_port;
-        info!(
+        println!(
             "Starting http monitor service with port:[{}] ......",
             http_port
         );
         let server = new_server();
         server.start(runtime_manager, http_port);
+        server
     }
 }
 

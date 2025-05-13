@@ -154,6 +154,7 @@ impl NodeUpdateAction {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 struct NodeUpdateInfo {
     ip: String,
+    grpc_port: i32,
     http_port: i32,
 }
 

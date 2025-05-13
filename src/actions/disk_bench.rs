@@ -21,13 +21,13 @@ pub struct DiskBenchAction {
 
     disk_throughput: u64,
 
-    w_runtime: RuntimeRef,
-    r_runtime: RuntimeRef,
-
     w_runtimes: Vec<RuntimeRef>,
 
     throttle_enabled: bool,
     throttle_runtime: RuntimeRef,
+    
+    http_server: Box<crate::http::http_service::PoemHTTPServer>,
+    runtime_manager: RuntimeManager,
 }
 
 impl DiskBenchAction {
@@ -43,15 +43,16 @@ impl DiskBenchAction {
         let port = util::find_available_port().unwrap();
         config.http_port = port;
         println!("Expose http service with port: {}", port);
+
         let runtime_manager = RuntimeManager::from(RuntimeConfig {
-            read_thread_num: 1,
-            localfile_write_thread_num: 1,
+            read_thread_num: 512,
+            localfile_write_thread_num: 512,
             hdfs_write_thread_num: 1,
-            http_thread_num: 1,
-            default_thread_num: 1,
-            dispatch_thread_num: 1,
+            http_thread_num: 4,
+            default_thread_num: 4,
+            dispatch_thread_num: 4,
         });
-        HttpMonitorService::init(&config, runtime_manager);
+        let http = HttpMonitorService::init(&config, runtime_manager.clone());
 
         let write_runtime = create_runtime(concurrency, "write pool");
         let read_runtime = create_runtime(concurrency, "read pool");
@@ -67,12 +68,12 @@ impl DiskBenchAction {
             concurrency,
             write_size: util::parse_raw_to_bytesize(write_size.as_str()),
             batch_number,
-            w_runtime: write_runtime,
-            r_runtime: read_runtime,
             disk_throughput: util::parse_raw_to_bytesize(disk_throughput.as_str()),
             throttle_enabled,
             throttle_runtime,
             w_runtimes,
+            http_server: http,
+            runtime_manager,
         }
     }
 }
@@ -82,8 +83,8 @@ impl Action for DiskBenchAction {
     async fn act(&self) -> anyhow::Result<()> {
         let t_runtime = tokio::runtime::Handle::current();
         let underlying_io_handler = SyncLocalIO::new(
-            &self.r_runtime,
-            &self.w_runtime,
+            &self.runtime_manager.read_runtime,
+            &self.runtime_manager.localfile_write_runtime,
             self.dir.as_str(),
             None,
             None,
@@ -191,7 +192,6 @@ impl Action for DiskBenchAction {
             bytesize::to_string(write_speed as u64, true)
         );
         println!("{}", log);
-
         Ok(())
     }
 }
