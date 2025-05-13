@@ -57,7 +57,10 @@ impl ThroughputBasedRateLimiter {
                 }
                 Err(insufficient) => {
                     // Will never be allowed (requested more than maximum capacity)
-                    println!("Maximum capacity is {}", insufficient.0);
+                    warn!(
+                        "Illegal acquired val: {}. insufficient capacity: {}",
+                        throughput, insufficient.0
+                    );
                     return;
                 }
             }
