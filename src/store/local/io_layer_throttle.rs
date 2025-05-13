@@ -10,20 +10,20 @@ use bytes::Bytes;
 use log::warn;
 use parking_lot::Mutex;
 use std::cmp::min;
+use std::num::NonZeroU32;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
+use governor::{Quota, RateLimiter};
+use governor::clock::{Clock, DefaultClock};
+use governor::state::{InMemoryState, NotKeyed};
+use nonzero_ext::nonzero;
 use tokio::time::{self, Duration, Instant};
 
 #[derive(Clone)]
 pub struct TokenBucketLimiter {
-    inner: Arc<Mutex<Inner>>,
-    throughput: f64,
-}
-
-struct Inner {
-    throughput_quota: f64,
-    last: Instant,
+    limiter: Arc<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
+    clock: DefaultClock,
 }
 
 impl TokenBucketLimiter {
@@ -33,56 +33,80 @@ impl TokenBucketLimiter {
         fill_rate: usize,
         refill_interval: Duration,
     ) -> Self {
+        let clock = DefaultClock::default();
+        let capacity = NonZeroU32::new(capacity as u32).unwrap();
+        let limiter = Arc::new(RateLimiter::direct_with_clock(Quota::per_second(
+            capacity,
+        ), clock.clone()));
         TokenBucketLimiter {
-            inner: Arc::new(Mutex::new(Inner {
-                throughput_quota: 0f64,
-                last: Instant::now(),
-            })),
-            throughput: capacity as f64,
+            limiter,
+            clock,
         }
     }
 
     pub async fn acquire(&self, throughput: usize) {
-        let throughput = throughput as f64;
-
+        let throughput = NonZeroU32::new(throughput as u32).unwrap();
         loop {
-            let wait = {
-                let mut inner = self.inner.lock();
-                let now = Instant::now();
-                let dur = now.duration_since(inner.last).as_secs_f64();
-                let throughput_refill = dur * self.throughput;
-                inner.last = now;
-                inner.throughput_quota =
-                    f64::min(inner.throughput_quota + throughput_refill, self.throughput);
-
-                let throughput_refill_duration =
-                    if self.throughput == 0.0 || inner.throughput_quota >= 0.0 {
-                        Duration::ZERO
-                    } else {
-                        Duration::from_secs_f64(-inner.throughput_quota / self.throughput)
-                    };
-                let wait = throughput_refill_duration;
-                if wait.is_zero() {
-                    if self.throughput > 0.0 {
-                        inner.throughput_quota -= throughput;
-                        return;
-                    }
+            match self.limiter.check_n(throughput) {
+                Ok(Ok(())) => {
+                    return;
+                },
+                Ok(Err(wait)) => {
+                    // Not enough capacity right now, but could be allowed later
+                    let wait_duration = wait.wait_time_from(self.clock.now());
+                    // Wait and try again...
+                    tokio::time::sleep(wait_duration).await;
+                },
+                Err(insufficient) => {
+                    // Will never be allowed (requested more than maximum capacity)
+                    println!("Maximum capacity is {}", insufficient.0);
+                    return;
                 }
-                wait
-            };
-            tokio::time::sleep(wait).await;
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use governor::clock;
+    use governor::clock::{Clock, DefaultClock};
+    use nonzero_ext::nonzero;
     use super::*;
     use tokio::time::Instant;
+    use crate::runtime::manager::create_runtime;
+
+    #[tokio::test]
+    async fn test_limiter() {
+        let capacity = nonzero!((1024 * 1024 * 1024) as u32);
+        let clock = DefaultClock::default();
+        let rate_limiter = Arc::new(RateLimiter::direct_with_clock(
+            Quota::per_second(capacity).allow_burst(capacity), clock.clone()
+        ));
+        loop {
+            match rate_limiter.check_n(nonzero!(1u32)) {
+                Ok(Ok(())) => {
+                    println!("Ok");
+                    return;
+                },
+                Ok(Err(wait)) => {
+                    // Not enough capacity right now, but could be allowed later
+                    let wait_duration = wait.wait_time_from(clock.now());
+                    // Wait and try again...
+                    tokio::time::sleep(wait_duration).await;
+                },
+                Err(insufficient) => {
+                    // Will never be allowed (requested more than maximum capacity)
+                    println!("Maximum capacity is {}", insufficient.0);
+                    return;
+                }
+            }
+        }
+    }
 
     #[tokio::test]
     async fn test_token_bucket_basic() {
-        let rt = RuntimeRef::default();
+        let rt = create_runtime(10, "");
         let capacity = 10;
         let fill_rate = 10;
         let refill_interval = Duration::from_secs(1);

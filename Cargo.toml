@@ -133,6 +133,8 @@ datafusion = "46.0.1"
 csv = "1.3.1"
 reqwest = { version = "0.12.15", features = ["json"] }
 indicatif = "0.17.11"
+governor = "0.10.0"
+nonzero_ext = "0.3.0"
 
 [dependencies.logforth]
 version = "0.19.1"
