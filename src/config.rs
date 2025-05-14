@@ -142,8 +142,6 @@ pub struct LocalfileStoreConfig {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct IoLimiterConfig {
     pub capacity: String,
-    pub fill_rate_of_per_second: String,
-    pub refill_interval_of_milliseconds: u64,
 }
 
 impl Default for LocalfileStoreConfig {

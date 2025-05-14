@@ -7,195 +7,138 @@ use crate::store::BytesWrapper;
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
+use governor::clock::{Clock, DefaultClock};
+use governor::state::{InMemoryState, NotKeyed};
+use governor::{Quota, RateLimiter};
 use log::warn;
+use nonzero_ext::nonzero;
+use parking_lot::Mutex;
 use std::cmp::min;
+use std::num::NonZeroU32;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
-use tokio::sync::{Mutex, Notify};
 use tokio::time::{self, Duration, Instant};
 
+// todo: using real retrieved byte size
+const READ_PER_BYTES: usize = 1024 * 1024 * 14;
+
 #[derive(Clone)]
-pub struct TokenBucketLimiter {
-    inner: Arc<Mutex<Inner>>,
-    notify: Arc<Notify>,
+pub struct ThroughputBasedRateLimiter {
+    limiter: Arc<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
+    clock: DefaultClock,
 }
 
-struct Inner {
-    capacity: usize,
-    tokens: usize,
-    fill_rate: usize,
-    last_refill: Instant,
-}
-
-impl TokenBucketLimiter {
-    pub fn new(
-        rt: &RuntimeRef,
-        capacity: usize,
-        fill_rate: usize,
-        refill_interval: Duration,
-    ) -> Self {
-        let limiter = TokenBucketLimiter {
-            inner: Arc::new(Mutex::new(Inner {
-                capacity,
-                tokens: capacity,
-                fill_rate,
-                last_refill: Instant::now(),
-            })),
-            notify: Arc::new(Default::default()),
-        };
-
-        let l_c = limiter.clone();
-        rt.clone()
-            .spawn_with_await_tree("TokenBucketLimiter periodical refill", async move {
-                l_c.refill_periodically(refill_interval).await;
-            });
-
-        limiter
+impl ThroughputBasedRateLimiter {
+    pub fn new(capacity: usize) -> Self {
+        let clock = DefaultClock::default();
+        let capacity = NonZeroU32::new(capacity as u32).unwrap();
+        let limiter = Arc::new(RateLimiter::direct_with_clock(
+            Quota::per_second(capacity),
+            clock.clone(),
+        ));
+        ThroughputBasedRateLimiter { limiter, clock }
     }
 
-    pub async fn acquire(&self, amount: usize) {
-        let mut inner = self
-            .inner
-            .lock()
-            .instrument_await("waiting the limiter lock...")
-            .await;
-        loop {
-            let capacity = inner.capacity;
-            let mut amount = amount;
-            if amount > capacity {
-                warn!(
-                    "Illegal acquiring operation. Acquired val: {} but capacity: {}",
-                    amount, capacity
-                );
-                amount = capacity / 2;
-            }
-
-            let tokens = &mut inner.tokens;
-            if *tokens >= amount {
-                *tokens -= amount;
-                return;
-            } else {
-                drop(inner);
-                self.notify
-                    .notified()
-                    .instrument_await("waiting the notify")
-                    .await;
-                inner = self
-                    .inner
-                    .lock()
-                    .instrument_await("waiting the inner lock...")
-                    .await;
-            }
-        }
-    }
-
-    async fn refill(&self) {
-        let inner = &mut self
-            .inner
-            .lock()
-            .instrument_await("waiting the limiter lock...")
-            .await;
-        if inner.tokens >= inner.capacity {
+    pub async fn acquire(&self, throughput: usize) {
+        if throughput <= 0 {
             return;
         }
-
-        let now = Instant::now();
-        let elapsed = now.duration_since(inner.last_refill);
-
-        let new_tokens = (elapsed.as_secs_f64() * inner.fill_rate as f64) as usize;
-        if new_tokens > 0 {
-            inner.tokens = min(inner.tokens + new_tokens, inner.capacity);
-            inner.last_refill = now;
-            self.notify.notify_waiters();
-        }
-    }
-
-    async fn refill_periodically(&self, period: Duration) {
+        let throughput = NonZeroU32::new(throughput as u32).unwrap();
         loop {
-            tokio::time::sleep(period)
-                .instrument_await("sleeping...")
-                .await;
-            self.refill().instrument_await("refilling...").await;
+            match self.limiter.check_n(throughput) {
+                Ok(Ok(())) => {
+                    return;
+                }
+                Ok(Err(wait)) => {
+                    // Not enough capacity right now, but could be allowed later
+                    let wait_duration = wait.wait_time_from(self.clock.now());
+                    // Wait and try again...
+                    tokio::time::sleep(wait_duration)
+                        .instrument_await("Throttle limited. waiting...")
+                        .await;
+                }
+                Err(insufficient) => {
+                    // Will never be allowed (requested more than maximum capacity)
+                    warn!(
+                        "Illegal acquired val: {}. insufficient capacity: {}",
+                        throughput, insufficient.0
+                    );
+                    return;
+                }
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::runtime::manager::RuntimeManager;
-    use crate::store::local::io_layer_throttle::TokenBucketLimiter;
-    use std::sync::atomic::Ordering::SeqCst;
-    use std::time::Duration;
+    use super::*;
+    use crate::runtime::manager::create_runtime;
+    use governor::clock;
+    use governor::clock::{Clock, DefaultClock};
+    use nonzero_ext::nonzero;
     use tokio::time::Instant;
 
-    // if the acquired token exceeding the capacity, it will fallback
-    #[test]
-    fn test_token_exceed_capacity() {
-        const capacity: usize = 4;
-        let runtime_manager: RuntimeManager = Default::default();
-        let limiter = TokenBucketLimiter::new(
-            &runtime_manager.localfile_write_runtime,
-            capacity,
-            1,
-            Duration::from_secs(1),
-        );
-
-        let runtime = runtime_manager.default_runtime.clone();
-        runtime.block_on(limiter.acquire(capacity + 1));
-
-        let l_c = limiter.clone();
-        assert_eq!(
-            2,
-            runtime.block_on(async move { l_c.inner.lock().await.tokens })
-        );
+    #[tokio::test]
+    async fn test_effectiveness() {
+        let capacity = nonzero!((1024 * 1024 * 1024) as u32);
+        let clock = DefaultClock::default();
+        let rate_limiter = Arc::new(RateLimiter::direct_with_clock(
+            Quota::per_second(capacity).allow_burst(capacity),
+            clock.clone(),
+        ));
+        loop {
+            match rate_limiter.check_n(nonzero!(1u32)) {
+                Ok(Ok(())) => {
+                    println!("Ok");
+                    return;
+                }
+                Ok(Err(wait)) => {
+                    // Not enough capacity right now, but could be allowed later
+                    let wait_duration = wait.wait_time_from(clock.now());
+                    // Wait and try again...
+                    tokio::time::sleep(wait_duration).await;
+                }
+                Err(insufficient) => {
+                    // Will never be allowed (requested more than maximum capacity)
+                    println!("Maximum capacity is {}", insufficient.0);
+                    return;
+                }
+            }
+        }
     }
 
-    #[test]
-    fn test_token_bucket() {
-        let rc: RuntimeManager = Default::default();
-        let limiter =
-            TokenBucketLimiter::new(&rc.localfile_write_runtime, 4, 1, Duration::from_secs(1));
+    #[tokio::test]
+    async fn test_token_bucket_limiter_rate_limit() {
+        let limiter = ThroughputBasedRateLimiter::new(10); // 10 tokens per second
 
-        let rt = rc.default_runtime.clone();
+        // First acquire(5) should proceed immediately
+        limiter.acquire(5).await;
 
-        // case1
-        rt.block_on(limiter.acquire(4));
-        let l_c = limiter.clone();
-        assert_eq!(0, rt.block_on(async move { l_c.inner.lock().await.tokens }));
+        let start = Instant::now();
+        // Second acquire(5) should trigger waiting due to rate limit
+        limiter.acquire(6).await;
+        let elapsed = start.elapsed();
 
-        // case2
-        let start_time = Instant::now();
-        rt.block_on(limiter.acquire(2));
-        assert!(start_time.elapsed() >= Duration::from_secs(2));
-
-        // case3
-        awaitility::at_most(Duration::from_secs(5)).until(|| {
-            let l_c = limiter.clone();
-            rt.block_on(async move { l_c.inner.lock().await.tokens }) == 4
-        });
+        // Assert that elapsed time is greater than 100millis (some small threshold)
+        assert!(
+            elapsed > Duration::from_millis(100),
+            "Expected rate limiting delay"
+        );
     }
 }
 
 pub struct ThrottleLayer {
     runtime: RuntimeRef,
     capacity: usize,
-    fill_rate: usize,
-    refill_interval: Duration,
 }
 
 impl ThrottleLayer {
-    pub fn new(
-        rt: &RuntimeRef,
-        capacity: usize,
-        fill_rate: usize,
-        refill_interval: Duration,
-    ) -> Self {
+    pub fn new(rt: &RuntimeRef, capacity: usize) -> Self {
         Self {
             runtime: rt.clone(),
             capacity,
-            fill_rate,
-            refill_interval,
         }
     }
 }
@@ -203,19 +146,14 @@ impl ThrottleLayer {
 impl Layer for ThrottleLayer {
     fn wrap(&self, handler: Handler) -> Handler {
         Arc::new(Box::new(ThrottleLayerWrapper {
-            limiter: TokenBucketLimiter::new(
-                &self.runtime,
-                self.capacity,
-                self.fill_rate,
-                self.refill_interval,
-            ),
+            limiter: ThroughputBasedRateLimiter::new(self.capacity),
             handler,
         }))
     }
 }
 
 struct ThrottleLayerWrapper {
-    limiter: TokenBucketLimiter,
+    limiter: ThroughputBasedRateLimiter,
     handler: Handler,
 }
 
@@ -238,6 +176,14 @@ impl LocalIO for ThrottleLayerWrapper {
         offset: i64,
         length: Option<i64>,
     ) -> anyhow::Result<Bytes, WorkerError> {
+        self.limiter
+            .acquire(READ_PER_BYTES)
+            .instrument_await(format!(
+                "[BUFFER_READ] Getting IO limiter permits: {}",
+                READ_PER_BYTES
+            ))
+            .await;
+
         self.handler.read(path, offset, length).await
     }
 
@@ -259,12 +205,19 @@ impl LocalIO for ThrottleLayerWrapper {
         written_bytes: usize,
         data: BytesWrapper,
     ) -> anyhow::Result<(), WorkerError> {
+        let acquired = data.len();
         self.limiter
-            .acquire(written_bytes)
-            .instrument_await(format!("Getting IO limiter permits: {}", written_bytes))
+            .acquire(acquired)
+            .instrument_await(format!(
+                "[DIRECT_APPEND] Getting IO limiter permits: {}",
+                acquired
+            ))
             .await;
 
-        self.handler.direct_append(path, written_bytes, data).await
+        self.handler
+            .direct_append(path, written_bytes, data)
+            .instrument_await("appending...")
+            .await
     }
 
     async fn direct_read(
@@ -273,10 +226,12 @@ impl LocalIO for ThrottleLayerWrapper {
         offset: i64,
         length: i64,
     ) -> anyhow::Result<Bytes, WorkerError> {
-        let len = 14 * 1024 * 1024;
         self.limiter
-            .acquire(len as usize)
-            .instrument_await(format!("Getting IO limiter permits: {}", len))
+            .acquire(READ_PER_BYTES)
+            .instrument_await(format!(
+                "[DIRECT_READ] Getting IO limiter permits: {}",
+                READ_PER_BYTES
+            ))
             .await;
 
         self.handler.direct_read(path, offset, length).await

@@ -29,6 +29,8 @@ enum Commands {
         write_size: String,
         #[arg(short, long)]
         disk_throughput: String,
+        #[arg(short, long)]
+        throttle_enabled: bool,
     },
 
     #[command(
@@ -85,12 +87,14 @@ fn main() -> anyhow::Result<()> {
             concurrency,
             write_size,
             disk_throughput,
+            throttle_enabled,
         } => Box::new(DiskBenchAction::new(
             dir,
-            batch_number,
-            write_size,
             concurrency,
+            write_size,
+            batch_number,
             disk_throughput,
+            throttle_enabled,
         )),
 
         Commands::DiskProfiler {

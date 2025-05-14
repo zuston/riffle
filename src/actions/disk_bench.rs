@@ -1,5 +1,7 @@
 use crate::actions::Action;
-use crate::runtime::manager::create_runtime;
+use crate::config::{Config, RuntimeConfig};
+use crate::http::HttpMonitorService;
+use crate::runtime::manager::{create_runtime, RuntimeManager};
 use crate::runtime::{Runtime, RuntimeRef};
 use crate::store::local::sync_io::SyncLocalIO;
 use crate::store::BytesWrapper;
@@ -10,6 +12,9 @@ use clap::builder::Str;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::sync::Arc;
 use std::time::Duration;
+use tracing_subscriber::fmt::format;
+
+const NUMBER_PER_THREAD_POOL: usize = 10;
 
 pub struct DiskBenchAction {
     dir: String,
@@ -19,8 +24,13 @@ pub struct DiskBenchAction {
 
     disk_throughput: u64,
 
-    w_runtime: RuntimeRef,
-    r_runtime: RuntimeRef,
+    w_runtimes: Vec<RuntimeRef>,
+
+    throttle_enabled: bool,
+    throttle_runtime: RuntimeRef,
+
+    http_server: Box<crate::http::http_service::PoemHTTPServer>,
+    runtime_manager: RuntimeManager,
 }
 
 impl DiskBenchAction {
@@ -30,17 +40,42 @@ impl DiskBenchAction {
         write_size: String,
         batch_number: usize,
         disk_throughput: String,
+        throttle_enabled: bool,
     ) -> Self {
-        let write_runtime = create_runtime(concurrency, "write pool");
-        let read_runtime = create_runtime(concurrency, "read pool");
+        // Creating the http service to inspect the await tree stack
+        let mut config = Config::create_simple_config();
+        let port = util::find_available_port().unwrap();
+        config.http_port = port;
+        println!("Expose http service with port: {}", port);
+
+        let runtime_manager = RuntimeManager::from(RuntimeConfig {
+            read_thread_num: 512,
+            localfile_write_thread_num: 512,
+            hdfs_write_thread_num: 1,
+            http_thread_num: 4,
+            default_thread_num: 4,
+            dispatch_thread_num: 4,
+        });
+        let http = HttpMonitorService::init(&config, runtime_manager.clone());
+
+        let throttle_runtime = create_runtime(10, "throttle layer pool");
+
+        let mut w_runtimes = Vec::new();
+        for _ in 0..concurrency {
+            w_runtimes.push(create_runtime(NUMBER_PER_THREAD_POOL, "writing pool"));
+        }
+
         Self {
             dir,
             concurrency,
             write_size: util::parse_raw_to_bytesize(write_size.as_str()),
             batch_number,
-            w_runtime: write_runtime,
-            r_runtime: read_runtime,
             disk_throughput: util::parse_raw_to_bytesize(disk_throughput.as_str()),
+            throttle_enabled,
+            throttle_runtime,
+            w_runtimes,
+            http_server: http,
+            runtime_manager,
         }
     }
 }
@@ -50,24 +85,25 @@ impl Action for DiskBenchAction {
     async fn act(&self) -> anyhow::Result<()> {
         let t_runtime = tokio::runtime::Handle::current();
         let underlying_io_handler = SyncLocalIO::new(
-            &self.r_runtime,
-            &self.w_runtime,
+            &self.runtime_manager.read_runtime,
+            &self.runtime_manager.localfile_write_runtime,
             self.dir.as_str(),
             None,
             None,
         );
 
-        let io_handler = crate::store::local::layers::OperatorBuilder::new(Arc::new(Box::new(
+        let mut builder = crate::store::local::layers::OperatorBuilder::new(Arc::new(Box::new(
             underlying_io_handler,
-        )))
-        .layer(crate::store::local::io_layer_throttle::ThrottleLayer::new(
-            &self.w_runtime,
-            (self.disk_throughput * 2) as usize,
-            self.disk_throughput as usize,
-            Duration::from_millis(10),
-        ))
-        .build();
-        let io_handler = Arc::new(io_handler);
+        )));
+        if self.throttle_enabled {
+            println!("Throttle is enabled.");
+            builder = builder.layer(crate::store::local::io_layer_throttle::ThrottleLayer::new(
+                &self.throttle_runtime,
+                self.disk_throughput as usize,
+            ));
+        }
+
+        let io_handler = Arc::new(builder.build());
 
         let test_data = vec![0u8; self.write_size as usize];
         let batch_number = self.batch_number;
@@ -100,7 +136,8 @@ impl Action for DiskBenchAction {
             let progress = progress.clone();
             let written_bytes = written_bytes.clone();
 
-            let handle = self.w_runtime.spawn(async move {
+            let runtime = self.w_runtimes.get(i).unwrap();
+            let handle = runtime.spawn_with_await_tree(format!("w-{}", i).as_str(), async move {
                 let mut file_written_bytes = 0;
                 for batch in 0..batch_number {
                     let bytes = Bytes::copy_from_slice(&data);
@@ -155,7 +192,6 @@ impl Action for DiskBenchAction {
             bytesize::to_string(write_speed as u64, true)
         );
         println!("{}", log);
-
         Ok(())
     }
 }
