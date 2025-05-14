@@ -193,7 +193,10 @@ impl LocalIO for ThrottleLayerWrapper {
                 .await;
         }
 
-        self.handler.read(path, offset, length).await
+        self.handler
+            .read(path, offset, length)
+            .instrument_await("In throttle layer to read")
+            .await
     }
 
     async fn delete(&self, path: &str) -> anyhow::Result<(), WorkerError> {
@@ -227,7 +230,7 @@ impl LocalIO for ThrottleLayerWrapper {
 
         self.handler
             .direct_append(path, written_bytes, data)
-            .instrument_await("appending...")
+            .instrument_await("In throttle layer to direct_append")
             .await
     }
 
@@ -247,6 +250,9 @@ impl LocalIO for ThrottleLayerWrapper {
                 .await;
         }
 
-        self.handler.direct_read(path, offset, length).await
+        self.handler
+            .direct_read(path, offset, length)
+            .instrument_await("In throttle layer to direct_read")
+            .await
     }
 }
