@@ -1,9 +1,11 @@
+use crate::config::IoLimiterConfig;
 use crate::error::WorkerError;
 use crate::runtime::manager::RuntimeManager;
 use crate::runtime::RuntimeRef;
 use crate::store::local::layers::{Handler, Layer};
 use crate::store::local::{FileStat, LocalIO};
 use crate::store::BytesWrapper;
+use crate::util;
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
@@ -131,23 +133,26 @@ mod tests {
 
 pub struct ThrottleLayer {
     runtime: RuntimeRef,
-    capacity: usize,
+    config: IoLimiterConfig,
 }
 
 impl ThrottleLayer {
-    pub fn new(rt: &RuntimeRef, capacity: usize) -> Self {
+    pub fn new(rt: &RuntimeRef, config: &IoLimiterConfig) -> Self {
         Self {
             runtime: rt.clone(),
-            capacity,
+            config: config.clone(),
         }
     }
 }
 
 impl Layer for ThrottleLayer {
     fn wrap(&self, handler: Handler) -> Handler {
+        let capacity = util::parse_raw_to_bytesize(&self.config.capacity) as usize;
         Arc::new(Box::new(ThrottleLayerWrapper {
-            limiter: ThroughputBasedRateLimiter::new(self.capacity),
+            limiter: ThroughputBasedRateLimiter::new(capacity),
             handler,
+            read_enabled: self.config.read_enable,
+            write_enabled: self.config.write_enable,
         }))
     }
 }
@@ -155,6 +160,8 @@ impl Layer for ThrottleLayer {
 struct ThrottleLayerWrapper {
     limiter: ThroughputBasedRateLimiter,
     handler: Handler,
+    read_enabled: bool,
+    write_enabled: bool,
 }
 
 unsafe impl Send for ThrottleLayerWrapper {}
@@ -176,13 +183,15 @@ impl LocalIO for ThrottleLayerWrapper {
         offset: i64,
         length: Option<i64>,
     ) -> anyhow::Result<Bytes, WorkerError> {
-        self.limiter
-            .acquire(READ_PER_BYTES)
-            .instrument_await(format!(
-                "[BUFFER_READ] Getting IO limiter permits: {}",
-                READ_PER_BYTES
-            ))
-            .await;
+        if self.read_enabled {
+            self.limiter
+                .acquire(READ_PER_BYTES)
+                .instrument_await(format!(
+                    "[BUFFER_READ] Getting IO limiter permits: {}",
+                    READ_PER_BYTES
+                ))
+                .await;
+        }
 
         self.handler.read(path, offset, length).await
     }
@@ -205,14 +214,16 @@ impl LocalIO for ThrottleLayerWrapper {
         written_bytes: usize,
         data: BytesWrapper,
     ) -> anyhow::Result<(), WorkerError> {
-        let acquired = data.len();
-        self.limiter
-            .acquire(acquired)
-            .instrument_await(format!(
-                "[DIRECT_APPEND] Getting IO limiter permits: {}",
-                acquired
-            ))
-            .await;
+        if self.write_enabled {
+            let acquired = data.len();
+            self.limiter
+                .acquire(acquired)
+                .instrument_await(format!(
+                    "[DIRECT_APPEND] Getting IO limiter permits: {}",
+                    acquired
+                ))
+                .await;
+        }
 
         self.handler
             .direct_append(path, written_bytes, data)
@@ -226,13 +237,15 @@ impl LocalIO for ThrottleLayerWrapper {
         offset: i64,
         length: i64,
     ) -> anyhow::Result<Bytes, WorkerError> {
-        self.limiter
-            .acquire(READ_PER_BYTES)
-            .instrument_await(format!(
-                "[DIRECT_READ] Getting IO limiter permits: {}",
-                READ_PER_BYTES
-            ))
-            .await;
+        if self.read_enabled {
+            self.limiter
+                .acquire(READ_PER_BYTES)
+                .instrument_await(format!(
+                    "[DIRECT_READ] Getting IO limiter permits: {}",
+                    READ_PER_BYTES
+                ))
+                .await;
+        }
 
         self.handler.direct_read(path, offset, length).await
     }

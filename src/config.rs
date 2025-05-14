@@ -142,6 +142,17 @@ pub struct LocalfileStoreConfig {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct IoLimiterConfig {
     pub capacity: String,
+    #[serde(default = "as_default_io_limit_read_enable")]
+    pub read_enable: bool,
+    #[serde(default = "as_default_io_limit_write_enable")]
+    pub write_enable: bool,
+}
+
+fn as_default_io_limit_read_enable() -> bool {
+    true
+}
+fn as_default_io_limit_write_enable() -> bool {
+    true
 }
 
 impl Default for LocalfileStoreConfig {
