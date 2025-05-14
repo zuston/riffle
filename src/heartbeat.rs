@@ -11,7 +11,7 @@ use crate::server_state_manager::ServerStateManager;
 use await_tree::InstrumentAwait;
 use log::{error, info};
 use std::time::Duration;
-use tonic::transport::Channel;
+use tonic::transport::{Channel, Error};
 
 const DEFAULT_SHUFFLE_SERVER_TAG: &str = "ss_v4";
 
@@ -54,16 +54,27 @@ impl HeartbeatTask {
         let git_commit_id = env!("GIT_COMMIT_HASH").to_string();
         let version = env!("CARGO_PKG_VERSION").to_string();
 
-        runtime_manager.default_runtime.spawn_with_await_tree(
-            "Coordinator heartbeat task",
-            async move {
-                let mut multi_coordinator_clients: Vec<CoordinatorServerClient<Channel>> =
-                    futures::future::try_join_all(coordinator_quorum.iter().map(|quorum| {
-                        CoordinatorServerClient::connect(format!("http://{}", quorum))
-                    }))
-                    .await
-                    .unwrap();
+        let mut multi_coordinator_clients = runtime_manager.default_runtime.block_on(async move {
+            let mut clients = vec![];
+            for quorum in &coordinator_quorum {
+                match CoordinatorServerClient::connect(format!("http://{}", &quorum)).await {
+                    Ok(client) => clients.push(client),
+                    Err(error) => error!(
+                        "Failed to connect to coordinator server: {}. error: {}",
+                        quorum, error
+                    ),
+                }
+            }
+            clients
+        });
 
+        if multi_coordinator_clients.len() <= 0 {
+            panic!("No active coordinator server found");
+        }
+
+        runtime_manager.default_runtime.spawn_with_await_tree(
+            "Heartbeat task with multi coordinators",
+            async move {
                 loop {
                     tokio::time::sleep(Duration::from_secs(interval_seconds as u64))
                         .instrument_await("sleeping")
