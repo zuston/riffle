@@ -97,6 +97,10 @@ impl LocalDiskDelegator {
                 &runtime_manager.localfile_write_runtime,
                 &conf,
             ));
+            info!(
+                "IO layer of throttle is enabled for disk: {}. throughput: {}/s",
+                root, conf.capacity
+            );
         }
         let io_handler = operator_builder
             .layer(TimeoutLayer::new(config.io_duration_threshold_sec))
