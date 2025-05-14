@@ -1,5 +1,5 @@
 use crate::actions::Action;
-use crate::config::{Config, RuntimeConfig};
+use crate::config::{Config, IoLimiterConfig, RuntimeConfig};
 use crate::http::HttpMonitorService;
 use crate::runtime::manager::{create_runtime, RuntimeManager};
 use crate::runtime::{Runtime, RuntimeRef};
@@ -22,7 +22,7 @@ pub struct DiskBenchAction {
     write_size: u64,
     batch_number: usize,
 
-    disk_throughput: u64,
+    disk_throughput: String,
 
     w_runtimes: Vec<RuntimeRef>,
 
@@ -70,7 +70,7 @@ impl DiskBenchAction {
             concurrency,
             write_size: util::parse_raw_to_bytesize(write_size.as_str()),
             batch_number,
-            disk_throughput: util::parse_raw_to_bytesize(disk_throughput.as_str()),
+            disk_throughput,
             throttle_enabled,
             throttle_runtime,
             w_runtimes,
@@ -97,9 +97,14 @@ impl Action for DiskBenchAction {
         )));
         if self.throttle_enabled {
             println!("Throttle is enabled.");
+            let config = IoLimiterConfig {
+                capacity: self.disk_throughput.clone(),
+                read_enable: true,
+                write_enable: true,
+            };
             builder = builder.layer(crate::store::local::io_layer_throttle::ThrottleLayer::new(
                 &self.throttle_runtime,
-                self.disk_throughput as usize,
+                &config,
             ));
         }
 
