@@ -187,8 +187,13 @@ prost-build = "0.12.1"
 [dev-dependencies]
 env_logger = "0.10.0"
 awaitility = "0.3.1"
+criterion = "0.5.1"
 
 [profile.dev]
 # re-enable debug assertions when pprof-rs fixed the reports for misaligned pointer dereferences
 #   https://github.com/rust-lang/rust/pull/98112/
 debug-assertions = false
+
+[[bench]]
+name = "conf_bytestring"
+harness = false
