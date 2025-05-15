@@ -17,7 +17,6 @@ pub type ConfigOption<T> = Arc<dyn ConfRef<T, Output = T>>;
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct ByteString {
-    pub val: String,
     pub parsed_val: u64,
 }
 
@@ -32,7 +31,7 @@ impl ByteString {
 
 impl Display for ByteString {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", &self.val)
+        write!(f, "{}", &self.parsed_val)
     }
 }
 
@@ -43,16 +42,13 @@ impl<'de> Deserialize<'de> for ByteString {
     {
         let raw = String::deserialize(deserializer)?;
         let val = raw.parse::<ByteSize>().map_err(serde::de::Error::custom)?.0;
-        Ok(ByteString {
-            val: raw,
-            parsed_val: val,
-        })
+        Ok(ByteString { parsed_val: val })
     }
 }
 
 impl Into<u64> for ByteString {
     fn into(self) -> u64 {
-        util::parse_raw_to_bytesize(&self.val)
+        self.as_u64()
     }
 }
 
