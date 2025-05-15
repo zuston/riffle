@@ -46,6 +46,8 @@ use fxhash::{FxBuildHasher, FxHasher};
 use log::{debug, info, warn};
 use std::sync::Arc;
 
+const DASHMAP_SHARD_COUNT: usize = 128;
+
 pub struct MemoryStore {
     memory_capacity: i64,
     state: DashMap<PartitionedUId, Arc<MemoryBuffer>, BuildHasherDefault<FxHasher>>,
@@ -94,8 +96,8 @@ impl MemoryStore {
         );
 
         /// the dashmap shard that will effect the lookup performance.
-        let shard_amount = conf.dashmap_shard_amount;
-        let dashmap = DashMap::with_hasher_and_shard_amount(FxBuildHasher::default(), shard_amount);
+        let dashmap =
+            DashMap::with_hasher_and_shard_amount(FxBuildHasher::default(), DASHMAP_SHARD_COUNT);
 
         MemoryStore {
             state: dashmap,

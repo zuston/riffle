@@ -30,17 +30,10 @@ pub struct MemoryStoreConfig {
     pub buffer_ticket_timeout_sec: i64,
     #[serde(default = "as_default_buffer_ticket_timeout_check_interval_sec")]
     pub buffer_ticket_check_interval_sec: i64,
-
-    #[serde(default = "as_default_dashmap_shard_amount")]
-    pub dashmap_shard_amount: usize,
 }
 
 fn as_default_buffer_ticket_timeout_check_interval_sec() -> i64 {
     10
-}
-
-fn as_default_dashmap_shard_amount() -> usize {
-    128
 }
 
 fn as_default_buffer_ticket_timeout_sec() -> i64 {
@@ -53,7 +46,6 @@ impl MemoryStoreConfig {
             capacity,
             buffer_ticket_timeout_sec: as_default_buffer_ticket_timeout_sec(),
             buffer_ticket_check_interval_sec: as_default_buffer_ticket_timeout_check_interval_sec(),
-            dashmap_shard_amount: as_default_dashmap_shard_amount(),
         }
     }
 
@@ -62,7 +54,6 @@ impl MemoryStoreConfig {
             capacity,
             buffer_ticket_timeout_sec,
             buffer_ticket_check_interval_sec: as_default_buffer_ticket_timeout_check_interval_sec(),
-            dashmap_shard_amount: as_default_dashmap_shard_amount(),
         }
     }
 }
