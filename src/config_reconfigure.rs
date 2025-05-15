@@ -197,13 +197,11 @@ mod tests {
         let conf_ref: DynamicConfRef<ByteString> = DynamicConfRef {
             key: "memory_store.capacity".to_owned(),
             value: RwLock::new(ByteString {
-                val: "1M".to_string(),
                 parsed_val: 1 * 1000 * 1000,
             }),
             callback: Default::default(),
         };
         let val = conf_ref.get();
-        assert_eq!("1M", val.val);
         let val: u64 = conf_ref.get().into();
 
         Ok(())

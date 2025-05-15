@@ -24,6 +24,12 @@ unsafe impl Send for ByteString {}
 unsafe impl Sync for ByteString {}
 
 impl ByteString {
+    pub fn new(raw_val: &str) -> Self {
+        Self {
+            parsed_val: util::parse_raw_to_bytesize(raw_val),
+        }
+    }
+
     pub fn as_u64(&self) -> u64 {
         self.parsed_val
     }
