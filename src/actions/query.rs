@@ -2,13 +2,18 @@ use crate::actions::discovery::{Discovery, ServerInfo, ServerStatus};
 use crate::util;
 use anyhow::Result;
 use csv::Writer;
+use datafusion::arrow;
+use datafusion::arrow::csv::reader::Format;
+use datafusion::arrow::csv::ReaderBuilder;
+use datafusion::datasource::MemTable;
 use datafusion::prelude::{CsvReadOptions, SessionConfig, SessionContext};
 use indicatif::HumanBytes;
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
-use std::io::Write;
+use std::io::{Cursor, Seek, Write};
 use std::ops::Deref;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tempfile::TempDir;
 
 const INSTANCES_TABLE_NAME: &str = "instances";
@@ -17,7 +22,6 @@ const ACTIVE_APPS_TABLE_NAME: &str = "active_apps";
 
 pub struct SessionContextExtend {
     ctx: SessionContext,
-    tmp_dir: TempDir,
     discovery: Discovery,
 }
 
@@ -70,101 +74,61 @@ impl SessionContextExtend {
             SessionContext::new_with_config(SessionConfig::new().with_information_schema(true));
         let self_me = Self {
             ctx,
-            tmp_dir: tempfile::tempdir().unwrap(),
             discovery: Discovery::new(&[coordinator_url]),
         };
-        self_me.register_table_instances().await.unwrap();
-        self_me.register_table_active_apps().await.unwrap();
-        self_me.register_table_historical_apps().await.unwrap();
+        self_me.register_instances().await?;
+        self_me.register_active_apps().await?;
+        self_me.register_historical_apps().await?;
         Ok(self_me)
     }
 
-    fn write_csv<T: serde::Serialize>(
-        &self,
-        instances: Vec<T>,
-        file_name: &str,
-    ) -> Result<PathBuf> {
-        let mut wtr = Writer::from_writer(vec![]);
-
-        for instance in instances {
-            wtr.serialize(instance)?;
-        }
-
-        let raw_data = String::from_utf8(wtr.into_inner()?)?;
-        let file_path = self.tmp_dir.path().join(file_name);
-
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .open(&file_path)?;
-
-        file.write_all(raw_data.as_bytes())?;
-        file.sync_all()?;
-
-        Ok(file_path)
-    }
-
-    async fn register_table_active_apps(&self) -> Result<()> {
+    async fn register_active_apps(&self) -> Result<()> {
         let apps = self.discovery.list_active_apps().await?;
-        const CSV_FILE_NAME: &str = "riffle.active.app.csv";
-        let path = self.write_csv(apps, CSV_FILE_NAME)?;
-        self.ctx
-            .register_csv(
-                ACTIVE_APPS_TABLE_NAME,
-                path.to_str().unwrap(),
-                CsvReadOptions::default().has_header(true),
-            )
-            .await?;
-
+        self.register(apps, ACTIVE_APPS_TABLE_NAME)?;
         Ok(())
     }
 
-    async fn register_table_historical_apps(&self) -> Result<()> {
+    async fn register_historical_apps(&self) -> Result<()> {
         let apps = self.discovery.list_historical_apps().await?;
-        const CSV_FILE_NAME: &str = "riffle.history.app.csv";
-
-        let path = self.write_csv(apps, CSV_FILE_NAME)?;
-
-        self.ctx
-            .register_csv(
-                HISTORICAL_APPS_TABLE_NAME,
-                path.to_str().unwrap(),
-                CsvReadOptions::default().has_header(true),
-            )
-            .await?;
-
+        self.register(apps, HISTORICAL_APPS_TABLE_NAME)?;
         Ok(())
     }
 
-    async fn register_table_instances(&self) -> Result<()> {
+    async fn register_instances(&self) -> Result<()> {
         let instances = self.discovery.list_nodes().await?;
         let instances = instances
             .iter()
             .map(|x| x.into())
             .collect::<Vec<TableInstance>>();
-        const CSV_FILE_NAME: &str = "riffle.instance.csv";
+        self.register(instances, INSTANCES_TABLE_NAME)?;
+        Ok(())
+    }
 
+    fn register<T>(&self, raw_vec: Vec<T>, table_name: &str) -> Result<()>
+    where
+        T: Serialize,
+    {
         let mut wtr = Writer::from_writer(vec![]);
-        for instance_info in instances {
-            wtr.serialize(instance_info)?;
+        for raw in raw_vec {
+            wtr.serialize(raw)?;
         }
-        let raw_data = String::from_utf8(wtr.into_inner()?)?;
-        let file_path = self.tmp_dir.path().join(CSV_FILE_NAME);
+        let raw_bytes = String::from_utf8(wtr.into_inner()?)?;
 
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .open(&file_path)?;
-        file.write_all(raw_data.as_bytes())?;
-        file.sync_all()?;
+        let mut cursor = Cursor::new(raw_bytes);
+        let (schema, _) = Format::default()
+            .with_header(true)
+            .infer_schema(&mut cursor, None)
+            .unwrap();
+        cursor.rewind()?;
+        let schema = Arc::new(schema);
 
-        self.ctx
-            .register_csv(
-                INSTANCES_TABLE_NAME,
-                file_path.to_str().unwrap(),
-                CsvReadOptions::default().has_header(true),
-            )
-            .await?;
+        let mut reader = ReaderBuilder::new(schema.clone())
+            .with_header(true)
+            .build(cursor)?;
+        let batches = reader.collect::<arrow::error::Result<Vec<_>>>()?;
+
+        let table = MemTable::try_new(schema, vec![batches])?;
+        self.ctx.register_table(table_name, Arc::new(table))?;
 
         Ok(())
     }
