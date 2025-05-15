@@ -1275,7 +1275,6 @@ pub(crate) mod test {
                 capacity: "20B".to_string(),
                 buffer_ticket_timeout_sec: 1,
                 buffer_ticket_check_interval_sec: 1,
-                dashmap_shard_amount: 16,
             }),
         );
         let _ = std::mem::replace(
