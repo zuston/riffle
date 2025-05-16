@@ -29,15 +29,15 @@ pub struct HistoricalAppInfo {
     app_id: String,
 
     // about bytes
-    pub total_bytes: usize,
+    pub total_bytes: u64,
 
     // about partitions
-    pub partition_num: usize,
-    pub huge_partition_num: usize,
+    pub partition_num: u64,
+    pub huge_partition_num: u64,
 
-    pub avg_huge_partition_bytes: usize,
-    pub max_huge_partition_bytes: usize,
-    pub min_huge_partition_bytes: usize,
+    pub avg_huge_partition_bytes: u64,
+    pub max_huge_partition_bytes: u64,
+    pub min_huge_partition_bytes: u64,
 
     pub start_timestamp: u128,
     pub end_timestamp: u128,
@@ -108,8 +108,8 @@ impl HistoricalAppManager {
         let start = Instant::now();
 
         let app_id = app.app_id.to_owned();
-        let partition_num = app.partition_number();
-        let huge_partition_num = app.huge_partition_number() as usize;
+        let partition_num = app.partition_number() as u64;
+        let huge_partition_num = app.huge_partition_number();
 
         let huge_partition_size_list = app.dump_all_huge_partitions_size().await?;
         let mut max_size = 0u64;
@@ -133,12 +133,12 @@ impl HistoricalAppManager {
 
         let historical_app = HistoricalAppInfo {
             app_id: app_id.to_owned(),
-            total_bytes: 0,
+            total_bytes: app.total_received_data_size(),
             partition_num,
             huge_partition_num,
-            avg_huge_partition_bytes: avg as usize,
-            max_huge_partition_bytes: max_size as usize,
-            min_huge_partition_bytes: min_size as usize,
+            avg_huge_partition_bytes: avg,
+            max_huge_partition_bytes: max_size,
+            min_huge_partition_bytes: min_size,
             start_timestamp: app.registry_timestamp,
             end_timestamp: now_timestamp_as_sec() as u128,
         };
