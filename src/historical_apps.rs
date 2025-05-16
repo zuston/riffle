@@ -65,7 +65,8 @@ impl HistoricalAppManager {
         let app_manager = manager.clone();
         rtm.default_runtime
             .spawn_with_await_tree("Historical app statistics", async move {
-                let interval = 300;
+                // 30 minutes
+                let interval = 60 * 30;
                 loop {
                     tokio::time::sleep(Duration::from_secs(interval))
                         .instrument_await(format!("sleeping for {} sec...", interval))
