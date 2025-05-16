@@ -143,13 +143,17 @@ fn main() -> Result<()> {
     // inject ports into process env
     inject_ports_into_env(&config);
 
+    config.conf_reload_enable;
+
     let runtime_manager = RuntimeManager::from(config.runtime_config.clone());
 
     // init the reconfigurableConfManager
-    let reconf_manager = ReconfigurableConfManager::new(
-        &config,
-        Some((args.config.as_str(), 60, &runtime_manager.default_runtime).into()),
-    )?;
+    let reload_options = if config.conf_reload_enable {
+        Some((args.config.as_str(), 60, &runtime_manager.default_runtime).into())
+    } else {
+        None
+    };
+    let reconf_manager = ReconfigurableConfManager::new(&config, reload_options)?;
 
     let storage = StorageService::init(&runtime_manager, &config, &reconf_manager);
     let app_manager_ref = AppManager::get_ref(
