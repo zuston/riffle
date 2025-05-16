@@ -220,3 +220,57 @@ impl HistoricalAppStore for SledHistoricalAppStore {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::historical_apps::{
+        HistoricalAppInfo, HistoricalAppStore, MemoryHistoricalAppStore, SledHistoricalAppStore,
+    };
+    use anyhow::Result;
+
+    async fn check_store(store: Box<dyn HistoricalAppStore>) -> Result<()> {
+        let app = HistoricalAppInfo {
+            app_id: "test_app".to_string(),
+            total_bytes: 1024,
+            partition_num: 10,
+            huge_partition_num: 2,
+            avg_huge_partition_bytes: 512,
+            max_huge_partition_bytes: 1024,
+            min_huge_partition_bytes: 256,
+            start_timestamp: 1000,
+            end_timestamp: 2000,
+        };
+
+        // Save
+        store.save(app.clone()).await?;
+        let loaded_apps = store.load().await?;
+        assert_eq!(loaded_apps.len(), 1);
+        assert_eq!(loaded_apps[0], app);
+
+        // Remove
+        store.remove(&app.app_id).await?;
+        let loaded_apps = store.load().await?;
+        assert!(loaded_apps.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_sled_store() -> Result<()> {
+        let temp_dir = tempdir::TempDir::new("test_sled_store")?;
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        println!("created the temp file path: {}", &temp_path);
+        let store = SledHistoricalAppStore::new(&temp_path);
+        check_store(Box::new(store)).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_mem_store() -> Result<()> {
+        let store = MemoryHistoricalAppStore {
+            apps: Default::default(),
+        };
+        check_store(Box::new(store)).await?;
+        Ok(())
+    }
+}
