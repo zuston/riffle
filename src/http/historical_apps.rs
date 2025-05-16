@@ -1,8 +1,10 @@
 use crate::app::APP_MANAGER_REF;
 use crate::historical_apps::HistoricalAppInfo;
 use crate::http::Handler;
+use log::info;
 use poem::web::Json;
 use poem::{handler, RouteMethod};
+use tokio::time::Instant;
 
 #[derive(Default)]
 pub struct HistoricalAppsHandler;
@@ -19,10 +21,18 @@ impl Handler for HistoricalAppsHandler {
 
 #[handler]
 async fn json() -> Json<Vec<HistoricalAppInfo>> {
+    let timer = Instant::now();
     let manager_ref = APP_MANAGER_REF.get().unwrap();
     let mut apps = vec![];
     if let Some(historical_manager) = manager_ref.get_historical_app_manager() {
         apps = historical_manager.load().await.unwrap();
     }
-    Json(apps)
+    let num = apps.len();
+    let apps = Json(apps);
+    info!(
+        "Gotten {} historical apps from http that costs {} ms",
+        num,
+        timer.elapsed().as_millis()
+    );
+    apps
 }
