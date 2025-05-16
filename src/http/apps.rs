@@ -125,7 +125,7 @@ struct AppInfo {
 
 impl From<&Arc<App>> for AppInfo {
     fn from(app: &Arc<App>) -> Self {
-        let timestamp = app.registry_timestamp;
+        let timestamp = app.start_timestamp;
         let resident_bytes = app.total_resident_data_size();
         let duration_min = milliseconds_to_minutes(util::now_timestamp_as_millis() - timestamp);
         let app_id = app.app_id.to_string();

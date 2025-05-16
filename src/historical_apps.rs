@@ -1,7 +1,7 @@
 use crate::app::App;
 use crate::config::HistoricalAppStoreBackend;
 use crate::runtime::manager::RuntimeManager;
-use crate::util::now_timestamp_as_sec;
+use crate::util::{now_timestamp_as_millis, now_timestamp_as_sec};
 use crate::{config, util};
 use anyhow::Result;
 use async_trait::async_trait;
@@ -140,8 +140,8 @@ impl HistoricalAppManager {
             avg_huge_partition_bytes: avg,
             max_huge_partition_bytes: max_size,
             min_huge_partition_bytes: min_size,
-            start_timestamp: app.registry_timestamp,
-            end_timestamp: now_timestamp_as_sec() as u128,
+            start_timestamp: app.start_timestamp,
+            end_timestamp: now_timestamp_as_millis(),
         };
         info!(
             "Saved historical app: {} cost {}(ms)",

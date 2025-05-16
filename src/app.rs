@@ -158,7 +158,7 @@ pub struct App {
     // when exceeding the partition-limit-threshold, it will be marked as huge partition
     huge_partition_number: AtomicU64,
 
-    pub(crate) registry_timestamp: u128,
+    pub(crate) start_timestamp: u128,
 
     // key: shuffle_id, val: shuffle's all block_ids bitmap
     block_id_manager: Arc<Box<dyn BlockIdManager>>,
@@ -303,7 +303,7 @@ impl App {
             total_received_data_size: Default::default(),
             total_resident_data_size: Default::default(),
             huge_partition_number: Default::default(),
-            registry_timestamp: now_timestamp_as_millis(),
+            start_timestamp: now_timestamp_as_millis(),
             block_id_manager,
             partition_split_enable,
             partition_split_threshold,
