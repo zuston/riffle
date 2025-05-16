@@ -389,6 +389,13 @@ pub struct Config {
 
     #[serde(default = "as_default_initial_unhealthy_status_enable")]
     pub initial_unhealthy_status_enable: bool,
+
+    #[serde(default = "as_default_conf_reload_enable")]
+    pub conf_reload_enable: bool,
+}
+
+fn as_default_conf_reload_enable() -> bool {
+    true
 }
 
 fn as_default_initial_unhealthy_status_enable() -> bool {
