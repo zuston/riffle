@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 use tokio::runtime::Runtime;
 use uniffle_worker::actions::disk_bench::DiskBenchAction;
 use uniffle_worker::actions::disk_profiler::DiskProfiler;
+use uniffle_worker::actions::postgres_server::PostgresServerAction;
 use uniffle_worker::actions::{
     Action, NodeUpdateAction, OutputFormat, QueryAction, ValidateAction,
 };
@@ -57,6 +58,17 @@ enum Commands {
         index_file_path: String,
         #[arg(short, long)]
         data_file_path: String,
+    },
+    #[command(
+        about = "Expose postgres protocol server to query instances/active_apps/historical_apps table"
+    )]
+    PostgresServer {
+        #[arg(short, long)]
+        coordinator_http_url: String,
+        #[arg(short, long, default_value = "0.0.0.0")]
+        host: String,
+        #[arg(short, long, default_value = "29999")]
+        port: usize,
     },
     #[command(about = "Use sql to query instances/active_apps/historical_apps table")]
     Query {
@@ -120,7 +132,11 @@ fn main() -> anyhow::Result<()> {
             index_file_path,
             data_file_path,
         } => Box::new(ValidateAction::new(index_file_path, data_file_path)),
-
+        Commands::PostgresServer {
+            coordinator_http_url,
+            host,
+            port,
+        } => Box::new(PostgresServerAction::new(coordinator_http_url, host, port)),
         Commands::Query {
             sql,
             coordinator_http_url,

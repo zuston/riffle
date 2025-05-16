@@ -64,7 +64,7 @@ logforth = ["dep:logforth"]
 
 [dependencies]
 anyhow = "1"
-tokio = { version = "1.28.2", features = ["full"] }
+tokio = { version = "1.45.0", features = ["full"] }
 tokio-rustls = "0.22"
 tokio-stream = { version = "0.1", features = ["sync", "net"] }
 tokio-util = { version = "0.6", features = ["full"] }
@@ -135,6 +135,8 @@ reqwest = { version = "0.12.15", features = ["json"] }
 indicatif = "0.17.11"
 governor = "0.10.0"
 nonzero_ext = "0.3.0"
+pgwire = "0.28.0"
+datafusion-postgres = { git = "https://github.com/sunng87/datafusion-postgres.git", rev = "862113df28bdf4b5a338e913a3fea02defd8bc7d"}
 
 [dependencies.logforth]
 version = "0.19.1"
