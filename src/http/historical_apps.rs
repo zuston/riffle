@@ -18,11 +18,11 @@ impl Handler for HistoricalAppsHandler {
 }
 
 #[handler]
-fn json() -> Json<Vec<HistoricalAppInfo>> {
+async fn json() -> Json<Vec<HistoricalAppInfo>> {
     let manager_ref = APP_MANAGER_REF.get().unwrap();
     let mut apps = vec![];
-    if let Some(historical_manager) = manager_ref.get_historical_statistics() {
-        apps = historical_manager.dump();
+    if let Some(historical_manager) = manager_ref.get_historical_app_manager() {
+        apps = historical_manager.load().await.unwrap();
     }
     Json(apps)
 }

@@ -344,6 +344,19 @@ fn as_default_runtime_config() -> RuntimeConfig {
     RuntimeConfig::default()
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct HistoricalAppStoreConfig {
+    pub retention_days: usize,
+    pub backend: HistoricalAppStoreBackend,
+    pub db_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum HistoricalAppStoreBackend {
+    MEM,
+    SLED,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 pub struct Config {
     #[serde(default = "as_default_hybrid_store_config")]
@@ -389,6 +402,8 @@ pub struct Config {
 
     #[serde(default = "as_default_initial_unhealthy_status_enable")]
     pub initial_unhealthy_status_enable: bool,
+
+    pub historical_apps_config: Option<HistoricalAppStoreConfig>,
 
     #[serde(default = "as_default_conf_reload_enable")]
     pub conf_reload_enable: bool,
@@ -452,9 +467,6 @@ pub struct AppConfig {
     #[serde(default = "as_default_block_id_manager_type")]
     pub block_id_manager_type: BlockIdManagerType,
 
-    #[serde(default = "bool::default")]
-    pub historical_apps_record_enable: bool,
-
     // for the partition split mechanism
     #[serde(default = "bool::default")]
     pub partition_split_enable: bool,
@@ -496,7 +508,6 @@ fn as_default_app_config() -> AppConfig {
         partition_limit_memory_backpressure_ratio:
             as_default_partition_limit_memory_backpressure_ratio(),
         block_id_manager_type: as_default_block_id_manager_type(),
-        historical_apps_record_enable: false,
         partition_split_enable: false,
         partition_split_threshold: as_default_partition_split_threshold(),
     }
