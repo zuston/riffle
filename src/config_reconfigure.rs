@@ -107,19 +107,30 @@ impl ReconfigurableConfManager {
             panic!("[ReconfigurableConfManager] No such register-key: {}", key)
         }
 
-        info!("Register reconfiguration key for [{}]", key);
-        let val = self.conf_state.get(key).unwrap().clone();
-        // fast fail on any parsing failure
-        let val: T = serde_json::from_value(val)?;
+        let option = match self.attachments.get(key) {
+            None => {
+                info!("Register reconfiguration key for [{}]", key);
+                let val = self.conf_state.get(key).unwrap().clone();
+                // fast fail on any parsing failure
+                let val: T = serde_json::from_value(val)?;
 
-        let c_ref: ConfigOption<T> = if self.reload_enabled {
-            Arc::new(DynamicConfRef::new(key, val))
-        } else {
-            Arc::new(StaticConfRef::new(val))
+                let c_ref: ConfigOption<T> = if self.reload_enabled {
+                    Arc::new(DynamicConfRef::new(key, val))
+                } else {
+                    Arc::new(StaticConfRef::new(val))
+                };
+                self.attachments
+                    .insert(key.to_string(), Arc::new(c_ref.clone()));
+                c_ref
+            }
+            Some(x) => x
+                .value()
+                .as_any()
+                .downcast_ref::<ConfigOption<T>>()
+                .unwrap()
+                .clone(),
         };
-        self.attachments
-            .insert(key.to_string(), Arc::new(c_ref.clone()));
-        Ok(c_ref)
+        Ok(option)
     }
 
     fn reload(&self, path: &str) -> Result<()> {
@@ -374,6 +385,46 @@ mod tests {
         write_conf_into_file(target_conf_file.to_owned(), toml_conf.to_string())?;
 
         awaitility::at_most(Duration::from_secs(2)).until(|| reconf_ref_1.get() == 0.2);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_register_and_remove() -> Result<()> {
+        let temp_dir = tempdir::TempDir::new("test_register_and_remove").unwrap();
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        println!("init local file path: {}", &temp_path);
+
+        let toml_str = create_toml_config(0.8);
+
+        let target_conf_file = format!("{}/{}", &temp_path, "conf.file");
+        write_conf_into_file(target_conf_file.to_owned(), toml_str.to_string())?;
+
+        let config = Config::from(&target_conf_file);
+        let runtime = Builder::default()
+            .worker_threads(1)
+            .thread_name("reload")
+            .enable_all()
+            .build()?;
+        let runtime = Arc::new(runtime);
+
+        let reconf_manager = ReconfigurableConfManager::new(
+            &config,
+            Some((target_conf_file.as_str(), 1, &runtime).into()),
+        )?;
+
+        let key = "hybrid_store.memory_spill_high_watermark";
+        let reconf_ref_1: ConfigOption<f64> = reconf_manager.register(key)?;
+        let reconf_ref_2: ConfigOption<f64> = reconf_manager.register(key)?;
+        assert_eq!(0.8, reconf_ref_1.get());
+        assert_eq!(0.8, reconf_ref_2.get());
+
+        // update
+        let toml_conf = create_toml_config(0.2);
+        write_conf_into_file(target_conf_file.to_owned(), toml_conf.to_string())?;
+
+        awaitility::at_most(Duration::from_secs(2)).until(|| reconf_ref_1.get() == 0.2);
+        awaitility::at_most(Duration::from_secs(2)).until(|| reconf_ref_2.get() == 0.2);
 
         Ok(())
     }
