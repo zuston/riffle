@@ -1,12 +1,12 @@
 use crate::actions::Action;
-use crate::runtime::{Runtime, RuntimeRef};
-use crate::store::local::sync_io::SyncLocalIO;
-use crate::store::local::LocalIO;
-use crate::store::BytesWrapper;
-use crate::util;
 use bytes::Bytes;
 use bytesize;
 use indicatif::{ProgressBar, ProgressStyle};
+use riffle_server::runtime::{Runtime, RuntimeRef};
+use riffle_server::store::local::sync_io::SyncLocalIO;
+use riffle_server::store::local::LocalIO;
+use riffle_server::store::BytesWrapper;
+use riffle_server::util;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -49,7 +49,8 @@ impl DiskProfiler {
         max_concurrency: usize,
         test_duration_secs: u64,
     ) -> Self {
-        let runtime = crate::runtime::manager::create_runtime(max_concurrency, "profiler pool");
+        let runtime =
+            riffle_server::runtime::manager::create_runtime(max_concurrency, "profiler pool");
         Self {
             dir,
             min_block_size: util::parse_raw_to_bytesize(min_block_size.as_str()) as usize,

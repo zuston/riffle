@@ -1,12 +1,13 @@
 #![allow(dead_code, unused)]
+#![feature(impl_trait_in_assoc_type)]
 
+mod actions;
+
+use crate::actions::disk_bench::DiskBenchAction;
+use crate::actions::disk_profiler::DiskProfiler;
+use crate::actions::{Action, NodeUpdateAction, OutputFormat, QueryAction, ValidateAction};
 use clap::{Parser, Subcommand};
 use tokio::runtime::Runtime;
-use uniffle_worker::actions::disk_bench::DiskBenchAction;
-use uniffle_worker::actions::disk_profiler::DiskProfiler;
-use uniffle_worker::actions::{
-    Action, NodeUpdateAction, OutputFormat, QueryAction, ValidateAction,
-};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]

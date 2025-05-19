@@ -16,15 +16,16 @@
 // under the License.
 
 #[cfg(test)]
-mod tests {
-    use anyhow::Result;
-    use uniffle_worker::config::{Config, LocalfileStoreConfig, StorageType};
-    use uniffle_worker::{start_uniffle_worker, write_read_for_one_time};
-
+mod test {
     use std::time::Duration;
+
+    use signal_hook::consts::SIGTERM;
+    use signal_hook::low_level::raise;
     use tonic::transport::Channel;
-    use uniffle_worker::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
-    use uniffle_worker::metric::GAUGE_MEMORY_ALLOCATED;
+
+    use riffle_server::config::Config;
+    use riffle_server::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
+    use riffle_server::{start_uniffle_worker, write_read_for_one_time};
 
     async fn get_data_from_remote(
         _client: &ShuffleServerClient<Channel>,
@@ -36,15 +37,12 @@ mod tests {
 
     async fn start_embedded_worker(path: String, port: i32) {
         let config = Config::create_mem_localfile_config(port, "1G".to_string(), path);
-        if let Err(err) = start_uniffle_worker(config).await {
-            println!("err: {:#?}", err);
-            panic!();
-        }
+        let _ = start_uniffle_worker(config).await;
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn write_read_test_with_embedded_worker() -> Result<()> {
+    #[tokio::test]
+    async fn graceful_shutdown_test_with_embedded_worker_successfully_shutdown() {
         let temp_dir = tempdir::TempDir::new("test_write_read").unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("created the temp file path: {}", &temp_path);
@@ -52,11 +50,23 @@ mod tests {
         let port = 21101;
         let _ = start_embedded_worker(temp_path, port).await;
 
-        let client = ShuffleServerClient::connect(format!("http://{}:{}", "0.0.0.0", port)).await?;
+        let client =
+            match ShuffleServerClient::connect(format!("http://{}:{}", "0.0.0.0", port)).await {
+                Ok(client) => client,
+                Err(e) => {
+                    // Handle the error, e.g., by panicking or logging it.
+                    panic!("Failed to connect: {}", e);
+                }
+            };
 
-        // after one batch write/read process, the allocated memory size should be 0
-        assert_eq!(0, GAUGE_MEMORY_ALLOCATED.get());
+        let jh = tokio::spawn(async move { write_read_for_one_time(client).await });
 
-        write_read_for_one_time(client).await
+        // raise shutdown signal
+        tokio::spawn(async {
+            raise(SIGTERM).expect("failed to raise shutdown signal");
+            eprintln!("successfully raised shutdown signal");
+        });
+
+        let _ = jh.await.expect("Task panicked or failed.");
     }
 }

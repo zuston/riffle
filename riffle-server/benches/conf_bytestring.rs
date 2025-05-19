@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use uniffle_worker::config_ref::{ByteString, ConfRef, DynamicConfRef};
+use riffle_server::config_ref::{ByteString, ConfRef, DynamicConfRef};
 
 #[inline]
 fn reconf_bytestring(batch: usize) {
