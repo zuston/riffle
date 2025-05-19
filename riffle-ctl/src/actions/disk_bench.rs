@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const NUMBER_PER_THREAD_POOL: usize = 10;
+pub const FILE_PREFIX: &str = "disk-bench-";
 
 pub struct DiskBenchAction {
     dir: String,
@@ -136,7 +137,7 @@ impl Action for DiskBenchAction {
 
         let mut handles = Vec::with_capacity(self.concurrency);
         for i in 0..self.concurrency {
-            let file_path = format!("test_file_{}", i);
+            let file_path = format!("{}{}", FILE_PREFIX, i);
             let data = test_data.clone();
             let io_handler = io_handler.clone();
             let progress = progress.clone();

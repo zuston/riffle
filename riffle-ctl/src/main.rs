@@ -6,6 +6,7 @@ mod actions;
 use crate::actions::disk_bench::DiskBenchAction;
 use crate::actions::disk_profiler::DiskProfiler;
 use crate::actions::postgres_server::PostgresServerAction;
+use crate::actions::disk_read_bench::DiskReadBenchAction;
 use crate::actions::{Action, NodeUpdateAction, OutputFormat, QueryAction, ValidateAction};
 use clap::{Parser, Subcommand};
 use tokio::runtime::Runtime;
@@ -29,6 +30,16 @@ enum Commands {
         host: String,
         #[arg(long, default_value = "29999")]
         port: usize,
+    },
+    DiskReadBench {
+        #[arg(short, long)]
+        dir: String,
+        #[arg(short, long)]
+        read_size: String,
+        #[arg(short, long)]
+        batch_number: usize,
+        #[arg(short, long)]
+        concurrency: usize,
     },
     #[command(about = "Using the riffle IO scheduler to test local disk IO")]
     DiskBench {
@@ -99,6 +110,17 @@ fn main() -> anyhow::Result<()> {
             host,
             port,
         } => Box::new(PostgresServerAction::new(coordinator_http_url, host, port)),
+        Commands::DiskReadBench {
+            dir,
+            read_size,
+            batch_number,
+            concurrency,
+        } => Box::new(DiskReadBenchAction::new(
+            dir,
+            read_size,
+            batch_number,
+            concurrency,
+        )),
         Commands::DiskBench {
             dir,
             batch_number,

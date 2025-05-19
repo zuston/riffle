@@ -14,6 +14,7 @@ pub mod discovery;
 pub mod disk_bench;
 pub mod disk_profiler;
 pub mod postgres_server;
+pub mod disk_read_bench;
 pub mod query;
 
 #[async_trait::async_trait]
