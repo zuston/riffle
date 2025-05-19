@@ -60,130 +60,86 @@ logforth = ["dep:logforth"]
 [dependencies]
 anyhow = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
-tokio-rustls = "0.22"
-tokio-stream = { version = "0.1", features = ["sync", "net"] }
-tokio-util = { version = "0.6", features = ["full"] }
-toml = "0.7.4"
-tracing = "0.1"
-tracing-appender = "0.2"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tonic = { git = "https://github.com/zuston/tonic.git", branch = "zero_copy_bytes" }
-prost = "0.12.1"
-bytes = "1"
-tonic-build = { git = "https://github.com/zuston/tonic.git", branch = "zero_copy_bytes" }
-thiserror = "1"
-dashmap = "5.4.0"
-log = "0.4.17"
-env_logger = "0.10.0"
-crossbeam = "0.8.2"
-crossbeam-channel = "0.5"
-crossbeam-utils = "0.8.16"
-tempdir = "0.3.7"
+tokio-rustls = { workspace = true }
+tokio-stream = { workspace = true, features = ["sync", "net"] }
+tokio-util = { workspace = true, features = ["full"] }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+tonic = { workspace = true }
+prost = { workspace = true }
+bytes = { workspace = true }
+tonic-build = { workspace = true }
+thiserror = { workspace = true }
+dashmap = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+crossbeam = { workspace = true }
+crossbeam-channel = { workspace = true }
+crossbeam-utils = { workspace = true }
+tempdir = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-async-channel = "1.8.0"
-croaring = "2.2.0"
-prometheus = { version = "0.13", features = ["process", "push"] }
-crc32fast = "1.3.2"
-fs2 = "0.4.3"
+async-channel = { workspace = true }
+croaring = { workspace = true }
+prometheus = { workspace = true, features = ["process", "push"] }
+crc32fast = { workspace = true }
+fs2 = { workspace = true }
 url = { workspace = true }
-await-tree = "0.1.1"
+await-tree = { workspace = true }
 poem = { workspace = true, features = ["rustls", "test", "anyhow"] }
-pprof = { version = "0.11.1", features = [
-    "flamegraph",
-    "protobuf-codec",
-    "protobuf",
-] }
+pprof = { workspace = true, features = ["flamegraph", "protobuf-codec", "protobuf"] }
 tempfile = { workspace = true }
-once_cell = "1.18.0"
-tower = { version = "0.4", features = ["util", "load-shed"] }
-hyper = "0.14"
-tokio-console = "0.1.8"
-pin-project-lite = "0.2.8"
-signal-hook = "0.3.17"
+once_cell = { workspace = true }
+tower = { workspace = true, features = ["util", "load-shed"] }
+hyper = { workspace = true }
+tokio-console = { workspace = true }
+pin-project-lite = { workspace = true }
+signal-hook = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
-socket2 = { version = "0.4", features = ["all"] }
-spin = "0.9.8"
-hashlink = "0.9.1"
-rand = "0.8.5"
+socket2 = { workspace = true, features = ["all"] }
+spin = { workspace = true }
+hashlink = { workspace = true }
+rand = { workspace = true }
 #fastrace = { version = "0.6", features = ["enable"] }
-fastrace = { version = "0.6" }
-fastrace-jaeger = { version = "0.6" }
-fxhash = "0.2.1"
-parking_lot = { version = "0.12.3", features = ["deadlock_detection"] }
-num_enum = "0.7.0"
-core_affinity = "0.8.1"
-chrono = "0.4.38"
-strum = "0.20.0"
-strum_macros = "0.20.0"
-hdrhistogram = "7.5.4"
-libc = "0.2.169"
-allocator-api2 = "0.2"
+fastrace = { workspace = true }
+fastrace-jaeger = { workspace = true }
+fxhash = { workspace = true }
+parking_lot = { workspace = true, features = ["deadlock_detection"] }
+num_enum = { workspace = true }
+core_affinity = { workspace = true }
+chrono = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
+hdrhistogram = { workspace = true }
+libc = { workspace = true }
+allocator-api2 = { workspace = true }
 bytesize = { workspace = true, features = ["serde"] }
-cc = "1.2.13"
-backtrace = "0.3.48"
-serde_json = "1.0.132"
-datafusion = "46.0.1"
-csv = "1.3.1"
-reqwest = { version = "0.12.15", features = ["json"] }
-indicatif = "0.17.11"
-governor = "0.10.0"
-nonzero_ext = "0.3.0"
-sled = "0.34.7"
-
-[dependencies.logforth]
-version = "0.19.1"
-features = ["rolling-file"]
-optional = true
-
-[dependencies.mimalloc]
-version = "0.1.39"
-optional = true
-
-[dependencies.cap]
-version = "0.1.2"
-optional = true
-
-[dependencies.hdfs-native]
-version = "0.11.2"
-optional = true
-
-[dependencies.hdrs]
-git = "https://github.com/zuston/hdrs"
-rev = "882ccbbdc4a4c6f850009b7973dc31faf346f87b"
-optional = true
-
-# jemalloc related optional dependencies
-[dependencies.tikv-jemalloc-ctl]
-version = "0.6.0"
-optional = true
-features = ["use_std"]
-
-[dependencies.tikv-jemalloc-sys]
-version = "0.6.0"
-optional = true
-features = ["stats", "profiling", "unprefixed_malloc_on_supported_platforms"]
-
-[dependencies.tikv-jemallocator]
-version = "0.6.0"
-optional = true
-features = ["profiling", "unprefixed_malloc_on_supported_platforms"]
-
-# todo: When https://github.com/polarsignals/rust-jemalloc-pprof/pull/22 is merged, using the official repo
-[dependencies.jemalloc_pprof]
-version = "0.7.0"
-features = ["symbolize", "flamegraph"]
-optional = true
+backtrace = { workspace = true }
+serde_json = { workspace = true }
+governor = { workspace = true }
+nonzero_ext = { workspace = true }
+sled = { workspace = true }
+logforth= { workspace = true, features = ["rolling-file"], optional = true }
+mimalloc= { workspace = true, optional = true }
+cap= { workspace = true, optional = true }
+hdfs-native= { workspace = true, optional = true }
+hdrs= { workspace = true, optional = true }
+tikv-jemalloc-ctl= { workspace = true, features = ["use_std"], optional = true }
+tikv-jemalloc-sys= { workspace = true, features = ["stats", "profiling", "unprefixed_malloc_on_supported_platforms"], optional = true }
+tikv-jemallocator= { workspace = true, features = ["profiling", "unprefixed_malloc_on_supported_platforms"], optional = true }
+jemalloc_pprof= { workspace = true, features = ["symbolize", "flamegraph"], optional = true }
 
 [build-dependencies]
-tonic-build = { git = "https://github.com/zuston/tonic.git", branch = "zero_copy_bytes" }
-prost-build = "0.12.1"
+tonic-build = { workspace = true }
+prost-build = { workspace = true }
 
 [dev-dependencies]
-env_logger = "0.10.0"
-awaitility = "0.3.1"
-criterion = "0.5.1"
+env_logger = { workspace = true }
+awaitility = { workspace = true }
+criterion = { workspace = true }
 
 [profile.dev]
 # re-enable debug assertions when pprof-rs fixed the reports for misaligned pointer dereferences
