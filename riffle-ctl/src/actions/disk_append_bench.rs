@@ -142,6 +142,8 @@ impl Action for DiskAppendBenchAction {
             let io_handler = io_handler.clone();
             let progress = progress.clone();
             let written_bytes = written_bytes.clone();
+            let total_batches = (self.concurrency * batch_number) as u64;
+            let start_time = start_time.clone();
 
             let runtime = self.w_runtimes.get(i).unwrap();
             let handle = runtime.spawn_with_await_tree(format!("w-{}", i).as_str(), async move {
@@ -167,9 +169,17 @@ impl Action for DiskAppendBenchAction {
                                 written_bytes.load(std::sync::atomic::Ordering::Relaxed);
                             let current_speed = current_written as f64 / elapsed;
 
+                            let remaining_batches = total_batches - progress.position();
+                            let est_secs = if current_speed > 0.0 {
+                                (remaining_batches * write_size as u64) as f64 / current_speed
+                            } else {
+                                0.0
+                            };
+
                             progress.set_message(format!(
-                                "Writing files... Speed: {}/s",
-                                bytesize::to_string(current_speed as u64, true)
+                                "Writing files... Speed: {}/s, ETA: {:.1}s",
+                                bytesize::to_string(current_speed as u64, true),
+                                est_secs
                             ));
                         }
                         Err(e) => eprintln!(
