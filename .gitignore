@@ -1,4 +1,4 @@
 /target
 .DS_Store
 .idea
-src/grpc/protobuf/uniffle.rs
+riffle-server/src/grpc/protobuf/uniffle.rs
