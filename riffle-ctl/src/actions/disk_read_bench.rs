@@ -17,6 +17,12 @@ pub struct DiskReadBenchAction {
     read_size: u64,
     batch_number: u64,
     concurrency: usize,
+
+    io_handler: SyncLocalIO,
+
+    append_action: DiskAppendBenchAction,
+
+    read_runtimes: Vec<RuntimeRef>,
 }
 
 impl DiskReadBenchAction {
@@ -26,12 +32,35 @@ impl DiskReadBenchAction {
         batch_num: usize,
         concurrency: usize,
     ) -> Self {
-        Self {
+        let read_runtime = create_runtime(concurrency, "pool");
+        let write_runtime = create_runtime(1, "pool");
+        let underlying_io_handler =
+            SyncLocalIO::new(&read_runtime, &write_runtime, dir.as_str(), None, None);
+
+        let mut r_runtimes = vec![];
+        for idx in 0..concurrency {
+            r_runtimes.push(create_runtime(10, ""));
+        }
+
+        let append_action = DiskAppendBenchAction::new(
+            dir.to_string(),
+            concurrency,
+            read_size.to_string(),
+            batch_num,
+            "100G".to_string(),
+            false,
+        );
+
+        let action = Self {
             dir,
             read_size: riffle_server::util::parse_raw_to_bytesize(&read_size),
             batch_number: batch_num as u64,
             concurrency,
-        }
+            io_handler: underlying_io_handler,
+            append_action,
+            read_runtimes: r_runtimes,
+        };
+        action
     }
 }
 
@@ -47,48 +76,26 @@ impl Action for DiskReadBenchAction {
             .filter_map(|entry| entry.ok())
             .filter(|entry| {
                 entry.file_type().map(|ft| ft.is_file()).unwrap_or(false)
-                    && !entry.file_name().to_string_lossy().starts_with(FILE_PREFIX)
+                    && entry.file_name().to_string_lossy().starts_with(FILE_PREFIX)
             })
             .collect();
 
         if files.is_empty() || files.len() < self.concurrency {
             println!("Creating read_bench files to read...");
-            let write_handler = DiskAppendBenchAction::new(
-                self.dir.to_string(),
-                self.concurrency,
-                self.read_size.to_string(),
-                self.batch_number as usize,
-                "100G".to_string(),
-                false,
-            );
-            write_handler.act().await?;
+            self.append_action.act().await?;
             println!("Done!");
         }
-
-        let read_runtime = create_runtime(self.concurrency, "pool");
-        let write_runtime = create_runtime(1, "pool");
-        let underlying_io_handler =
-            SyncLocalIO::new(&read_runtime, &write_runtime, self.dir.as_str(), None, None);
-
-        let r_runtimes = {
-            let mut runtimes = vec![];
-            for idx in 0..self.concurrency {
-                runtimes.push(create_runtime(1, ""))
-            }
-            runtimes
-        };
 
         let mut futures = vec![];
         let batch_number = self.batch_number;
         let read_size = self.read_size;
         for idx in 0..self.concurrency {
             let file_name = format!("{}{}", FILE_PREFIX, idx);
-            let handler: SyncLocalIO = underlying_io_handler.clone();
-            let r_runtime = r_runtimes.get(idx).unwrap();
+            let handler: SyncLocalIO = self.io_handler.clone();
             let batch_number = batch_number;
             let read_size = read_size;
-            let f = r_runtime.spawn(async move {
-                let file_name = file_name;
+            let rt = self.read_runtimes.get(idx).unwrap();
+            let f = rt.spawn(async move {
                 let mut offset = 0;
                 let mut latencies = Vec::with_capacity(batch_number as usize);
                 let start = Instant::now();
