@@ -1,3 +1,4 @@
+use crate::historical_apps::HistoricalAppInfo;
 use crate::runtime::manager::create_runtime;
 use crate::runtime::{Runtime, RuntimeRef};
 use anyhow::{anyhow, Result};
@@ -17,24 +18,6 @@ pub struct ActiveAppInfo {
     pub partition_number: usize,
     pub huge_partition_number: u64,
     pub reported_block_id_number: u64,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct HistoricalAppInfo {
-    pub app_id: String,
-    pub partition_num: usize,
-    pub huge_partition_num: usize,
-
-    #[serde(skip_serializing)]
-    pub avg_huge_partition_bytes: usize,
-
-    pub max_huge_partition_bytes: usize,
-
-    #[serde(skip_serializing)]
-    pub min_huge_partition_bytes: usize,
-
-    #[serde(skip_serializing)]
-    pub record_timestamp: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

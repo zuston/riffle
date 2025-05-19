@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::config::{Config, StorageType};
+use crate::config::{Config, HistoricalAppStoreConfig, StorageType};
 use crate::error::WorkerError;
 use crate::metric::{
     BLOCK_ID_NUMBER, GAUGE_APP_NUMBER, GAUGE_HUGE_PARTITION_NUMBER, GAUGE_PARTITION_NUMBER,
@@ -51,7 +51,7 @@ use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::config_ref::{ByteString, ConfRef, ConfigOption};
 use crate::constant::ALL_LABEL;
 use crate::grpc::protobuf::uniffle::{BlockIdLayout, RemoteStorage};
-use crate::historical_apps::HistoricalAppStatistics;
+use crate::historical_apps::HistoricalAppManager;
 use crate::id_layout::IdLayout;
 use crate::storage::HybridStorage;
 use crate::store::local::LocalfileStoreStat;
@@ -158,7 +158,7 @@ pub struct App {
     // when exceeding the partition-limit-threshold, it will be marked as huge partition
     huge_partition_number: AtomicU64,
 
-    pub(crate) registry_timestamp: u128,
+    pub(crate) start_timestamp: u128,
 
     // key: shuffle_id, val: shuffle's all block_ids bitmap
     block_id_manager: Arc<Box<dyn BlockIdManager>>,
@@ -303,7 +303,7 @@ impl App {
             total_received_data_size: Default::default(),
             total_resident_data_size: Default::default(),
             huge_partition_number: Default::default(),
-            registry_timestamp: now_timestamp_as_millis(),
+            start_timestamp: now_timestamp_as_millis(),
             block_id_manager,
             partition_split_enable,
             partition_split_threshold,
@@ -816,7 +816,7 @@ pub struct AppManager {
     app_heartbeat_timeout_min: u32,
     config: Config,
     runtime_manager: RuntimeManager,
-    historical_app_statistics: Option<HistoricalAppStatistics>,
+    historical_app_manager: Option<HistoricalAppManager>,
     reconf_manager: ReconfigurableConfManager,
 }
 
@@ -830,12 +830,10 @@ impl AppManager {
         let (sender, receiver) = async_channel::unbounded();
         let app_heartbeat_timeout_min = config.app_config.app_heartbeat_timeout_min;
 
-        let historical_app_statistics: Option<HistoricalAppStatistics> =
-            if config.app_config.historical_apps_record_enable {
-                info!("Historical apps recorder has been initialized.");
-                Some(HistoricalAppStatistics::new(&runtime_manager, 24 * 60 * 60))
-            } else {
-                None
+        let historical_app_manager: Option<HistoricalAppManager> =
+            match &config.historical_apps_config {
+                None => None,
+                Some(conf) => Some(HistoricalAppManager::new(&runtime_manager, &conf)),
             };
 
         let manager = AppManager {
@@ -846,7 +844,7 @@ impl AppManager {
             app_heartbeat_timeout_min,
             config,
             runtime_manager: runtime_manager.clone(),
-            historical_app_statistics,
+            historical_app_manager,
             reconf_manager: reconf_manager.clone(),
         };
         manager
@@ -963,8 +961,8 @@ impl AppManager {
         app_ref
     }
 
-    pub fn get_historical_statistics(&self) -> Option<&HistoricalAppStatistics> {
-        self.historical_app_statistics.as_ref()
+    pub fn get_historical_app_manager(&self) -> Option<&HistoricalAppManager> {
+        self.historical_app_manager.as_ref()
     }
 
     pub fn app_is_exist(&self, app_id: &str) -> bool {
@@ -1009,7 +1007,7 @@ impl AppManager {
             ]);
 
             // record into the historical app list
-            if let Some(historical_manager) = self.historical_app_statistics.as_ref() {
+            if let Some(historical_manager) = self.historical_app_manager.as_ref() {
                 info!(
                     "Saving timeout app into the historical list.. app_id: {}",
                     app_id.as_str()

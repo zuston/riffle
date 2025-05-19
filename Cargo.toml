@@ -135,6 +135,7 @@ reqwest = { version = "0.12.15", features = ["json"] }
 indicatif = "0.17.11"
 governor = "0.10.0"
 nonzero_ext = "0.3.0"
+sled = "0.34.7"
 
 [dependencies.logforth]
 version = "0.19.1"
