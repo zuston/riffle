@@ -16,7 +16,7 @@ use std::time::Duration;
 const NUMBER_PER_THREAD_POOL: usize = 10;
 pub const FILE_PREFIX: &str = "disk-bench-";
 
-pub struct DiskBenchAction {
+pub struct DiskAppendBenchAction {
     dir: String,
     concurrency: usize,
     write_size: u64,
@@ -33,7 +33,7 @@ pub struct DiskBenchAction {
     runtime_manager: RuntimeManager,
 }
 
-impl DiskBenchAction {
+impl DiskAppendBenchAction {
     pub fn new(
         dir: String,
         concurrency: usize,
@@ -81,7 +81,7 @@ impl DiskBenchAction {
 }
 
 #[async_trait::async_trait]
-impl Action for DiskBenchAction {
+impl Action for DiskAppendBenchAction {
     async fn act(&self) -> anyhow::Result<()> {
         let t_runtime = tokio::runtime::Handle::current();
         let underlying_io_handler = SyncLocalIO::new(

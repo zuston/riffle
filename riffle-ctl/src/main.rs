@@ -3,7 +3,7 @@
 
 mod actions;
 
-use crate::actions::disk_bench::DiskBenchAction;
+use crate::actions::disk_append_bench::DiskAppendBenchAction;
 use crate::actions::disk_profiler::DiskProfiler;
 use crate::actions::postgres_server::PostgresServerAction;
 use crate::actions::disk_read_bench::DiskReadBenchAction;
@@ -42,8 +42,8 @@ enum Commands {
         concurrency: usize,
     },
     #[command(about = "Using the riffle IO scheduler to test local disk IO")]
-    DiskBench {
-        #[arg(short, long)]
+    DiskAppendBench {
+        #[arg(long)]
         dir: String,
         #[arg(short, long)]
         batch_number: usize,
@@ -121,14 +121,14 @@ fn main() -> anyhow::Result<()> {
             batch_number,
             concurrency,
         )),
-        Commands::DiskBench {
+        Commands::DiskAppendBench {
             dir,
             batch_number,
             concurrency,
             write_size,
             disk_throughput,
             throttle_enabled,
-        } => Box::new(DiskBenchAction::new(
+        } => Box::new(DiskAppendBenchAction::new(
             dir,
             concurrency,
             write_size,

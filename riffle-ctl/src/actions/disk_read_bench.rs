@@ -1,6 +1,6 @@
-use crate::actions::disk_bench::{DiskBenchAction, FILE_PREFIX};
+use crate::actions::disk_append_bench::{DiskAppendBenchAction, FILE_PREFIX};
 use crate::actions::Action;
-use crate::Commands::DiskBench;
+use crate::Commands::DiskAppendBench;
 use riffle_server::config::IoLimiterConfig;
 use riffle_server::runtime::manager::create_runtime;
 use riffle_server::runtime::RuntimeRef;
@@ -53,7 +53,7 @@ impl Action for DiskReadBenchAction {
 
         if files.is_empty() || files.len() < self.concurrency {
             println!("Creating read_bench files to read...");
-            let write_handler = DiskBenchAction::new(
+            let write_handler = DiskAppendBenchAction::new(
                 self.dir.to_string(),
                 self.concurrency,
                 self.read_size.to_string(),
