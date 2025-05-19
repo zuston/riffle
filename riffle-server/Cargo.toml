@@ -1,0 +1,151 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+[package]
+name = "riffle-server"
+version = "0.10.0"
+edition = "2021"
+
+[profile.release]
+debug = 1
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "riffle-server"
+path = "src/main.rs"
+
+[lib]
+name = "riffle_server"
+path = "src/lib.rs"
+
+[features]
+#default = ["jemalloc", "allocator-analysis"]
+
+# whether to use jemalloc as the global allocator or not
+jemalloc = [
+    "dep:tikv-jemalloc-ctl",
+    "dep:tikv-jemalloc-sys",
+    "dep:tikv-jemallocator",
+    "dep:jemalloc_pprof",
+]
+
+# whether to enable memory profiling or not, once enabled, it implies using jemalloc as the global allocator
+memory-prof = ["jemalloc", "tikv-jemallocator/profiling", "allocator-analysis"]
+
+hdfs = ["dep:hdfs-native"]
+
+hdrs = ["hdfs", "dep:hdrs"]
+
+allocator-analysis = ["dep:cap"]
+
+mimalloc = ["dep:mimalloc"]
+
+logforth = ["dep:logforth"]
+
+[dependencies]
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-rustls = { workspace = true }
+tokio-stream = { workspace = true, features = ["sync", "net"] }
+tokio-util = { workspace = true, features = ["full"] }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+tonic = { workspace = true }
+prost = { workspace = true }
+bytes = { workspace = true }
+tonic-build = { workspace = true }
+thiserror = { workspace = true }
+dashmap = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+crossbeam = { workspace = true }
+crossbeam-channel = { workspace = true }
+crossbeam-utils = { workspace = true }
+tempdir = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+async-channel = { workspace = true }
+croaring = { workspace = true }
+prometheus = { workspace = true, features = ["process", "push"] }
+crc32fast = { workspace = true }
+fs2 = { workspace = true }
+url = { workspace = true }
+await-tree = { workspace = true }
+poem = { workspace = true, features = ["rustls", "test", "anyhow"] }
+pprof = { workspace = true, features = ["flamegraph", "protobuf-codec", "protobuf"] }
+tempfile = { workspace = true }
+once_cell = { workspace = true }
+tower = { workspace = true, features = ["util", "load-shed"] }
+hyper = { workspace = true }
+tokio-console = { workspace = true }
+pin-project-lite = { workspace = true }
+signal-hook = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+socket2 = { workspace = true, features = ["all"] }
+spin = { workspace = true }
+hashlink = { workspace = true }
+rand = { workspace = true }
+#fastrace = { version = "0.6", features = ["enable"] }
+fastrace = { workspace = true }
+fastrace-jaeger = { workspace = true }
+fxhash = { workspace = true }
+parking_lot = { workspace = true, features = ["deadlock_detection"] }
+num_enum = { workspace = true }
+core_affinity = { workspace = true }
+chrono = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
+hdrhistogram = { workspace = true }
+libc = { workspace = true }
+allocator-api2 = { workspace = true }
+bytesize = { workspace = true, features = ["serde"] }
+backtrace = { workspace = true }
+serde_json = { workspace = true }
+governor = { workspace = true }
+nonzero_ext = { workspace = true }
+sled = { workspace = true }
+logforth= { workspace = true, features = ["rolling-file"], optional = true }
+mimalloc= { workspace = true, optional = true }
+cap= { workspace = true, optional = true }
+hdfs-native= { workspace = true, optional = true }
+hdrs= { workspace = true, optional = true }
+tikv-jemalloc-ctl= { workspace = true, features = ["use_std"], optional = true }
+tikv-jemalloc-sys= { workspace = true, features = ["stats", "profiling", "unprefixed_malloc_on_supported_platforms"], optional = true }
+tikv-jemallocator= { workspace = true, features = ["profiling", "unprefixed_malloc_on_supported_platforms"], optional = true }
+jemalloc_pprof= { workspace = true, features = ["symbolize", "flamegraph"], optional = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }
+prost-build = { workspace = true }
+
+[dev-dependencies]
+env_logger = { workspace = true }
+awaitility = { workspace = true }
+criterion = { workspace = true }
+
+[profile.dev]
+# re-enable debug assertions when pprof-rs fixed the reports for misaligned pointer dereferences
+#   https://github.com/rust-lang/rust/pull/98112/
+debug-assertions = false
+
+[[bench]]
+name = "conf_bytestring"
+harness = false

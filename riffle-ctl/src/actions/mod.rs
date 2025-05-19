@@ -1,10 +1,4 @@
 use crate::actions::query::SessionContextExtend;
-use crate::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
-use crate::grpc::protobuf::uniffle::shuffle_server_internal_client::ShuffleServerInternalClient;
-use crate::grpc::protobuf::uniffle::{
-    shuffle_server_internal_client, CancelDecommissionRequest, DecommissionRequest, ServerStatus,
-};
-use crate::util::get_crc;
 use bytes::{Buf, Bytes};
 use clap::builder::Str;
 use dashmap::DashMap;
@@ -125,7 +119,7 @@ impl Action for ValidateAction {
             let task_id = index_data.get_i64();
 
             let partial = data.slice((offset as usize..(offset + (length as i64)) as usize));
-            let data_crc = get_crc(&partial);
+            let data_crc = riffle_server::util::get_crc(&partial);
             if crc != data_crc {
                 println!(
                     "blockId: {}, crc is not correct. expected: {}, real: {}. total batch: {}. batch index: {}",

@@ -1,0 +1,34 @@
+[package]
+name = "riffle-ctl"
+version = "0.10.0"
+edition = "2021"
+
+[[bin]]
+name = "riffle-ctl"
+path = "src/main.rs"
+
+[dependencies]
+riffle-server = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+clap = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+datafusion = { workspace = true }
+csv = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+indicatif = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+url = { workspace = true }
+async-trait = { workspace = true }
+tempfile = { workspace = true }
+futures = { workspace = true }
+bytesize = { workspace = true, features = ["serde"] }
+
+bytes = { workspace = true }
+dashmap = { workspace = true }
+
+strum = { workspace = true }
+strum_macros = { workspace = true }
+
+[dev-dependencies]
+poem = { workspace = true, features = ["rustls", "test", "anyhow"] }

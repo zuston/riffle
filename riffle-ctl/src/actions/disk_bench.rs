@@ -1,18 +1,17 @@
 use crate::actions::Action;
-use crate::config::{Config, IoLimiterConfig, RuntimeConfig};
-use crate::http::HttpMonitorService;
-use crate::runtime::manager::{create_runtime, RuntimeManager};
-use crate::runtime::{Runtime, RuntimeRef};
-use crate::store::local::sync_io::SyncLocalIO;
-use crate::store::BytesWrapper;
-use crate::util;
 use bytes::Bytes;
 use bytesize;
 use clap::builder::Str;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use riffle_server::config::{Config, IoLimiterConfig, RuntimeConfig};
+use riffle_server::http::HttpMonitorService;
+use riffle_server::runtime::manager::{create_runtime, RuntimeManager};
+use riffle_server::runtime::{Runtime, RuntimeRef};
+use riffle_server::store::local::sync_io::SyncLocalIO;
+use riffle_server::store::BytesWrapper;
+use riffle_server::util;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing_subscriber::fmt::format;
 
 const NUMBER_PER_THREAD_POOL: usize = 10;
 
@@ -29,7 +28,7 @@ pub struct DiskBenchAction {
     throttle_enabled: bool,
     throttle_runtime: RuntimeRef,
 
-    http_server: Box<crate::http::http_service::PoemHTTPServer>,
+    http_server: Box<riffle_server::http::http_service::PoemHTTPServer>,
     runtime_manager: RuntimeManager,
 }
 
@@ -92,9 +91,9 @@ impl Action for DiskBenchAction {
             None,
         );
 
-        let mut builder = crate::store::local::layers::OperatorBuilder::new(Arc::new(Box::new(
-            underlying_io_handler,
-        )));
+        let mut builder = riffle_server::store::local::layers::OperatorBuilder::new(Arc::new(
+            Box::new(underlying_io_handler),
+        ));
         if self.throttle_enabled {
             println!("Throttle is enabled.");
             let config = IoLimiterConfig {
@@ -102,10 +101,12 @@ impl Action for DiskBenchAction {
                 read_enable: true,
                 write_enable: true,
             };
-            builder = builder.layer(crate::store::local::io_layer_throttle::ThrottleLayer::new(
-                &self.throttle_runtime,
-                &config,
-            ));
+            builder = builder.layer(
+                riffle_server::store::local::io_layer_throttle::ThrottleLayer::new(
+                    &self.throttle_runtime,
+                    &config,
+                ),
+            );
         }
 
         let io_handler = Arc::new(builder.build());

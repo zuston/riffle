@@ -1,5 +1,4 @@
 use crate::actions::discovery::{Discovery, ServerInfo, ServerStatus};
-use crate::util;
 use anyhow::Result;
 use csv::Writer;
 use datafusion::arrow;
@@ -8,6 +7,7 @@ use datafusion::arrow::csv::ReaderBuilder;
 use datafusion::datasource::MemTable;
 use datafusion::prelude::{CsvReadOptions, SessionConfig, SessionContext};
 use indicatif::HumanBytes;
+use riffle_server::util;
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::io::{Cursor, Seek, Write};
@@ -150,10 +150,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_table_instances() {
-        let coordinator = FakeCoordinator::new(20010).await;
-        let coordinator_url = "http://localhost:20010";
+        let port = riffle_server::util::find_available_port().unwrap();
+        let coordinator = FakeCoordinator::new(port as i32).await;
+        let coordinator_url = format!("http://localhost:{}", port);
 
-        let context = SessionContextExtend::new(coordinator_url).await.unwrap();
+        let context = SessionContextExtend::new(&coordinator_url).await.unwrap();
 
         let sql = "SELECT * FROM instances";
         let df = context.sql(sql).await.unwrap();
