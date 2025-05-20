@@ -5,6 +5,7 @@ mod actions;
 
 use crate::actions::disk_bench::DiskBenchAction;
 use crate::actions::disk_profiler::DiskProfiler;
+use crate::actions::postgres_server::PostgresServerAction;
 use crate::actions::{Action, NodeUpdateAction, OutputFormat, QueryAction, ValidateAction};
 use clap::{Parser, Subcommand};
 use tokio::runtime::Runtime;
@@ -18,6 +19,17 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Commands {
+    #[command(
+        about = "Expose postgres protocol server to query instances/active_apps/historical_apps table"
+    )]
+    PostgresServer {
+        #[arg(short, long)]
+        coordinator_http_url: String,
+        #[arg(long, default_value = "0.0.0.0")]
+        host: String,
+        #[arg(long, default_value = "29999")]
+        port: usize,
+    },
     #[command(about = "Using the riffle IO scheduler to test local disk IO")]
     DiskBench {
         #[arg(short, long)]
@@ -82,6 +94,11 @@ fn main() -> anyhow::Result<()> {
     let command = args.command;
 
     let action: Box<dyn Action> = match command {
+        Commands::PostgresServer {
+            coordinator_http_url,
+            host,
+            port,
+        } => Box::new(PostgresServerAction::new(coordinator_http_url, host, port)),
         Commands::DiskBench {
             dir,
             batch_number,

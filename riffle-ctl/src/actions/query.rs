@@ -21,7 +21,7 @@ const HISTORICAL_APPS_TABLE_NAME: &str = "historical_apps";
 const ACTIVE_APPS_TABLE_NAME: &str = "active_apps";
 
 pub struct SessionContextExtend {
-    ctx: SessionContext,
+    pub ctx: SessionContext,
     discovery: Discovery,
 }
 

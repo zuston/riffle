@@ -30,5 +30,8 @@ dashmap = { workspace = true }
 strum = { workspace = true }
 strum_macros = { workspace = true }
 
+pgwire = { workspace = true }
+datafusion-postgres = { workspace = true }
+
 [dev-dependencies]
 poem = { workspace = true, features = ["rustls", "test", "anyhow"] }
