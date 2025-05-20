@@ -5,8 +5,8 @@ mod actions;
 
 use crate::actions::disk_append_bench::DiskAppendBenchAction;
 use crate::actions::disk_profiler::DiskProfiler;
-use crate::actions::postgres_server::PostgresServerAction;
 use crate::actions::disk_read_bench::DiskReadBenchAction;
+use crate::actions::postgres_server::PostgresServerAction;
 use crate::actions::{Action, NodeUpdateAction, OutputFormat, QueryAction, ValidateAction};
 use clap::{Parser, Subcommand};
 use tokio::runtime::Runtime;
