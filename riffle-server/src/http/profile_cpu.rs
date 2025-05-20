@@ -142,7 +142,6 @@ mod tests {
     use poem::Route;
 
     #[tokio::test]
-    #[ignore]
     async fn test_router() {
         let handler = ProfileCpuHandler::default();
         let app = Route::new().at(handler.get_route_path(), handler.get_route_method());
