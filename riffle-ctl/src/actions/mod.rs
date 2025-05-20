@@ -11,8 +11,9 @@ use std::{fs, io, thread};
 use url::Url;
 
 pub mod discovery;
-pub mod disk_bench;
+pub mod disk_append_bench;
 pub mod disk_profiler;
+pub mod disk_read_bench;
 pub mod postgres_server;
 pub mod query;
 

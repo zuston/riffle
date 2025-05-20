@@ -3,8 +3,9 @@
 
 mod actions;
 
-use crate::actions::disk_bench::DiskBenchAction;
+use crate::actions::disk_append_bench::DiskAppendBenchAction;
 use crate::actions::disk_profiler::DiskProfiler;
+use crate::actions::disk_read_bench::DiskReadBenchAction;
 use crate::actions::postgres_server::PostgresServerAction;
 use crate::actions::{Action, NodeUpdateAction, OutputFormat, QueryAction, ValidateAction};
 use clap::{Parser, Subcommand};
@@ -30,9 +31,19 @@ enum Commands {
         #[arg(long, default_value = "29999")]
         port: usize,
     },
-    #[command(about = "Using the riffle IO scheduler to test local disk IO")]
-    DiskBench {
+    DiskReadBench {
         #[arg(short, long)]
+        dir: String,
+        #[arg(short, long)]
+        read_size: String,
+        #[arg(short, long)]
+        batch_number: usize,
+        #[arg(short, long)]
+        concurrency: usize,
+    },
+    #[command(about = "Using the riffle IO scheduler to test local disk IO")]
+    DiskAppendBench {
+        #[arg(long)]
         dir: String,
         #[arg(short, long)]
         batch_number: usize,
@@ -99,14 +110,25 @@ fn main() -> anyhow::Result<()> {
             host,
             port,
         } => Box::new(PostgresServerAction::new(coordinator_http_url, host, port)),
-        Commands::DiskBench {
+        Commands::DiskReadBench {
+            dir,
+            read_size,
+            batch_number,
+            concurrency,
+        } => Box::new(DiskReadBenchAction::new(
+            dir,
+            read_size,
+            batch_number,
+            concurrency,
+        )),
+        Commands::DiskAppendBench {
             dir,
             batch_number,
             concurrency,
             write_size,
             disk_throughput,
             throttle_enabled,
-        } => Box::new(DiskBenchAction::new(
+        } => Box::new(DiskAppendBenchAction::new(
             dir,
             concurrency,
             write_size,

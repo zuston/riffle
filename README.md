@@ -259,7 +259,7 @@ To validate the effectiveness of this throttle mechanism, the disk-bench command
 You can apply pressure to the system using the following command:
 
 ```shell
-./riffle-ctl disk-bench --dir /data1/bench --batch-number 100 --concurrency 200 --write-size 10M --disk-throughput 100M -t
+./riffle-ctl disk-append-bench --dir /data1/bench --batch-number 100 --concurrency 200 --write-size 10M --disk-throughput 100M -t
 ```
 
 To enable this feature, add the following configuration to your config.toml file.
