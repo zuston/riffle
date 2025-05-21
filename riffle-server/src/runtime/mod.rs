@@ -21,6 +21,7 @@ mod metrics;
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::runtime::metrics::Metrics;
 use anyhow::anyhow;
+use await_tree::span;
 use pin_project_lite::pin_project;
 use std::fmt::Debug;
 use std::{
@@ -49,10 +50,10 @@ impl Runtime {
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        let info = format!("[{}] - {}", self.name, info);
+        let info = span!("[{}] - {}", self.name, info);
         JoinHandle {
             inner: self.rt.spawn(async move {
-                let await_root = AWAIT_TREE_REGISTRY.clone().register(info).await;
+                let await_root = AWAIT_TREE_REGISTRY.register(info).await;
                 await_root.instrument(future).await
             }),
         }

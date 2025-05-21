@@ -32,8 +32,7 @@ impl Default for AwaitTreeHandler {
 impl Handler for AwaitTreeHandler {
     fn get_route_method(&self) -> RouteMethod {
         get(make(|_| async {
-            let registry = AWAIT_TREE_REGISTRY.clone();
-            let mut sorted_list = registry.collect_all();
+            let mut sorted_list = AWAIT_TREE_REGISTRY.collect_all();
             sorted_list.sort_by_key(|kv| kv.0);
 
             let mut dynamic_string = String::new();

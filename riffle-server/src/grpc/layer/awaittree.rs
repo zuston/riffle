@@ -1,8 +1,8 @@
-use std::task::{Context, Poll};
-
 use crate::await_tree::AwaitTreeDelegator;
+use await_tree::span;
 use futures::Future;
 use hyper::Body;
+use std::task::{Context, Poll};
 use tower::layer::util::Identity;
 use tower::util::Either;
 use tower::{Layer, Service};
@@ -69,7 +69,7 @@ where
 
         let manager = self.manager.clone();
         async move {
-            let root = manager.register(format!("{}", req.uri().path())).await;
+            let root = manager.register(span!("{}", req.uri().path())).await;
             root.instrument(inner.call(req)).await
         }
     }
