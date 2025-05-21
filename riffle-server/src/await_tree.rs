@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use await_tree::{init_global_registry, span, AnyKey, Config, Registry, Tree, TreeRoot};
+use await_tree::{init_global_registry, span, AnyKey, Config, Registry, Span, Tree, TreeRoot};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -39,9 +39,9 @@ impl AwaitTreeDelegator {
         }
     }
 
-    pub async fn register(&self, msg: String) -> TreeRoot {
+    pub async fn register(&self, msg: impl Into<Span>) -> TreeRoot {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        self.registry.register(id, span!("actor=[{id}]. {msg}"))
+        self.registry.register(id, msg)
     }
 
     pub fn collect_all(&self) -> Vec<(u64, Tree)> {

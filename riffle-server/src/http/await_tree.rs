@@ -37,7 +37,8 @@ impl Handler for AwaitTreeHandler {
             sorted_list.sort_by_key(|kv| kv.0);
 
             let mut dynamic_string = String::new();
-            for (_, raw_tree) in sorted_list {
+            for (idx, raw_tree) in sorted_list {
+                dynamic_string.push_str(format!("actor={idx} ").as_str());
                 dynamic_string.push_str(raw_tree.to_string().as_str());
                 dynamic_string.push('\n');
             }
@@ -76,10 +77,7 @@ mod tests {
         let cli = TestClient::new(app);
         let resp = cli.get("/await-tree").send().await;
         resp.assert_status_is_ok();
-        println!(
-            "output: {}",
-            resp.0.into_body().into_string().await.unwrap()
-        );
+        println!("{}", resp.0.into_body().into_string().await.unwrap());
 
         Ok(())
     }
