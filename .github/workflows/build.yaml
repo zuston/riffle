@@ -56,6 +56,10 @@ jobs:
           - ""
     runs-on: ${{ matrix.os }}
     steps:
+      - name: Remove unnecessary files (Linux only)
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
       - name: Install Protoc
         uses: arduino/setup-protoc@v2
         with:
