@@ -15,37 +15,43 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use await_tree::{Registry, TreeRoot};
+use await_tree::{init_global_registry, span, AnyKey, Config, Registry, Tree, TreeRoot};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-type AwaitTreeRegistryRef = Arc<Mutex<Registry<u64>>>;
-
-pub static AWAIT_TREE_REGISTRY: Lazy<AwaitTreeInner> = Lazy::new(|| AwaitTreeInner::new());
+pub static AWAIT_TREE_REGISTRY: Lazy<AwaitTreeDelegator> = Lazy::new(|| AwaitTreeDelegator::new());
 
 #[derive(Clone)]
-pub struct AwaitTreeInner {
-    inner: AwaitTreeRegistryRef,
+pub struct AwaitTreeDelegator {
+    registry: Registry,
     next_id: Arc<AtomicU64>,
 }
 
-impl AwaitTreeInner {
+impl AwaitTreeDelegator {
     fn new() -> Self {
+        init_global_registry(Config::default());
+        let registry = Registry::current();
         Self {
-            inner: Arc::new(Mutex::new(Registry::new(await_tree::Config::default()))),
+            registry,
             next_id: Arc::new(Default::default()),
         }
     }
 
     pub async fn register(&self, msg: String) -> TreeRoot {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let msg = format!("actor=[{}], {}", id, msg);
-        self.inner.lock().register(id, msg)
+        self.registry.register(id, span!("actor=[{id}]. {msg}"))
     }
 
-    pub fn get_inner(&self) -> AwaitTreeRegistryRef {
-        self.inner.clone()
+    pub fn collect_all(&self) -> Vec<(u64, Tree)> {
+        self.registry
+            .collect_all()
+            .iter()
+            .map(|(key, tree)| {
+                let key: u64 = *key.downcast_ref().unwrap();
+                (key, tree.clone())
+            })
+            .collect()
     }
 }

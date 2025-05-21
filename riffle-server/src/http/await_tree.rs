@@ -17,6 +17,7 @@
 
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::http::Handler;
+use await_tree::AnyKey;
 use poem::endpoint::make;
 use poem::{get, RouteMethod};
 
@@ -31,19 +32,13 @@ impl Default for AwaitTreeHandler {
 impl Handler for AwaitTreeHandler {
     fn get_route_method(&self) -> RouteMethod {
         get(make(|_| async {
-            let registry_cloned = AWAIT_TREE_REGISTRY.clone().get_inner();
-            let registry = registry_cloned.lock();
-            let mut sorted_list: Vec<(u64, String)> = vec![];
-            for (v, tree) in registry.iter() {
-                let raw_tree = format!("{}", tree);
-                sorted_list.push((*v, raw_tree));
-            }
-            drop(registry);
+            let registry = AWAIT_TREE_REGISTRY.clone();
+            let mut sorted_list = registry.collect_all();
+            sorted_list.sort_by_key(|kv| kv.0);
 
             let mut dynamic_string = String::new();
-            sorted_list.sort_by_key(|kv| kv.0);
             for (_, raw_tree) in sorted_list {
-                dynamic_string.push_str(raw_tree.as_str());
+                dynamic_string.push_str(raw_tree.to_string().as_str());
                 dynamic_string.push('\n');
             }
             dynamic_string
