@@ -49,3 +49,38 @@ impl Handler for AwaitTreeHandler {
         "/await-tree".to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::await_tree::AWAIT_TREE_REGISTRY;
+    use crate::http::await_tree::AwaitTreeHandler;
+    use crate::http::Handler;
+    use await_tree::{span, InstrumentAwait};
+    use poem::test::TestClient;
+    use poem::Route;
+    use tracing::Instrument;
+
+    #[tokio::test]
+    async fn test_router() -> anyhow::Result<()> {
+        let await_registry = AWAIT_TREE_REGISTRY.clone();
+        let await_root = await_registry.register("test".to_string()).await;
+
+        tokio::spawn(await_root.instrument(async move {
+            tokio::time::sleep(tokio::time::Duration::from_secs(5))
+                .instrument_await(span!("sleeping..."))
+                .await;
+        }));
+
+        let handler = AwaitTreeHandler::default();
+        let app = Route::new().at(handler.get_route_path(), handler.get_route_method());
+        let cli = TestClient::new(app);
+        let resp = cli.get("/await-tree").send().await;
+        resp.assert_status_is_ok();
+        println!(
+            "output: {}",
+            resp.0.into_body().into_string().await.unwrap()
+        );
+
+        Ok(())
+    }
+}
