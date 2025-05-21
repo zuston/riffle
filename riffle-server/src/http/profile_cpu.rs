@@ -67,35 +67,22 @@ async fn pprof_handler(req: &Request) -> poem::Result<Response> {
 
     static PROFILE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-    // Copied from the neon. refer link:
+    // Refer from the neon. refer link:
     // https://github.com/neondatabase/neon/blob/main/libs/http-utils/src/endpoint.rs
 
-    let report = {
-        // Only allow one profiler at a time. If force is true, cancel a running profile (e.g. a
-        // Grafana continuous profile). We use a try_lock() loop when cancelling instead of waiting
-        // for a lock(), to avoid races where the notify isn't currently awaited.
-        let _lock = loop {
-            match PROFILE_LOCK.try_lock() {
-                Ok(lock) => break lock,
-                Err(_) => {
-                    return Err(anyhow!("profiler already running").into());
-                }
-            }
-        };
-
-        let guard = ProfilerGuardBuilder::default()
-            .frequency(frequency.into())
-            .blocklist(&["libc", "libgcc", "pthread", "vdso"])
-            .build()
-            .map_err(|err| InternalServerError(err))?;
-
-        tokio::time::sleep(Duration::from_secs(seconds)).await;
-
-        guard
-            .report()
-            .build()
-            .map_err(|err| InternalServerError(err))?
-    };
+    let lock = PROFILE_LOCK
+        .try_lock()
+        .map_err(|_| anyhow!("profiler already running"))?;
+    let guard = ProfilerGuardBuilder::default()
+        .frequency(frequency.into())
+        .blocklist(&["libc", "libgcc", "pthread", "vdso"])
+        .build()
+        .map_err(|err| InternalServerError(err))?;
+    tokio::time::sleep(Duration::from_secs(seconds)).await;
+    let report = guard
+        .report()
+        .build()
+        .map_err(|err| InternalServerError(err))?;
 
     let mut body = Vec::new();
     let response = match format {
