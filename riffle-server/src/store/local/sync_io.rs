@@ -254,6 +254,16 @@ impl LocalIO for SyncLocalIO {
                 let len = length.unwrap() as usize;
                 let mut file = File::open(path)?;
 
+                #[cfg(all(target_family = "unix", not(target_os = "macos")))]
+                unsafe {
+                    use libc::{posix_fadvise, POSIX_FADV_WILLNEED, POSIX_FADV_DONTNEED};
+                    let fd = file.as_raw_fd();
+                    let ret = posix_fadvise(fd, offset as i64, len as i64, POSIX_FADV_WILLNEED);
+                    if ret != 0 {
+                        // log or ignore
+                    }
+                }
+
                 let start = Instant::now();
                 let mut buffer = vec![0; len];
                 LOCALFILE_READ_MEMORY_ALLOCATION_LATENCY.record(start.elapsed().as_nanos() as u64);
