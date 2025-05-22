@@ -14,6 +14,7 @@ use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::local::io_layer_await_tree::AwaitTreeLayer;
 use crate::store::local::io_layer_metrics::MetricsLayer;
+use crate::store::local::io_layer_prefetch::ReadPrefetchLayer;
 use crate::store::local::io_layer_retry::{IoLayerRetry, RETRY_MAX_TIMES};
 use crate::store::local::io_layer_throttle::{ThrottleLayer, ThroughputBasedRateLimiter};
 use crate::store::local::io_layer_timeout::TimeoutLayer;
@@ -107,6 +108,7 @@ impl LocalDiskDelegator {
             .layer(IoLayerRetry::new(RETRY_MAX_TIMES, root))
             .layer(AwaitTreeLayer::new(root))
             .layer(MetricsLayer::new(root))
+            .layer(ReadPrefetchLayer::new())
             .build();
 
         let delegator = Self {
