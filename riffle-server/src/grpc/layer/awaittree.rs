@@ -1,8 +1,8 @@
-use std::task::{Context, Poll};
-
-use crate::await_tree::AwaitTreeInner;
+use crate::await_tree::AwaitTreeDelegator;
+use await_tree::span;
 use futures::Future;
 use hyper::Body;
+use std::task::{Context, Poll};
 use tower::layer::util::Identity;
 use tower::util::Either;
 use tower::{Layer, Service};
@@ -11,16 +11,16 @@ use tower::{Layer, Service};
 
 #[derive(Clone)]
 pub struct AwaitTreeMiddlewareLayer {
-    manager: AwaitTreeInner,
+    manager: AwaitTreeDelegator,
 }
 pub type OptionalAwaitTreeMiddlewareLayer = Either<AwaitTreeMiddlewareLayer, Identity>;
 
 impl AwaitTreeMiddlewareLayer {
-    pub fn new(manager: AwaitTreeInner) -> Self {
+    pub fn new(manager: AwaitTreeDelegator) -> Self {
         Self { manager }
     }
 
-    pub fn new_optional(optional: Option<AwaitTreeInner>) -> OptionalAwaitTreeMiddlewareLayer {
+    pub fn new_optional(optional: Option<AwaitTreeDelegator>) -> OptionalAwaitTreeMiddlewareLayer {
         if let Some(manager) = optional {
             Either::A(Self::new(manager))
         } else {
@@ -43,7 +43,7 @@ impl<S> Layer<S> for AwaitTreeMiddlewareLayer {
 #[derive(Clone)]
 pub struct AwaitTreeMiddleware<S> {
     inner: S,
-    manager: AwaitTreeInner,
+    manager: AwaitTreeDelegator,
 }
 
 impl<S> Service<hyper::Request<Body>> for AwaitTreeMiddleware<S>
@@ -69,7 +69,7 @@ where
 
         let manager = self.manager.clone();
         async move {
-            let root = manager.register(format!("{}", req.uri().path())).await;
+            let root = manager.register(span!("{}", req.uri().path())).await;
             root.instrument(inner.call(req)).await
         }
     }

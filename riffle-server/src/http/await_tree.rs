@@ -17,6 +17,7 @@
 
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::http::Handler;
+use await_tree::AnyKey;
 use poem::endpoint::make;
 use poem::{get, RouteMethod};
 
@@ -31,19 +32,13 @@ impl Default for AwaitTreeHandler {
 impl Handler for AwaitTreeHandler {
     fn get_route_method(&self) -> RouteMethod {
         get(make(|_| async {
-            let registry_cloned = AWAIT_TREE_REGISTRY.clone().get_inner();
-            let registry = registry_cloned.lock();
-            let mut sorted_list: Vec<(u64, String)> = vec![];
-            for (v, tree) in registry.iter() {
-                let raw_tree = format!("{}", tree);
-                sorted_list.push((*v, raw_tree));
-            }
-            drop(registry);
+            let mut sorted_list = AWAIT_TREE_REGISTRY.collect_all();
+            sorted_list.sort_by_key(|kv| kv.0);
 
             let mut dynamic_string = String::new();
-            sorted_list.sort_by_key(|kv| kv.0);
-            for (_, raw_tree) in sorted_list {
-                dynamic_string.push_str(raw_tree.as_str());
+            for (idx, raw_tree) in sorted_list {
+                dynamic_string.push_str(format!("actor={idx} ").as_str());
+                dynamic_string.push_str(raw_tree.to_string().as_str());
                 dynamic_string.push('\n');
             }
             dynamic_string
@@ -52,5 +47,37 @@ impl Handler for AwaitTreeHandler {
 
     fn get_route_path(&self) -> String {
         "/await-tree".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::await_tree::AWAIT_TREE_REGISTRY;
+    use crate::http::await_tree::AwaitTreeHandler;
+    use crate::http::Handler;
+    use await_tree::{span, InstrumentAwait};
+    use poem::test::TestClient;
+    use poem::Route;
+    use tracing::Instrument;
+
+    #[tokio::test]
+    async fn test_router() -> anyhow::Result<()> {
+        let await_registry = AWAIT_TREE_REGISTRY.clone();
+        let await_root = await_registry.register("test".to_string()).await;
+
+        tokio::spawn(await_root.instrument(async move {
+            tokio::time::sleep(tokio::time::Duration::from_secs(5))
+                .instrument_await(span!("sleeping..."))
+                .await;
+        }));
+
+        let handler = AwaitTreeHandler::default();
+        let app = Route::new().at(handler.get_route_path(), handler.get_route_method());
+        let cli = TestClient::new(app);
+        let resp = cli.get("/await-tree").send().await;
+        resp.assert_status_is_ok();
+        println!("{}", resp.0.into_body().into_string().await.unwrap());
+
+        Ok(())
     }
 }

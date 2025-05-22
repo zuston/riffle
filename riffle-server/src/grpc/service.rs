@@ -50,7 +50,7 @@ use crate::reject::RejectionPolicyGateway;
 use crate::server_state_manager::{ServerState, ServerStateManager};
 use crate::store::{PartitionedData, ResponseDataIndex};
 use crate::util;
-use await_tree::InstrumentAwait;
+use await_tree::{span, InstrumentAwait};
 use bytes::Bytes;
 use croaring::{JvmLegacy, Treemap};
 use fastrace::future::FutureExt;
@@ -257,9 +257,10 @@ impl ShuffleServer for DefaultShuffleServer {
 
         let release_result = app
             .release_ticket(ticket_id)
-            .instrument_await(format!(
+            .instrument_await(span!(
                 "releasing buffer for appId: {:?}. shuffleId: {}.",
-                &app_id, shuffle_id
+                &app_id,
+                shuffle_id
             ))
             .await;
         if release_result.is_err() {
@@ -294,7 +295,12 @@ impl ShuffleServer for DefaultShuffleServer {
                 continue;
             }
             let app_id_ref = app_id.clone();
-            let await_tree_msg = format!("inserting data that has costed {}(ms). appId: {:?}. shuffleId: {}. partitionId: {}", util::now_timestamp_as_millis() - insert_start, &app_id_ref, shuffle_id, partition_id);
+            let await_tree_msg = span!(
+                "Inserting data. appId: {:?}. shuffleId: {}. partitionId: {}",
+                &app_id_ref,
+                shuffle_id,
+                partition_id
+            );
             let uid = PartitionedUId {
                 app_id: app_id_ref,
                 shuffle_id,
@@ -787,9 +793,10 @@ impl ShuffleServer for DefaultShuffleServer {
                 size: req.require_size as i64,
                 partition_ids: req.partition_ids.clone(),
             })
-            .instrument_await(format!(
+            .instrument_await(span!(
                 "require buffer. uid: {:?}. partition_ids: {:?}",
-                &partition_id, &req.partition_ids
+                &partition_id,
+                &req.partition_ids
             ))
             .await;
 
