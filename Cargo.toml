@@ -86,6 +86,7 @@ tracing-subscriber = "0.3"
 dashmap = "5.4.0"
 pgwire = "0.28.0"
 datafusion-postgres = { git = "https://github.com/sunng87/datafusion-postgres.git", rev = "862113df28bdf4b5a338e913a3fea02defd8bc7d"}
+moka = "0.12.10"
 
 [profile.release]
 debug = 1

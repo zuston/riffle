@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use dashmap::{DashMap, DashSet};
+use moka::sync::{Cache, CacheBuilder};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
@@ -23,7 +24,7 @@ impl Layer for ReadPrefetchLayer {
     fn wrap(&self, handler: Handler) -> Handler {
         let layer = ReadPrefetchLayerWrapper {
             handler,
-            fetched: Default::default(),
+            fetched: Cache::builder().max_capacity(2000).build(),
         };
         Arc::new(Box::new(layer))
     }
@@ -32,7 +33,7 @@ impl Layer for ReadPrefetchLayer {
 #[derive(Clone)]
 struct ReadPrefetchLayerWrapper {
     handler: Handler,
-    fetched: DashSet<String>,
+    fetched: Cache<String, ()>,
 }
 
 unsafe impl Send for ReadPrefetchLayerWrapper {}
@@ -56,8 +57,8 @@ impl LocalIO for ReadPrefetchLayerWrapper {
     ) -> anyhow::Result<Bytes, WorkerError> {
         #[cfg(all(target_family = "unix", not(target_os = "macos")))]
         {
-            if length.is_some() && !self.fetched.contains(path) {
-                self.fetched.insert(path.to_string());
+            if length.is_some() && !self.fetched.contains_key(path) {
+                self.fetched.insert(path.to_string(), ());
 
                 use libc::{posix_fadvise, POSIX_FADV_WILLNEED};
                 use std::fs::File;
