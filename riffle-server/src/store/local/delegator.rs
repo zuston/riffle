@@ -103,12 +103,15 @@ impl LocalDiskDelegator {
                 root, conf.capacity
             );
         }
+        if config.read_prefetch_enable {
+            operator_builder = operator_builder.layer(ReadPrefetchLayer::new());
+            info!("Read prefetch layer is enabled for disk: {}", root);
+        }
         let io_handler = operator_builder
             .layer(TimeoutLayer::new(config.io_duration_threshold_sec))
             .layer(IoLayerRetry::new(RETRY_MAX_TIMES, root))
             .layer(AwaitTreeLayer::new(root))
             .layer(MetricsLayer::new(root))
-            .layer(ReadPrefetchLayer::new())
             .build();
 
         let delegator = Self {

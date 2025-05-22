@@ -56,7 +56,7 @@ impl LocalIO for ReadPrefetchLayerWrapper {
     ) -> anyhow::Result<Bytes, WorkerError> {
         #[cfg(all(target_family = "unix", not(target_os = "macos")))]
         {
-            if !self.fetched.contains(path) {
+            if length.is_some() && !self.fetched.contains(path) {
                 self.fetched.insert(path.to_string());
 
                 use libc::{posix_fadvise, POSIX_FADV_WILLNEED};

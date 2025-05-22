@@ -10,7 +10,9 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::Instant;
+use tokio::time::sleep;
 
 pub struct DiskReadBenchAction {
     dir: String,
@@ -99,7 +101,10 @@ impl Action for DiskReadBenchAction {
                 let mut offset = 0;
                 let mut latencies = Vec::with_capacity(batch_number as usize);
                 let start = Instant::now();
-                for _batch_idx in 0..batch_number {
+                for batch_idx in 0..batch_number {
+                    if batch_idx == 0 {
+                        sleep(Duration::from_secs(5)).await;
+                    }
                     let batch_start = Instant::now();
                     let _data = handler
                         .read(file_name.as_str(), offset, Some(read_size as i64))

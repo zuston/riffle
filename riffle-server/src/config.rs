@@ -128,6 +128,13 @@ pub struct LocalfileStoreConfig {
     pub index_consistency_detection_enable: bool,
 
     pub io_limiter: Option<IoLimiterConfig>,
+
+    #[serde(default = "as_default_read_prefetch_enable")]
+    pub read_prefetch_enable: bool,
+}
+
+fn as_default_read_prefetch_enable() -> bool {
+    false
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -200,6 +207,7 @@ impl LocalfileStoreConfig {
             io_duration_threshold_sec: as_default_io_duration_threshold_sec(),
             index_consistency_detection_enable: false,
             io_limiter: None,
+            read_prefetch_enable: as_default_read_prefetch_enable(),
         }
     }
 }
