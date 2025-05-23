@@ -28,9 +28,10 @@ use log::{error, info};
 use once_cell::sync::Lazy;
 use prometheus::{
     histogram_opts, labels, register_gauge_vec, register_histogram_vec,
-    register_histogram_vec_with_registry, register_int_counter_vec, register_int_gauge,
-    register_int_gauge_vec, Gauge, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounter,
-    IntCounterVec, IntGauge, IntGaugeVec, Registry,
+    register_histogram_vec_with_registry, register_histogram_with_registry,
+    register_int_counter_vec, register_int_gauge, register_int_gauge_vec, Gauge, GaugeVec,
+    Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
+    Registry,
 };
 use std::collections::HashMap;
 use std::time::Duration;
@@ -53,6 +54,17 @@ const SPILL_BATCH_SIZE_BUCKETS: &[f64] = &[
     ReadableSize::gb(1).as_bytes() as f64,
     ReadableSize::gb(10).as_bytes() as f64,
     ReadableSize::gb(100).as_bytes() as f64,
+];
+
+const LOCALFILE_INDEX_FILE_BYTES_BUCKETS: &[f64] = &[
+    ReadableSize::kb(1).as_bytes() as f64,
+    ReadableSize::kb(10).as_bytes() as f64,
+    ReadableSize::kb(100).as_bytes() as f64,
+    ReadableSize::mb(1).as_bytes() as f64,
+    ReadableSize::mb(10).as_bytes() as f64,
+    ReadableSize::mb(100).as_bytes() as f64,
+    ReadableSize::gb(1).as_bytes() as f64,
+    ReadableSize::gb(10).as_bytes() as f64,
 ];
 
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
@@ -579,6 +591,16 @@ pub static TOTAL_APP_FLUSHED_BYTES: Lazy<IntCounterVec> = Lazy::new(|| {
         &["app_id", "storage_type"]
     )
     .unwrap()
+});
+
+pub static LOCALFILE_INDEX_FILE_BYTES_HISTOGRAM: Lazy<Histogram> = Lazy::new(|| {
+    let opts = histogram_opts!(
+        "localfile_index_file_bytes_histogram",
+        "local file index file size in bytes",
+        Vec::from(LOCALFILE_INDEX_FILE_BYTES_BUCKETS)
+    );
+    let opts = register_histogram_with_registry!(opts, REGISTRY).unwrap();
+    opts
 });
 
 pub static MEMORY_SPILL_IN_FLUSHING_BYTES_HISTOGRAM: Lazy<HistogramVec> = Lazy::new(|| {
