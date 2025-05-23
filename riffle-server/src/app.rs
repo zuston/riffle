@@ -41,7 +41,7 @@ use log::{debug, error, info, warn};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use std::hash::{Hash, Hasher};
+use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::ops::Deref;
 use std::str::FromStr;
 
@@ -59,6 +59,7 @@ use crate::store::mem::capacity::CapacitySnapshot;
 use crate::util;
 use await_tree::InstrumentAwait;
 use crossbeam::epoch::Atomic;
+use fxhash::{FxBuildHasher, FxHasher};
 use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
 use prometheus::core::Collector;
@@ -164,7 +165,7 @@ pub struct App {
     block_id_manager: Arc<Box<dyn BlockIdManager>>,
 
     // key: (shuffle_id, partition_id)
-    partition_meta_infos: DashMap<(i32, i32), PartitionedMeta>,
+    partition_meta_infos: DashMap<(i32, i32), PartitionedMeta, BuildHasherDefault<FxHasher>>,
 
     // partition split
     partition_split_enable: bool,
@@ -299,7 +300,7 @@ impl App {
             partition_limit_enable,
             partition_limit_threshold,
             partition_limit_mem_backpressure_ratio,
-            partition_meta_infos: DashMap::new(),
+            partition_meta_infos: DashMap::with_hasher(FxBuildHasher::default()),
             total_received_data_size: Default::default(),
             total_resident_data_size: Default::default(),
             huge_partition_number: Default::default(),
@@ -809,7 +810,7 @@ pub type AppManagerRef = Arc<AppManager>;
 
 pub struct AppManager {
     // key: app_id
-    pub(crate) apps: DashMap<String, Arc<App>>,
+    pub(crate) apps: DashMap<String, Arc<App>, BuildHasherDefault<FxHasher>>,
     receiver: async_channel::Receiver<PurgeEvent>,
     sender: async_channel::Sender<PurgeEvent>,
     store: Arc<HybridStore>,
@@ -837,7 +838,7 @@ impl AppManager {
             };
 
         let manager = AppManager {
-            apps: DashMap::new(),
+            apps: DashMap::with_hasher_and_shard_amount(FxBuildHasher::default(), 1024),
             receiver,
             sender,
             store: storage.clone(),
