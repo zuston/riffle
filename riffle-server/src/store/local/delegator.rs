@@ -14,6 +14,7 @@ use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::local::io_layer_await_tree::AwaitTreeLayer;
 use crate::store::local::io_layer_metrics::MetricsLayer;
+use crate::store::local::io_layer_prefetch::ReadPrefetchLayer;
 use crate::store::local::io_layer_retry::{IoLayerRetry, RETRY_MAX_TIMES};
 use crate::store::local::io_layer_throttle::{ThrottleLayer, ThroughputBasedRateLimiter};
 use crate::store::local::io_layer_timeout::TimeoutLayer;
@@ -101,6 +102,10 @@ impl LocalDiskDelegator {
                 "IO layer of throttle is enabled for disk: {}. throughput: {}/s",
                 root, conf.capacity
             );
+        }
+        if config.read_prefetch_enable {
+            operator_builder = operator_builder.layer(ReadPrefetchLayer::new());
+            info!("Read prefetch layer is enabled for disk: {}", root);
         }
         let io_handler = operator_builder
             .layer(TimeoutLayer::new(config.io_duration_threshold_sec))

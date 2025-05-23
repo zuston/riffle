@@ -99,7 +99,7 @@ impl Action for DiskReadBenchAction {
                 let mut offset = 0;
                 let mut latencies = Vec::with_capacity(batch_number as usize);
                 let start = Instant::now();
-                for _batch_idx in 0..batch_number {
+                for batch_idx in 0..batch_number {
                     let batch_start = Instant::now();
                     let _data = handler
                         .read(file_name.as_str(), offset, Some(read_size as i64))

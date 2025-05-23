@@ -131,6 +131,7 @@ tikv-jemalloc-ctl= { workspace = true, features = ["use_std"], optional = true }
 tikv-jemalloc-sys= { workspace = true, features = ["stats", "profiling", "unprefixed_malloc_on_supported_platforms"], optional = true }
 tikv-jemallocator= { workspace = true, features = ["profiling", "unprefixed_malloc_on_supported_platforms"], optional = true }
 jemalloc_pprof= { workspace = true, features = ["symbolize", "flamegraph"], optional = true }
+moka = { workspace = true , features = ["sync"] }
 
 [build-dependencies]
 tonic-build = { workspace = true }
