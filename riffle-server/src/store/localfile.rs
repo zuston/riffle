@@ -23,7 +23,8 @@ use crate::app::{
 use crate::config::{LocalfileStoreConfig, StorageType};
 use crate::error::WorkerError;
 use crate::metric::{
-    GAUGE_LOCAL_DISK_SERVICE_USED, TOTAL_DETECTED_LOCALFILE_IN_CONSISTENCY, TOTAL_LOCALFILE_USED,
+    GAUGE_LOCAL_DISK_SERVICE_USED, LOCALFILE_INDEX_FILE_BYTES_HISTOGRAM,
+    TOTAL_DETECTED_LOCALFILE_IN_CONSISTENCY, TOTAL_LOCALFILE_USED,
 };
 use crate::store::ResponseDataIndex::Local;
 use crate::store::{
@@ -528,6 +529,7 @@ impl Store for LocalFileStore {
                 &index_file_path
             ))
             .await?;
+        LOCALFILE_INDEX_FILE_BYTES_HISTOGRAM.observe(data.len() as f64);
 
         // Detect inconsistent data
         if self.conf.index_consistency_detection_enable && data.len() > INDEX_BLOCK_SIZE {
