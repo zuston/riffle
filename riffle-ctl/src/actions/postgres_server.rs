@@ -1,6 +1,7 @@
 use crate::actions::query::SessionContextExtend;
 use crate::actions::Action;
 use async_trait::async_trait;
+use datafusion::common::context;
 use datafusion_postgres::{DfSessionService, HandlerFactory};
 use pgwire::tokio::process_socket;
 use std::sync::Arc;
@@ -25,17 +26,28 @@ impl PostgresServerAction {
 #[async_trait]
 impl Action for PostgresServerAction {
     async fn act(&self) -> anyhow::Result<()> {
-        let extended = SessionContextExtend::new(self.coordinator_server_url.as_str()).await?;
+        let context_manager =
+            SessionContextExtend::new(self.coordinator_server_url.as_str()).await?;
+        let context = context_manager.get_context();
+
+        tokio::spawn(async move {
+            loop {
+                // refresh table
+                tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+                if let Err(e) = context_manager.reload().await {
+                    println!("Error reloading session: {}", e);
+                }
+            }
+        });
 
         // Get the first catalog name from the session context
-        let catalog_name = extended
-            .ctx
+        let catalog_name = context
             .catalog_names() // Fixed: Removed .catalog_list()
             .first()
             .cloned();
 
         let factory = Arc::new(HandlerFactory(Arc::new(DfSessionService::new(
-            extended.ctx,
+            context,
             catalog_name,
         ))));
 
