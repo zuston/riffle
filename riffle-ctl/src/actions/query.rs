@@ -21,12 +21,12 @@ const HISTORICAL_APPS_TABLE_NAME: &str = "historical_apps";
 const ACTIVE_APPS_TABLE_NAME: &str = "active_apps";
 
 pub struct SessionContextExtend {
-    pub ctx: SessionContext,
+    ctx: Arc<SessionContext>,
     discovery: Discovery,
 }
 
 impl Deref for SessionContextExtend {
-    type Target = SessionContext;
+    type Target = Arc<SessionContext>;
 
     fn deref(&self) -> &Self::Target {
         &self.ctx
@@ -73,13 +73,22 @@ impl SessionContextExtend {
         let ctx =
             SessionContext::new_with_config(SessionConfig::new().with_information_schema(true));
         let self_me = Self {
-            ctx,
+            ctx: Arc::new(ctx),
             discovery: Discovery::new(&[coordinator_url]),
         };
-        self_me.register_instances().await?;
-        self_me.register_active_apps().await?;
-        self_me.register_historical_apps().await?;
+        self_me.reload().await?;
         Ok(self_me)
+    }
+
+    pub fn get_context(&self) -> Arc<SessionContext> {
+        self.ctx.clone()
+    }
+
+    pub async fn reload(&self) -> Result<()> {
+        self.register_instances().await?;
+        self.register_active_apps().await?;
+        self.register_historical_apps().await?;
+        Ok(())
     }
 
     async fn register_active_apps(&self) -> Result<()> {
@@ -128,6 +137,7 @@ impl SessionContextExtend {
         let batches = reader.collect::<arrow::error::Result<Vec<_>>>()?;
 
         let table = MemTable::try_new(schema, vec![batches])?;
+        let _ = self.ctx.deregister_table(table_name);
         self.ctx.register_table(table_name, Arc::new(table))?;
 
         Ok(())
