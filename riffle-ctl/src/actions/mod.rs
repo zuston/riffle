@@ -4,6 +4,9 @@ use clap::builder::Str;
 use dashmap::DashMap;
 use datafusion::dataframe::DataFrameWriteOptions;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
+use riffle_server::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
+use riffle_server::grpc::protobuf::uniffle::shuffle_server_internal_client::ShuffleServerInternalClient;
+use riffle_server::grpc::protobuf::uniffle::{CancelDecommissionRequest, DecommissionRequest};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
@@ -136,13 +139,19 @@ impl Action for ValidateAction {
 pub struct NodeUpdateAction {
     ip_and_port: Option<String>,
     target_status: String,
+    is_decommission_grpc_mode: bool,
 }
 
 impl NodeUpdateAction {
-    pub fn new(instance: Option<String>, target_status: String) -> Self {
+    pub fn new(
+        instance: Option<String>,
+        target_status: String,
+        is_decommission_grpc_mode: bool,
+    ) -> Self {
         Self {
             ip_and_port: instance,
             target_status,
+            is_decommission_grpc_mode,
         }
     }
 }
@@ -151,13 +160,53 @@ impl NodeUpdateAction {
 struct NodeUpdateInfo {
     ip: String,
     http_port: i32,
+    grpc_port: i32,
+}
+
+impl From<Vec<&str>> for NodeUpdateInfo {
+    fn from(parts: Vec<&str>) -> Self {
+        if parts.len() != 2 {
+            panic!("Illegal vars.")
+        }
+        NodeUpdateInfo {
+            ip: parts.get(0).unwrap().to_string(),
+            http_port: parts.get(1).unwrap().parse::<i32>().unwrap(),
+            grpc_port: 0,
+        }
+    }
 }
 
 async fn update_remote_server_status(
-    ip: String,
-    http_port: usize,
+    update_info: &NodeUpdateInfo,
     target_status: String,
+    decommission_is_grpc_mode: bool,
 ) -> anyhow::Result<()> {
+    let ip = update_info.ip.clone();
+    let http_port = update_info.http_port;
+    let grpc_port = update_info.grpc_port;
+
+    if decommission_is_grpc_mode {
+        match target_status.as_str() {
+            "DECOMMISSION" => {
+                let mut client =
+                    ShuffleServerInternalClient::connect(format!("http://{}:{}", ip, grpc_port))
+                        .await?;
+                client.decommission(DecommissionRequest::default()).await?;
+                return Ok(());
+            }
+            "CANCEL_DECOMMISSION" => {
+                let mut client =
+                    ShuffleServerInternalClient::connect(format!("http://{}:{}", ip, grpc_port))
+                        .await?;
+                client
+                    .cancel_decommission(CancelDecommissionRequest::default())
+                    .await?;
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+
     let url = format!(
         "http://{}:{}/admin?update_state={}",
         ip.as_str(),
@@ -214,9 +263,9 @@ impl Action for NodeUpdateAction {
             let mut failed_ips = vec![];
             for info in &infos {
                 match update_remote_server_status(
-                    info.ip.clone(),
-                    info.http_port as usize,
+                    &info,
                     self.target_status.to_string(),
+                    self.is_decommission_grpc_mode,
                 )
                 .await
                 {
@@ -247,9 +296,9 @@ impl Action for NodeUpdateAction {
             panic!("Illegal [id:http_port]={:?}", self.ip_and_port);
         }
         update_remote_server_status(
-            splits.get(0).unwrap().to_string(),
-            splits.get(1).unwrap().parse()?,
+            &NodeUpdateInfo::from(splits),
             self.target_status.to_string(),
+            false,
         )
         .await?;
 
