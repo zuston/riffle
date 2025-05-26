@@ -7,7 +7,9 @@ use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use riffle_server::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
 use riffle_server::grpc::protobuf::uniffle::shuffle_server_internal_client::ShuffleServerInternalClient;
 use riffle_server::grpc::protobuf::uniffle::{CancelDecommissionRequest, DecommissionRequest};
+use riffle_server::server_state_manager::ServerState;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, io, thread};
@@ -181,20 +183,22 @@ async fn update_remote_server_status(
     target_status: String,
     decommission_is_grpc_mode: bool,
 ) -> anyhow::Result<()> {
+    let target_status = ServerState::from_str(target_status.as_str())?;
+
     let ip = update_info.ip.clone();
     let http_port = update_info.http_port;
     let grpc_port = update_info.grpc_port;
 
     if decommission_is_grpc_mode {
-        match target_status.as_str() {
-            "DECOMMISSION" => {
+        match &target_status {
+            ServerState::DECOMMISSIONING => {
                 let mut client =
                     ShuffleServerInternalClient::connect(format!("http://{}:{}", ip, grpc_port))
                         .await?;
                 client.decommission(DecommissionRequest::default()).await?;
                 return Ok(());
             }
-            "CANCEL_DECOMMISSION" => {
+            ServerState::CANCEL_DECOMMISSION => {
                 let mut client =
                     ShuffleServerInternalClient::connect(format!("http://{}:{}", ip, grpc_port))
                         .await?;
@@ -211,7 +215,7 @@ async fn update_remote_server_status(
         "http://{}:{}/admin?update_state={}",
         ip.as_str(),
         http_port,
-        target_status.as_str()
+        target_status
     );
     let resp = reqwest::get(url).await?;
     if !resp.status().is_success() {
