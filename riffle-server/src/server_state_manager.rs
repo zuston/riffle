@@ -9,14 +9,14 @@ use serde::Deserialize;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
-use strum_macros::Display;
+use strum_macros::{Display, EnumString};
 
 const INTERVAL: u64 = 60 * 10;
 
 pub static SERVER_STATE_MANAGER_REF: OnceCell<ServerStateManager> = OnceCell::new();
 
 #[allow(non_camel_case_types)]
-#[derive(Debug, Clone, PartialEq, Display, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, EnumString, Display)]
 pub enum ServerState {
     ACTIVE,
     DECOMMISSIONING,
@@ -128,6 +128,13 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::thread;
     use std::time::Duration;
+
+    #[test]
+    fn test_macro() -> Result<()> {
+        let status = ServerState::CANCEL_DECOMMISSION;
+        assert_eq!("CANCEL_DECOMMISSION", status.to_string());
+        Ok(())
+    }
 
     #[test]
     fn test_decommission() -> Result<()> {

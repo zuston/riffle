@@ -191,7 +191,9 @@ fn main() -> anyhow::Result<()> {
 
     let rt = Runtime::new()?;
     rt.block_on(async {
-        let _ = action.act().await;
+        if let Err(e) = action.act().await {
+            println!("Error: {}", e);
+        }
     });
 
     Ok(())
