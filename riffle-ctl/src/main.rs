@@ -97,6 +97,8 @@ enum Commands {
         instance: Option<String>,
         #[arg(short, long)]
         status: String,
+        #[arg(short, long)]
+        decommission_grpc_mode: bool,
     },
 }
 
@@ -174,7 +176,15 @@ fn main() -> anyhow::Result<()> {
             Box::new(QueryAction::new(sql, table_format, coordinator_http_url))
         }
 
-        Commands::Update { instance, status } => Box::new(NodeUpdateAction::new(instance, status)),
+        Commands::Update {
+            instance,
+            status,
+            decommission_grpc_mode,
+        } => Box::new(NodeUpdateAction::new(
+            instance,
+            status,
+            decommission_grpc_mode,
+        )),
 
         _ => panic!("Unknown command"),
     };
