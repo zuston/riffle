@@ -56,7 +56,7 @@ const SPILL_BATCH_SIZE_BUCKETS: &[f64] = &[
     ReadableSize::gb(100).as_bytes() as f64,
 ];
 
-const LOCALFILE_RPC_BATCH_BYTES_BUCKETS: &[f64] = &[
+const RPC_BATCH_BYTES_BUCKETS: &[f64] = &[
     ReadableSize::kb(1).as_bytes() as f64,
     ReadableSize::kb(10).as_bytes() as f64,
     ReadableSize::kb(100).as_bytes() as f64,
@@ -66,6 +66,15 @@ const LOCALFILE_RPC_BATCH_BYTES_BUCKETS: &[f64] = &[
     ReadableSize::gb(1).as_bytes() as f64,
     ReadableSize::gb(10).as_bytes() as f64,
 ];
+
+#[allow(non_camel_case_types)]
+#[derive(strum_macros::Display)]
+pub enum RPC_BATCH_BYTES_OPERATION {
+    MEMORY_GET_DATA,
+    LOCALFILE_GET_INDEX,
+    LOCALFILE_GET_DATA,
+    SEND_DATA,
+}
 
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
 
@@ -593,23 +602,13 @@ pub static TOTAL_APP_FLUSHED_BYTES: Lazy<IntCounterVec> = Lazy::new(|| {
     .unwrap()
 });
 
-pub static LOCALFILE_DATA_RPC_BATCH_BYTES_HISTOGRAM: Lazy<Histogram> = Lazy::new(|| {
+pub static RPC_BATCH_DATA_BYTES_HISTOGRAM: Lazy<HistogramVec> = Lazy::new(|| {
     let opts = histogram_opts!(
-        "localfile_data_rpc_batch_bytes",
-        "local file index file size in bytes for one rpc batch",
-        Vec::from(LOCALFILE_RPC_BATCH_BYTES_BUCKETS)
+        "rpc_batch_data_bytes_histogram",
+        "rpc_batch_data_bytes_histogram",
+        Vec::from(RPC_BATCH_BYTES_BUCKETS)
     );
-    let opts = register_histogram_with_registry!(opts, REGISTRY).unwrap();
-    opts
-});
-
-pub static LOCALFILE_INDEX_RPC_BATCH_BYTES_HISTOGRAM: Lazy<Histogram> = Lazy::new(|| {
-    let opts = histogram_opts!(
-        "localfile_index_rpc_batch_bytes",
-        "local file index file size in bytes for one rpc batch",
-        Vec::from(LOCALFILE_RPC_BATCH_BYTES_BUCKETS)
-    );
-    let opts = register_histogram_with_registry!(opts, REGISTRY).unwrap();
+    let opts = register_histogram_vec_with_registry!(opts, &["operation"], REGISTRY).unwrap();
     opts
 });
 
