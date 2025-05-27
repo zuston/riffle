@@ -22,7 +22,7 @@ use crate::app::{
 };
 use crate::config::{MemoryStoreConfig, StorageType};
 use crate::error::WorkerError;
-use crate::metric::TOTAL_MEMORY_USED;
+use crate::metric::{RPC_BATCH_BYTES_OPERATION, RPC_BATCH_DATA_BYTES_HISTOGRAM, TOTAL_MEMORY_USED};
 use crate::readable_size::ReadableSize;
 use crate::store::{Block, RequireBufferResponse, ResponseData, ResponseDataIndex, Store};
 use crate::*;
@@ -267,6 +267,10 @@ impl Store for MemoryStore {
 
         TOTAL_MEMORY_USED.inc_by(size);
 
+        RPC_BATCH_DATA_BYTES_HISTOGRAM
+            .with_label_values(&[&RPC_BATCH_BYTES_OPERATION::SEND_DATA.to_string()])
+            .observe(size as f64);
+
         Ok(())
     }
 
@@ -283,6 +287,9 @@ impl Store for MemoryStore {
             )?,
             _ => panic!("Should not happen."),
         };
+        RPC_BATCH_DATA_BYTES_HISTOGRAM
+            .with_label_values(&[&RPC_BATCH_BYTES_OPERATION::MEMORY_GET_DATA.to_string()])
+            .observe(read_data.data.len() as f64);
 
         Ok(ResponseData::Mem(read_data))
     }
