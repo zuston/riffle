@@ -1,7 +1,7 @@
 use crate::metric::{GAUGE_GRPC_REQUEST_QUEUE_SIZE, TOTAL_GRPC_REQUEST};
 use hyper::service::Service;
 use hyper::Body;
-use prometheus::HistogramVec;
+use prometheus::{HistogramTimer, HistogramVec};
 use std::task::{Context, Poll};
 use tower::Layer;
 
@@ -47,29 +47,46 @@ where
     }
 
     fn call(&mut self, req: hyper::Request<Body>) -> Self::Future {
-        TOTAL_GRPC_REQUEST.with_label_values(&[&"ALL"]).inc();
-        GAUGE_GRPC_REQUEST_QUEUE_SIZE.inc();
-
         // This is necessary because tonic internally uses `tower::buffer::Buffer`.
         // See https://github.com/tower-rs/tower/issues/547#issuecomment-767629149
         // for details on why this is necessary
         let clone = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, clone);
 
-        let metrics = self.metric.clone();
+        let mut metric_tracker = RequestMetricTracker::with_timer(&self.metric);
 
         Box::pin(async move {
             let path = req.uri().path();
-            TOTAL_GRPC_REQUEST.with_label_values(&[path]).inc();
-            let timer = metrics.with_label_values(&[path]).start_timer();
-
+            metric_tracker.record(path);
             let response = inner.call(req).await?;
-
-            timer.observe_duration();
-
-            GAUGE_GRPC_REQUEST_QUEUE_SIZE.dec();
-
             Ok(response)
         })
+    }
+}
+
+struct RequestMetricTracker {
+    histogram: HistogramVec,
+    timer: Option<HistogramTimer>,
+}
+impl RequestMetricTracker {
+    pub fn with_timer(timer: &HistogramVec) -> Self {
+        Self {
+            timer: None,
+            histogram: timer.clone(),
+        }
+    }
+    pub fn record(&mut self, path: &str) {
+        TOTAL_GRPC_REQUEST.with_label_values(&[&"ALL"]).inc();
+        TOTAL_GRPC_REQUEST.with_label_values(&[path]).inc();
+        GAUGE_GRPC_REQUEST_QUEUE_SIZE.inc();
+
+        let timer = self.histogram.with_label_values(&[path]).start_timer();
+        self.timer.replace(timer);
+    }
+}
+
+impl Drop for RequestMetricTracker {
+    fn drop(&mut self) {
+        GAUGE_GRPC_REQUEST_QUEUE_SIZE.dec();
     }
 }
