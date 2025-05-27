@@ -117,6 +117,7 @@ struct AppInfo {
     app_id: String,
     registry_timestamp: u128,
     duration_minutes: f64,
+    received_bytes: u64,
     resident_bytes: u64,
     partition_number: usize,
     huge_partition_number: u64,
@@ -126,7 +127,6 @@ struct AppInfo {
 impl From<&Arc<App>> for AppInfo {
     fn from(app: &Arc<App>) -> Self {
         let timestamp = app.start_timestamp;
-        let resident_bytes = app.total_resident_data_size();
         let duration_min = milliseconds_to_minutes(util::now_timestamp_as_millis() - timestamp);
         let app_id = app.app_id.to_string();
 
@@ -134,10 +134,11 @@ impl From<&Arc<App>> for AppInfo {
             app_id,
             registry_timestamp: timestamp,
             duration_minutes: duration_min,
-            resident_bytes,
+            received_bytes: app.total_received_data_size(),
             partition_number: app.partition_number(),
             huge_partition_number: app.huge_partition_number(),
             reported_block_id_number: app.reported_block_id_number(),
+            resident_bytes: app.total_resident_data_size(),
         }
     }
 }
