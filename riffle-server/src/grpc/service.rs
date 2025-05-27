@@ -411,10 +411,10 @@ impl ShuffleServer for DefaultShuffleServer {
         let duration = start.elapsed().as_millis() as u64;
         GRPC_GET_LOCALFILE_INDEX_LATENCY.record(duration);
 
-        info!("[get_local_shuffle_index] duration {}(ms). app_id: {}, shuffle_id: {}, partition_id: {}", duration, &app_id, shuffle_id, &partition_id.partition_id);
-
         match data_index_wrapper.unwrap() {
             ResponseDataIndex::Local(data_index) => {
+                info!("[get_local_shuffle_index] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
+                    duration, data_index.data_file_len, &app_id, shuffle_id, &partition_id.partition_id);
                 Ok(Response::new(GetLocalShuffleIndexResponse {
                     index_data: data_index.index_data,
                     status: StatusCode::SUCCESS.into(),
@@ -489,10 +489,12 @@ impl ShuffleServer for DefaultShuffleServer {
         let duration = start.elapsed().as_millis() as u64;
         GRPC_GET_LOCALFILE_DATA_LATENCY.record(duration);
 
-        info!("[get_local_shuffle_data] duration {}(ms). app_id: {}, shuffle_id: {}, partition_id: {}", duration, &app_id, shuffle_id, &partition_id.partition_id);
+        let data = data_fetched_result.unwrap().from_local();
+        info!("[get_local_shuffle_data] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
+            duration, data.len(), &app_id, shuffle_id, &partition_id.partition_id);
 
         Ok(Response::new(GetLocalShuffleDataResponse {
-            data: data_fetched_result.unwrap().from_local(),
+            data,
             status: StatusCode::SUCCESS.into(),
             ret_msg: "".to_string(),
         }))
