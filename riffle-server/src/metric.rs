@@ -67,6 +67,7 @@ const RPC_BATCH_BYTES_BUCKETS: &[f64] = &[
     ReadableSize::gb(10).as_bytes() as f64,
 ];
 
+#[allow(non_camel_case_types)]
 #[derive(strum_macros::Display)]
 pub enum RPC_BATCH_BYTES_OPERATION {
     MEMORY_GET_DATA,
