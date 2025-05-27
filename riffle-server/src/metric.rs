@@ -605,7 +605,7 @@ pub static TOTAL_APP_FLUSHED_BYTES: Lazy<IntCounterVec> = Lazy::new(|| {
 pub static RPC_BATCH_DATA_BYTES_HISTOGRAM: Lazy<HistogramVec> = Lazy::new(|| {
     let opts = histogram_opts!(
         "rpc_batch_data_bytes_histogram",
-        "",
+        "rpc_batch_data_bytes_histogram",
         Vec::from(RPC_BATCH_BYTES_BUCKETS)
     );
     let opts = register_histogram_vec_with_registry!(opts, &["operation"], REGISTRY).unwrap();
