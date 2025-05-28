@@ -508,8 +508,8 @@ impl App {
                 // partition split
                 if self.partition_split_enable
                     && self
-                    .get_partition_meta(&puid)
-                    .is_split(&puid, self.partition_split_threshold.get().into())?
+                        .get_partition_meta(&puid)
+                        .is_split(&puid, self.partition_split_threshold.get().into())?
                 {
                     partition_split_candidates.insert(*partition_id);
                     split_hit = true;
