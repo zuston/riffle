@@ -50,6 +50,7 @@ use crate::block_id_manager::{get_block_id_manager, BlockIdManager};
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::config_ref::{ByteString, ConfRef, ConfigOption};
 use crate::constant::ALL_LABEL;
+use crate::dashmap_extension::DashMapExtend;
 use crate::grpc::protobuf::uniffle::{BlockIdLayout, RemoteStorage};
 use crate::historical_apps::HistoricalAppManager;
 use crate::id_layout::IdLayout;
@@ -165,7 +166,7 @@ pub struct App {
     block_id_manager: Arc<Box<dyn BlockIdManager>>,
 
     // key: (shuffle_id, partition_id)
-    partition_meta_infos: DashMap<(i32, i32), PartitionedMeta, BuildHasherDefault<FxHasher>>,
+    partition_meta_infos: DashMapExtend<(i32, i32), PartitionedMeta, BuildHasherDefault<FxHasher>>,
 
     // partition split
     partition_split_enable: bool,
@@ -300,7 +301,11 @@ impl App {
             partition_limit_enable,
             partition_limit_threshold,
             partition_limit_mem_backpressure_ratio,
-            partition_meta_infos: DashMap::with_hasher(FxBuildHasher::default()),
+            partition_meta_infos: DashMapExtend::<
+                (i32, i32),
+                PartitionedMeta,
+                BuildHasherDefault<FxHasher>,
+            >::new(),
             total_received_data_size: Default::default(),
             total_resident_data_size: Default::default(),
             huge_partition_number: Default::default(),
@@ -536,15 +541,12 @@ impl App {
     fn get_partition_meta(&self, uid: &PartitionedUId) -> PartitionedMeta {
         let shuffle_id = uid.shuffle_id;
         let partition_id = uid.partition_id;
-        let partitioned_meta = self
-            .partition_meta_infos
-            .entry((shuffle_id, partition_id))
-            .or_insert_with(|| {
+        self.partition_meta_infos
+            .compute_if_absent((shuffle_id, partition_id), || {
                 TOTAL_PARTITION_NUMBER.inc();
                 GAUGE_PARTITION_NUMBER.inc();
                 PartitionedMeta::new()
-            });
-        partitioned_meta.clone()
+            })
     }
 
     pub fn inc_partition_size(&self, uid: &PartitionedUId, size: u64) -> Result<()> {

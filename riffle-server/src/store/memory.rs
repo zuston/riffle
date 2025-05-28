@@ -34,6 +34,7 @@ use std::hash::BuildHasherDefault;
 
 use std::str::FromStr;
 
+use crate::dashmap_extension::DashMapExtend;
 use crate::store::mem::budget::MemoryBudget;
 use crate::store::mem::buffer::MemoryBuffer;
 use crate::store::mem::capacity::CapacitySnapshot;
@@ -46,11 +47,9 @@ use fxhash::{FxBuildHasher, FxHasher};
 use log::{debug, info, warn};
 use std::sync::Arc;
 
-const DASHMAP_SHARD_COUNT: usize = 128;
-
 pub struct MemoryStore {
     memory_capacity: i64,
-    state: DashMap<PartitionedUId, Arc<MemoryBuffer>, BuildHasherDefault<FxHasher>>,
+    state: DashMapExtend<PartitionedUId, Arc<MemoryBuffer>, BuildHasherDefault<FxHasher>>,
     budget: MemoryBudget,
     runtime_manager: RuntimeManager,
     ticket_manager: TicketManager,
@@ -73,7 +72,7 @@ impl MemoryStore {
             TicketManager::new(5 * 60, 10, release_allocated_func, runtime_manager.clone());
         MemoryStore {
             budget,
-            state: DashMap::with_hasher(FxBuildHasher::default()),
+            state: DashMapExtend::<PartitionedUId, Arc<MemoryBuffer>, BuildHasherDefault<FxHasher>>::new(),
             memory_capacity: max_memory_size,
             ticket_manager,
             runtime_manager,
@@ -95,12 +94,8 @@ impl MemoryStore {
             runtime_manager.clone(),
         );
 
-        /// the dashmap shard that will effect the lookup performance.
-        let dashmap =
-            DashMap::with_hasher_and_shard_amount(FxBuildHasher::default(), DASHMAP_SHARD_COUNT);
-
         MemoryStore {
-            state: dashmap,
+            state: DashMapExtend::<PartitionedUId, Arc<MemoryBuffer>, BuildHasherDefault<FxHasher>>::new(),
             budget: MemoryBudget::new(capacity.as_bytes() as i64),
             memory_capacity: capacity.as_bytes() as i64,
             ticket_manager,
@@ -206,11 +201,8 @@ impl MemoryStore {
 
     // only invoked when inserting
     pub fn get_or_create_buffer(&self, uid: PartitionedUId) -> Arc<MemoryBuffer> {
-        let buffer = self
-            .state
-            .entry(uid)
-            .or_insert_with(|| Arc::new(MemoryBuffer::new()));
-        buffer.clone()
+        self.state
+            .compute_if_absent(uid, || Arc::new(MemoryBuffer::new()))
     }
 
     pub fn get_buffer(&self, uid: &PartitionedUId) -> Result<Arc<MemoryBuffer>> {
