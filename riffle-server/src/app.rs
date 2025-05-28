@@ -500,24 +500,26 @@ impl App {
 
         let mut partition_split_candidates = HashSet::new();
 
-        for partition_id in &ctx.partition_ids {
-            let puid = PartitionedUId::from(app_id.to_owned(), *shuffle_id, *partition_id);
-            let mut split_hit = false;
+        if self.partition_limit_enable || self.partition_split_enable {
+            for partition_id in &ctx.partition_ids {
+                let puid = PartitionedUId::from(app_id.to_owned(), *shuffle_id, *partition_id);
+                let mut split_hit = false;
 
-            // partition split
-            if self.partition_split_enable
-                && self
-                    .get_partition_meta(&puid)
-                    .is_split(&puid, self.partition_split_threshold.get().into())?
-            {
-                partition_split_candidates.insert(*partition_id);
-                split_hit = true;
-            }
+                // partition split
+                if self.partition_split_enable
+                    && self
+                        .get_partition_meta(&puid)
+                        .is_split(&puid, self.partition_split_threshold.get().into())?
+                {
+                    partition_split_candidates.insert(*partition_id);
+                    split_hit = true;
+                }
 
-            // huge partition limitation
-            if self.is_backpressure_of_partition(&puid).await? {
-                TOTAL_REQUIRE_BUFFER_FAILED.inc();
-                return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
+                // huge partition limitation
+                if self.is_backpressure_of_partition(&puid).await? {
+                    TOTAL_REQUIRE_BUFFER_FAILED.inc();
+                    return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
+                }
             }
         }
 
