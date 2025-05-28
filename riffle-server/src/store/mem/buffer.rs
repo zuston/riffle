@@ -6,7 +6,7 @@ use crate::store::{Block, DataSegment, PartitionedMemoryData};
 use anyhow::Result;
 use croaring::Treemap;
 use fastrace::trace;
-use parking_lot::RwLock;
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::mem;
@@ -14,7 +14,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 pub struct MemoryBuffer {
-    buffer: RwLock<BufferInternal>,
+    buffer: Mutex<BufferInternal>,
 }
 
 #[derive(Default, Debug)]
@@ -93,28 +93,28 @@ impl BufferInternal {
 impl MemoryBuffer {
     pub fn new() -> MemoryBuffer {
         MemoryBuffer {
-            buffer: RwLock::new(BufferInternal::new()),
+            buffer: Mutex::new(BufferInternal::new()),
         }
     }
 
     #[trace]
     pub fn total_size(&self) -> Result<i64> {
-        return Ok(self.buffer.read().total_size);
+        return Ok(self.buffer.lock().total_size);
     }
 
     #[trace]
     pub fn flight_size(&self) -> Result<i64> {
-        return Ok(self.buffer.read().flight_size);
+        return Ok(self.buffer.lock().flight_size);
     }
 
     #[trace]
     pub fn staging_size(&self) -> Result<i64> {
-        return Ok(self.buffer.read().staging_size);
+        return Ok(self.buffer.lock().staging_size);
     }
 
     #[trace]
     pub fn clear(&self, flight_id: u64, flight_size: u64) -> Result<()> {
-        let mut buffer = self.buffer.write();
+        let mut buffer = self.buffer.lock();
         let flight = &mut buffer.flight;
         let removed = flight.remove(&flight_id);
         if let Some(block_ref) = removed {
@@ -133,7 +133,7 @@ impl MemoryBuffer {
         /// read sequence
         /// 1. from flight (expect: last_block_id not found or last_block_id == -1)
         /// 2. from staging
-        let buffer = self.buffer.read();
+        let buffer = self.buffer.lock();
 
         let mut read_result = vec![];
         let mut read_len = 0i64;
@@ -234,7 +234,7 @@ impl MemoryBuffer {
         /// read sequence
         /// 1. from flight (expect: last_block_id not found or last_block_id == 0)
         /// 2. from staging
-        let buffer = self.buffer.read();
+        let buffer = self.buffer.lock();
 
         let mut read_result = vec![];
         let mut read_len = 0i64;
@@ -310,7 +310,7 @@ impl MemoryBuffer {
 
     // when there is no any staging data, it will return the None
     pub fn spill(&self) -> Result<Option<BufferSpillResult>> {
-        let mut buffer = self.buffer.write();
+        let mut buffer = self.buffer.lock();
         if buffer.staging_size == 0 {
             return Ok(None);
         }
@@ -336,7 +336,7 @@ impl MemoryBuffer {
 
     #[trace]
     pub fn append(&self, blocks: Vec<Block>, size: u64) -> Result<()> {
-        let mut buffer = self.buffer.write();
+        let mut buffer = self.buffer.lock();
         let mut staging = &mut buffer.staging;
         staging.push(blocks);
 
