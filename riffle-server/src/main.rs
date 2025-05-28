@@ -97,6 +97,7 @@ pub mod historical_apps;
 
 pub mod config_reconfigure;
 pub mod config_ref;
+pub mod dashmap_extension;
 pub mod panic_hook;
 const MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY: &str = "MAX_MEMORY_ALLOCATION_LIMIT_SIZE";
 

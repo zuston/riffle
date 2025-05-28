@@ -60,6 +60,8 @@ pub mod panic_hook;
 pub mod server_state_manager;
 
 pub mod config_ref;
+mod dashmap_extension;
+
 use crate::app::{AppManager, AppManagerRef};
 use crate::common::init_global_variable;
 use crate::config_reconfigure::ReconfigurableConfManager;
@@ -70,7 +72,7 @@ use crate::grpc::protobuf::uniffle::{
     SendShuffleDataRequest, ShuffleBlock, ShuffleData, ShuffleRegisterRequest,
 };
 use crate::http::{HTTPServer, HttpMonitorService};
-use crate::id_layout::{IdLayout, DEFAULT_BLOCK_ID_LAYOUT};
+use crate::id_layout::DEFAULT_BLOCK_ID_LAYOUT;
 use crate::metric::MetricService;
 use crate::rpc::DefaultRpcService;
 use crate::runtime::manager::RuntimeManager;
