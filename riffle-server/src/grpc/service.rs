@@ -308,7 +308,7 @@ impl ShuffleServer for DefaultShuffleServer {
             };
             let ctx = WritingViewContext::new(uid, blocks);
             let app_ref = app.clone();
-            let inserted = app_ref.insert(ctx).instrument_await(await_tree_msg).await;
+            let inserted = app_ref.insert(ctx).await;
 
             if inserted.is_err() {
                 let err = format!(
@@ -795,11 +795,7 @@ impl ShuffleServer for DefaultShuffleServer {
                 size: req.require_size as i64,
                 partition_ids: req.partition_ids.clone(),
             })
-            .instrument_await(span!(
-                "require buffer. uid: {:?}. partition_ids: {:?}",
-                &partition_id,
-                &req.partition_ids
-            ))
+            .instrument_await(span!("require buffer. uid: {:?}", &partition_id))
             .await;
 
         let res = match app {
