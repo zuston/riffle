@@ -76,7 +76,7 @@ impl HdfsClient for HdfsNativeClient {
             .instrument_await("appending...")
             .await?;
         file_writer
-            .write(data.freeze())
+            .write(data.freeze(false))
             .instrument_await("writing..")
             .await?;
         file_writer.close().instrument_await("closing...").await?;

@@ -1,4 +1,4 @@
-use crate::composed_bytes::recycle_blocks::{Block, BlockManager};
+use crate::composed_bytes::recycle_blocks::{Block, BlockManager, RecycledBlock};
 use crate::store::alignment::io_buffer_pool::IoBufferPool;
 use crate::store::alignment::ALIGN;
 use bytes::{Bytes, BytesMut};
@@ -38,8 +38,12 @@ impl ComposedBytes {
     }
 
     /// Freeze the composed bytes into a single immutable Bytes object.
-    pub fn freeze(&self) -> Bytes {
-        let mut block = BLOCK_MANAGER.acquire(self.total_len);
+    pub fn freeze(&self, cache_enable: bool) -> Bytes {
+        let mut block = if cache_enable {
+            BLOCK_MANAGER.acquire(self.total_len)
+        } else {
+            RecycledBlock::new(BytesMut::with_capacity(self.total_len))
+        };
         for x in self.composed.iter() {
             block.extend_from_slice(x);
         }
@@ -65,6 +69,7 @@ pub mod recycle_blocks {
     use crate::store::alignment::io_bytes::IoBuffer;
     use bytes::BytesMut;
     use crossbeam::queue::ArrayQueue;
+    use std::io::Bytes;
     use std::ops::{Deref, DerefMut};
 
     #[derive(Debug)]
@@ -151,6 +156,14 @@ pub mod recycle_blocks {
         internal: Block,
         pool: Option<&'a BlockManager>,
     }
+    impl<'a> RecycledBlock<'a> {
+        pub fn new(bytes_mut: BytesMut) -> RecycledBlock<'a> {
+            Self {
+                internal: Block { bytes_mut },
+                pool: None,
+            }
+        }
+    }
 
     impl Drop for RecycledBlock<'_> {
         fn drop(&mut self) {
@@ -193,7 +206,7 @@ mod test {
         assert_eq!(b"hello", iter.next().unwrap().as_ref());
         assert_eq!(b"world", iter.next().unwrap().as_ref());
 
-        let data = composed.freeze();
+        let data = composed.freeze(true);
         assert_eq!(b"helloworld", data.as_ref());
     }
 }
