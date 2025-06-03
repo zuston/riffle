@@ -1,6 +1,4 @@
 use crate::composed_bytes::recycle_blocks::{Block, BlockManager, RecycledBlock};
-use crate::store::alignment::io_buffer_pool::IoBufferPool;
-use crate::store::alignment::ALIGN;
 use bytes::{Bytes, BytesMut};
 use once_cell::sync::Lazy;
 use std::ops::{Deref, DerefMut};
