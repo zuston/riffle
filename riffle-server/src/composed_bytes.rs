@@ -1,4 +1,14 @@
+use crate::composed_bytes::recycle_blocks::{Block, BlockManager};
+use crate::store::alignment::io_buffer_pool::IoBufferPool;
+use crate::store::alignment::ALIGN;
 use bytes::{Bytes, BytesMut};
+use once_cell::sync::Lazy;
+use std::ops::{Deref, DerefMut};
+
+const BLOCK_SIZE: usize = 16 * 1024 * 1024;
+const POOL_CAPACITY: usize = 4 * 1024 * 1024 * 1024 / BLOCK_SIZE;
+static BLOCK_MANAGER: Lazy<BlockManager> =
+    Lazy::new(|| BlockManager::new(BLOCK_SIZE, POOL_CAPACITY));
 
 /// To compose multi Bytes into one for zero copy.
 #[derive(Clone, Debug)]
@@ -27,13 +37,14 @@ impl ComposedBytes {
         self.composed.push(bytes);
     }
 
-    /// this is expensive to consume like the Bytes
+    /// Freeze the composed bytes into a single immutable Bytes object.
     pub fn freeze(&self) -> Bytes {
-        let mut bytes_mut = BytesMut::with_capacity(self.total_len);
+        let mut block = BLOCK_MANAGER.acquire(self.total_len);
         for x in self.composed.iter() {
-            bytes_mut.extend_from_slice(x);
+            block.extend_from_slice(x);
         }
-        bytes_mut.freeze()
+        let data = block.clone().freeze();
+        data
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Bytes> + '_ {
@@ -46,6 +57,123 @@ impl ComposedBytes {
 
     pub fn len(&self) -> usize {
         self.total_len
+    }
+}
+
+pub mod recycle_blocks {
+    use crate::store::alignment::io_buffer_pool::RecycledIoBuffer;
+    use crate::store::alignment::io_bytes::IoBuffer;
+    use bytes::BytesMut;
+    use crossbeam::queue::ArrayQueue;
+    use std::ops::{Deref, DerefMut};
+
+    #[derive(Debug)]
+    pub struct BlockManager {
+        capacity: usize,
+        block_size: usize,
+        queue: ArrayQueue<Block>,
+    }
+
+    impl BlockManager {
+        pub fn new(block_size: usize, capacity: usize) -> Self {
+            Self {
+                capacity,
+                block_size,
+                queue: ArrayQueue::new(capacity),
+            }
+        }
+
+        pub fn acquire(&self, size: usize) -> RecycledBlock {
+            if size > self.block_size {
+                return RecycledBlock {
+                    internal: Block {
+                        bytes_mut: BytesMut::with_capacity(size),
+                    },
+                    pool: None,
+                };
+            }
+
+            let create = || Block::new(self.block_size);
+            let block = match self.queue.pop() {
+                Some(block) => block,
+                None => create(),
+            };
+            RecycledBlock {
+                internal: block,
+                pool: Some(self),
+            }
+        }
+
+        pub fn release(&self, block: Block) {
+            if self.queue.len() < self.capacity {
+                let _ = self.queue.push(block);
+            }
+        }
+
+        pub fn block_size(&self) -> usize {
+            self.block_size
+        }
+    }
+
+    #[derive(Default, Debug)]
+    pub struct Block {
+        bytes_mut: BytesMut,
+    }
+
+    impl From<BytesMut> for Block {
+        fn from(value: BytesMut) -> Self {
+            Self { bytes_mut: value }
+        }
+    }
+    impl Block {
+        fn new(size: usize) -> Self {
+            Self {
+                bytes_mut: BytesMut::with_capacity(size),
+            }
+        }
+    }
+
+    impl DerefMut for Block {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.bytes_mut
+        }
+    }
+
+    impl Deref for Block {
+        type Target = BytesMut;
+
+        fn deref(&self) -> &Self::Target {
+            &self.bytes_mut
+        }
+    }
+
+    pub struct RecycledBlock<'a> {
+        internal: Block,
+        pool: Option<&'a BlockManager>,
+    }
+
+    impl Drop for RecycledBlock<'_> {
+        fn drop(&mut self) {
+            if let Some(pool) = self.pool {
+                let mut taked = std::mem::take(&mut self.internal);
+                taked.bytes_mut.clear();
+                pool.release(taked);
+            }
+        }
+    }
+
+    impl Deref for RecycledBlock<'_> {
+        type Target = Block;
+
+        fn deref(&self) -> &Self::Target {
+            &self.internal
+        }
+    }
+
+    impl DerefMut for RecycledBlock<'_> {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.internal
+        }
     }
 }
 
