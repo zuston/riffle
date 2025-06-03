@@ -33,6 +33,7 @@ use crate::store::{
 };
 use std::cmp::min;
 use std::fs;
+use std::hash::BuildHasherDefault;
 use std::ops::Deref;
 use std::path::Path;
 use std::str::FromStr;
@@ -47,32 +48,36 @@ use log::{debug, error, info, warn};
 
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::composed_bytes::ComposedBytes;
+use crate::dashmap_extension::DashMapExtend;
 use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
-use crate::store::local::delegator::LocalDiskDelegator;
-use crate::util::get_crc;
-use dashmap::mapref::entry::Entry;
-use std::sync::atomic::Ordering::SeqCst;
-use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::Instrument;
-
 use crate::store::index_codec::{IndexCodec, INDEX_BLOCK_SIZE};
+use crate::store::local::delegator::LocalDiskDelegator;
 use crate::store::local::{LocalDiskStorage, LocalIO, LocalfileStoreStat};
 use crate::store::spill::SpillWritingViewContext;
 use crate::util;
+use crate::util::get_crc;
+use dashmap::mapref::entry::Entry;
+use futures::AsyncReadExt;
+use fxhash::FxHasher;
+use std::sync::atomic::Ordering::SeqCst;
+use std::sync::atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tracing::Instrument;
 
-struct LockedObj {
+struct PartitionCoordinator {
     disk: LocalDiskDelegator,
-    pointer: AtomicI64,
+    pointer: Arc<AtomicU64>,
+    write_lock: Arc<Mutex<()>>,
 }
 
-impl From<LocalDiskDelegator> for LockedObj {
+impl From<LocalDiskDelegator> for PartitionCoordinator {
     fn from(value: LocalDiskDelegator) -> Self {
         Self {
             disk: value,
             pointer: Default::default(),
+            write_lock: Arc::new(Default::default()),
         }
     }
 }
@@ -81,7 +86,8 @@ pub struct LocalFileStore {
     local_disks: Vec<LocalDiskDelegator>,
     min_number_of_available_disks: i32,
     runtime_manager: RuntimeManager,
-    partition_locks: DashMap<String, Arc<RwLock<LockedObj>>>,
+    partition_coordinators:
+        DashMapExtend<String, Arc<PartitionCoordinator>, BuildHasherDefault<FxHasher>>,
 
     direct_io_enable: bool,
     direct_io_read_enable: bool,
@@ -108,7 +114,11 @@ impl LocalFileStore {
             local_disks: local_disk_instances,
             min_number_of_available_disks: 1,
             runtime_manager,
-            partition_locks: Default::default(),
+            partition_coordinators: DashMapExtend::<
+                String,
+                Arc<PartitionCoordinator>,
+                BuildHasherDefault<FxHasher>,
+            >::new(),
             direct_io_enable: config.direct_io_enable,
             direct_io_read_enable: config.direct_io_read_enable,
             direct_io_append_enable: config.direct_io_append_enable,
@@ -162,7 +172,11 @@ impl LocalFileStore {
             local_disks: local_disk_instances,
             min_number_of_available_disks,
             runtime_manager,
-            partition_locks: Default::default(),
+            partition_coordinators: DashMapExtend::<
+                String,
+                Arc<PartitionCoordinator>,
+                BuildHasherDefault<FxHasher>,
+            >::new(),
             direct_io_enable: localfile_config.direct_io_enable,
             direct_io_read_enable: localfile_config.direct_io_read_enable,
             direct_io_append_enable: localfile_config.direct_io_append_enable,
@@ -255,23 +269,24 @@ impl LocalFileStore {
             LocalFileStore::gen_relative_path_for_partition(&uid);
 
         let mut parent_dir_is_created = true;
-        let locked_obj = match self.partition_locks.entry(data_file_path.clone()) {
+        let partition_coordinator = match self.partition_coordinators.entry(data_file_path.clone())
+        {
             Entry::Vacant(e) => {
                 parent_dir_is_created = false;
                 let disk = self.select_disk(&uid)?;
-                let locked_obj = Arc::new(RwLock::new(LockedObj::from(disk)));
-                let obj = e.insert_entry(locked_obj.clone());
+                let obj = e.insert_entry(Arc::new(PartitionCoordinator::from(disk)));
                 obj.get().clone()
             }
             Entry::Occupied(v) => v.get().clone(),
         };
 
-        let locked_obj = locked_obj
-            .write()
-            .instrument_await("waiting the localfile partition lock...")
+        let partition_write_lock = partition_coordinator
+            .write_lock
+            .lock()
+            .instrument_await("waiting the localfile partition lock")
             .await;
-        let local_disk = &locked_obj.disk;
-        let next_offset = locked_obj.pointer.load(SeqCst);
+        let local_disk = &partition_coordinator.disk;
+        let next_offset = partition_coordinator.pointer.load(SeqCst);
 
         if local_disk.is_corrupted()? {
             return Err(WorkerError::PARTIAL_DATA_LOST(local_disk.root()));
@@ -291,7 +306,7 @@ impl LocalFileStore {
             }
         }
 
-        let shuffle_file_format = self.create_shuffle_format(blocks, next_offset)?;
+        let shuffle_file_format = self.create_shuffle_format(blocks, next_offset as i64)?;
         let append_future = if self.direct_io_enable && self.direct_io_append_enable {
             local_disk.direct_append(
                 &data_file_path,
@@ -321,10 +336,10 @@ impl LocalFileStore {
             .with_label_values(&[&local_disk.root()])
             .add(shuffle_file_format.len as i64);
 
-        locked_obj
+        partition_coordinator
             .deref()
             .pointer
-            .store(shuffle_file_format.offset, SeqCst);
+            .store(shuffle_file_format.offset as u64, SeqCst);
 
         Ok(())
     }
@@ -434,56 +449,45 @@ impl Store for LocalFileStore {
         }
 
         let (data_file_path, _) = LocalFileStore::gen_relative_path_for_partition(&uid);
+        match self.partition_coordinators.get(&data_file_path) {
+            None => {
+                warn!(
+                    "There is no cached data in localfile store for [{:?}]",
+                    &uid
+                );
+                Ok(ResponseData::Local(PartitionedLocalData {
+                    data: Default::default(),
+                }))
+            }
+            Some(coordinator) => {
+                let local_disk = &coordinator.disk;
+                if local_disk.is_corrupted()? {
+                    return Err(WorkerError::LOCAL_DISK_OWNED_BY_PARTITION_CORRUPTED(
+                        local_disk.root(),
+                    ));
+                }
 
-        if !self.partition_locks.contains_key(&data_file_path) {
-            warn!(
-                "There is no cached data in localfile store for [{:?}]",
-                &uid
-            );
-            return Ok(ResponseData::Local(PartitionedLocalData {
-                data: Default::default(),
-            }));
+                let future_read = if self.direct_io_enable && self.direct_io_read_enable {
+                    local_disk.direct_read(&data_file_path, offset, len)
+                } else {
+                    local_disk.read(&data_file_path, offset, Some(len))
+                };
+                let data = future_read
+                    .instrument_await(format!(
+                        "getting data from offset:{} with expected {} bytes from localfile: {}",
+                        offset, len, &data_file_path
+                    ))
+                    .await?;
+
+                RPC_BATCH_DATA_BYTES_HISTOGRAM
+                    .with_label_values(
+                        &[&RPC_BATCH_BYTES_OPERATION::LOCALFILE_GET_DATA.to_string()],
+                    )
+                    .observe(data.len() as f64);
+
+                Ok(ResponseData::Local(PartitionedLocalData { data }))
+            }
         }
-
-        let locked_object = self
-            .partition_locks
-            .entry(data_file_path.clone())
-            .or_insert_with(|| {
-                Arc::new(RwLock::new(LockedObj::from(
-                    self.select_disk(&uid).unwrap(),
-                )))
-            })
-            .clone();
-
-        let locked_object = locked_object
-            .read()
-            .instrument_await("waiting the partition file [write] lock")
-            .await;
-        let local_disk = &locked_object.disk;
-
-        if local_disk.is_corrupted()? {
-            return Err(WorkerError::LOCAL_DISK_OWNED_BY_PARTITION_CORRUPTED(
-                local_disk.root(),
-            ));
-        }
-
-        let future_read = if self.direct_io_enable && self.direct_io_read_enable {
-            local_disk.direct_read(&data_file_path, offset, len)
-        } else {
-            local_disk.read(&data_file_path, offset, Some(len))
-        };
-        let data = future_read
-            .instrument_await(format!(
-                "getting data from offset:{} with expected {} bytes from localfile: {}",
-                offset, len, &data_file_path
-            ))
-            .await?;
-
-        RPC_BATCH_DATA_BYTES_HISTOGRAM
-            .with_label_values(&[&RPC_BATCH_BYTES_OPERATION::LOCALFILE_GET_DATA.to_string()])
-            .observe(data.len() as f64);
-
-        Ok(ResponseData::Local(PartitionedLocalData { data }))
     }
 
     async fn get_index(
@@ -494,66 +498,57 @@ impl Store for LocalFileStore {
         let (data_file_path, index_file_path) =
             LocalFileStore::gen_relative_path_for_partition(&uid);
 
-        if !self.partition_locks.contains_key(&data_file_path) {
-            warn!(
-                "There is no cached data in localfile store for [{:?}]",
-                &uid
-            );
-            return Ok(Local(LocalDataIndex {
-                index_data: Default::default(),
-                data_file_len: 0,
-            }));
-        }
+        match self.partition_coordinators.get(&data_file_path) {
+            None => {
+                warn!(
+                    "There is no cached data in localfile store for [{:?}]",
+                    &uid
+                );
+                Ok(Local(LocalDataIndex {
+                    index_data: Default::default(),
+                    data_file_len: 0,
+                }))
+            }
+            Some(partition_coordinator) => {
+                let local_disk = &partition_coordinator.disk;
+                if local_disk.is_corrupted()? {
+                    return Err(WorkerError::LOCAL_DISK_OWNED_BY_PARTITION_CORRUPTED(
+                        local_disk.root(),
+                    ));
+                }
+                let len = partition_coordinator.pointer.load(SeqCst);
+                let data = local_disk
+                    .read(&index_file_path, 0, None)
+                    .instrument_await(format!(
+                        "reading index data from file: {:?}",
+                        &index_file_path
+                    ))
+                    .await?;
+                RPC_BATCH_DATA_BYTES_HISTOGRAM
+                    .with_label_values(&[
+                        &RPC_BATCH_BYTES_OPERATION::LOCALFILE_GET_INDEX.to_string()
+                    ])
+                    .observe(data.len() as f64);
 
-        let locked_object = self
-            .partition_locks
-            .entry(data_file_path.clone())
-            .or_insert_with(|| {
-                Arc::new(RwLock::new(LockedObj::from(
-                    self.select_disk(&uid).unwrap(),
-                )))
-            })
-            .clone();
+                // Detect inconsistent data
+                if self.conf.index_consistency_detection_enable && data.len() > INDEX_BLOCK_SIZE {
+                    if let Err(e) = LocalFileStore::detect_index_inconsistency(
+                        &data,
+                        len as i64,
+                        &local_disk.root(),
+                        &index_file_path,
+                        &data_file_path,
+                    ) {
+                        error!("Errors on detecting index inconsistency. err: {}", e);
+                    }
+                }
 
-        let locked_object = locked_object
-            .read()
-            .instrument_await("waiting the partition file [read] lock")
-            .await;
-        let local_disk = &locked_object.disk;
-        if local_disk.is_corrupted()? {
-            return Err(WorkerError::LOCAL_DISK_OWNED_BY_PARTITION_CORRUPTED(
-                local_disk.root(),
-            ));
-        }
-        let len = locked_object.pointer.load(SeqCst);
-        let data = local_disk
-            .read(&index_file_path, 0, None)
-            .instrument_await(format!(
-                "reading index data from file: {:?}",
-                &index_file_path
-            ))
-            .await?;
-        RPC_BATCH_DATA_BYTES_HISTOGRAM
-            .with_label_values(&[&RPC_BATCH_BYTES_OPERATION::LOCALFILE_GET_INDEX.to_string()])
-            .observe(data.len() as f64);
-
-        // Detect inconsistent data
-        if self.conf.index_consistency_detection_enable && data.len() > INDEX_BLOCK_SIZE {
-            if let Err(e) = LocalFileStore::detect_index_inconsistency(
-                &data,
-                len,
-                &local_disk.root(),
-                &index_file_path,
-                &data_file_path,
-            ) {
-                error!("Errors on detecting index inconsistency. err: {}", e);
+                Ok(Local(LocalDataIndex {
+                    index_data: data,
+                    data_file_len: len as i64,
+                }))
             }
         }
-
-        Ok(Local(LocalDataIndex {
-            index_data: data,
-            data_file_len: len,
-        }))
     }
 
     async fn purge(&self, ctx: &PurgeDataContext) -> Result<i64> {
@@ -570,26 +565,26 @@ impl Store for LocalFileStore {
         }
 
         let keys_to_delete: Vec<_> = self
-            .partition_locks
+            .partition_coordinators
             .iter()
             .filter(|entry| entry.key().starts_with(&data_relative_dir_path))
             .map(|entry| entry.key().to_string())
             .collect();
 
-        let mut removed_data_size = 0i64;
+        let mut removed_data_size = 0u64;
         for key in keys_to_delete {
-            let meta = self.partition_locks.remove(&key);
+            let meta = self.partition_coordinators.remove(&key);
             if let Some(x) = meta {
-                let lock_obj = x.1.write().await;
-                let size = lock_obj.pointer.load(SeqCst);
+                let p_lock = x.1.write_lock.lock().await;
+                let size = x.1.pointer.load(SeqCst);
                 removed_data_size += size;
                 GAUGE_LOCAL_DISK_SERVICE_USED
-                    .with_label_values(&[&lock_obj.disk.root()])
-                    .sub(size);
+                    .with_label_values(&[&x.1.disk.root()])
+                    .sub(size as i64);
             }
         }
 
-        Ok(removed_data_size)
+        Ok(removed_data_size as i64)
     }
 
     async fn is_healthy(&self) -> Result<bool> {
