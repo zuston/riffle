@@ -54,6 +54,7 @@ pub mod id_layout;
 pub mod lazy_initializer;
 
 mod config_reconfigure;
+#[cfg(feature = "deadlock-detection")]
 pub mod deadlock;
 pub mod historical_apps;
 pub mod panic_hook;

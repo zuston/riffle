@@ -57,6 +57,8 @@ mimalloc = ["dep:mimalloc"]
 
 logforth = ["dep:logforth"]
 
+deadlock-detection = ["parking_lot/deadlock_detection"]
+
 [dependencies]
 anyhow = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
@@ -107,7 +109,7 @@ rand = { workspace = true }
 fastrace = { workspace = true }
 fastrace-jaeger = { workspace = true }
 fxhash = { workspace = true }
-parking_lot = { workspace = true, features = ["deadlock_detection"] }
+parking_lot = { workspace = true }
 num_enum = { workspace = true }
 core_affinity = { workspace = true }
 chrono = { workspace = true }

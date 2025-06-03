@@ -1,5 +1,6 @@
 use crate::app::AppManagerRef;
 use crate::config::HealthServiceConfig;
+#[cfg(feature = "deadlock-detection")]
 use crate::deadlock::DEADLOCK_TAG;
 use crate::mem_allocator::ALLOCATOR;
 use crate::panic_hook::PANIC_TAG;
@@ -98,6 +99,7 @@ impl HealthService {
     }
 
     pub async fn is_healthy(&self) -> Result<bool> {
+        #[cfg(feature = "deadlock-detection")]
         if (DEADLOCK_TAG.load(SeqCst)) {
             return Ok(false);
         }
@@ -208,6 +210,7 @@ mod tests {
     use crate::app::test::mock_config;
     use crate::app::AppManager;
     use crate::config_reconfigure::ReconfigurableConfManager;
+    #[cfg(feature = "deadlock-detection")]
     use crate::deadlock::DEADLOCK_TAG;
     use crate::health_service::HealthService;
     use crate::runtime::manager::RuntimeManager;
@@ -217,6 +220,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stable_memory_used() -> anyhow::Result<()> {
+        #[cfg(feature = "deadlock-detection")]
         DEADLOCK_TAG.store(false, SeqCst);
 
         let mut config = mock_config();

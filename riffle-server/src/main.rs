@@ -31,6 +31,8 @@ use crate::log_service::LogService;
 use crate::logforth_service::LogService;
 
 use crate::config_reconfigure::ReconfigurableConfManager;
+
+#[cfg(feature = "deadlock-detection")]
 use crate::deadlock::detect_deadlock;
 use crate::mem_allocator::ALLOCATOR;
 use crate::metric::MetricService;
@@ -91,6 +93,7 @@ pub mod tracing;
 pub mod urpc;
 pub mod util;
 
+#[cfg(feature = "deadlock-detection")]
 pub mod deadlock;
 
 pub mod historical_apps;
@@ -126,6 +129,7 @@ fn main() -> Result<()> {
     );
 
     // Detect potential deadlock
+    #[cfg(feature = "deadlock-detection")]
     detect_deadlock();
 
     // Set the system hook
