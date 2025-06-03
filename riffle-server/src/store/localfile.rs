@@ -33,6 +33,7 @@ use crate::store::{
 };
 use std::cmp::min;
 use std::fs;
+use std::hash::BuildHasherDefault;
 use std::ops::Deref;
 use std::path::Path;
 use std::str::FromStr;
@@ -47,22 +48,23 @@ use log::{debug, error, info, warn};
 
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::composed_bytes::ComposedBytes;
+use crate::dashmap_extension::DashMapExtend;
 use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
+use crate::store::index_codec::{IndexCodec, INDEX_BLOCK_SIZE};
 use crate::store::local::delegator::LocalDiskDelegator;
+use crate::store::local::{LocalDiskStorage, LocalIO, LocalfileStoreStat};
+use crate::store::spill::SpillWritingViewContext;
+use crate::util;
 use crate::util::get_crc;
 use dashmap::mapref::entry::Entry;
 use futures::AsyncReadExt;
+use fxhash::FxHasher;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::Instrument;
-
-use crate::store::index_codec::{IndexCodec, INDEX_BLOCK_SIZE};
-use crate::store::local::{LocalDiskStorage, LocalIO, LocalfileStoreStat};
-use crate::store::spill::SpillWritingViewContext;
-use crate::util;
 
 struct PartitionCoordinator {
     disk: LocalDiskDelegator,
@@ -84,7 +86,8 @@ pub struct LocalFileStore {
     local_disks: Vec<LocalDiskDelegator>,
     min_number_of_available_disks: i32,
     runtime_manager: RuntimeManager,
-    partition_coordinators: DashMap<String, Arc<PartitionCoordinator>>,
+    partition_coordinators:
+        DashMapExtend<String, Arc<PartitionCoordinator>, BuildHasherDefault<FxHasher>>,
 
     direct_io_enable: bool,
     direct_io_read_enable: bool,
@@ -111,7 +114,11 @@ impl LocalFileStore {
             local_disks: local_disk_instances,
             min_number_of_available_disks: 1,
             runtime_manager,
-            partition_coordinators: Default::default(),
+            partition_coordinators: DashMapExtend::<
+                String,
+                Arc<PartitionCoordinator>,
+                BuildHasherDefault<FxHasher>,
+            >::new(),
             direct_io_enable: config.direct_io_enable,
             direct_io_read_enable: config.direct_io_read_enable,
             direct_io_append_enable: config.direct_io_append_enable,
@@ -165,7 +172,11 @@ impl LocalFileStore {
             local_disks: local_disk_instances,
             min_number_of_available_disks,
             runtime_manager,
-            partition_coordinators: Default::default(),
+            partition_coordinators: DashMapExtend::<
+                String,
+                Arc<PartitionCoordinator>,
+                BuildHasherDefault<FxHasher>,
+            >::new(),
             direct_io_enable: localfile_config.direct_io_enable,
             direct_io_read_enable: localfile_config.direct_io_read_enable,
             direct_io_append_enable: localfile_config.direct_io_append_enable,
