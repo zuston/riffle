@@ -814,7 +814,7 @@ pub type AppManagerRef = Arc<AppManager>;
 
 pub struct AppManager {
     // key: app_id
-    pub(crate) apps: DashMap<String, Arc<App>, BuildHasherDefault<FxHasher>>,
+    pub(crate) apps: DashMapExtend<String, Arc<App>, BuildHasherDefault<FxHasher>>,
     receiver: async_channel::Receiver<PurgeEvent>,
     sender: async_channel::Sender<PurgeEvent>,
     store: Arc<HybridStore>,
@@ -842,7 +842,7 @@ impl AppManager {
             };
 
         let manager = AppManager {
-            apps: DashMap::with_hasher_and_shard_amount(FxBuildHasher::default(), 1024),
+            apps: DashMapExtend::<String, Arc<App>, BuildHasherDefault<FxHasher>>::new(),
             receiver,
             sender,
             store: storage.clone(),
@@ -1046,23 +1046,19 @@ impl AppManager {
             app_id.clone(),
             shuffle_id
         );
-        let app_ref = self
-            .apps
-            .entry(app_id.clone())
-            .or_insert_with(|| {
-                TOTAL_APP_NUMBER.inc();
-                GAUGE_APP_NUMBER.inc();
+        let app_ref = self.apps.compute_if_absent(app_id.clone(), || {
+            TOTAL_APP_NUMBER.inc();
+            GAUGE_APP_NUMBER.inc();
 
-                Arc::new(App::from(
-                    app_id,
-                    app_config_options,
-                    self.store.clone(),
-                    self.runtime_manager.clone(),
-                    &self.config,
-                    &self.reconf_manager,
-                ))
-            })
-            .clone();
+            Arc::new(App::from(
+                app_id,
+                app_config_options,
+                self.store.clone(),
+                self.runtime_manager.clone(),
+                &self.config,
+                &self.reconf_manager,
+            ))
+        });
         app_ref.register_shuffle(shuffle_id)
     }
 
