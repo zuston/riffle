@@ -155,10 +155,10 @@ impl BytesWrapper {
         }
     }
 
-    pub fn freeze(&self, cache_enable: bool) -> Bytes {
+    pub fn freeze(&self) -> Bytes {
         match self {
             BytesWrapper::Direct(bytes) => bytes.clone(),
-            BytesWrapper::Composed(composed) => composed.freeze(cache_enable),
+            BytesWrapper::Composed(composed) => composed.freeze(),
             _ => panic!(),
         }
     }

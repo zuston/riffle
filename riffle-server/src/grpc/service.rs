@@ -577,7 +577,7 @@ impl ShuffleServer for DefaultShuffleServer {
 
         let freeze_timer = GRPC_GET_MEMORY_DATA_FREEZE_PROCESS_TIME.start_timer();
         let data = data_fetched_result.unwrap().from_memory();
-        let bytes = data.data.freeze(true);
+        let bytes = data.data.freeze();
         freeze_timer.observe_duration();
 
         timer.observe_duration();
