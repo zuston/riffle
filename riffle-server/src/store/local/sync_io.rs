@@ -215,7 +215,7 @@ impl LocalIO for SyncLocalIO {
                 match data {
                     BytesWrapper::Direct(bytes) => buf_writer.write_all(&bytes)?,
                     BytesWrapper::Composed(composed) => {
-                        buf_writer.write_all(&composed.freeze(false))?;
+                        buf_writer.write_all(&composed.freeze())?;
                     }
                 }
                 buf_writer.flush()?;

@@ -1077,7 +1077,7 @@ pub(crate) mod tests {
                         );
                         continue;
                     }
-                    assert_eq!(Bytes::copy_from_slice(data), mem_data.data.freeze(false));
+                    assert_eq!(Bytes::copy_from_slice(data), mem_data.data.freeze());
                     let segments = mem_data.shuffle_data_block_segments;
                     assert_eq!(1, segments.len());
                     last_block_id = segments.get(0).unwrap().block_id;

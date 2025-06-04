@@ -64,7 +64,7 @@ impl HdfsClient for HdrsClient {
         let path = self.with_root(file_path)?;
         let client = &self.inner.client;
         let mut file = client.open_file().append(true).open(path.as_str())?;
-        file.write_all(&data.freeze(false))?;
+        file.write_all(&data.freeze())?;
         file.flush()?;
         Ok(())
     }
