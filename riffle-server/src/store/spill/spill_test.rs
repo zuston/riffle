@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use crate::app::test::mock_writing_context;
-    use crate::app::{AppManager, PartitionedUId};
+    use crate::app_manager::partition_identifier::PartitionedUId;
+    use crate::app_manager::test::mock_writing_context;
+    use crate::app_manager::AppManager;
     use crate::config::StorageType::{HDFS, LOCALFILE};
     use crate::config::{Config, StorageType};
     use crate::config_reconfigure::ReconfigurableConfManager;
@@ -190,7 +191,6 @@ mod tests {
             0,
             store
                 .get_memory_buffer_size(&PartitionedUId::from(app_id.to_string(), 1, 0))
-                .await
                 .unwrap()
         );
 
@@ -420,7 +420,7 @@ mod tests {
 }
 
 mod mock {
-    use crate::app::{
+    use crate::app_manager::request_context::{
         PurgeDataContext, ReadingIndexViewContext, ReadingViewContext, RegisterAppContext,
         ReleaseTicketContext, RequireBufferContext, WritingViewContext,
     };

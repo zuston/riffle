@@ -1,4 +1,4 @@
-use crate::app::APP_MANAGER_REF;
+use crate::app_manager::APP_MANAGER_REF;
 use crate::historical_apps::HistoricalAppInfo;
 use crate::http::Handler;
 use log::info;

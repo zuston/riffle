@@ -31,7 +31,7 @@ use crate::http::metrics::MetricsHTTPHandler;
 use crate::http::profile_cpu::ProfileCpuHandler;
 use crate::runtime::manager::RuntimeManager;
 
-use crate::app::AppManagerRef;
+use crate::app_manager::AppManagerRef;
 use crate::http::admin::AdminHandler;
 use crate::http::apps::AppsHandler;
 use crate::http::historical_apps::HistoricalAppsHandler;

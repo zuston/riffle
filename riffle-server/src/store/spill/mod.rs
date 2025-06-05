@@ -1,4 +1,4 @@
-use crate::app::PartitionedUId;
+use crate::app_manager::partition_identifier::PartitionedUId;
 use crate::config::StorageType;
 use crate::error::WorkerError;
 use crate::metric::{

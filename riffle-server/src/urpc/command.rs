@@ -1,7 +1,8 @@
-use crate::app::{
-    AppManagerRef, PartitionedUId, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
-    WritingViewContext,
+use crate::app_manager::partition_identifier::PartitionedUId;
+use crate::app_manager::request_context::{
+    ReadingIndexViewContext, ReadingOptions, ReadingViewContext, WritingViewContext,
 };
+use crate::app_manager::AppManagerRef;
 use crate::constant::StatusCode;
 use crate::metric::URPC_SEND_DATA_TRANSPORT_TIME;
 use crate::store::ResponseDataIndex::Local;

@@ -15,10 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::app::ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE;
-use crate::app::{
-    PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingViewContext,
-    RegisterAppContext, ReleaseTicketContext, RequireBufferContext, WritingViewContext,
+use crate::app_manager::request_context::ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE;
+use crate::app_manager::request_context::{
+    PurgeDataContext, ReadingIndexViewContext, ReadingViewContext, RegisterAppContext,
+    ReleaseTicketContext, RequireBufferContext, WritingViewContext,
 };
 use crate::config::{MemoryStoreConfig, StorageType};
 use crate::error::WorkerError;
@@ -34,6 +34,7 @@ use std::hash::BuildHasherDefault;
 
 use std::str::FromStr;
 
+use crate::app_manager::partition_identifier::PartitionedUId;
 use crate::dashmap_extension::DashMapExtend;
 use crate::store::mem::budget::MemoryBudget;
 use crate::store::mem::buffer::MemoryBuffer;
@@ -405,9 +406,9 @@ impl From<(i64, i64, i64)> for MemorySnapshot {
 
 #[cfg(test)]
 mod test {
-    use crate::app::{
-        PartitionedUId, PurgeDataContext, PurgeReason, ReadingOptions, ReadingViewContext,
-        RequireBufferContext, WritingViewContext,
+    use crate::app_manager::request_context::{
+        PurgeDataContext, ReadingOptions, ReadingViewContext, RequireBufferContext,
+        WritingViewContext,
     };
 
     use crate::store::memory::MemoryStore;
@@ -419,6 +420,8 @@ mod test {
     use core::panic;
     use std::sync::Arc;
 
+    use crate::app_manager::partition_identifier::PartitionedUId;
+    use crate::app_manager::purge_event::PurgeReason;
     use anyhow::Result;
     use croaring::Treemap;
 

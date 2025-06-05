@@ -1,4 +1,4 @@
-use crate::app::AppManagerRef;
+use crate::app_manager::AppManagerRef;
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::config::Config;
 use crate::grpc::layer::awaittree::AwaitTreeMiddlewareLayer;

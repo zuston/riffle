@@ -15,10 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::app::ReadingOptions::FILE_OFFSET_AND_LEN;
-use crate::app::{
-    PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingViewContext,
-    RegisterAppContext, ReleaseTicketContext, RequireBufferContext, WritingViewContext,
+use crate::app_manager::request_context::ReadingOptions::FILE_OFFSET_AND_LEN;
+use crate::app_manager::request_context::{
+    PurgeDataContext, ReadingIndexViewContext, ReadingViewContext, RegisterAppContext,
+    ReleaseTicketContext, RequireBufferContext, WritingViewContext,
 };
 use crate::config::{LocalfileStoreConfig, StorageType};
 use crate::error::WorkerError;
@@ -46,6 +46,7 @@ use dashmap::DashMap;
 
 use log::{debug, error, info, warn};
 
+use crate::app_manager::partition_identifier::PartitionedUId;
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::composed_bytes::ComposedBytes;
 use crate::dashmap_extension::DashMapExtend;
@@ -631,12 +632,14 @@ impl Store for LocalFileStore {
 mod test {
     use std::path::Path;
 
-    use crate::app::{
-        PartitionedUId, PurgeDataContext, PurgeReason, ReadingIndexViewContext, ReadingOptions,
-        ReadingViewContext, WritingViewContext,
+    use crate::app_manager::request_context::{
+        PurgeDataContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
+        WritingViewContext,
     };
     use crate::store::localfile::LocalFileStore;
 
+    use crate::app_manager::partition_identifier::PartitionedUId;
+    use crate::app_manager::purge_event::PurgeReason;
     use crate::error::WorkerError;
     use crate::store::index_codec::{IndexBlock, IndexCodec};
     use crate::store::local::LocalDiskStorage;

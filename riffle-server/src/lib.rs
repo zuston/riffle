@@ -18,7 +18,7 @@
 #![allow(dead_code, unused)]
 #![feature(impl_trait_in_assoc_type)]
 
-pub mod app;
+pub mod app_manager;
 pub mod await_tree;
 pub mod common;
 mod composed_bytes;
@@ -63,7 +63,7 @@ pub mod server_state_manager;
 pub mod config_ref;
 mod dashmap_extension;
 
-use crate::app::{AppManager, AppManagerRef};
+use crate::app_manager::{AppManager, AppManagerRef};
 use crate::common::init_global_variable;
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;

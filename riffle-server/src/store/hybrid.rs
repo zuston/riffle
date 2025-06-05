@@ -15,10 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::app::{
-    AppManagerRef, PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingOptions,
-    ReadingViewContext, RegisterAppContext, ReleaseTicketContext, RequireBufferContext,
-    WritingViewContext,
+use crate::app_manager::request_context::{
+    PurgeDataContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
+    RegisterAppContext, ReleaseTicketContext, RequireBufferContext, WritingViewContext,
 };
 
 use crate::config::{Config, HybridStoreConfig, StorageType};
@@ -56,6 +55,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 
+use crate::app_manager::partition_identifier::PartitionedUId;
+use crate::app_manager::AppManagerRef;
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::local::LocalfileStoreStat;
@@ -410,7 +411,7 @@ impl HybridStore {
         self.hot_store.get_buffer(uid)
     }
 
-    pub async fn get_memory_buffer_size(&self, uid: &PartitionedUId) -> Result<u64> {
+    pub fn get_memory_buffer_size(&self, uid: &PartitionedUId) -> Result<u64> {
         self.hot_store.get_buffer_size(uid)
     }
 
@@ -741,10 +742,9 @@ impl Store for HybridStore {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::app::ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE;
-    use crate::app::{
-        PartitionedUId, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
-        WritingViewContext,
+    use crate::app_manager::request_context::ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE;
+    use crate::app_manager::request_context::{
+        ReadingIndexViewContext, ReadingOptions, ReadingViewContext, WritingViewContext,
     };
     use crate::config::{
         Config, HybridStoreConfig, LocalfileStoreConfig, MemoryStoreConfig, StorageType,
@@ -762,6 +762,7 @@ pub(crate) mod tests {
     use std::sync::Arc;
     use std::thread;
 
+    use crate::app_manager::partition_identifier::PartitionedUId;
     use crate::config_reconfigure::ReconfigurableConfManager;
     use serde::de::Unexpected::Seq;
     use std::time::Duration;

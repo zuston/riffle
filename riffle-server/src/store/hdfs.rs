@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::app::{
+use crate::app_manager::{
     PartitionedUId, PurgeDataContext, PurgeReason, ReadingIndexViewContext, ReadingViewContext,
     RegisterAppContext, ReleaseTicketContext, RequireBufferContext, WritingViewContext,
     SHUFFLE_SERVER_ID,
@@ -138,7 +138,7 @@ impl HdfsStore {
         let shuffle_id = &uid.shuffle_id;
         let p_id = &uid.partition_id;
 
-        let worker_id = crate::app::SHUFFLE_SERVER_ID.get().unwrap();
+        let worker_id = crate::app_manager::SHUFFLE_SERVER_ID.get().unwrap();
         (
             format!("{}/{}/{}-{}/{}", app_id, shuffle_id, p_id, p_id, worker_id),
             format!("{}/{}/{}-{}/{}", app_id, shuffle_id, p_id, p_id, worker_id),
@@ -545,8 +545,8 @@ impl Store for HdfsStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::app::{PartitionedUId, PurgeReason, SHUFFLE_SERVER_ID};
-    use crate::app::{PurgeDataContext, WritingViewContext};
+    use crate::app_manager::{PartitionedUId, PurgeReason, SHUFFLE_SERVER_ID};
+    use crate::app_manager::{PurgeDataContext, WritingViewContext};
     use crate::config::HdfsStoreConfig;
     use crate::error::WorkerError;
     use crate::lazy_initializer::LazyInit;
