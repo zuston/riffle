@@ -15,12 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::app_manager::{
-    AppConfigOptions, AppManagerRef, DataDistribution, GetBlocksContext, GetMultiBlockIdsContext,
-    PartitionedUId, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
-    RemoteStorageConfig, ReportBlocksContext, ReportMultiBlockIdsContext, RequireBufferContext,
-    WritingViewContext,
+use crate::app_manager::app_configs::{AppConfigOptions, DataDistribution, RemoteStorageConfig};
+use crate::app_manager::partition_identifier::PartitionedUId;
+use crate::app_manager::request_context::{
+    GetMultiBlockIdsContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
+    ReportMultiBlockIdsContext, RequireBufferContext, WritingViewContext,
 };
+use crate::app_manager::AppManagerRef;
 use crate::constant::StatusCode;
 use crate::error::WorkerError;
 use crate::grpc::protobuf::uniffle::shuffle_server_internal_server::ShuffleServerInternal;

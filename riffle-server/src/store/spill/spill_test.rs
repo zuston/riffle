@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod tests {
+    use crate::app_manager::partition_identifier::PartitionedUId;
     use crate::app_manager::test::mock_writing_context;
-    use crate::app_manager::{AppManager, PartitionedUId};
+    use crate::app_manager::AppManager;
     use crate::config::StorageType::{HDFS, LOCALFILE};
     use crate::config::{Config, StorageType};
     use crate::config_reconfigure::ReconfigurableConfManager;
@@ -420,7 +421,7 @@ mod tests {
 }
 
 mod mock {
-    use crate::app_manager::{
+    use crate::app_manager::request_context::{
         PurgeDataContext, ReadingIndexViewContext, ReadingViewContext, RegisterAppContext,
         ReleaseTicketContext, RequireBufferContext, WritingViewContext,
     };

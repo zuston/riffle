@@ -1,4 +1,4 @@
-use crate::app_manager::{GetMultiBlockIdsContext, ReportMultiBlockIdsContext};
+use crate::app_manager::request_context::{GetMultiBlockIdsContext, ReportMultiBlockIdsContext};
 use crate::block_id_manager::BlockIdManagerType::DEFAULT;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -174,7 +174,9 @@ impl BlockIdManager for DefaultBlockIdManager {
 
 #[cfg(test)]
 mod tests {
-    use crate::app_manager::{GetMultiBlockIdsContext, ReportMultiBlockIdsContext};
+    use crate::app_manager::request_context::{
+        GetMultiBlockIdsContext, ReportMultiBlockIdsContext,
+    };
     use crate::block_id_manager::{get_block_id_manager, BlockIdManager, BlockIdManagerType};
     use crate::id_layout::{to_layout, DEFAULT_BLOCK_ID_LAYOUT};
     use anyhow::Result;

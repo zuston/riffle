@@ -27,7 +27,7 @@ pub mod mem;
 pub mod memory;
 pub mod spill;
 
-use crate::app_manager::{
+use crate::app_manager::request_context::{
     PurgeDataContext, ReadingIndexViewContext, ReadingViewContext, RegisterAppContext,
     ReleaseTicketContext, RequireBufferContext, WritingViewContext,
 };

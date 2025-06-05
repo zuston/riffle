@@ -26,6 +26,7 @@ use crate::heartbeat::HeartbeatTask;
 use crate::http::{HTTPServer, HttpMonitorService};
 #[cfg(not(feature = "logforth"))]
 use crate::log_service::LogService;
+use std::pin::pin;
 
 #[cfg(feature = "logforth")]
 use crate::logforth_service::LogService;
