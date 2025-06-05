@@ -116,6 +116,21 @@ impl BlockIdManager for DefaultBlockIdManager {
     async fn get_multi_block_ids(&self, ctx: GetMultiBlockIdsContext) -> Result<Bytes> {
         let shuffle_id = ctx.shuffle_id;
         let partition_ids = ctx.partition_ids;
+
+        // No need to iter if having only one partition
+        if partition_ids.len() == 1 {
+            return if let Some(bitmap) = self
+                .block_id_bitmap
+                .get(&(shuffle_id, *partition_ids.get(0).unwrap()))
+            {
+                let bitmap = bitmap.clone();
+                let bitmap = bitmap.read();
+                Ok(Bytes::from(bitmap.serialize::<JvmLegacy>()))
+            } else {
+                Ok(Bytes::new())
+            };
+        }
+
         let mut treemap = Treemap::new();
         for pid in partition_ids {
             if let Some(bitmap) = self.block_id_bitmap.get(&(shuffle_id, pid)) {
