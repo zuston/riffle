@@ -191,7 +191,6 @@ mod tests {
             0,
             store
                 .get_memory_buffer_size(&PartitionedUId::from(app_id.to_string(), 1, 0))
-                .await
                 .unwrap()
         );
 

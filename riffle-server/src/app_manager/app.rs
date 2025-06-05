@@ -26,6 +26,7 @@ use crate::store::hybrid::HybridStore;
 use crate::store::{RequireBufferResponse, ResponseData, ResponseDataIndex, Store};
 use crate::util;
 use crate::util::{now_timestamp_as_millis, now_timestamp_as_sec};
+use anyhow::Result;
 use bytes::Bytes;
 use fxhash::FxHasher;
 use log::{error, info, warn};
@@ -168,7 +169,8 @@ impl App {
 
     pub fn heartbeat(&self) -> anyhow::Result<()> {
         let timestamp = now_timestamp_as_sec();
-        self.latest_heartbeat_time.store(timestamp, SeqCst);
+        self.latest_heartbeat_time
+            .store(timestamp, Ordering::Relaxed);
         Ok(())
     }
 
@@ -178,27 +180,36 @@ impl App {
     }
 
     pub async fn insert(&self, ctx: WritingViewContext) -> anyhow::Result<i32, WorkerError> {
-        self.heartbeat()?;
-
         let len: u64 = ctx.data_size;
+
         TOTAL_RECEIVED_DATA.inc_by(len);
-
-        // add the partition size into the meta
-        self.inc_partition_size(&ctx.uid, len)?;
-
-        self.total_received_data_size.fetch_add(len, SeqCst);
-        self.total_resident_data_size.fetch_add(len, SeqCst);
-
         RESIDENT_BYTES.add(len as i64);
+
+        self.total_received_data_size
+            .fetch_add(len, Ordering::Relaxed);
+        self.total_resident_data_size
+            .fetch_add(len, Ordering::Relaxed);
+
+        // add the partition size into the meta and check its constraint
+        let partition_meta = self.get_partition_meta(&ctx.uid);
+        let partition_size = partition_meta.inc_size(len) + len;
+        if self.partition_limit_enable
+            && partition_size > self.partition_limit_threshold.get().as_u64()
+        {
+            partition_meta.mark_as_huge_partition();
+            self.add_huge_partition_metric();
+        }
+        if self.partition_split_enable
+            && partition_size > self.partition_split_threshold.get().as_u64()
+        {
+            partition_meta.mark_as_split();
+        }
 
         self.store.insert(ctx).await?;
         Ok(len as i32)
     }
 
-    pub async fn select(
-        &self,
-        ctx: ReadingViewContext,
-    ) -> anyhow::Result<ResponseData, WorkerError> {
+    pub async fn select(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
         self.heartbeat()?;
 
         let response = self.store.get(ctx).await;
@@ -247,29 +258,6 @@ impl App {
         Ok(())
     }
 
-    pub fn is_huge_partition(&self, uid: &PartitionedUId) -> anyhow::Result<bool> {
-        // always mark false when partition limit is not enabled
-        if !self.partition_limit_enable {
-            return Ok(false);
-        }
-
-        let partition_limit_threshold = self.partition_limit_threshold.get().as_u64();
-        let mut meta = self.get_partition_meta(uid);
-        if meta.is_huge_partition() {
-            Ok(true)
-        } else {
-            let data_size = meta.get_size()?;
-            if data_size > partition_limit_threshold {
-                meta.mark_as_huge_partition();
-                self.add_huge_partition_metric();
-                warn!("Partition is marked as huge partition. uid: {:?}", uid);
-                Ok(true)
-            } else {
-                Ok(false)
-            }
-        }
-    }
-
     fn add_huge_partition_metric(&self) {
         self.huge_partition_number.fetch_add(1, Ordering::SeqCst);
         TOTAL_HUGE_PARTITION_NUMBER.inc();
@@ -303,7 +291,7 @@ impl App {
         }
         let ratio = self.partition_limit_mem_backpressure_ratio.get();
         let threshold = (self.memory_capacity as f64 * ratio) as u64;
-        let used = self.store.get_memory_buffer_size(uid).await?;
+        let used = self.store.get_memory_buffer_size(uid)?;
 
         if used > threshold {
             info!(
@@ -325,6 +313,15 @@ impl App {
         self.store.move_allocated_to_used_from_hot_store(size)
     }
 
+    pub fn is_huge_partition(&self, uid: &PartitionedUId) -> Result<bool> {
+        if self.partition_limit_enable {
+            Ok(false)
+        } else {
+            let partition_meta = self.get_partition_meta(uid);
+            Ok(partition_meta.is_huge_partition())
+        }
+    }
+
     pub async fn require_buffer(
         &self,
         ctx: RequireBufferContext,
@@ -337,24 +334,26 @@ impl App {
         let mut partition_split_candidates = HashSet::new();
 
         if self.partition_limit_enable || self.partition_split_enable {
+            let partition_limit_threshold = (self.memory_capacity as f64
+                * self.partition_limit_mem_backpressure_ratio.get())
+                as u64;
+
             for partition_id in &ctx.partition_ids {
                 let puid = PartitionedUId::from(app_id.to_owned(), *shuffle_id, *partition_id);
-                let mut split_hit = false;
+                let partition_meta = self.get_partition_meta(&puid);
 
-                // partition split
-                if self.partition_split_enable
-                    && self
-                        .get_partition_meta(&puid)
-                        .is_split(&puid, self.partition_split_threshold.get().into())?
-                {
+                if self.partition_split_enable && partition_meta.is_split() {
                     partition_split_candidates.insert(*partition_id);
-                    split_hit = true;
                 }
 
-                // huge partition limitation
-                if self.is_backpressure_of_partition(&puid).await? {
-                    TOTAL_REQUIRE_BUFFER_FAILED.inc();
-                    return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
+                if self.partition_limit_enable && partition_meta.is_huge_partition() {
+                    let used = self.store.get_memory_buffer_size(&puid)?;
+                    if used > partition_limit_threshold {
+                        info!("[{:?}] with huge partition (used/limited: {}/{}), it has been limited of writing speed",
+                            puid, used, partition_limit_threshold);
+                        TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED.inc();
+                        return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
+                    }
                 }
             }
         }
@@ -387,11 +386,6 @@ impl App {
             })
     }
 
-    pub fn inc_partition_size(&self, uid: &PartitionedUId, size: u64) -> anyhow::Result<()> {
-        let mut partitioned_meta = self.get_partition_meta(&uid);
-        partitioned_meta.inc_size(size as i32)
-    }
-
     pub async fn get_multi_block_ids(&self, ctx: GetMultiBlockIdsContext) -> anyhow::Result<Bytes> {
         self.heartbeat()?;
         self.block_id_manager.get_multi_block_ids(ctx).await
@@ -413,7 +407,7 @@ impl App {
         for entry in view.iter() {
             let val = entry.1;
             if val.is_huge_partition() {
-                let size = val.get_size()?;
+                let size = val.get_size();
                 records.push(size);
             }
         }

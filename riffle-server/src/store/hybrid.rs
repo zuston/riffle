@@ -411,7 +411,7 @@ impl HybridStore {
         self.hot_store.get_buffer(uid)
     }
 
-    pub async fn get_memory_buffer_size(&self, uid: &PartitionedUId) -> Result<u64> {
+    pub fn get_memory_buffer_size(&self, uid: &PartitionedUId) -> Result<u64> {
         self.hot_store.get_buffer_size(uid)
     }
 
