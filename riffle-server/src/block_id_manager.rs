@@ -154,9 +154,7 @@ impl BlockIdManager for DefaultBlockIdManager {
                 .or_insert_with(|| Arc::new(RwLock::new(Treemap::new())))
                 .clone();
             let mut treemap = treemap.write();
-            for block_id in block_ids {
-                treemap.add(block_id as u64);
-            }
+            treemap.extend(block_ids.into_iter().map(|v| v as u64));
         }
         self.number.fetch_add(number as u64, SeqCst);
         Ok(number as u64)
