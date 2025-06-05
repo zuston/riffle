@@ -1,4 +1,4 @@
-use crate::app::SHUFFLE_SERVER_ID;
+use crate::app_manager::SHUFFLE_SERVER_ID;
 use crate::config::LogConfig;
 use logforth::append::rolling_file::{RollingFileWriter, Rotation};
 use logforth::append::{rolling_file, RollingFile};

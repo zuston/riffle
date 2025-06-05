@@ -1113,7 +1113,7 @@ impl PartitionedUId {
 
 #[cfg(test)]
 pub(crate) mod test {
-    use crate::app::{
+    use crate::app_manager::{
         AppManager, GetBlocksContext, GetMultiBlockIdsContext, PartitionedUId, PurgeReason,
         ReadingOptions, ReadingViewContext, ReportBlocksContext, ReportMultiBlockIdsContext,
         RequireBufferContext, WritingViewContext,

@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::app::{
+use crate::app_manager::{
     AppManagerRef, PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingOptions,
     ReadingViewContext, RegisterAppContext, ReleaseTicketContext, RequireBufferContext,
     WritingViewContext,
@@ -741,8 +741,8 @@ impl Store for HybridStore {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::app::ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE;
-    use crate::app::{
+    use crate::app_manager::ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE;
+    use crate::app_manager::{
         PartitionedUId, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
         WritingViewContext,
     };

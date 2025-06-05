@@ -1,4 +1,4 @@
-use crate::app::{
+use crate::app_manager::{
     AppManagerRef, PartitionedUId, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
     WritingViewContext,
 };

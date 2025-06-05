@@ -15,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::app::ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE;
-use crate::app::{
+use crate::app_manager::ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE;
+use crate::app_manager::{
     PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingViewContext,
     RegisterAppContext, ReleaseTicketContext, RequireBufferContext, WritingViewContext,
 };
@@ -405,7 +405,7 @@ impl From<(i64, i64, i64)> for MemorySnapshot {
 
 #[cfg(test)]
 mod test {
-    use crate::app::{
+    use crate::app_manager::{
         PartitionedUId, PurgeDataContext, PurgeReason, ReadingOptions, ReadingViewContext,
         RequireBufferContext, WritingViewContext,
     };

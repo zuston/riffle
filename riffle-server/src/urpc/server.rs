@@ -9,7 +9,7 @@ use tokio::sync::{broadcast, mpsc, Semaphore};
 use crate::urpc::connection::Connection;
 use crate::urpc::shutdown::Shutdown;
 
-use crate::app::AppManagerRef;
+use crate::app_manager::AppManagerRef;
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::error::WorkerError;
 use crate::metric::{URPC_CONNECTION_NUMBER, URPC_REQUEST_PROCESSING_LATENCY};
@@ -163,7 +163,7 @@ pub async fn run(listener: TcpListener, shutdown: impl Future, app_manager_ref: 
 
 #[cfg(test)]
 mod test {
-    use crate::app::AppManager;
+    use crate::app_manager::AppManager;
     use crate::config::Config;
     use crate::config_reconfigure::ReconfigurableConfManager;
     use crate::rpc::DefaultRpcService;

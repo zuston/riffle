@@ -1,4 +1,4 @@
-use crate::app::AppManagerRef;
+use crate::app_manager::AppManagerRef;
 use crate::config::Config;
 use crate::grpc::protobuf::uniffle::ServerStatus;
 use crate::util;
@@ -117,8 +117,8 @@ fn send_sigterm_to_self() {
 
 #[cfg(test)]
 mod tests {
-    use crate::app::test::mock_config;
-    use crate::app::AppManager;
+    use crate::app_manager::test::mock_config;
+    use crate::app_manager::AppManager;
     use crate::config_reconfigure::ReconfigurableConfManager;
     use crate::grpc::protobuf::uniffle::ServerStatus;
     use crate::runtime::manager::RuntimeManager;

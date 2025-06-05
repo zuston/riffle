@@ -1,4 +1,4 @@
-use crate::app::AppManagerRef;
+use crate::app_manager::AppManagerRef;
 use crate::config::HealthServiceConfig;
 #[cfg(feature = "deadlock-detection")]
 use crate::deadlock::DEADLOCK_TAG;
@@ -207,8 +207,8 @@ impl HealthService {
 
 #[cfg(test)]
 mod tests {
-    use crate::app::test::mock_config;
-    use crate::app::AppManager;
+    use crate::app_manager::test::mock_config;
+    use crate::app_manager::AppManager;
     use crate::config_reconfigure::ReconfigurableConfManager;
     #[cfg(feature = "deadlock-detection")]
     use crate::deadlock::DEADLOCK_TAG;

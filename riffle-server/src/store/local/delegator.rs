@@ -1,4 +1,4 @@
-use crate::app::SHUFFLE_SERVER_ID;
+use crate::app_manager::SHUFFLE_SERVER_ID;
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::config::LocalfileStoreConfig;
 use crate::error::WorkerError;

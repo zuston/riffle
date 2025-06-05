@@ -1,4 +1,4 @@
-use crate::app::{SHUFFLE_SERVER_ID, SHUFFLE_SERVER_IP};
+use crate::app_manager::{SHUFFLE_SERVER_ID, SHUFFLE_SERVER_IP};
 use crate::config::Config;
 use crate::util::{generate_worker_uid, get_local_ip};
 

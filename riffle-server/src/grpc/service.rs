@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::app::{
+use crate::app_manager::{
     AppConfigOptions, AppManagerRef, DataDistribution, GetBlocksContext, GetMultiBlockIdsContext,
     PartitionedUId, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
     RemoteStorageConfig, ReportBlocksContext, ReportMultiBlockIdsContext, RequireBufferContext,

@@ -1,4 +1,4 @@
-use crate::app::{App, AppManagerRef, PartitionedUId};
+use crate::app_manager::{App, AppManagerRef, PartitionedUId};
 use crate::config::Config;
 use crate::error::WorkerError;
 use anyhow::Result;

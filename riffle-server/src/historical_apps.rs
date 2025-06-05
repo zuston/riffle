@@ -1,4 +1,4 @@
-use crate::app::App;
+use crate::app_manager::App;
 use crate::config::HistoricalAppStoreBackend;
 use crate::runtime::manager::RuntimeManager;
 use crate::util::{now_timestamp_as_millis, now_timestamp_as_sec};

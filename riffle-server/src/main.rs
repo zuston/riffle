@@ -18,7 +18,7 @@
 #![allow(dead_code, unused)]
 #![feature(impl_trait_in_assoc_type)]
 
-use crate::app::{AppManager, APP_MANAGER_REF};
+use crate::app_manager::{AppManager, APP_MANAGER_REF};
 use crate::common::init_global_variable;
 use crate::config::Config;
 use crate::health_service::HealthService;
@@ -52,7 +52,7 @@ use std::str::FromStr;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-pub mod app;
+pub mod app_manager;
 mod await_tree;
 pub mod common;
 pub mod composed_bytes;

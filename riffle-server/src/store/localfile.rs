@@ -15,8 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::app::ReadingOptions::FILE_OFFSET_AND_LEN;
-use crate::app::{
+use crate::app_manager::ReadingOptions::FILE_OFFSET_AND_LEN;
+use crate::app_manager::{
     PartitionedUId, PurgeDataContext, ReadingIndexViewContext, ReadingViewContext,
     RegisterAppContext, ReleaseTicketContext, RequireBufferContext, WritingViewContext,
 };
@@ -631,7 +631,7 @@ impl Store for LocalFileStore {
 mod test {
     use std::path::Path;
 
-    use crate::app::{
+    use crate::app_manager::{
         PartitionedUId, PurgeDataContext, PurgeReason, ReadingIndexViewContext, ReadingOptions,
         ReadingViewContext, WritingViewContext,
     };
