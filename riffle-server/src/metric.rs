@@ -62,8 +62,18 @@ const RPC_BATCH_BYTES_BUCKETS: &[f64] = &[
     ReadableSize::kb(100).as_bytes() as f64,
     ReadableSize::mb(1).as_bytes() as f64,
     ReadableSize::mb(10).as_bytes() as f64,
+    ReadableSize::mb(20).as_bytes() as f64,
+    ReadableSize::mb(30).as_bytes() as f64,
+    ReadableSize::mb(40).as_bytes() as f64,
+    ReadableSize::mb(50).as_bytes() as f64,
     ReadableSize::mb(100).as_bytes() as f64,
+    ReadableSize::mb(200).as_bytes() as f64,
+    ReadableSize::mb(400).as_bytes() as f64,
+    ReadableSize::mb(800).as_bytes() as f64,
     ReadableSize::gb(1).as_bytes() as f64,
+    ReadableSize::gb(2).as_bytes() as f64,
+    ReadableSize::gb(4).as_bytes() as f64,
+    ReadableSize::gb(8).as_bytes() as f64,
     ReadableSize::gb(10).as_bytes() as f64,
 ];
 
