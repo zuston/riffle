@@ -57,7 +57,6 @@ use croaring::{JvmLegacy, Treemap};
 use fastrace::future::FutureExt;
 use fastrace::trace;
 use log::{debug, error, info, warn};
-use std::arch::aarch64::veorq_s8;
 use std::collections::HashMap;
 use tokio::time::Instant;
 use tonic::{Request, Response, Status};
