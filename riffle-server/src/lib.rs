@@ -190,6 +190,7 @@ pub async fn write_read_for_one_time(mut client: ShuffleServerClient<Channel>) -
                 }],
                 timestamp: 0,
                 stage_attempt_number: 0,
+                combined_shuffle_data: None,
             })
             .await?;
 
@@ -209,6 +210,9 @@ pub async fn write_read_for_one_time(mut client: ShuffleServerClient<Channel>) -
                     partition_id: idx,
                     block_ids: vec![block_id],
                 }],
+                partition_ids: vec![],
+                block_ids: vec![],
+                block_id_counts: vec![],
             })
             .await?;
     }

@@ -28,14 +28,14 @@ use crate::grpc::protobuf::uniffle::shuffle_server_internal_server::ShuffleServe
 use crate::grpc::protobuf::uniffle::shuffle_server_server::ShuffleServer;
 use crate::grpc::protobuf::uniffle::{
     AppHeartBeatRequest, AppHeartBeatResponse, CancelDecommissionRequest,
-    CancelDecommissionResponse, DecommissionRequest, DecommissionResponse, FinishShuffleRequest,
-    FinishShuffleResponse, GetLocalShuffleDataRequest, GetLocalShuffleDataResponse,
-    GetLocalShuffleIndexRequest, GetLocalShuffleIndexResponse, GetMemoryShuffleDataRequest,
-    GetMemoryShuffleDataResponse, GetShuffleResultForMultiPartRequest,
+    CancelDecommissionResponse, CombinedShuffleData, DecommissionRequest, DecommissionResponse,
+    FinishShuffleRequest, FinishShuffleResponse, GetLocalShuffleDataRequest,
+    GetLocalShuffleDataResponse, GetLocalShuffleIndexRequest, GetLocalShuffleIndexResponse,
+    GetMemoryShuffleDataRequest, GetMemoryShuffleDataResponse, GetShuffleResultForMultiPartRequest,
     GetShuffleResultForMultiPartResponse, GetShuffleResultRequest, GetShuffleResultResponse,
     ReportShuffleResultRequest, ReportShuffleResultResponse, RequireBufferRequest,
     RequireBufferResponse, SendShuffleDataRequest, SendShuffleDataResponse, ShuffleCommitRequest,
-    ShuffleCommitResponse, ShuffleRegisterRequest, ShuffleRegisterResponse,
+    ShuffleCommitResponse, ShuffleData, ShuffleRegisterRequest, ShuffleRegisterResponse,
     ShuffleUnregisterByAppIdRequest, ShuffleUnregisterByAppIdResponse, ShuffleUnregisterRequest,
     ShuffleUnregisterResponse,
 };
@@ -45,11 +45,12 @@ use crate::metric::{
     GRPC_GET_LOCALFILE_DATA_PROCESS_TIME, GRPC_GET_LOCALFILE_DATA_TRANSPORT_TIME,
     GRPC_GET_LOCALFILE_INDEX_LATENCY, GRPC_GET_MEMORY_DATA_FREEZE_PROCESS_TIME,
     GRPC_GET_MEMORY_DATA_PROCESS_TIME, GRPC_GET_MEMORY_DATA_TRANSPORT_TIME,
-    GRPC_SEND_DATA_PROCESS_TIME, GRPC_SEND_DATA_TRANSPORT_TIME,
+    GRPC_SEND_DATA_PROCESS_TIME, GRPC_SEND_DATA_TRANSPORT_TIME, RPC_BATCH_BYTES_OPERATION,
+    RPC_BATCH_DATA_BYTES_HISTOGRAM, TOTAL_MEMORY_USED,
 };
 use crate::reject::RejectionPolicyGateway;
 use crate::server_state_manager::{ServerState, ServerStateManager};
-use crate::store::{PartitionedData, ResponseDataIndex};
+use crate::store::{Block, PartitionedData, ResponseDataIndex};
 use crate::util;
 use await_tree::{span, InstrumentAwait};
 use bytes::Bytes;
@@ -86,6 +87,143 @@ impl DefaultShuffleServer {
             rejection_policy_gateway: rejection_policy_gateway.clone(),
             server_state_manager: server_state_manager.clone(),
         }
+    }
+
+    fn unpack_shuffle_data(req: SendShuffleDataRequest) -> anyhow::Result<Vec<PartitionedData>> {
+        match req.combined_shuffle_data {
+            None => Ok(req
+                .shuffle_data
+                .into_iter()
+                .map(PartitionedData::from)
+                .collect::<Vec<PartitionedData>>()),
+            Some(combined) => {
+                let CombinedShuffleData {
+                    partition_ids,
+                    partition_block_counts,
+                    block_ids,
+                    lengths,
+                    uncompress_lengths,
+                    crcs,
+                    task_attempt_ids,
+                    combined_data,
+                } = combined;
+
+                let total_blocks = block_ids.len();
+                if lengths.len() != total_blocks
+                    || uncompress_lengths.len() != total_blocks
+                    || crcs.len() != total_blocks
+                    || task_attempt_ids.len() != total_blocks
+                {
+                    anyhow::bail!("Inconsistent block-level lengths");
+                }
+
+                if partition_ids.len() != partition_block_counts.len() {
+                    anyhow::bail!("Mismatch between partition_ids and partition_block_counts");
+                }
+
+                let mut offset = 0;
+                let mut block_idx = 0;
+                let mut result = Vec::with_capacity(partition_ids.len());
+
+                for (i, &pid) in partition_ids.iter().enumerate() {
+                    let block_count = partition_block_counts[i] as usize;
+                    let mut blocks = Vec::with_capacity(block_count);
+
+                    for _ in 0..block_count {
+                        if block_idx >= total_blocks {
+                            anyhow::bail!("block index out of bounds");
+                        }
+
+                        let len = lengths[block_idx] as usize;
+                        let end = offset + len;
+                        if end > combined_data.len() {
+                            anyhow::bail!("combined_data out of bounds");
+                        }
+
+                        let block = Block {
+                            block_id: block_ids[block_idx],
+                            length: len as i32,
+                            uncompress_length: uncompress_lengths[block_idx],
+                            crc: crcs[block_idx],
+                            task_attempt_id: task_attempt_ids[block_idx],
+                            data: combined_data.slice(offset..end),
+                        };
+
+                        blocks.push(block);
+                        offset = end;
+                        block_idx += 1;
+                    }
+
+                    result.push(PartitionedData {
+                        partition_id: pid,
+                        blocks,
+                    });
+                }
+
+                if block_idx != total_blocks {
+                    anyhow::bail!("Not all blocks were consumed");
+                }
+
+                Ok(result)
+            }
+        }
+    }
+
+    fn unpack_block_ids(req: ReportShuffleResultRequest) -> anyhow::Result<HashMap<i32, Vec<i64>>> {
+        let mut block_ids = HashMap::new();
+
+        // for legacy layout
+        if req.partition_to_block_ids.len() > 0 {
+            let partition_to_block_ids = req.partition_to_block_ids;
+            for partition_to_block_id in partition_to_block_ids {
+                block_ids.insert(
+                    partition_to_block_id.partition_id,
+                    partition_to_block_id.block_ids,
+                );
+            }
+        } else {
+            // for new layout
+            let partition_ids = &req.partition_ids;
+            let block_id_counts = &req.block_id_counts;
+            let flat_block_ids = &req.block_ids;
+
+            if partition_ids.len() != block_id_counts.len() {
+                anyhow::bail!(
+                    "partition_ids.len() ({}) != block_id_counts.len() ({})",
+                    partition_ids.len(),
+                    block_id_counts.len()
+                );
+            }
+
+            let mut offset = 0;
+            for (i, &count) in block_id_counts.iter().enumerate() {
+                let count = count as usize;
+                let end = offset + count;
+                if end > flat_block_ids.len() {
+                    anyhow::bail!(
+                        "block_ids out of range: offset {} + count {} > total {}",
+                        offset,
+                        count,
+                        flat_block_ids.len()
+                    );
+                }
+
+                let pid = partition_ids[i];
+                let blocks = flat_block_ids[offset..end].to_vec();
+
+                block_ids.insert(pid, blocks);
+                offset = end;
+            }
+
+            if offset != flat_block_ids.len() {
+                anyhow::bail!(
+                    "block_ids contains extra data: used {} of {}",
+                    offset,
+                    flat_block_ids.len()
+                );
+            }
+        }
+        Ok(block_ids)
     }
 }
 
@@ -224,7 +362,7 @@ impl ShuffleServer for DefaultShuffleServer {
         let timer = GRPC_SEND_DATA_PROCESS_TIME.start_timer();
         let req = request.into_inner();
 
-        let app_id = req.app_id;
+        let app_id = &req.app_id;
         let shuffle_id: i32 = req.shuffle_id;
         let ticket_id = req.require_buffer_id;
 
@@ -274,34 +412,31 @@ impl ShuffleServer for DefaultShuffleServer {
                 ret_msg: "No such buffer ticket id, it may be discarded due to timeout".to_string(),
             }));
         }
+        let app_id = app_id.to_string();
         let required_len_with_ticket = release_result.unwrap();
-
-        let mut blocks_map = HashMap::new();
-        for shuffle_data in req.shuffle_data {
-            let data: PartitionedData = shuffle_data.into();
-            let partition_id = data.partition_id;
-            let data_blocks = data.blocks;
-            let blocks = blocks_map.entry(partition_id).or_insert_with(|| vec![]);
-            blocks.extend(data_blocks);
-        }
+        let partition_blocks = match DefaultShuffleServer::unpack_shuffle_data(req) {
+            Ok(data) => data,
+            Err(e) => {
+                return Ok(Response::new(SendShuffleDataResponse {
+                    status: StatusCode::INTERNAL_ERROR.into(),
+                    ret_msg: e.to_string(),
+                }));
+            }
+        };
 
         let mut inserted_failure_occurs = false;
         let mut inserted_failure_error = None;
         let mut inserted_total_size = 0;
 
         let insert_start = util::now_timestamp_as_millis();
-        let mut shuffled_blocks: Vec<_> = blocks_map.into_iter().collect();
-        for (partition_id, blocks) in shuffled_blocks {
+        for partition_block in partition_blocks {
+            let partition_id = partition_block.partition_id;
+            let blocks = partition_block.blocks;
+
             if inserted_failure_occurs {
                 continue;
             }
             let app_id_ref = app_id.clone();
-            let await_tree_msg = span!(
-                "Inserting data. appId: {:?}. shuffleId: {}. partitionId: {}",
-                &app_id_ref,
-                shuffle_id,
-                partition_id
-            );
             let uid = PartitionedUId {
                 app_id: app_id_ref,
                 shuffle_id,
@@ -348,6 +483,12 @@ impl ShuffleServer for DefaultShuffleServer {
                 ret_msg: inserted_failure_error.unwrap(),
             }));
         }
+
+        TOTAL_MEMORY_USED.inc_by(inserted_total_size as u64);
+
+        RPC_BATCH_DATA_BYTES_HISTOGRAM
+            .with_label_values(&[&RPC_BATCH_BYTES_OPERATION::SEND_DATA.to_string()])
+            .observe(inserted_total_size as f64);
 
         timer.observe_duration();
         Ok(Response::new(SendShuffleDataResponse {
@@ -612,9 +753,8 @@ impl ShuffleServer for DefaultShuffleServer {
         request: Request<ReportShuffleResultRequest>,
     ) -> Result<Response<ReportShuffleResultResponse>, Status> {
         let req = request.into_inner();
-        let app_id = req.app_id;
+        let app_id = &req.app_id;
         let shuffle_id = req.shuffle_id;
-        let partition_to_block_ids = req.partition_to_block_ids;
 
         let app = self.app_manager_ref.get_app(&app_id);
         if app.is_none() {
@@ -624,24 +764,25 @@ impl ShuffleServer for DefaultShuffleServer {
             }));
         }
         let app = app.unwrap();
-        let mut block_ids = HashMap::new();
-        for partition_to_block_id in partition_to_block_ids {
-            block_ids.insert(
-                partition_to_block_id.partition_id,
-                partition_to_block_id.block_ids,
-            );
-        }
-        match app
-            .report_multi_block_ids(ReportMultiBlockIdsContext::new(shuffle_id, block_ids))
-            .await
-        {
+        match DefaultShuffleServer::unpack_block_ids(req) {
+            Ok(block_ids) => {
+                match app
+                    .report_multi_block_ids(ReportMultiBlockIdsContext::new(shuffle_id, block_ids))
+                    .await
+                {
+                    Err(e) => Ok(Response::new(ReportShuffleResultResponse {
+                        status: StatusCode::INTERNAL_ERROR.into(),
+                        ret_msg: e.to_string(),
+                    })),
+                    _ => Ok(Response::new(ReportShuffleResultResponse {
+                        status: StatusCode::SUCCESS.into(),
+                        ret_msg: "".to_string(),
+                    })),
+                }
+            }
             Err(e) => Ok(Response::new(ReportShuffleResultResponse {
                 status: StatusCode::INTERNAL_ERROR.into(),
                 ret_msg: e.to_string(),
-            })),
-            _ => Ok(Response::new(ReportShuffleResultResponse {
-                status: StatusCode::SUCCESS.into(),
-                ret_msg: "".to_string(),
             })),
         }
     }
@@ -847,5 +988,155 @@ impl ShuffleServer for DefaultShuffleServer {
             status: StatusCode::SUCCESS.into(),
             ret_msg: "".to_string(),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::grpc::protobuf::uniffle::{
+        CombinedShuffleData, PartitionToBlockIds, ReportShuffleResultRequest,
+        SendShuffleDataRequest, ShuffleData,
+    };
+    use crate::grpc::service::DefaultShuffleServer;
+    use crate::store::PartitionedData;
+    use bytes::Bytes;
+
+    #[test]
+    fn test_extract_block_ids_legacy() {
+        let mut req = ReportShuffleResultRequest {
+            app_id: "app".to_string(),
+            shuffle_id: 1,
+            task_attempt_id: 123,
+            bitmap_num: 0,
+            partition_to_block_ids: vec![
+                PartitionToBlockIds {
+                    partition_id: 1,
+                    block_ids: vec![10, 11],
+                },
+                PartitionToBlockIds {
+                    partition_id: 2,
+                    block_ids: vec![20],
+                },
+            ],
+            partition_ids: vec![],
+            block_ids: vec![],
+            block_id_counts: vec![],
+        };
+
+        let result = DefaultShuffleServer::unpack_block_ids(req).unwrap();
+        assert_eq!(result.get(&1), Some(&vec![10, 11]));
+        assert_eq!(result.get(&2), Some(&vec![20]));
+    }
+
+    #[test]
+    fn test_extract_block_ids_flat() {
+        let req = ReportShuffleResultRequest {
+            app_id: "app".to_string(),
+            shuffle_id: 1,
+            task_attempt_id: 123,
+            bitmap_num: 0,
+            partition_to_block_ids: vec![],
+            partition_ids: vec![1, 2],
+            block_ids: vec![100, 101, 102, 200],
+            block_id_counts: vec![3, 1],
+        };
+
+        let result = DefaultShuffleServer::unpack_block_ids(req).unwrap();
+        assert_eq!(result.get(&1), Some(&vec![100, 101, 102]));
+        assert_eq!(result.get(&2), Some(&vec![200]));
+    }
+
+    #[test]
+    fn test_extract_block_ids_flat_invalid_lengths() {
+        let req = ReportShuffleResultRequest {
+            app_id: "app".to_string(),
+            shuffle_id: 1,
+            task_attempt_id: 123,
+            bitmap_num: 0,
+            partition_to_block_ids: vec![],
+            partition_ids: vec![1],
+            block_ids: vec![100, 101],
+            block_id_counts: vec![3], // Too large
+        };
+
+        let result = DefaultShuffleServer::unpack_block_ids(req);
+        assert!(result.is_err());
+    }
+
+    fn build_combined_data() -> SendShuffleDataRequest {
+        let combined_data = Bytes::from(vec![1, 2, 3, 4, 5, 6, 7, 8]);
+
+        SendShuffleDataRequest {
+            app_id: "app".into(),
+            shuffle_id: 1,
+            timestamp: 456,
+            stage_attempt_number: 1,
+            shuffle_data: vec![],
+            combined_shuffle_data: Some(CombinedShuffleData {
+                partition_ids: vec![1, 2],
+                partition_block_counts: vec![1, 1],
+                block_ids: vec![10, 20],
+                lengths: vec![3, 5],
+                uncompress_lengths: vec![3, 5],
+                crcs: vec![111, 222],
+                task_attempt_ids: vec![1000, 2000],
+                combined_data,
+            }),
+            require_buffer_id: 0,
+        }
+    }
+
+    #[test]
+    fn test_unpack_combined_shuffle_data_success() {
+        let req = build_combined_data();
+        let result = DefaultShuffleServer::unpack_shuffle_data(req).unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].partition_id, 1);
+        assert_eq!(result[0].blocks.len(), 1);
+        assert_eq!(result[0].blocks[0].block_id, 10);
+        assert_eq!(result[0].blocks[0].data, Bytes::from(vec![1, 2, 3]));
+
+        assert_eq!(result[1].partition_id, 2);
+        assert_eq!(result[1].blocks.len(), 1);
+        assert_eq!(result[1].blocks[0].block_id, 20);
+        assert_eq!(result[1].blocks[0].data, Bytes::from(vec![4, 5, 6, 7, 8]));
+    }
+
+    #[test]
+    fn test_unpack_combined_shuffle_data_inconsistent_lengths() {
+        let mut req = build_combined_data();
+        if let Some(ref mut data) = req.combined_shuffle_data {
+            data.block_ids.pop(); // make block_ids shorter
+        }
+        let err = DefaultShuffleServer::unpack_shuffle_data(req).unwrap_err();
+        assert!(err.to_string().contains("Inconsistent block-level lengths"));
+    }
+
+    #[test]
+    fn test_unpack_legacy_shuffle_data() {
+        let legacy = SendShuffleDataRequest {
+            app_id: "app".into(),
+            shuffle_id: 1,
+            timestamp: 456,
+            stage_attempt_number: 1,
+            combined_shuffle_data: None,
+            shuffle_data: vec![
+                ShuffleData {
+                    partition_id: 1,
+                    block: vec![],
+                },
+                ShuffleData {
+                    partition_id: 2,
+                    block: vec![],
+                },
+            ],
+            require_buffer_id: 0,
+        };
+
+        let result = DefaultShuffleServer::unpack_shuffle_data(legacy).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].partition_id, 1);
+        assert_eq!(result[1].partition_id, 2);
     }
 }

@@ -298,8 +298,8 @@ impl Frame {
                 /// skip the shuffle-servers data?
                 let length_of_shuffle_servers = get_i32(src)?;
                 for idx in 0..length_of_shuffle_servers {
-                    let _ = get_string(src)?;
-                    let _ = get_string(src)?;
+                    let _ = skip_string(src)?;
+                    let _ = skip_string(src)?;
                     let _ = get_i32(src)?;
                     let _ = get_i32(src)?;
                 }
@@ -471,6 +471,25 @@ fn skip(src: &mut Cursor<&[u8]>, n: usize) -> Result<(), WorkerError> {
     }
 
     Buf::advance(src, n);
+    Ok(())
+}
+
+fn skip_string(src: &mut Cursor<&[u8]>) -> Result<(), WorkerError> {
+    if !Buf::has_remaining(src) {
+        return Err(STREAM_INCORRECT("get_string 1".into()));
+    }
+    let len = get_i32(src)? as usize;
+    if len <= 0 {
+        return Ok(());
+    }
+    if Buf::remaining(src) < len {
+        return Err(STREAM_INCORRECT(format!(
+            "get string. src remaining: {}. len: {}",
+            Buf::remaining(src),
+            len
+        )));
+    }
+    skip(src, len)?;
     Ok(())
 }
 

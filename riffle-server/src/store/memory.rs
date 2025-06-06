@@ -258,12 +258,6 @@ impl Store for MemoryStore {
         let buffer = self.get_or_create_buffer(uid);
         buffer.append(blocks, ctx.data_size)?;
 
-        TOTAL_MEMORY_USED.inc_by(size);
-
-        RPC_BATCH_DATA_BYTES_HISTOGRAM
-            .with_label_values(&[&RPC_BATCH_BYTES_OPERATION::SEND_DATA.to_string()])
-            .observe(size as f64);
-
         Ok(())
     }
 
