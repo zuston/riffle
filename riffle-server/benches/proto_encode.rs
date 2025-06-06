@@ -1,8 +1,8 @@
 use bytes::{Bytes, BytesMut};
 use criterion::{criterion_group, criterion_main, Criterion};
 use prost::Message;
-use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 
 #[derive(Clone, PartialEq, Message)]
 pub struct SendShuffleDataRequestNested {
