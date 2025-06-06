@@ -436,12 +436,6 @@ impl ShuffleServer for DefaultShuffleServer {
                 continue;
             }
             let app_id_ref = app_id.clone();
-            let await_tree_msg = span!(
-                "Inserting data. appId: {:?}. shuffleId: {}. partitionId: {}",
-                &app_id_ref,
-                shuffle_id,
-                partition_id
-            );
             let uid = PartitionedUId {
                 app_id: app_id_ref,
                 shuffle_id,
