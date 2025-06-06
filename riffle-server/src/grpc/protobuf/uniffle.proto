@@ -229,6 +229,20 @@ message SendShuffleDataRequest {
   repeated ShuffleData shuffleData = 4;
   int64 timestamp = 5;
   int32 stageAttemptNumber = 6;
+  CombinedShuffleData combinedShuffleData = 7;
+}
+
+message CombinedShuffleData {
+  repeated int32 partition_ids = 1;
+  repeated int32 partition_block_counts = 2;
+
+  repeated int64 block_ids = 3;
+  repeated int32 lengths = 4;
+  repeated int32 uncompress_lengths = 5;
+  repeated int64 crcs = 6;
+  repeated int64 task_attempt_ids = 7;
+
+  bytes combined_data = 8;
 }
 
 message SendShuffleDataResponse {
