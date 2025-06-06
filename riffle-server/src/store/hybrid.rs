@@ -614,37 +614,39 @@ impl Store for HybridStore {
 
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
         let store = self.hot_store.clone();
-        let uid = &ctx.uid;
+        let uid = ctx.uid.clone();
+        let insert_result = store.insert(ctx).await;
 
-        if !self.is_memory_only() {
-            // for single buffer spill
-            //
-            // maybe the same partition will trigger spill at the same time, the thread
-            // safe will be ensured by the buffer self.
-            // if the first request has been handled, the following requests will not
-            // fast skip this logic.
-            if let Some(threshold) = self.memory_spill_partition_max_threshold {
-                let size = self.hot_store.get_buffer_staging_size(&uid)?;
-                if size > threshold {
-                    if let Err(err) = self.single_buffer_spill(&uid).await {
-                        warn!(
-                            "Errors on single buffer spill. uid: {:?}. err: {:?}",
-                            &uid, err
-                        );
-                    }
-                }
-            }
+        if self.is_memory_only() {
+            return insert_result;
+        }
 
-            if !self.async_watermark_spill_enable {
-                if let Ok(_) = self.sync_memory_spill_lock.try_lock() {
-                    if let Err(err) = self.watermark_spill().await {
-                        warn!("Errors on watermark spill. {:?}", err)
-                    }
+        // for single buffer spill
+        //
+        // maybe the same partition will trigger spill at the same time, the thread
+        // safe will be ensured by the buffer self.
+        // if the first request has been handled, the following requests will not
+        // fast skip this logic.
+        if let Some(threshold) = self.memory_spill_partition_max_threshold {
+            let size = self.hot_store.get_buffer_staging_size(&uid)?;
+            if size > threshold {
+                if let Err(err) = self.single_buffer_spill(&uid).await {
+                    warn!(
+                        "Errors on single buffer spill. uid: {:?}. err: {:?}",
+                        &uid, err
+                    );
                 }
             }
         }
 
-        let insert_result = store.insert(ctx).await;
+        if !self.async_watermark_spill_enable {
+            if let Ok(_) = self.sync_memory_spill_lock.try_lock() {
+                if let Err(err) = self.watermark_spill().await {
+                    warn!("Errors on watermark spill. {:?}", err)
+                }
+            }
+        }
+
         insert_result
     }
 
