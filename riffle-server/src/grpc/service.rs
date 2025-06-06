@@ -45,7 +45,8 @@ use crate::metric::{
     GRPC_GET_LOCALFILE_DATA_PROCESS_TIME, GRPC_GET_LOCALFILE_DATA_TRANSPORT_TIME,
     GRPC_GET_LOCALFILE_INDEX_LATENCY, GRPC_GET_MEMORY_DATA_FREEZE_PROCESS_TIME,
     GRPC_GET_MEMORY_DATA_PROCESS_TIME, GRPC_GET_MEMORY_DATA_TRANSPORT_TIME,
-    GRPC_SEND_DATA_PROCESS_TIME, GRPC_SEND_DATA_TRANSPORT_TIME,
+    GRPC_SEND_DATA_PROCESS_TIME, GRPC_SEND_DATA_TRANSPORT_TIME, RPC_BATCH_BYTES_OPERATION,
+    RPC_BATCH_DATA_BYTES_HISTOGRAM, TOTAL_MEMORY_USED,
 };
 use crate::reject::RejectionPolicyGateway;
 use crate::server_state_manager::{ServerState, ServerStateManager};
@@ -482,6 +483,12 @@ impl ShuffleServer for DefaultShuffleServer {
                 ret_msg: inserted_failure_error.unwrap(),
             }));
         }
+
+        TOTAL_MEMORY_USED.inc_by(inserted_total_size as u64);
+
+        RPC_BATCH_DATA_BYTES_HISTOGRAM
+            .with_label_values(&[&RPC_BATCH_BYTES_OPERATION::SEND_DATA.to_string()])
+            .observe(inserted_total_size as f64);
 
         timer.observe_duration();
         Ok(Response::new(SendShuffleDataResponse {
