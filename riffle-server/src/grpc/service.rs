@@ -16,6 +16,7 @@
 // under the License.
 
 use crate::app_manager::app_configs::{AppConfigOptions, DataDistribution, RemoteStorageConfig};
+use crate::app_manager::application_identifier::ApplicationId;
 use crate::app_manager::partition_identifier::PartitionedUId;
 use crate::app_manager::request_context::{
     GetMultiBlockIdsContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
@@ -362,7 +363,9 @@ impl ShuffleServer for DefaultShuffleServer {
         let timer = GRPC_SEND_DATA_PROCESS_TIME.start_timer();
         let req = request.into_inner();
 
-        let app_id = &req.app_id;
+        let raw_app_id = &req.app_id;
+        let app_id = ApplicationId::from(raw_app_id);
+
         let shuffle_id: i32 = req.shuffle_id;
         let ticket_id = req.require_buffer_id;
 
@@ -375,7 +378,7 @@ impl ShuffleServer for DefaultShuffleServer {
                 warn!(
                     "Potential long tail latency of transport time {}(seconds) when \
                 sending shuffleData for app:{}, shuffleId:{}. This should not happen",
-                    transport_seconds, &app_id, shuffle_id
+                    transport_seconds, &raw_app_id, shuffle_id
                 );
             }
         }
@@ -384,7 +387,7 @@ impl ShuffleServer for DefaultShuffleServer {
         if app_option.is_none() {
             warn!(
                 "Reject the NO_REGISTER app: {}. This should not happen",
-                &app_id
+                &raw_app_id
             );
             return Ok(Response::new(SendShuffleDataResponse {
                 status: StatusCode::NO_REGISTER.into(),
@@ -398,21 +401,20 @@ impl ShuffleServer for DefaultShuffleServer {
             .release_ticket(ticket_id)
             .instrument_await(span!(
                 "releasing buffer for appId: {:?}. shuffleId: {}.",
-                &app_id,
+                &raw_app_id,
                 shuffle_id
             ))
             .await;
         if release_result.is_err() {
             warn!(
                 "No such buffer ticketId: {} for app:{} that may be evicted due to the timeout.",
-                ticket_id, &app_id
+                ticket_id, &raw_app_id
             );
             return Ok(Response::new(SendShuffleDataResponse {
                 status: StatusCode::NO_BUFFER.into(),
                 ret_msg: "No such buffer ticket id, it may be discarded due to timeout".to_string(),
             }));
         }
-        let app_id = app_id.to_string();
         let required_len_with_ticket = release_result.unwrap();
         let partition_blocks = match DefaultShuffleServer::unpack_shuffle_data(req) {
             Ok(data) => data,
@@ -437,14 +439,9 @@ impl ShuffleServer for DefaultShuffleServer {
                 continue;
             }
             let app_id_ref = app_id.clone();
-            let uid = PartitionedUId {
-                app_id: app_id_ref,
-                shuffle_id,
-                partition_id,
-            };
+            let uid = PartitionedUId::new(&app_id, shuffle_id, partition_id);
             let ctx = WritingViewContext::new(uid, blocks);
-            let app_ref = app.clone();
-            let inserted = app_ref.insert(ctx).await;
+            let inserted = app.insert(ctx).await;
 
             if inserted.is_err() {
                 let err = format!(
@@ -503,16 +500,16 @@ impl ShuffleServer for DefaultShuffleServer {
     ) -> Result<Response<GetLocalShuffleIndexResponse>, Status> {
         let start = tokio::time::Instant::now();
         let req = request.into_inner();
-        let app_id = req.app_id;
+        let raw_app_id = req.app_id;
+        let app_id = ApplicationId::from(&raw_app_id);
         let shuffle_id: i32 = req.shuffle_id;
         let partition_id = req.partition_id;
         let _partition_num = req.partition_num;
         let _partition_per_range = req.partition_num_per_range;
 
         let app_option = self.app_manager_ref.get_app(&app_id);
-
         if app_option.is_none() {
-            warn!("Reject the NO_REGISTER app: {} when getting localShuffleIndex. This should not happen", &app_id);
+            warn!("Reject the NO_REGISTER app: {} when getting localShuffleIndex. This should not happen", &raw_app_id);
             return Ok(Response::new(GetLocalShuffleIndexResponse {
                 index_data: Default::default(),
                 status: StatusCode::NO_REGISTER.into(),
@@ -523,8 +520,7 @@ impl ShuffleServer for DefaultShuffleServer {
         }
 
         let app = app_option.unwrap();
-
-        let partition_id = PartitionedUId::from(app_id.to_string(), shuffle_id, partition_id);
+        let partition_id = PartitionedUId::new(&app_id, shuffle_id, partition_id);
         let data_index_wrapper = app
             .list_index(ReadingIndexViewContext {
                 partition_id: partition_id.clone(),
@@ -539,7 +535,7 @@ impl ShuffleServer for DefaultShuffleServer {
             let error_msg = data_index_wrapper.err();
             error!(
                 "Errors on getting localfile data index for app:[{}], error: {:?}",
-                &app_id, error_msg
+                &raw_app_id, error_msg
             );
             return Ok(Response::new(GetLocalShuffleIndexResponse {
                 index_data: Default::default(),
@@ -556,7 +552,7 @@ impl ShuffleServer for DefaultShuffleServer {
         match data_index_wrapper.unwrap() {
             ResponseDataIndex::Local(data_index) => {
                 info!("[get_local_shuffle_index] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
-                    duration, data_index.data_file_len, &app_id, shuffle_id, &partition_id.partition_id);
+                    duration, data_index.data_file_len, &raw_app_id, shuffle_id, &partition_id.partition_id);
                 Ok(Response::new(GetLocalShuffleIndexResponse {
                     index_data: data_index.index_data,
                     status: StatusCode::SUCCESS.into(),
@@ -575,7 +571,8 @@ impl ShuffleServer for DefaultShuffleServer {
         let start = tokio::time::Instant::now();
         let timer = GRPC_GET_LOCALFILE_DATA_PROCESS_TIME.start_timer();
         let req = request.into_inner();
-        let app_id = req.app_id;
+        let raw_app_id = req.app_id;
+        let app_id = ApplicationId::from(&raw_app_id);
         let shuffle_id: i32 = req.shuffle_id;
         let partition_id = req.partition_id;
 
@@ -587,7 +584,7 @@ impl ShuffleServer for DefaultShuffleServer {
 
         let app = self.app_manager_ref.get_app(&app_id);
         if app.is_none() {
-            warn!("Reject the NO_REGISTER app: {} when getting localShuffleData. This should not happen", &app_id);
+            warn!("Reject the NO_REGISTER app: {} when getting localShuffleData. This should not happen", &raw_app_id);
             return Ok(Response::new(GetLocalShuffleDataResponse {
                 data: Default::default(),
                 status: StatusCode::NO_REGISTER.into(),
@@ -595,11 +592,7 @@ impl ShuffleServer for DefaultShuffleServer {
             }));
         }
 
-        let partition_id = PartitionedUId {
-            app_id: app_id.to_string(),
-            shuffle_id,
-            partition_id,
-        };
+        let partition_id = PartitionedUId::new(&app_id, shuffle_id, partition_id);
         let data_fetched_result = app
             .unwrap()
             .select(ReadingViewContext {
@@ -617,7 +610,7 @@ impl ShuffleServer for DefaultShuffleServer {
             let err_msg = data_fetched_result.err();
             error!(
                 "Errors on getting localfile index for app:[{}], error: {:?}",
-                &app_id, err_msg
+                &raw_app_id, err_msg
             );
             return Ok(Response::new(GetLocalShuffleDataResponse {
                 data: Default::default(),
@@ -633,7 +626,7 @@ impl ShuffleServer for DefaultShuffleServer {
 
         let data = data_fetched_result.unwrap().from_local();
         info!("[get_local_shuffle_data] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
-            duration, data.len(), &app_id, shuffle_id, &partition_id.partition_id);
+            duration, data.len(), &raw_app_id, shuffle_id, &partition_id.partition_id);
 
         Ok(Response::new(GetLocalShuffleDataResponse {
             data,
@@ -648,7 +641,8 @@ impl ShuffleServer for DefaultShuffleServer {
     ) -> Result<Response<GetMemoryShuffleDataResponse>, Status> {
         let timer = GRPC_GET_MEMORY_DATA_PROCESS_TIME.start_timer();
         let req = request.into_inner();
-        let app_id = req.app_id;
+        let raw_app_id = req.app_id;
+        let app_id = ApplicationId::from(&raw_app_id);
         let shuffle_id: i32 = req.shuffle_id;
         let partition_id = req.partition_id;
 
@@ -660,13 +654,13 @@ impl ShuffleServer for DefaultShuffleServer {
             if transport_seconds > 60 {
                 warn!("Potential long tail latency of transport time {}(seconds) when getting \
                 memory shuffleData for app:{}, shuffleId:{}, partitionId:{}. This should not happen",
-                    transport_seconds, &app_id, shuffle_id, partition_id);
+                    transport_seconds, &raw_app_id, shuffle_id, partition_id);
             }
         }
 
         let app = self.app_manager_ref.get_app(&app_id);
         if app.is_none() {
-            warn!("Reject the NO_REGISTER app: {} when getting memoryShuffleData. This should not happen", &app_id);
+            warn!("Reject the NO_REGISTER app: {} when getting memoryShuffleData. This should not happen", &raw_app_id);
             return Ok(Response::new(GetMemoryShuffleDataResponse {
                 shuffle_data_block_segments: Default::default(),
                 data: Default::default(),
@@ -675,11 +669,7 @@ impl ShuffleServer for DefaultShuffleServer {
             }));
         }
 
-        let partition_id = PartitionedUId {
-            app_id: app_id.to_string(),
-            shuffle_id,
-            partition_id,
-        };
+        let partition_id = PartitionedUId::new(&app_id, shuffle_id, partition_id);
 
         let serialized_expected_task_ids_bitmap =
             if !req.serialized_expected_task_ids_bitmap.is_empty() {
@@ -707,7 +697,7 @@ impl ShuffleServer for DefaultShuffleServer {
             let error_msg = data_fetched_result.err();
             error!(
                 "Errors on getting data from memory for [{}], error: {:?}",
-                &app_id, error_msg
+                &raw_app_id, error_msg
             );
             return Ok(Response::new(GetMemoryShuffleDataResponse {
                 shuffle_data_block_segments: vec![],
@@ -753,7 +743,8 @@ impl ShuffleServer for DefaultShuffleServer {
         request: Request<ReportShuffleResultRequest>,
     ) -> Result<Response<ReportShuffleResultResponse>, Status> {
         let req = request.into_inner();
-        let app_id = &req.app_id;
+        let raw_app_id = &req.app_id;
+        let app_id = ApplicationId::from(raw_app_id.as_str());
         let shuffle_id = req.shuffle_id;
 
         let app = self.app_manager_ref.get_app(&app_id);
@@ -792,7 +783,8 @@ impl ShuffleServer for DefaultShuffleServer {
         request: Request<GetShuffleResultRequest>,
     ) -> Result<Response<GetShuffleResultResponse>, Status> {
         let req = request.into_inner();
-        let app_id = req.app_id;
+        let raw_app_id = req.app_id;
+        let app_id = ApplicationId::from(raw_app_id.as_str());
         let shuffle_id = req.shuffle_id;
         let partition_id = req.partition_id;
         let layout = req.block_id_layout;
@@ -815,14 +807,14 @@ impl ShuffleServer for DefaultShuffleServer {
             .get_multi_block_ids(ctx)
             .instrument_await(format!(
                 "getting the block_id bitmap for app[{}]/shuffle_id[{}]/partition[{}]",
-                &app_id, shuffle_id, partition_id
+                &raw_app_id, shuffle_id, partition_id
             ))
             .await;
         if block_ids_result.is_err() {
             let err_msg = block_ids_result.err();
             error!(
                 "Errors on getting shuffle block ids for app:[{}], error: {:?}",
-                &app_id, err_msg
+                &raw_app_id, err_msg
             );
             return Ok(Response::new(GetShuffleResultResponse {
                 status: StatusCode::INTERNAL_ERROR.into(),
@@ -843,7 +835,8 @@ impl ShuffleServer for DefaultShuffleServer {
         request: Request<GetShuffleResultForMultiPartRequest>,
     ) -> Result<Response<GetShuffleResultForMultiPartResponse>, Status> {
         let req = request.into_inner();
-        let app_id = req.app_id;
+        let raw_app_id = req.app_id;
+        let app_id = ApplicationId::from(raw_app_id.as_str());
         let shuffle_id = req.shuffle_id;
         // todo: handle the empty layout
         let layout = req.block_id_layout;
@@ -853,7 +846,7 @@ impl ShuffleServer for DefaultShuffleServer {
         if app.is_none() {
             warn!(
                 "The app of {:?} has not been registered or been removed that should not happen!",
-                &app_id
+                &raw_app_id
             );
             return Ok(Response::new(GetShuffleResultForMultiPartResponse {
                 status: StatusCode::NO_REGISTER.into(),
@@ -871,14 +864,14 @@ impl ShuffleServer for DefaultShuffleServer {
             .get_multi_block_ids(ctx)
             .instrument_await(format!(
                 "getting the block_id bitmap for app[{}]/shuffle_id[{}]",
-                &app_id, shuffle_id
+                &raw_app_id, shuffle_id
             ))
             .await
         {
             Err(e) => {
                 error!(
                     "Errors on getting shuffle block ids by multipart way of app:[{}], error: {:?}",
-                    &app_id, &e
+                    &raw_app_id, &e
                 );
                 Ok(Response::new(GetShuffleResultForMultiPartResponse {
                     status: StatusCode::INTERNAL_ERROR.into(),
@@ -911,7 +904,8 @@ impl ShuffleServer for DefaultShuffleServer {
     ) -> Result<Response<RequireBufferResponse>, Status> {
         let timer = GRPC_BUFFER_REQUIRE_PROCESS_TIME.start_timer();
         let req = request.into_inner();
-        let app_id = req.app_id;
+        let raw_app_id = req.app_id;
+        let app_id = ApplicationId::from(raw_app_id.as_str());
         let shuffle_id = req.shuffle_id;
 
         let app = self.app_manager_ref.get_app(&app_id);
@@ -923,13 +917,7 @@ impl ShuffleServer for DefaultShuffleServer {
                 need_split_partition_ids: vec![],
             }));
         }
-
-        let partition_id = PartitionedUId {
-            app_id,
-            shuffle_id,
-            // ignore this.
-            partition_id: 1,
-        };
+        let partition_id = PartitionedUId::new(&app_id, shuffle_id, 1);
         let app = app
             .unwrap()
             .require_buffer(RequireBufferContext {
@@ -970,8 +958,9 @@ impl ShuffleServer for DefaultShuffleServer {
         &self,
         request: Request<AppHeartBeatRequest>,
     ) -> Result<Response<AppHeartBeatResponse>, Status> {
-        let app_id = request.into_inner().app_id;
-        info!("Accepted heartbeat for app: {:?}", &app_id);
+        let raw_app_id = request.into_inner().app_id;
+        let app_id = ApplicationId::from(raw_app_id.as_str());
+        info!("Accepted heartbeat for app: {:?}", &raw_app_id);
 
         let app = self.app_manager_ref.get_app(&app_id);
         if app.is_none() {

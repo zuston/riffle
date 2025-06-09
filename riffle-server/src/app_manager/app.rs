@@ -339,7 +339,7 @@ impl App {
                 as u64;
 
             for partition_id in &ctx.partition_ids {
-                let puid = PartitionedUId::from(app_id.to_owned(), *shuffle_id, *partition_id);
+                let puid = PartitionedUId::new(app_id, *shuffle_id, *partition_id);
                 let partition_meta = self.get_partition_meta(&puid);
 
                 if self.partition_split_enable && partition_meta.is_split() {

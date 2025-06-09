@@ -1,26 +1,17 @@
+use crate::app_manager::application_identifier::ApplicationId;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-#[derive(Ord, PartialOrd, Default, Debug, Hash, Clone)]
+#[derive(Ord, PartialOrd, Default, Debug, Hash, Clone, PartialEq, Eq)]
 pub struct PartitionedUId {
-    pub app_id: String,
+    pub app_id: ApplicationId,
     pub shuffle_id: i32,
     pub partition_id: i32,
 }
 
-impl PartialEq for PartitionedUId {
-    fn eq(&self, other: &Self) -> bool {
-        self.partition_id == other.partition_id
-            && self.shuffle_id == other.shuffle_id
-            && self.app_id == other.app_id
-    }
-}
-
-impl Eq for PartitionedUId {}
-
 impl PartitionedUId {
-    pub fn from(app_id: String, shuffle_id: i32, partition_id: i32) -> PartitionedUId {
+    pub fn new(app_id: &ApplicationId, shuffle_id: i32, partition_id: i32) -> PartitionedUId {
         PartitionedUId {
-            app_id,
+            app_id: app_id.clone(),
             shuffle_id,
             partition_id,
         }

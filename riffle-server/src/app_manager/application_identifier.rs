@@ -1,9 +1,10 @@
+use clap::builder::Str;
 use std::fmt::{Display, Formatter};
 
 const APP_PREFIX: &str = "application_";
 const SPLIT_PREFIX: &str = "_";
 
-#[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+#[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Debug, Default, Hash)]
 pub struct ApplicationId {
     part_1: u64,
     part_2: u32,
@@ -26,6 +27,14 @@ impl ApplicationId {
             part_1: parts[0].parse().unwrap_or(0),
             part_2: parts[1].parse().unwrap_or(0),
             part_3: parts[2].parse().unwrap_or(0),
+        }
+    }
+
+    pub fn mock() -> Self {
+        Self {
+            part_1: 1,
+            part_2: 2,
+            part_3: 3,
         }
     }
 }

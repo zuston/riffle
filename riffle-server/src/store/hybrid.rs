@@ -55,6 +55,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 
+use crate::app_manager::application_identifier::ApplicationId;
 use crate::app_manager::partition_identifier::PartitionedUId;
 use crate::app_manager::AppManagerRef;
 use crate::config_reconfigure::ReconfigurableConfManager;
@@ -460,7 +461,7 @@ impl HybridStore {
         let flight_len = spill_result.flight_len();
 
         let app_manager_ref = self.app_manager.clone();
-        let app_is_exist_func = move |app_id: &str| -> bool {
+        let app_is_exist_func = move |app_id: &ApplicationId| -> bool {
             let app_ref = app_manager_ref.get();
             if app_ref.is_none() {
                 return true;
@@ -888,11 +889,7 @@ pub(crate) mod tests {
 
         let runtime = store.runtime_manager.clone();
 
-        let uid = PartitionedUId {
-            app_id: "1000".to_string(),
-            shuffle_id: 0,
-            partition_id: 0,
-        };
+        let uid = PartitionedUId::new(&Default::default(), 0, 0);
         let expected_block_ids = runtime.wait(write_some_data(
             store.clone(),
             uid.clone(),
@@ -956,11 +953,7 @@ pub(crate) mod tests {
         let store = start_store(Some("1B".to_string()), ((data_len * 1) as i64).to_string());
         store.clone().start();
 
-        let uid = PartitionedUId {
-            app_id: "1000".to_string(),
-            shuffle_id: 0,
-            partition_id: 0,
-        };
+        let uid = PartitionedUId::new(&Default::default(), 0, 0);
         write_some_data(store.clone(), uid.clone(), data_len as i32, data, 400).await;
         awaitility::at_most(Duration::from_secs(10))
             .until(|| store.in_flight_bytes.load(SeqCst) == 0);
@@ -1039,11 +1032,7 @@ pub(crate) mod tests {
         let store = start_store(None, ((data_len * 1) as i64).to_string());
         let runtime = store.runtime_manager.clone();
 
-        let uid = PartitionedUId {
-            app_id: "1000".to_string(),
-            shuffle_id: 0,
-            partition_id: 0,
-        };
+        let uid = PartitionedUId::new(&Default::default(), 0, 0);
         runtime.wait(write_some_data(
             store.clone(),
             uid.clone(),

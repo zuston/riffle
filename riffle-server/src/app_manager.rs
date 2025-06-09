@@ -55,6 +55,7 @@ use std::str::FromStr;
 
 use crate::app_manager::app::App;
 use crate::app_manager::app_configs::AppConfigOptions;
+use crate::app_manager::application_identifier::ApplicationId;
 use crate::app_manager::purge_event::{PurgeEvent, PurgeReason};
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::block_id_manager::{get_block_id_manager, BlockIdManager};
@@ -91,7 +92,7 @@ pub type AppManagerRef = Arc<AppManager>;
 
 pub struct AppManager {
     // key: app_id
-    pub(crate) apps: DashMapExtend<String, Arc<App>, BuildHasherDefault<FxHasher>>,
+    pub(crate) apps: DashMapExtend<ApplicationId, Arc<App>, BuildHasherDefault<FxHasher>>,
     receiver: async_channel::Receiver<PurgeEvent>,
     sender: async_channel::Sender<PurgeEvent>,
     store: Arc<HybridStore>,
@@ -119,7 +120,7 @@ impl AppManager {
             };
 
         let manager = AppManager {
-            apps: DashMapExtend::<String, Arc<App>, BuildHasherDefault<FxHasher>>::new(),
+            apps: DashMapExtend::<ApplicationId, Arc<App>, BuildHasherDefault<FxHasher>>::new(),
             receiver,
             sender,
             store: storage.clone(),
@@ -247,7 +248,7 @@ impl AppManager {
         self.historical_app_manager.as_ref()
     }
 
-    pub fn app_is_exist(&self, app_id: &str) -> bool {
+    pub fn app_is_exist(&self, app_id: &ApplicationId) -> bool {
         self.apps.contains_key(app_id)
     }
 
@@ -275,24 +276,13 @@ impl AppManager {
         )))?;
         if shuffle_id_option.is_none() {
             self.apps.remove(&app_id);
-
             GAUGE_APP_NUMBER.dec();
-            let _ = GAUGE_TOPN_APP_RESIDENT_BYTES.remove_label_values(&[&app_id]);
-
-            let _ = TOTAL_APP_FLUSHED_BYTES.remove_label_values(&[
-                app_id.as_str(),
-                format!("{:?}", StorageType::LOCALFILE).as_str(),
-            ]);
-            let _ = TOTAL_APP_FLUSHED_BYTES.remove_label_values(&[
-                app_id.as_str(),
-                format!("{:?}", StorageType::HDFS).as_str(),
-            ]);
 
             // record into the historical app list
             if let Some(historical_manager) = self.historical_app_manager.as_ref() {
                 info!(
                     "Saving timeout app into the historical list.. app_id: {}",
-                    app_id.as_str()
+                    app_id.to_string()
                 );
                 historical_manager
                     .save(&app)
@@ -304,7 +294,7 @@ impl AppManager {
         Ok(())
     }
 
-    pub fn get_app(&self, app_id: &str) -> Option<Arc<App>> {
+    pub fn get_app(&self, app_id: &ApplicationId) -> Option<Arc<App>> {
         self.apps.get(app_id).map(|v| v.value().clone())
     }
 
@@ -323,7 +313,8 @@ impl AppManager {
             app_id.clone(),
             shuffle_id
         );
-        let app_ref = self.apps.compute_if_absent(app_id.clone(), || {
+        let application_id = ApplicationId::from(app_id.as_str());
+        let app_ref = self.apps.compute_if_absent(application_id, || {
             TOTAL_APP_NUMBER.inc();
             GAUGE_APP_NUMBER.inc();
 
@@ -340,18 +331,20 @@ impl AppManager {
     }
 
     pub async fn unregister_shuffle(&self, app_id: String, shuffle_id: i32) -> Result<()> {
+        let application_id = ApplicationId::from(app_id.as_str());
         self.sender
             .send(PurgeEvent {
-                reason: PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(app_id, shuffle_id),
+                reason: PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(application_id, shuffle_id),
             })
             .await?;
         Ok(())
     }
 
     pub async fn unregister_app(&self, app_id: String) -> Result<()> {
+        let application_id = ApplicationId::from(app_id.as_str());
         self.sender
             .send(PurgeEvent {
-                reason: PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(app_id),
+                reason: PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(application_id),
             })
             .await?;
         Ok(())
@@ -364,6 +357,8 @@ impl AppManager {
 
 #[cfg(test)]
 pub(crate) mod test {
+    use crate::app_manager::app::App;
+    use crate::app_manager::application_identifier::ApplicationId;
     use crate::app_manager::partition_identifier::PartitionedUId;
     use crate::app_manager::request_context::{
         GetMultiBlockIdsContext, ReadingOptions, ReadingViewContext, ReportMultiBlockIdsContext,
@@ -387,7 +382,8 @@ pub(crate) mod test {
 
     #[test]
     fn test_uid_hash() {
-        let uid = PartitionedUId::from("a".to_string(), 1, 1);
+        let app_id = ApplicationId::mock();
+        let uid = PartitionedUId::new(&app_id, 1, 1);
         let hash_value = PartitionedUId::get_hash(&uid);
         println!("{}", hash_value);
     }
@@ -405,7 +401,7 @@ pub(crate) mod test {
     }
 
     pub fn mock_writing_context(
-        app_id: &str,
+        app_id: &ApplicationId,
         shuffle_id: i32,
         partition_id: i32,
         block_batch: i32,
@@ -424,11 +420,7 @@ pub(crate) mod test {
             blocks.push(block);
         }
         let writing_ctx = WritingViewContext::new_with_size(
-            PartitionedUId {
-                app_id: app_id.to_string(),
-                shuffle_id,
-                partition_id,
-            },
+            PartitionedUId::new(&app_id, shuffle_id, partition_id),
             blocks,
             (block_len * block_batch) as u64,
         );
@@ -437,7 +429,8 @@ pub(crate) mod test {
 
     #[test]
     fn app_partition_split_test() {
-        let app_id = "app_partition_split_test";
+        let app_id = ApplicationId::mock();
+        let raw_app_id = app_id.to_string();
         let runtime_manager: RuntimeManager = Default::default();
 
         let mut config = create_config_for_partition_features();
@@ -450,11 +443,11 @@ pub(crate) mod test {
         let app_manager_ref =
             AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
         app_manager_ref
-            .register(app_id.clone().into(), 1, Default::default())
+            .register(raw_app_id.to_string(), 1, Default::default())
             .unwrap();
 
         // case1: exceeding the partition split, but not exceeding the partition limit.
-        let app = app_manager_ref.get_app(app_id.as_ref()).unwrap();
+        let app = app_manager_ref.get_app(&app_id).unwrap();
         let ctx = mock_writing_context(&app_id, 1, 0, 2, 3);
         let f = app.insert(ctx);
         if runtime_manager.wait(f).is_err() {
@@ -462,11 +455,7 @@ pub(crate) mod test {
         }
 
         let require_buffer_ctx = RequireBufferContext {
-            uid: PartitionedUId {
-                app_id: app_id.to_string(),
-                shuffle_id: 1,
-                partition_id: 0,
-            },
+            uid: PartitionedUId::new(&app_id, 1, 0),
             size: 10,
             partition_ids: vec![0],
         };
@@ -553,7 +542,8 @@ pub(crate) mod test {
 
     #[test]
     fn app_backpressure_of_huge_partition() {
-        let app_id = "backpressure_of_huge_partition";
+        let app_id = ApplicationId::mock();
+        let raw_app_id = app_id.to_string();
         let runtime_manager: RuntimeManager = Default::default();
 
         let config = create_config_for_partition_features();
@@ -563,10 +553,10 @@ pub(crate) mod test {
         let app_manager_ref =
             AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
         app_manager_ref
-            .register(app_id.clone().into(), 1, Default::default())
+            .register(raw_app_id.to_string(), 1, Default::default())
             .unwrap();
 
-        let app = app_manager_ref.get_app(app_id.as_ref()).unwrap();
+        let app = app_manager_ref.get_app(&app_id).unwrap();
         let ctx = mock_writing_context(&app_id, 1, 0, 2, 10);
         let f = app.insert(ctx);
         if runtime_manager.wait(f).is_err() {
@@ -574,11 +564,7 @@ pub(crate) mod test {
         }
 
         let ctx = RequireBufferContext {
-            uid: PartitionedUId {
-                app_id: app_id.to_string(),
-                shuffle_id: 1,
-                partition_id: 0,
-            },
+            uid: PartitionedUId::new(&app_id, 1, 0),
             size: 10,
             partition_ids: vec![0],
         };
@@ -591,7 +577,8 @@ pub(crate) mod test {
 
     #[test]
     fn app_put_get_purge_test() {
-        let app_id = "app_put_get_purge_test-----id";
+        let app_id = ApplicationId::mock();
+        let raw_app_id = app_id.to_string();
 
         let runtime_manager: RuntimeManager = Default::default();
         let config = mock_config();
@@ -600,10 +587,10 @@ pub(crate) mod test {
         let app_manager_ref =
             AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
         app_manager_ref
-            .register(app_id.clone().into(), 1, Default::default())
+            .register(raw_app_id.to_string(), 1, Default::default())
             .unwrap();
 
-        if let Some(app) = app_manager_ref.get_app("app_id".into()) {
+        if let Some(app) = app_manager_ref.get_app(&app_id) {
             let writing_ctx = mock_writing_context(&app_id, 1, 0, 2, 20);
 
             // case1: put
@@ -645,7 +632,7 @@ pub(crate) mod test {
                 )
                 .expect("");
 
-            assert_eq!(false, app_manager_ref.get_app(app_id).is_none());
+            assert_eq!(false, app_manager_ref.get_app(&app_id).is_none());
 
             // check the data size again after the data has been removed
             assert_eq!(40, app.total_received_data_size());
@@ -662,17 +649,19 @@ pub(crate) mod test {
         let app_manager_ref =
             AppManager::get_ref(Default::default(), config, &storage, &reconf_manager).clone();
 
+        let app_id = ApplicationId::mock();
         app_manager_ref
-            .register("app_id".into(), 1, Default::default())
+            .register(app_id.to_string(), 1, Default::default())
             .unwrap();
-        if let Some(app) = app_manager_ref.get_app("app_id".into()) {
-            assert_eq!("app_id", app.app_id);
+        if let Some(app) = app_manager_ref.get_app(&app_id) {
+            assert_eq!("app_id", app.app_id.to_string());
         }
     }
 
     #[test]
     fn test_get_or_put_block_ids() {
-        let app_id = "test_get_or_put_block_ids-----id".to_string();
+        let app_id = ApplicationId::mock();
+        let raw_app_id = app_id.to_string();
 
         let runtime_manager: RuntimeManager = Default::default();
         let config = mock_config();
@@ -681,10 +670,10 @@ pub(crate) mod test {
         let app_manager_ref =
             AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
         app_manager_ref
-            .register(app_id.clone().into(), 1, Default::default())
+            .register(raw_app_id.to_string(), 1, Default::default())
             .unwrap();
 
-        let app = app_manager_ref.get_app(app_id.as_ref()).unwrap();
+        let app = app_manager_ref.get_app(&app_id).unwrap();
         let block_id_1 = DEFAULT_BLOCK_ID_LAYOUT.get_block_id(1, 10, 2);
         let block_id_2 = DEFAULT_BLOCK_ID_LAYOUT.get_block_id(2, 10, 3);
         let block_id_3 = DEFAULT_BLOCK_ID_LAYOUT.get_block_id(2, 20, 3);

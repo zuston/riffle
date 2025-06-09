@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod tests {
+    use crate::app_manager::app::App;
+    use crate::app_manager::application_identifier::ApplicationId;
     use crate::app_manager::partition_identifier::PartitionedUId;
     use crate::app_manager::test::mock_writing_context;
     use crate::app_manager::AppManager;
@@ -130,8 +132,8 @@ mod tests {
         store.with_app_manager(&app_manager_ref);
 
         // case1: the app don't exist in the app manager, so the spill will fail.
-        let app_id = "test_flush_after_app_purged-app";
-        let ctx = mock_writing_context(app_id, 1, 0, 1, 20);
+        let app_id = ApplicationId::mock();
+        let ctx = mock_writing_context(&app_id, 1, 0, 1, 20);
         let _ = store.insert(ctx).await;
 
         awaitility::at_most(Duration::from_secs(1))
@@ -180,8 +182,8 @@ mod tests {
         let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
         let store = create_hybrid_store(&config, &warm, None, &reconf_manager);
 
-        let app_id = "test_flush_failed-app";
-        let ctx = mock_writing_context(app_id, 1, 0, 1, 20);
+        let app_id = ApplicationId::mock();
+        let ctx = mock_writing_context(&app_id, 1, 0, 1, 20);
         let _ = store.insert(ctx).await;
 
         // case1: flush failed with multi retry.
@@ -190,7 +192,7 @@ mod tests {
         assert_eq!(
             0,
             store
-                .get_memory_buffer_size(&PartitionedUId::from(app_id.to_string(), 1, 0))
+                .get_memory_buffer_size(&PartitionedUId::new(&app_id, 1, 0))
                 .unwrap()
         );
 
@@ -245,18 +247,15 @@ mod tests {
         let app_manager = AppManager::get_ref(Default::default(), config, &store, &reconf_manager);
         app_manager.register(app_id.to_string(), shuffle_id, Default::default())?;
         // this will make watermark-spill accumulate in_flight_bytes_of_huge_partition.
+        let application_id = ApplicationId::from(app_id);
         app_manager
-            .get_app(&app_id)
+            .get_app(&application_id)
             .unwrap()
-            .mark_huge_partition(&PartitionedUId::from(
-                app_id.to_owned(),
-                shuffle_id,
-                partition,
-            ));
+            .mark_huge_partition(&PartitionedUId::new(&application_id, shuffle_id, partition));
         store.with_app_manager(&app_manager);
 
         store.hot_store.inc_used(9);
-        let ctx = mock_writing_context(app_id.to_string().as_str(), shuffle_id, partition, 1, 9);
+        let ctx = mock_writing_context(&application_id, shuffle_id, partition, 1, 9);
         let _ = store.insert(ctx).await;
         // trigger the watermark spill. ratio:0.9 > threshold:0.8
         assert_eq!(1, store.get_spill_event_num()?);
@@ -265,7 +264,7 @@ mod tests {
 
         // and then insert the 10B data. If sensitive watermark-spill is disabled, this will not trigger spill.
         store.hot_store.inc_used(3);
-        let ctx = mock_writing_context(app_id.to_string().as_str(), shuffle_id, partition, 1, 3);
+        let ctx = mock_writing_context(&application_id, shuffle_id, partition, 1, 3);
         let _ = store.insert(ctx).await;
 
         // Due to the hang writing, the spill event num is still 1. This time inserting will not trigger watermark spill.
@@ -274,8 +273,7 @@ mod tests {
         // and then enable sensitive watermark spill
         store.enable_sensitive_watermark_spill();
         store.hot_store.inc_used(2);
-        let ctx =
-            mock_writing_context(app_id.to_string().as_str(), shuffle_id, partition + 1, 1, 2);
+        let ctx = mock_writing_context(&application_id, shuffle_id, partition + 1, 1, 2);
         let _ = store.insert(ctx).await;
 
         // This will trigger watermark spill, but only one buffer of partition=1 will be spilled.
@@ -293,8 +291,8 @@ mod tests {
         awaitility::at_most(Duration::from_secs(5)).until(|| {
             store
                 .hot_store
-                .get_buffer(&PartitionedUId::from(
-                    app_id.to_string(),
+                .get_buffer(&PartitionedUId::new(
+                    &ApplicationId::from(app_id),
                     shuffle_id,
                     partition,
                 ))
@@ -308,8 +306,8 @@ mod tests {
             2,
             store
                 .hot_store
-                .get_buffer(&PartitionedUId::from(
-                    app_id.to_string(),
+                .get_buffer(&PartitionedUId::new(
+                    &ApplicationId::from(app_id),
                     shuffle_id,
                     partition + 1
                 ))
@@ -356,7 +354,7 @@ mod tests {
         assert_eq!(
             0,
             store
-                .get_memory_buffer_size(&PartitionedUId::from(app_id.to_string(), 1, 0))
+                .get_memory_buffer_size(&PartitionedUId::new(app_id.to_string(), 1, 0))
                 .await
                 .unwrap()
         );
@@ -407,7 +405,7 @@ mod tests {
         assert_eq!(
             0,
             store
-                .get_memory_buffer_size(&PartitionedUId::from(app_id.to_string(), 1, 0))
+                .get_memory_buffer_size(&PartitionedUId::new(app_id.to_string(), 1, 0))
                 .await
                 .unwrap()
         );

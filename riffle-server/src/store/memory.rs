@@ -414,6 +414,7 @@ mod test {
     use core::panic;
     use std::sync::Arc;
 
+    use crate::app_manager::application_identifier::ApplicationId;
     use crate::app_manager::partition_identifier::PartitionedUId;
     use crate::app_manager::purge_event::PurgeReason;
     use anyhow::Result;
@@ -424,11 +425,7 @@ mod test {
         let store = MemoryStore::new(1024);
         let runtime = store.runtime_manager.clone();
 
-        let uid = PartitionedUId {
-            app_id: "100".to_string(),
-            shuffle_id: 0,
-            partition_id: 0,
-        };
+        let uid = PartitionedUId::new(&Default::default(), 0, 0);
         let writing_view_ctx = create_writing_ctx_with_blocks(10, 10, uid.clone());
         let _ = runtime.wait(store.insert(writing_view_ctx));
 
@@ -639,12 +636,9 @@ mod test {
         let store = MemoryStore::new(1024 * 1024 * 1024);
         let runtime = store.runtime_manager.clone();
 
+        let app_id = ApplicationId::from("application_1_1_2");
         let ctx = RequireBufferContext {
-            uid: PartitionedUId {
-                app_id: "100".to_string(),
-                shuffle_id: 0,
-                partition_id: 0,
-            },
+            uid: PartitionedUId::new(&app_id, 0, 0),
             size: 10000,
             partition_ids: vec![],
         };
@@ -653,7 +647,7 @@ mod test {
                 let _ = runtime
                     .default_runtime
                     .block_on(store.purge(&PurgeDataContext {
-                        purge_reason: PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER("100".to_string()),
+                        purge_reason: PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(app_id),
                     }));
             }
             _ => panic!(),
@@ -669,11 +663,11 @@ mod test {
         let store = MemoryStore::new(1024);
         let runtime = store.runtime_manager.clone();
 
-        let app_id = "purge_app";
         let shuffle_id = 1;
         let partition = 1;
 
-        let uid = PartitionedUId::from(app_id.to_string(), shuffle_id, partition);
+        let app_id = ApplicationId::from("application_0_1_1");
+        let uid = PartitionedUId::new(&app_id, 0, 0);
 
         // the buffer requested
 
@@ -718,11 +712,9 @@ mod test {
                 &PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(app_id.to_owned(), shuffle_id),
             )))
             .expect("");
-        assert!(!store.state.contains_key(&PartitionedUId::from(
-            app_id.to_string(),
-            shuffle_id,
-            partition
-        )));
+        assert!(!store
+            .state
+            .contains_key(&PartitionedUId::new(&app_id, shuffle_id, partition)));
 
         // purge
         runtime
