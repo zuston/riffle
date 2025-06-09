@@ -52,6 +52,16 @@ impl Display for ApplicationId {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_map_key() {
+        let app_id = ApplicationId::mock();
+        let mut hashmap: HashMap<ApplicationId, i32> = HashMap::new();
+        hashmap.insert(app_id, 1);
+
+        assert!(hashmap.contains_key(&ApplicationId::mock()));
+    }
 
     #[test]
     fn test_application_id_parsing() {

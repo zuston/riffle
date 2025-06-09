@@ -239,7 +239,8 @@ mod tests {
         config.app_config.partition_limit_threshold = "20B".to_string();
         config.app_config.partition_limit_memory_backpressure_ratio = 0.2;
 
-        let app_id = "app_1";
+        let app_id = "application_0_1_2";
+        let application_id = ApplicationId::from(app_id);
         let shuffle_id = 1;
         let partition = 0;
         let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
@@ -247,7 +248,6 @@ mod tests {
         let app_manager = AppManager::get_ref(Default::default(), config, &store, &reconf_manager);
         app_manager.register(app_id.to_string(), shuffle_id, Default::default())?;
         // this will make watermark-spill accumulate in_flight_bytes_of_huge_partition.
-        let application_id = ApplicationId::from(app_id);
         app_manager
             .get_app(&application_id)
             .unwrap()
