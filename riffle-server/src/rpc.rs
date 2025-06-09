@@ -65,7 +65,8 @@ impl DefaultRpcService {
         let urpc_port = config.urpc_port.unwrap();
         info!("Starting urpc server with port:[{}] ......", urpc_port);
 
-        for _ in 0..URPC_PARALLELISM.get() {
+        let core_ids = core_affinity::get_core_ids().unwrap();
+        for (_, core_id) in core_ids.into_iter().enumerate() {
             let rx = tx.subscribe();
             async fn shutdown(mut rx: Receiver<()>) -> Result<()> {
                 if let Err(err) = rx.recv().await {
@@ -80,6 +81,7 @@ impl DefaultRpcService {
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port as u16);
 
             std::thread::spawn(move || {
+                core_affinity::set_for_current(core_id);
                 tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
