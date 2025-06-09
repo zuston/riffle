@@ -17,6 +17,7 @@
 
 pub mod app;
 pub mod app_configs;
+pub mod application_identifier;
 pub mod partition_identifier;
 mod partition_meta;
 pub mod purge_event;
