@@ -17,7 +17,7 @@
 
 use crate::app_manager::app_configs::{AppConfigOptions, DataDistribution, RemoteStorageConfig};
 use crate::app_manager::application_identifier::ApplicationId;
-use crate::app_manager::partition_identifier::PartitionedUId;
+use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::request_context::{
     GetMultiBlockIdsContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
     ReportMultiBlockIdsContext, RequireBufferContext, WritingViewContext,
@@ -439,7 +439,7 @@ impl ShuffleServer for DefaultShuffleServer {
                 continue;
             }
             let app_id_ref = app_id.clone();
-            let uid = PartitionedUId::new(&app_id, shuffle_id, partition_id);
+            let uid = PartitionUId::new(&app_id, shuffle_id, partition_id);
             let ctx = WritingViewContext::new(uid, blocks);
             let inserted = app.insert(ctx).await;
 
@@ -520,7 +520,7 @@ impl ShuffleServer for DefaultShuffleServer {
         }
 
         let app = app_option.unwrap();
-        let partition_id = PartitionedUId::new(&app_id, shuffle_id, partition_id);
+        let partition_id = PartitionUId::new(&app_id, shuffle_id, partition_id);
         let data_index_wrapper = app
             .list_index(ReadingIndexViewContext {
                 partition_id: partition_id.clone(),
@@ -592,7 +592,7 @@ impl ShuffleServer for DefaultShuffleServer {
             }));
         }
 
-        let partition_id = PartitionedUId::new(&app_id, shuffle_id, partition_id);
+        let partition_id = PartitionUId::new(&app_id, shuffle_id, partition_id);
         let data_fetched_result = app
             .unwrap()
             .select(ReadingViewContext {
@@ -669,7 +669,7 @@ impl ShuffleServer for DefaultShuffleServer {
             }));
         }
 
-        let partition_id = PartitionedUId::new(&app_id, shuffle_id, partition_id);
+        let partition_id = PartitionUId::new(&app_id, shuffle_id, partition_id);
 
         let serialized_expected_task_ids_bitmap =
             if !req.serialized_expected_task_ids_bitmap.is_empty() {
@@ -917,7 +917,7 @@ impl ShuffleServer for DefaultShuffleServer {
                 need_split_partition_ids: vec![],
             }));
         }
-        let partition_id = PartitionedUId::new(&app_id, shuffle_id, 1);
+        let partition_id = PartitionUId::new(&app_id, shuffle_id, 1);
         let app = app
             .unwrap()
             .require_buffer(RequireBufferContext {

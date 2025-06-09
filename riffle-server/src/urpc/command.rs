@@ -1,5 +1,5 @@
 use crate::app_manager::application_identifier::ApplicationId;
-use crate::app_manager::partition_identifier::PartitionedUId;
+use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::request_context::{
     ReadingIndexViewContext, ReadingOptions, ReadingViewContext, WritingViewContext,
 };
@@ -93,7 +93,7 @@ impl GetMemoryDataRequestCommand {
         }
 
         let app = app.unwrap();
-        let uid = PartitionedUId::new(&application_id, shuffle_id, partition_id);
+        let uid = PartitionUId::new(&application_id, shuffle_id, partition_id);
         let ctx = ReadingViewContext {
             uid,
             reading_options: ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(
@@ -175,7 +175,7 @@ impl GetLocalDataRequestCommand {
         }
 
         let app = app.unwrap();
-        let uid = PartitionedUId::new(&application_id, shuffle_id, partition_id);
+        let uid = PartitionUId::new(&application_id, shuffle_id, partition_id);
         let ctx = ReadingViewContext {
             uid,
             reading_options: ReadingOptions::FILE_OFFSET_AND_LEN(offset, length as i64),
@@ -263,7 +263,7 @@ impl GetLocalDataIndexRequestCommand {
 
         let app = app.unwrap();
         let application_id = ApplicationId::from(app_id);
-        let uid = PartitionedUId::new(&application_id, shuffle_id, partition_id);
+        let uid = PartitionUId::new(&application_id, shuffle_id, partition_id);
         let ctx = ReadingIndexViewContext { partition_id: uid };
 
         let command = match app
@@ -376,7 +376,7 @@ impl SendDataRequestCommand {
         for block in blocks {
             let partition_id = block.0;
             let partition_blocks = block.1;
-            let uid = PartitionedUId::new(&application_id, shuffle_id, partition_id);
+            let uid = PartitionUId::new(&application_id, shuffle_id, partition_id);
             let ctx = WritingViewContext::new(uid, partition_blocks);
             match app
                 .insert(ctx)

@@ -46,7 +46,7 @@ use dashmap::DashMap;
 
 use log::{debug, error, info, warn};
 
-use crate::app_manager::partition_identifier::PartitionedUId;
+use crate::app_manager::partition_identifier::PartitionUId;
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::composed_bytes::ComposedBytes;
 use crate::dashmap_extension::DashMapExtend;
@@ -209,7 +209,7 @@ impl LocalFileStore {
         format!("{}/{}/", app_id, shuffle_id)
     }
 
-    fn gen_relative_path_for_partition(uid: &PartitionedUId) -> (String, String) {
+    fn gen_relative_path_for_partition(uid: &PartitionUId) -> (String, String) {
         (
             format!(
                 "{}/{}/partition-{}.data",
@@ -237,8 +237,8 @@ impl LocalFileStore {
         Ok(available >= self.min_number_of_available_disks)
     }
 
-    fn select_disk(&self, uid: &PartitionedUId) -> Result<LocalDiskDelegator, WorkerError> {
-        let hash_value = PartitionedUId::get_hash(uid);
+    fn select_disk(&self, uid: &PartitionUId) -> Result<LocalDiskDelegator, WorkerError> {
+        let hash_value = PartitionUId::get_hash(uid);
 
         let mut candidates = vec![];
         for local_disk in &self.local_disks {
@@ -261,11 +261,7 @@ impl LocalFileStore {
         }
     }
 
-    async fn data_insert(
-        &self,
-        uid: PartitionedUId,
-        blocks: Vec<&Block>,
-    ) -> Result<(), WorkerError> {
+    async fn data_insert(&self, uid: PartitionUId, blocks: Vec<&Block>) -> Result<(), WorkerError> {
         let (data_file_path, index_file_path) =
             LocalFileStore::gen_relative_path_for_partition(&uid);
 
@@ -641,7 +637,7 @@ mod test {
     use crate::store::localfile::LocalFileStore;
 
     use crate::app_manager::application_identifier::ApplicationId;
-    use crate::app_manager::partition_identifier::PartitionedUId;
+    use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::purge_event::PurgeReason;
     use crate::error::WorkerError;
     use crate::store::index_codec::{IndexBlock, IndexCodec};
@@ -651,7 +647,7 @@ mod test {
     use log::{error, info};
 
     fn create_writing_ctx() -> WritingViewContext {
-        let uid = PartitionedUId::new(&Default::default(), 0, 0);
+        let uid = PartitionUId::new(&Default::default(), 0, 0);
         let data = b"hello world!hello china!";
         let size = data.len();
         let writing_ctx = WritingViewContext::create_for_test(
@@ -728,7 +724,7 @@ mod test {
         Ok(())
     }
 
-    fn create_writing_ctx_by_uid(uid: &PartitionedUId) -> WritingViewContext {
+    fn create_writing_ctx_by_uid(uid: &PartitionUId) -> WritingViewContext {
         let data = b"hello world!hello china!";
         let size = data.len();
         let writing_ctx = WritingViewContext::create_for_test(
@@ -770,8 +766,8 @@ mod test {
         let shuffle_id_1 = 1;
         let shuffle_id_2 = 13;
 
-        let uid_1 = PartitionedUId::new(&application_id, shuffle_id_1, 0);
-        let uid_2 = PartitionedUId::new(&application_id, shuffle_id_2, 0);
+        let uid_1 = PartitionUId::new(&application_id, shuffle_id_1, 0);
+        let uid_2 = PartitionUId::new(&application_id, shuffle_id_2, 0);
 
         // for shuffle_id = 1
         let writing_ctx_1 = create_writing_ctx_by_uid(&uid_1);
@@ -850,7 +846,7 @@ mod test {
 
         let runtime = local_store.runtime_manager.clone();
 
-        let uid = PartitionedUId::new(&Default::default(), 0, 0);
+        let uid = PartitionUId::new(&Default::default(), 0, 0);
         let data = b"hello world!hello china!";
         let size = data.len();
         let writing_ctx = WritingViewContext::create_for_test(
@@ -883,7 +879,7 @@ mod test {
 
         async fn get_and_check_partitial_data(
             local_store: &mut LocalFileStore,
-            uid: PartitionedUId,
+            uid: PartitionUId,
             size: i64,
             expected: &[u8],
         ) {

@@ -1,5 +1,5 @@
 use crate::app_manager::app_configs::AppConfigOptions;
-use crate::app_manager::partition_identifier::PartitionedUId;
+use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::partition_meta::PartitionMeta;
 use crate::app_manager::purge_event::PurgeReason;
 use crate::app_manager::request_context::{
@@ -252,7 +252,7 @@ impl App {
     }
 
     // Only for test case
-    pub fn mark_huge_partition(&self, uid: &PartitionedUId) -> anyhow::Result<()> {
+    pub fn mark_huge_partition(&self, uid: &PartitionUId) -> anyhow::Result<()> {
         let mut meta = self.get_partition_meta(uid);
         meta.mark_as_huge_partition();
         Ok(())
@@ -285,7 +285,7 @@ impl App {
         }
     }
 
-    pub async fn is_backpressure_of_partition(&self, uid: &PartitionedUId) -> anyhow::Result<bool> {
+    pub async fn is_backpressure_of_partition(&self, uid: &PartitionUId) -> anyhow::Result<bool> {
         if !self.is_huge_partition(uid)? {
             return Ok(false);
         }
@@ -313,7 +313,7 @@ impl App {
         self.store.move_allocated_to_used_from_hot_store(size)
     }
 
-    pub fn is_huge_partition(&self, uid: &PartitionedUId) -> Result<bool> {
+    pub fn is_huge_partition(&self, uid: &PartitionUId) -> Result<bool> {
         if self.partition_limit_enable {
             Ok(false)
         } else {
@@ -339,7 +339,7 @@ impl App {
                 as u64;
 
             for partition_id in &ctx.partition_ids {
-                let puid = PartitionedUId::new(app_id, *shuffle_id, *partition_id);
+                let puid = PartitionUId::new(app_id, *shuffle_id, *partition_id);
                 let partition_meta = self.get_partition_meta(&puid);
 
                 if self.partition_split_enable && partition_meta.is_split() {
@@ -375,7 +375,7 @@ impl App {
             .await
     }
 
-    fn get_partition_meta(&self, uid: &PartitionedUId) -> PartitionMeta {
+    fn get_partition_meta(&self, uid: &PartitionUId) -> PartitionMeta {
         let shuffle_id = uid.shuffle_id;
         let partition_id = uid.partition_id;
         self.partition_meta_infos

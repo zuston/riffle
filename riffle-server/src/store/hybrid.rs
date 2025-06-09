@@ -56,7 +56,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 
 use crate::app_manager::application_identifier::ApplicationId;
-use crate::app_manager::partition_identifier::PartitionedUId;
+use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::AppManagerRef;
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::runtime::manager::RuntimeManager;
@@ -408,11 +408,11 @@ impl HybridStore {
         Ok(Default::default())
     }
 
-    pub async fn get_memory_buffer(&self, uid: &PartitionedUId) -> Result<Arc<MemoryBuffer>> {
+    pub async fn get_memory_buffer(&self, uid: &PartitionUId) -> Result<Arc<MemoryBuffer>> {
         self.hot_store.get_buffer(uid)
     }
 
-    pub fn get_memory_buffer_size(&self, uid: &PartitionedUId) -> Result<u64> {
+    pub fn get_memory_buffer_size(&self, uid: &PartitionUId) -> Result<u64> {
         self.hot_store.get_buffer_size(uid)
     }
 
@@ -443,14 +443,14 @@ impl HybridStore {
         Ok(())
     }
 
-    async fn single_buffer_spill(&self, uid: &PartitionedUId) -> Result<u64> {
+    async fn single_buffer_spill(&self, uid: &PartitionUId) -> Result<u64> {
         let buffer = self.get_memory_buffer(uid).await?;
         self.buffer_spill_impl(uid, buffer).await
     }
 
     async fn buffer_spill_impl(
         &self,
-        uid: &PartitionedUId,
+        uid: &PartitionUId,
         buffer: Arc<MemoryBuffer>,
     ) -> Result<u64> {
         let spill_result = buffer.spill()?;
@@ -763,7 +763,7 @@ pub(crate) mod tests {
     use std::sync::Arc;
     use std::thread;
 
-    use crate::app_manager::partition_identifier::PartitionedUId;
+    use crate::app_manager::partition_identifier::PartitionUId;
     use crate::config_reconfigure::ReconfigurableConfManager;
     use serde::de::Unexpected::Seq;
     use std::time::Duration;
@@ -843,7 +843,7 @@ pub(crate) mod tests {
 
     pub async fn write_some_data(
         store: Arc<HybridStore>,
-        uid: PartitionedUId,
+        uid: PartitionUId,
         data_len: i32,
         data: &[u8; 12],
         batch_size: i64,
@@ -889,7 +889,7 @@ pub(crate) mod tests {
 
         let runtime = store.runtime_manager.clone();
 
-        let uid = PartitionedUId::new(&Default::default(), 0, 0);
+        let uid = PartitionUId::new(&Default::default(), 0, 0);
         let expected_block_ids = runtime.wait(write_some_data(
             store.clone(),
             uid.clone(),
@@ -953,7 +953,7 @@ pub(crate) mod tests {
         let store = start_store(Some("1B".to_string()), ((data_len * 1) as i64).to_string());
         store.clone().start();
 
-        let uid = PartitionedUId::new(&Default::default(), 0, 0);
+        let uid = PartitionUId::new(&Default::default(), 0, 0);
         write_some_data(store.clone(), uid.clone(), data_len as i32, data, 400).await;
         awaitility::at_most(Duration::from_secs(10))
             .until(|| store.in_flight_bytes.load(SeqCst) == 0);
@@ -1032,7 +1032,7 @@ pub(crate) mod tests {
         let store = start_store(None, ((data_len * 1) as i64).to_string());
         let runtime = store.runtime_manager.clone();
 
-        let uid = PartitionedUId::new(&Default::default(), 0, 0);
+        let uid = PartitionUId::new(&Default::default(), 0, 0);
         runtime.wait(write_some_data(
             store.clone(),
             uid.clone(),

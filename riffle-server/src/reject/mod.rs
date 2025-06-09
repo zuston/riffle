@@ -1,4 +1,4 @@
-use crate::app_manager::partition_identifier::PartitionedUId;
+use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::AppManagerRef;
 use crate::config::Config;
 use crate::error::WorkerError;
@@ -13,7 +13,7 @@ pub enum RejectionResult {
 
 #[async_trait]
 pub trait RejectionPolicy {
-    async fn should_allow(&self, request: &PartitionedUId) -> Result<(), WorkerError>;
+    async fn should_allow(&self, request: &PartitionUId) -> Result<(), WorkerError>;
 }
 
 pub trait ManualRejectPolicy: RejectionPolicy + Send + Sync {}
@@ -28,7 +28,7 @@ unsafe impl Send for HugePartitionRejectionPolicy {}
 unsafe impl Sync for HugePartitionRejectionPolicy {}
 #[async_trait]
 impl RejectionPolicy for HugePartitionRejectionPolicy {
-    async fn should_allow(&self, request: &PartitionedUId) -> Result<(), WorkerError> {
+    async fn should_allow(&self, request: &PartitionUId) -> Result<(), WorkerError> {
         let app_id = &request.app_id;
         let app = self.app_manager_ref.get_app(app_id);
         if app.is_none() {
@@ -53,7 +53,7 @@ unsafe impl Send for DiskUnhealthyRejectionPolicy {}
 unsafe impl Sync for DiskUnhealthyRejectionPolicy {}
 #[async_trait]
 impl RejectionPolicy for DiskUnhealthyRejectionPolicy {
-    async fn should_allow(&self, request: &PartitionedUId) -> Result<(), WorkerError> {
+    async fn should_allow(&self, request: &PartitionUId) -> Result<(), WorkerError> {
         Ok(())
     }
 }
@@ -65,7 +65,7 @@ unsafe impl Send for ServiceUnhealthyRejectionPolicy {}
 unsafe impl Sync for ServiceUnhealthyRejectionPolicy {}
 #[async_trait]
 impl RejectionPolicy for ServiceUnhealthyRejectionPolicy {
-    async fn should_allow(&self, request: &PartitionedUId) -> Result<(), WorkerError> {
+    async fn should_allow(&self, request: &PartitionUId) -> Result<(), WorkerError> {
         Ok(())
     }
 }
@@ -94,7 +94,7 @@ impl RejectionPolicyGateway {
         }
     }
 
-    pub async fn should_allow(&self, uid: &PartitionedUId) -> Result<(), WorkerError> {
+    pub async fn should_allow(&self, uid: &PartitionUId) -> Result<(), WorkerError> {
         for policy in &self.inner.policies {
             if let Err(err) = policy.should_allow(uid).await {
                 return Err(err);

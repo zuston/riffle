@@ -359,7 +359,7 @@ impl AppManager {
 pub(crate) mod test {
     use crate::app_manager::app::App;
     use crate::app_manager::application_identifier::ApplicationId;
-    use crate::app_manager::partition_identifier::PartitionedUId;
+    use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::request_context::{
         GetMultiBlockIdsContext, ReadingOptions, ReadingViewContext, ReportMultiBlockIdsContext,
         RequireBufferContext, WritingViewContext,
@@ -383,8 +383,8 @@ pub(crate) mod test {
     #[test]
     fn test_uid_hash() {
         let app_id = ApplicationId::mock();
-        let uid = PartitionedUId::new(&app_id, 1, 1);
-        let hash_value = PartitionedUId::get_hash(&uid);
+        let uid = PartitionUId::new(&app_id, 1, 1);
+        let hash_value = PartitionUId::get_hash(&uid);
         println!("{}", hash_value);
     }
 
@@ -420,7 +420,7 @@ pub(crate) mod test {
             blocks.push(block);
         }
         let writing_ctx = WritingViewContext::new_with_size(
-            PartitionedUId::new(&app_id, shuffle_id, partition_id),
+            PartitionUId::new(&app_id, shuffle_id, partition_id),
             blocks,
             (block_len * block_batch) as u64,
         );
@@ -455,7 +455,7 @@ pub(crate) mod test {
         }
 
         let require_buffer_ctx = RequireBufferContext {
-            uid: PartitionedUId::new(&app_id, 1, 0),
+            uid: PartitionUId::new(&app_id, 1, 0),
             size: 10,
             partition_ids: vec![0],
         };
@@ -564,7 +564,7 @@ pub(crate) mod test {
         }
 
         let ctx = RequireBufferContext {
-            uid: PartitionedUId::new(&app_id, 1, 0),
+            uid: PartitionUId::new(&app_id, 1, 0),
             size: 10,
             partition_ids: vec![0],
         };

@@ -1,5 +1,5 @@
 use crate::app_manager::app_configs::AppConfigOptions;
-use crate::app_manager::partition_identifier::PartitionedUId;
+use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::purge_event::PurgeReason;
 use crate::id_layout::IdLayout;
 use crate::store::Block;
@@ -30,7 +30,7 @@ impl Deref for PurgeDataContext {
 
 #[derive(Debug, Clone)]
 pub struct ReportBlocksContext {
-    pub(crate) uid: PartitionedUId,
+    pub(crate) uid: PartitionUId,
     pub(crate) blocks: Vec<i64>,
 }
 
@@ -57,19 +57,19 @@ pub struct GetMultiBlockIdsContext {
 
 #[derive(Debug, Clone)]
 pub struct GetBlocksContext {
-    pub(crate) uid: PartitionedUId,
+    pub(crate) uid: PartitionUId,
 }
 
 #[derive(Debug, Clone)]
 pub struct WritingViewContext {
-    pub uid: PartitionedUId,
+    pub uid: PartitionUId,
     pub data_blocks: Vec<Block>,
     pub data_size: u64,
 }
 
 impl WritingViewContext {
     // only for test
-    pub fn create_for_test(uid: PartitionedUId, data_blocks: Vec<Block>) -> Self {
+    pub fn create_for_test(uid: PartitionUId, data_blocks: Vec<Block>) -> Self {
         WritingViewContext {
             uid,
             data_blocks,
@@ -78,7 +78,7 @@ impl WritingViewContext {
     }
 
     // only for test
-    pub fn new_with_size(uid: PartitionedUId, data_blocks: Vec<Block>, data_size: u64) -> Self {
+    pub fn new_with_size(uid: PartitionUId, data_blocks: Vec<Block>, data_size: u64) -> Self {
         WritingViewContext {
             uid,
             data_blocks,
@@ -86,7 +86,7 @@ impl WritingViewContext {
         }
     }
 
-    pub fn new(uid: PartitionedUId, data_blocks: Vec<Block>) -> Self {
+    pub fn new(uid: PartitionUId, data_blocks: Vec<Block>) -> Self {
         let len: u64 = data_blocks.iter().map(|block| block.length).sum::<i32>() as u64;
         WritingViewContext {
             uid,
@@ -98,18 +98,18 @@ impl WritingViewContext {
 
 #[derive(Debug, Clone)]
 pub struct ReadingViewContext {
-    pub uid: PartitionedUId,
+    pub uid: PartitionUId,
     pub reading_options: ReadingOptions,
     pub serialized_expected_task_ids_bitmap: Option<Treemap>,
 }
 
 pub struct ReadingIndexViewContext {
-    pub partition_id: PartitionedUId,
+    pub partition_id: PartitionUId,
 }
 
 #[derive(Debug, Clone)]
 pub struct RequireBufferContext {
-    pub uid: PartitionedUId,
+    pub uid: PartitionUId,
     pub size: i64,
     // todo: we should replace uid with (app_id, shuffle_id).
     pub partition_ids: Vec<i32>,
@@ -133,7 +133,7 @@ impl From<i64> for ReleaseTicketContext {
 }
 
 impl RequireBufferContext {
-    pub fn create_for_test(uid: PartitionedUId, size: i64) -> Self {
+    pub fn create_for_test(uid: PartitionUId, size: i64) -> Self {
         Self {
             uid,
             size,

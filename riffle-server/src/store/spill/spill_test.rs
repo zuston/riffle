@@ -2,7 +2,7 @@
 mod tests {
     use crate::app_manager::app::App;
     use crate::app_manager::application_identifier::ApplicationId;
-    use crate::app_manager::partition_identifier::PartitionedUId;
+    use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::test::mock_writing_context;
     use crate::app_manager::AppManager;
     use crate::config::StorageType::{HDFS, LOCALFILE};
@@ -192,7 +192,7 @@ mod tests {
         assert_eq!(
             0,
             store
-                .get_memory_buffer_size(&PartitionedUId::new(&app_id, 1, 0))
+                .get_memory_buffer_size(&PartitionUId::new(&app_id, 1, 0))
                 .unwrap()
         );
 
@@ -251,7 +251,7 @@ mod tests {
         app_manager
             .get_app(&application_id)
             .unwrap()
-            .mark_huge_partition(&PartitionedUId::new(&application_id, shuffle_id, partition));
+            .mark_huge_partition(&PartitionUId::new(&application_id, shuffle_id, partition));
         store.with_app_manager(&app_manager);
 
         store.hot_store.inc_used(9);
@@ -291,7 +291,7 @@ mod tests {
         awaitility::at_most(Duration::from_secs(5)).until(|| {
             store
                 .hot_store
-                .get_buffer(&PartitionedUId::new(
+                .get_buffer(&PartitionUId::new(
                     &ApplicationId::from(app_id),
                     shuffle_id,
                     partition,
@@ -306,7 +306,7 @@ mod tests {
             2,
             store
                 .hot_store
-                .get_buffer(&PartitionedUId::new(
+                .get_buffer(&PartitionUId::new(
                     &ApplicationId::from(app_id),
                     shuffle_id,
                     partition + 1
@@ -354,7 +354,7 @@ mod tests {
         assert_eq!(
             0,
             store
-                .get_memory_buffer_size(&PartitionedUId::new(app_id.to_string(), 1, 0))
+                .get_memory_buffer_size(&PartitionUId::new(app_id.to_string(), 1, 0))
                 .await
                 .unwrap()
         );
@@ -405,7 +405,7 @@ mod tests {
         assert_eq!(
             0,
             store
-                .get_memory_buffer_size(&PartitionedUId::new(app_id.to_string(), 1, 0))
+                .get_memory_buffer_size(&PartitionUId::new(app_id.to_string(), 1, 0))
                 .await
                 .unwrap()
         );
