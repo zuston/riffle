@@ -654,6 +654,15 @@ pub static GAUGE_MEMORY_SPILL_HDFS_IN_FLUSHING_BYTES: Lazy<IntGauge> = Lazy::new
     .unwrap()
 });
 
+pub static TOTAL_URPC_REQUEST: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
+        "total_urpc_request_number",
+        "total request number",
+        &["path"]
+    )
+    .unwrap()
+});
+
 pub static TOTAL_GRPC_REQUEST: Lazy<IntCounterVec> = Lazy::new(|| {
     register_int_counter_vec!(
         "total_grpc_request_number",
@@ -869,6 +878,10 @@ fn register_custom_metrics() {
 
     REGISTRY
         .register(Box::new(TOTAL_GRPC_REQUEST.clone()))
+        .expect("");
+
+    REGISTRY
+        .register(Box::new(TOTAL_URPC_REQUEST.clone()))
         .expect("");
 
     REGISTRY

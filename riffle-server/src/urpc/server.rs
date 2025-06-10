@@ -12,7 +12,9 @@ use crate::urpc::shutdown::Shutdown;
 use crate::app_manager::AppManagerRef;
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::error::WorkerError;
-use crate::metric::{URPC_CONNECTION_NUMBER, URPC_REQUEST_PROCESSING_LATENCY};
+use crate::metric::{
+    TOTAL_GRPC_REQUEST, TOTAL_URPC_REQUEST, URPC_CONNECTION_NUMBER, URPC_REQUEST_PROCESSING_LATENCY,
+};
 use crate::urpc::command::Command;
 use anyhow::Result;
 use await_tree::InstrumentAwait;
@@ -109,7 +111,11 @@ impl Handler {
                 None => return Ok(()),
             };
 
-            let _ = URPC_REQUEST_PROCESSING_LATENCY
+            let path = frame.to_string();
+            TOTAL_URPC_REQUEST.with_label_values(&[&"ALL"]).inc();
+            TOTAL_URPC_REQUEST.with_label_values(&[&path]).inc();
+
+            let timer = URPC_REQUEST_PROCESSING_LATENCY
                 .with_label_values(&[&format!("{}", &frame)])
                 .start_timer();
             Command::from_frame(frame)?
