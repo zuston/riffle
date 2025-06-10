@@ -278,9 +278,9 @@ impl Frame {
         let shuffle_id = get_i32(src)?;
         let require_id = get_i64(src)?;
 
-        let mut blocks_map: HashMap<i32, Vec<Block>> = HashMap::new();
-
         let partition_batch_size = get_i32(src)?;
+        let mut blocks_map: HashMap<i32, Vec<Block>> =
+            HashMap::with_capacity(partition_batch_size as usize);
         for idx in 0..partition_batch_size {
             let partition_id = get_i32(src)?;
             let block_batch_size = get_i32(src)?;
