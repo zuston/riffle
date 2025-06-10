@@ -46,7 +46,7 @@ use dashmap::DashMap;
 
 use log::{debug, error, info, warn};
 
-use crate::app_manager::partition_identifier::PartitionedUId;
+use crate::app_manager::partition_identifier::PartitionUId;
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::composed_bytes::ComposedBytes;
 use crate::dashmap_extension::DashMapExtend;
@@ -209,7 +209,7 @@ impl LocalFileStore {
         format!("{}/{}/", app_id, shuffle_id)
     }
 
-    fn gen_relative_path_for_partition(uid: &PartitionedUId) -> (String, String) {
+    fn gen_relative_path_for_partition(uid: &PartitionUId) -> (String, String) {
         (
             format!(
                 "{}/{}/partition-{}.data",
@@ -237,8 +237,8 @@ impl LocalFileStore {
         Ok(available >= self.min_number_of_available_disks)
     }
 
-    fn select_disk(&self, uid: &PartitionedUId) -> Result<LocalDiskDelegator, WorkerError> {
-        let hash_value = PartitionedUId::get_hash(uid);
+    fn select_disk(&self, uid: &PartitionUId) -> Result<LocalDiskDelegator, WorkerError> {
+        let hash_value = PartitionUId::get_hash(uid);
 
         let mut candidates = vec![];
         for local_disk in &self.local_disks {
@@ -261,11 +261,7 @@ impl LocalFileStore {
         }
     }
 
-    async fn data_insert(
-        &self,
-        uid: PartitionedUId,
-        blocks: Vec<&Block>,
-    ) -> Result<(), WorkerError> {
+    async fn data_insert(&self, uid: PartitionUId, blocks: Vec<&Block>) -> Result<(), WorkerError> {
         let (data_file_path, index_file_path) =
             LocalFileStore::gen_relative_path_for_partition(&uid);
 
@@ -554,10 +550,12 @@ impl Store for LocalFileStore {
 
     async fn purge(&self, ctx: &PurgeDataContext) -> Result<i64> {
         let (app_id, shuffle_id_option) = ctx.extract();
-
+        let raw_app_id = app_id.to_string();
         let data_relative_dir_path = match shuffle_id_option {
-            Some(shuffle_id) => LocalFileStore::gen_relative_path_for_shuffle(&app_id, shuffle_id),
-            _ => LocalFileStore::gen_relative_path_for_app(&app_id),
+            Some(shuffle_id) => {
+                LocalFileStore::gen_relative_path_for_shuffle(&raw_app_id, shuffle_id)
+            }
+            _ => LocalFileStore::gen_relative_path_for_app(&raw_app_id),
         };
 
         for local_disk_ref in &self.local_disks {
@@ -638,7 +636,8 @@ mod test {
     };
     use crate::store::localfile::LocalFileStore;
 
-    use crate::app_manager::partition_identifier::PartitionedUId;
+    use crate::app_manager::application_identifier::ApplicationId;
+    use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::purge_event::PurgeReason;
     use crate::error::WorkerError;
     use crate::store::index_codec::{IndexBlock, IndexCodec};
@@ -648,12 +647,7 @@ mod test {
     use log::{error, info};
 
     fn create_writing_ctx() -> WritingViewContext {
-        let uid = PartitionedUId {
-            app_id: "100".to_string(),
-            shuffle_id: 0,
-            partition_id: 0,
-        };
-
+        let uid = PartitionUId::new(&Default::default(), 0, 0);
         let data = b"hello world!hello china!";
         let size = data.len();
         let writing_ctx = WritingViewContext::create_for_test(
@@ -730,7 +724,7 @@ mod test {
         Ok(())
     }
 
-    fn create_writing_ctx_by_uid(uid: &PartitionedUId) -> WritingViewContext {
+    fn create_writing_ctx_by_uid(uid: &PartitionUId) -> WritingViewContext {
         let data = b"hello world!hello china!";
         let size = data.len();
         let writing_ctx = WritingViewContext::create_for_test(
@@ -766,21 +760,14 @@ mod test {
 
         let runtime = local_store.runtime_manager.clone();
 
-        let app_id = "purge_test-app-id".to_string();
+        let app_id = "application_1747379850000_7237726_1749434628480";
+        let application_id = ApplicationId::from(app_id);
 
         let shuffle_id_1 = 1;
         let shuffle_id_2 = 13;
 
-        let uid_1 = PartitionedUId {
-            app_id: app_id.clone(),
-            shuffle_id: shuffle_id_1,
-            partition_id: 0,
-        };
-        let uid_2 = PartitionedUId {
-            app_id: app_id.to_owned(),
-            shuffle_id: shuffle_id_2,
-            partition_id: 0,
-        };
+        let uid_1 = PartitionUId::new(&application_id, shuffle_id_1, 0);
+        let uid_2 = PartitionUId::new(&application_id, shuffle_id_2, 0);
 
         // for shuffle_id = 1
         let writing_ctx_1 = create_writing_ctx_by_uid(&uid_1);
@@ -815,7 +802,10 @@ mod test {
         // shuffle level purge
         runtime
             .wait(local_store.purge(&PurgeDataContext::new(
-                &PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(app_id.to_owned(), shuffle_id_1),
+                &PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(
+                    application_id.to_owned(),
+                    shuffle_id_1,
+                ),
             )))
             .expect("");
         assert_eq!(
@@ -836,7 +826,7 @@ mod test {
 
         // app level purge
         runtime.wait(local_store.purge(&PurgeDataContext {
-            purge_reason: PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(app_id.to_owned()),
+            purge_reason: PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(application_id.to_owned()),
         }))?;
         assert_eq!(
             false,
@@ -856,12 +846,7 @@ mod test {
 
         let runtime = local_store.runtime_manager.clone();
 
-        let uid = PartitionedUId {
-            app_id: "100".to_string(),
-            shuffle_id: 0,
-            partition_id: 0,
-        };
-
+        let uid = PartitionUId::new(&Default::default(), 0, 0);
         let data = b"hello world!hello china!";
         let size = data.len();
         let writing_ctx = WritingViewContext::create_for_test(
@@ -894,7 +879,7 @@ mod test {
 
         async fn get_and_check_partitial_data(
             local_store: &mut LocalFileStore,
-            uid: PartitionedUId,
+            uid: PartitionUId,
             size: i64,
             expected: &[u8],
         ) {

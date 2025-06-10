@@ -1,4 +1,4 @@
-use crate::app_manager::partition_identifier::PartitionedUId;
+use crate::app_manager::partition_identifier::PartitionUId;
 use anyhow::Result;
 use futures::AsyncWriteExt;
 use log::warn;

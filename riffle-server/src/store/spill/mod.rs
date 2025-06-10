@@ -1,4 +1,5 @@
-use crate::app_manager::partition_identifier::PartitionedUId;
+use crate::app_manager::application_identifier::ApplicationId;
+use crate::app_manager::partition_identifier::PartitionUId;
 use crate::config::StorageType;
 use crate::error::WorkerError;
 use crate::metric::{
@@ -65,17 +66,17 @@ unsafe impl Sync for SpillMessage {}
 
 #[derive(Clone)]
 pub struct SpillWritingViewContext {
-    pub uid: PartitionedUId,
+    pub uid: PartitionUId,
     pub data_blocks: Arc<BatchMemoryBlock>,
-    app_is_exist_func: Arc<Box<dyn Fn(&str) -> bool + 'static>>,
+    app_is_exist_func: Arc<Box<dyn Fn(&ApplicationId) -> bool + 'static>>,
 }
 unsafe impl Send for SpillWritingViewContext {}
 unsafe impl Sync for SpillWritingViewContext {}
 
 impl SpillWritingViewContext {
-    pub fn new<F>(uid: PartitionedUId, blocks: Arc<BatchMemoryBlock>, func: F) -> Self
+    pub fn new<F>(uid: PartitionUId, blocks: Arc<BatchMemoryBlock>, func: F) -> Self
     where
-        F: Fn(&str) -> bool + 'static,
+        F: Fn(&ApplicationId) -> bool + 'static,
     {
         Self {
             uid,

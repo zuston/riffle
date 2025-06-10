@@ -34,7 +34,7 @@ use std::hash::BuildHasherDefault;
 
 use std::str::FromStr;
 
-use crate::app_manager::partition_identifier::PartitionedUId;
+use crate::app_manager::partition_identifier::PartitionUId;
 use crate::dashmap_extension::DashMapExtend;
 use crate::store::mem::budget::MemoryBudget;
 use crate::store::mem::buffer::MemoryBuffer;
@@ -50,7 +50,7 @@ use std::sync::Arc;
 
 pub struct MemoryStore {
     memory_capacity: i64,
-    state: DashMapExtend<PartitionedUId, Arc<MemoryBuffer>, BuildHasherDefault<FxHasher>>,
+    state: DashMapExtend<PartitionUId, Arc<MemoryBuffer>, BuildHasherDefault<FxHasher>>,
     budget: MemoryBudget,
     runtime_manager: RuntimeManager,
     ticket_manager: TicketManager,
@@ -73,7 +73,9 @@ impl MemoryStore {
             TicketManager::new(5 * 60, 10, release_allocated_func, runtime_manager.clone());
         MemoryStore {
             budget,
-            state: DashMapExtend::<PartitionedUId, Arc<MemoryBuffer>, BuildHasherDefault<FxHasher>>::new(),
+            state:
+                DashMapExtend::<PartitionUId, Arc<MemoryBuffer>, BuildHasherDefault<FxHasher>>::new(
+                ),
             memory_capacity: max_memory_size,
             ticket_manager,
             runtime_manager,
@@ -96,7 +98,9 @@ impl MemoryStore {
         );
 
         MemoryStore {
-            state: DashMapExtend::<PartitionedUId, Arc<MemoryBuffer>, BuildHasherDefault<FxHasher>>::new(),
+            state:
+                DashMapExtend::<PartitionUId, Arc<MemoryBuffer>, BuildHasherDefault<FxHasher>>::new(
+                ),
             budget: MemoryBudget::new(capacity.as_bytes() as i64),
             memory_capacity: capacity.as_bytes() as i64,
             ticket_manager,
@@ -132,7 +136,7 @@ impl MemoryStore {
     pub fn lookup_spill_buffers(
         &self,
         expected_spill_total_bytes: i64,
-    ) -> Result<HashMap<PartitionedUId, Arc<MemoryBuffer>>, anyhow::Error> {
+    ) -> Result<HashMap<PartitionUId, Arc<MemoryBuffer>>, anyhow::Error> {
         // 1. sort by the staging size.
         // 2. get the spill buffers until reaching the single max batch size
 
@@ -178,19 +182,19 @@ impl MemoryStore {
         Ok(spill_candidates)
     }
 
-    pub fn get_buffer_size(&self, uid: &PartitionedUId) -> Result<u64> {
+    pub fn get_buffer_size(&self, uid: &PartitionUId) -> Result<u64> {
         let buffer = self.get_buffer(uid)?;
         Ok(buffer.total_size()? as u64)
     }
 
-    pub fn get_buffer_staging_size(&self, uid: &PartitionedUId) -> Result<u64> {
+    pub fn get_buffer_staging_size(&self, uid: &PartitionUId) -> Result<u64> {
         let buffer = self.get_buffer(uid)?;
         Ok(buffer.staging_size()? as u64)
     }
 
     pub async fn clear_spilled_buffer(
         &self,
-        uid: PartitionedUId,
+        uid: PartitionUId,
         flight_id: u64,
         flight_len: u64,
     ) -> Result<()> {
@@ -201,12 +205,12 @@ impl MemoryStore {
     }
 
     // only invoked when inserting
-    pub fn get_or_create_buffer(&self, uid: PartitionedUId) -> Arc<MemoryBuffer> {
+    pub fn get_or_create_buffer(&self, uid: PartitionUId) -> Arc<MemoryBuffer> {
         self.state
             .compute_if_absent(uid, || Arc::new(MemoryBuffer::new()))
     }
 
-    pub fn get_buffer(&self, uid: &PartitionedUId) -> Result<Arc<MemoryBuffer>> {
+    pub fn get_buffer(&self, uid: &PartitionUId) -> Result<Arc<MemoryBuffer>> {
         let buffer = self.state.get(uid);
         if buffer.is_none() {
             return Err(anyhow!(format!(
@@ -414,7 +418,8 @@ mod test {
     use core::panic;
     use std::sync::Arc;
 
-    use crate::app_manager::partition_identifier::PartitionedUId;
+    use crate::app_manager::application_identifier::ApplicationId;
+    use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::purge_event::PurgeReason;
     use anyhow::Result;
     use croaring::Treemap;
@@ -424,11 +429,7 @@ mod test {
         let store = MemoryStore::new(1024);
         let runtime = store.runtime_manager.clone();
 
-        let uid = PartitionedUId {
-            app_id: "100".to_string(),
-            shuffle_id: 0,
-            partition_id: 0,
-        };
+        let uid = PartitionUId::new(&Default::default(), 0, 0);
         let writing_view_ctx = create_writing_ctx_with_blocks(10, 10, uid.clone());
         let _ = runtime.wait(store.insert(writing_view_ctx));
 
@@ -595,7 +596,7 @@ mod test {
         default_single_read_size: i64,
         last_block_id: i64,
         store: &MemoryStore,
-        uid: PartitionedUId,
+        uid: PartitionUId,
     ) -> PartitionedMemoryData {
         let ctx = ReadingViewContext {
             uid: uid.clone(),
@@ -618,7 +619,7 @@ mod test {
     fn create_writing_ctx_with_blocks(
         _block_number: i32,
         single_block_size: i32,
-        uid: PartitionedUId,
+        uid: PartitionUId,
     ) -> WritingViewContext {
         let mut data_blocks = vec![];
         for idx in 0..=9 {
@@ -639,12 +640,9 @@ mod test {
         let store = MemoryStore::new(1024 * 1024 * 1024);
         let runtime = store.runtime_manager.clone();
 
+        let app_id = ApplicationId::from("application_1_1_2");
         let ctx = RequireBufferContext {
-            uid: PartitionedUId {
-                app_id: "100".to_string(),
-                shuffle_id: 0,
-                partition_id: 0,
-            },
+            uid: PartitionUId::new(&app_id, 0, 0),
             size: 10000,
             partition_ids: vec![],
         };
@@ -653,7 +651,7 @@ mod test {
                 let _ = runtime
                     .default_runtime
                     .block_on(store.purge(&PurgeDataContext {
-                        purge_reason: PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER("100".to_string()),
+                        purge_reason: PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(app_id),
                     }));
             }
             _ => panic!(),
@@ -669,11 +667,11 @@ mod test {
         let store = MemoryStore::new(1024);
         let runtime = store.runtime_manager.clone();
 
-        let app_id = "purge_app";
         let shuffle_id = 1;
         let partition = 1;
 
-        let uid = PartitionedUId::from(app_id.to_string(), shuffle_id, partition);
+        let app_id = ApplicationId::from("application_0_1_1");
+        let uid = PartitionUId::new(&app_id, 0, 0);
 
         // the buffer requested
 
@@ -718,11 +716,9 @@ mod test {
                 &PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(app_id.to_owned(), shuffle_id),
             )))
             .expect("");
-        assert!(!store.state.contains_key(&PartitionedUId::from(
-            app_id.to_string(),
-            shuffle_id,
-            partition
-        )));
+        assert!(!store
+            .state
+            .contains_key(&PartitionUId::new(&app_id, shuffle_id, partition)));
 
         // purge
         runtime

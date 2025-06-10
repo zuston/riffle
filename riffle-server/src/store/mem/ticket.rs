@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use crate::app_manager::application_identifier::ApplicationId;
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::error::WorkerError;
 use crate::metric::{GAUGE_MEM_ALLOCATED_TICKET_NUM, TOTAL_EVICT_TIMEOUT_TICKETS_NUM};
@@ -33,16 +34,16 @@ pub struct Ticket {
     id: i64,
     created_time: u64,
     size: i64,
-    owned_by_app_id: String,
+    owned_by_app_id: ApplicationId,
 }
 
 impl Ticket {
-    pub fn new(ticket_id: i64, created_time: u64, size: i64, app_id: &str) -> Self {
+    pub fn new(ticket_id: i64, created_time: u64, size: i64, app_id: &ApplicationId) -> Self {
         Self {
             id: ticket_id,
             created_time,
             size,
-            owned_by_app_id: app_id.into(),
+            owned_by_app_id: app_id.to_owned(),
         }
     }
 
@@ -103,7 +104,7 @@ impl TicketManager {
     /// Delete all the ticket owned by the app id. And
     /// it will return all the allocated size of ticket ids that owned by this app_id
     #[trace]
-    pub fn delete_by_app_id(&self, app_id: &str) -> i64 {
+    pub fn delete_by_app_id(&self, app_id: &ApplicationId) -> i64 {
         let read_view = self.ticket_store.clone();
         let mut deleted_ids = vec![];
         for ticket in read_view.iter() {
@@ -124,12 +125,18 @@ impl TicketManager {
 
     /// insert one ticket managed by this ticket manager
     #[trace]
-    pub fn insert(&self, ticket_id: i64, size: i64, created_timestamp: u64, app_id: &str) -> bool {
+    pub fn insert(
+        &self,
+        ticket_id: i64,
+        size: i64,
+        created_timestamp: u64,
+        app_id: &ApplicationId,
+    ) -> bool {
         let ticket = Ticket {
             id: ticket_id,
             created_time: created_timestamp,
             size,
-            owned_by_app_id: app_id.into(),
+            owned_by_app_id: app_id.to_owned(),
         };
 
         self.ticket_store
@@ -181,7 +188,7 @@ impl TicketManager {
             if total_removed_size != 0 {
                 free_allocated_fn(total_removed_size);
                 warn!("Removed {:#?} memory allocated timeout tickets, release pre-allocated memory size: {:?}",
-                        discard_tickets.iter().map(|x| &x.owned_by_app_id).collect::<Vec<&String>>(), total_removed_size);
+                        discard_tickets.iter().map(|x| (&x.owned_by_app_id).to_string()).collect::<Vec<String>>(), total_removed_size);
                 TOTAL_EVICT_TIMEOUT_TICKETS_NUM.inc_by(discard_tickets.len() as u64);
             }
             tokio::time::sleep(Duration::from_secs(interval_sec as u64))
@@ -193,6 +200,7 @@ impl TicketManager {
 
 #[cfg(test)]
 mod test {
+    use crate::app_manager::application_identifier::ApplicationId;
     use crate::runtime::manager::RuntimeManager;
     use crate::store::mem::ticket::TicketManager;
     use dashmap::DashMap;
@@ -230,13 +238,14 @@ mod test {
         };
         let ticket_manager =
             TicketManager::new(1, 1, free_allocated_size_func, RuntimeManager::default());
-        let app_id = "test_ticket_manager_app_id";
+        let app_id = "application_1747379850000_7237726_1749434628480";
+        let app_id = ApplicationId::from(&app_id);
 
         assert!(ticket_manager.delete(1000).is_err());
 
         // case1
-        ticket_manager.insert(1, 10, crate::util::now_timestamp_as_sec() + 1, app_id);
-        ticket_manager.insert(2, 10, crate::util::now_timestamp_as_sec() + 1, app_id);
+        ticket_manager.insert(1, 10, crate::util::now_timestamp_as_sec() + 1, &app_id);
+        ticket_manager.insert(2, 10, crate::util::now_timestamp_as_sec() + 1, &app_id);
         assert!(ticket_manager.exist(1));
         assert!(ticket_manager.exist(2));
 
@@ -246,7 +255,7 @@ mod test {
         assert!(ticket_manager.exist(2));
 
         // case3
-        ticket_manager.delete_by_app_id(app_id);
+        ticket_manager.delete_by_app_id(&app_id);
         assert!(!ticket_manager.exist(2));
 
         // case4

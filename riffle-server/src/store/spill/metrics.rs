@@ -1,3 +1,4 @@
+use crate::app_manager::application_identifier::ApplicationId;
 use crate::config::StorageType;
 use crate::metric::{
     GAUGE_MEMORY_SPILL_IN_FLUSHING_BYTES, GAUGE_MEMORY_SPILL_IN_FLUSHING_OPERATION,
@@ -8,12 +9,11 @@ use crate::metric::{
 const ALL_STORAGE_TYPE: &str = "ALL";
 
 pub struct FlushingMetricsMonitor {
-    app_id: String,
     size: i64,
     candidate_type: Option<StorageType>,
 }
 impl FlushingMetricsMonitor {
-    pub fn new(app_id: &String, size: i64, candidate_type: Option<StorageType>) -> Self {
+    pub fn new(app_id: &ApplicationId, size: i64, candidate_type: Option<StorageType>) -> Self {
         let app_id = app_id.to_owned();
 
         GAUGE_MEMORY_SPILL_IN_FLUSHING_BYTES
@@ -44,13 +44,13 @@ impl FlushingMetricsMonitor {
                 .with_label_values(&[&stype])
                 .observe(size as f64);
 
+            let raw_app_id = app_id.to_string();
             TOTAL_APP_FLUSHED_BYTES
-                .with_label_values(&[app_id.as_str(), &stype])
+                .with_label_values(&[raw_app_id.as_str(), &stype])
                 .inc_by(size as u64);
         }
 
         Self {
-            app_id: "".to_string(),
             size,
             candidate_type,
         }

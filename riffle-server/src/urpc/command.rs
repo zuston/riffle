@@ -1,4 +1,5 @@
-use crate::app_manager::partition_identifier::PartitionedUId;
+use crate::app_manager::application_identifier::ApplicationId;
+use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::request_context::{
     ReadingIndexViewContext, ReadingOptions, ReadingViewContext, WritingViewContext,
 };
@@ -78,8 +79,9 @@ impl GetMemoryDataRequestCommand {
         let partition_id = self.partition_id;
         let last_block_id = self.last_block_id;
         let read_buffer_size = self.read_buffer_size;
+        let application_id = ApplicationId::from(app_id);
 
-        let app = app_manager_ref.get_app(&app_id);
+        let app = app_manager_ref.get_app(&application_id);
         if app.is_none() {
             let response = RpcResponseCommand {
                 request_id,
@@ -91,7 +93,7 @@ impl GetMemoryDataRequestCommand {
         }
 
         let app = app.unwrap();
-        let uid = PartitionedUId::from(app_id.to_string(), shuffle_id, partition_id);
+        let uid = PartitionUId::new(&application_id, shuffle_id, partition_id);
         let ctx = ReadingViewContext {
             uid,
             reading_options: ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(
@@ -155,8 +157,9 @@ impl GetLocalDataRequestCommand {
         let partition_id = self.partition_id;
         let offset = self.offset;
         let length = self.length;
+        let application_id = ApplicationId::from(app_id);
 
-        let app = app_manager_ref.get_app(&app_id);
+        let app = app_manager_ref.get_app(&application_id);
         if app.is_none() {
             let command = GetLocalDataResponseCommand {
                 request_id,
@@ -172,7 +175,7 @@ impl GetLocalDataRequestCommand {
         }
 
         let app = app.unwrap();
-        let uid = PartitionedUId::from(app_id.to_string(), shuffle_id, partition_id);
+        let uid = PartitionUId::new(&application_id, shuffle_id, partition_id);
         let ctx = ReadingViewContext {
             uid,
             reading_options: ReadingOptions::FILE_OFFSET_AND_LEN(offset, length as i64),
@@ -243,8 +246,9 @@ impl GetLocalDataIndexRequestCommand {
         let app_id = self.app_id.as_str();
         let shuffle_id = self.shuffle_id;
         let partition_id = self.partition_id;
+        let application_id = ApplicationId::from(app_id);
 
-        let app = app_manager_ref.get_app(&app_id);
+        let app = app_manager_ref.get_app(&application_id);
         if app.is_none() {
             let command = GetLocalDataIndexResponseCommand {
                 request_id,
@@ -258,7 +262,8 @@ impl GetLocalDataIndexRequestCommand {
         }
 
         let app = app.unwrap();
-        let uid = PartitionedUId::from(app_id.to_string(), shuffle_id, partition_id);
+        let application_id = ApplicationId::from(app_id);
+        let uid = PartitionUId::new(&application_id, shuffle_id, partition_id);
         let ctx = ReadingIndexViewContext { partition_id: uid };
 
         let command = match app
@@ -330,11 +335,11 @@ impl SendDataRequestCommand {
         let shuffle_id = self.shuffle_id;
         let app_id = self.app_id.as_str();
         let timestamp = self.timestamp;
+        let application_id = ApplicationId::from(app_id);
 
         URPC_SEND_DATA_TRANSPORT_TIME
             .observe(((util::now_timestamp_as_millis() - timestamp as u128) / 1000) as f64);
-
-        let app = app_manager_ref.get_app(&app_id);
+        let app = app_manager_ref.get_app(&application_id);
         if app.is_none() {
             let response = RpcResponseCommand {
                 request_id,
@@ -367,12 +372,11 @@ impl SendDataRequestCommand {
         let mut insert_failure_message = None;
 
         let mut insert_len = 0;
-
         let blocks = self.blocks;
         for block in blocks {
             let partition_id = block.0;
             let partition_blocks = block.1;
-            let uid = PartitionedUId::from(app_id.to_string(), shuffle_id, partition_id);
+            let uid = PartitionUId::new(&application_id, shuffle_id, partition_id);
             let ctx = WritingViewContext::new(uid, partition_blocks);
             match app
                 .insert(ctx)
