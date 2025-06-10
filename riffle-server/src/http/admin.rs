@@ -4,6 +4,7 @@ use anyhow::Result;
 use clap::builder::Str;
 use poem::{handler, Request, RouteMethod};
 use serde::Deserialize;
+use strum_macros::{Display, EnumString};
 
 #[derive(Default)]
 pub struct AdminHandler;
@@ -22,6 +23,14 @@ impl Handler for AdminHandler {
 #[derive(Deserialize)]
 struct OperationParam {
     update_state: Option<ServerState>,
+    operation: Option<Operation>,
+}
+
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone, PartialEq, Deserialize, EnumString, Display)]
+enum Operation {
+    KILL,
+    FORCE_KILL,
 }
 
 #[handler]
@@ -32,7 +41,13 @@ fn admin_handler(req: &Request) -> poem::Result<String> {
         return Ok("Uninitialized server_state_manager. Ingore".to_string());
     }
     let server_state_manager_ref = server_state_manager_ref.unwrap();
-    if let Some(state) = params.update_state {
+    if let Some(operation) = params.operation {
+        let force = match operation {
+            Operation::KILL => false,
+            Operation::FORCE_KILL => true,
+        };
+        server_state_manager_ref.shutdown(force);
+    } else if let Some(state) = params.update_state {
         server_state_manager_ref.as_state(state);
     }
 

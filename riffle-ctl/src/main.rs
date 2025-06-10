@@ -6,8 +6,11 @@ mod actions;
 use crate::actions::disk_append_bench::DiskAppendBenchAction;
 use crate::actions::disk_profiler::DiskProfiler;
 use crate::actions::disk_read_bench::DiskReadBenchAction;
+use crate::actions::kill_action::KillAction;
 use crate::actions::postgres_server::PostgresServerAction;
-use crate::actions::{Action, NodeUpdateAction, OutputFormat, QueryAction, ValidateAction};
+use crate::actions::update_action::NodeUpdateAction;
+use crate::actions::{Action, OutputFormat, QueryAction, ValidateAction};
+use crate::Commands::Kill;
 use clap::{Parser, Subcommand};
 use tokio::runtime::Runtime;
 
@@ -100,6 +103,13 @@ enum Commands {
         #[arg(short, long)]
         decommission_grpc_mode: bool,
     },
+    #[command(about = "Kill riffle server")]
+    Kill {
+        #[arg(short, long, default_value = "false")]
+        force: bool,
+        #[arg(short, long)]
+        instance: Option<String>,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -185,6 +195,7 @@ fn main() -> anyhow::Result<()> {
             status,
             decommission_grpc_mode,
         )),
+        Commands::Kill { force, instance } => Box::new(KillAction::new(force, instance)),
 
         _ => panic!("Unknown command"),
     };

@@ -53,6 +53,18 @@ impl ServerStateManager {
         }
     }
 
+    pub fn shutdown(&self, force: bool) -> anyhow::Result<()> {
+        if !force {
+            let alive_apps = self.app_manager_ref.get_alive_app_number();
+            if alive_apps > 0 {
+                return anyhow::bail!("Still {} apps", alive_apps);
+            }
+        }
+        info!("Shutting down server...");
+        send_sigterm_to_self();
+        Ok(())
+    }
+
     pub fn as_state(&self, state: ServerState) {
         let mut internal_state = self.state.write();
         if *internal_state == state {
