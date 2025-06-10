@@ -378,11 +378,7 @@ impl SendDataRequestCommand {
             let partition_blocks = block.1;
             let uid = PartitionUId::new(&application_id, shuffle_id, partition_id);
             let ctx = WritingViewContext::new(uid, partition_blocks);
-            match app
-                .insert(ctx)
-                .instrument_await(format!("inserting shuffle data for app:{}", &app_id))
-                .await
-            {
+            match app.insert(ctx).await {
                 Ok(size) => insert_len += size as i64,
                 Err(e) => {
                     let msg = format!(
