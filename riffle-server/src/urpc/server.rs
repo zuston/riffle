@@ -115,8 +115,8 @@ impl Handler {
             TOTAL_URPC_REQUEST.with_label_values(&[&"ALL"]).inc();
             TOTAL_URPC_REQUEST.with_label_values(&[&path]).inc();
 
-            let _ = URPC_REQUEST_PROCESSING_LATENCY
-                .with_label_values(&[&path])
+            let timer = URPC_REQUEST_PROCESSING_LATENCY
+                .with_label_values(&[&format!("{}", &frame)])
                 .start_timer();
             Command::from_frame(frame)?
                 .apply(
