@@ -257,8 +257,9 @@ pub trait Store {
     fn create_shuffle_format(&self, blocks: Vec<&Block>, offset: i64) -> Result<ShuffleFileFormat> {
         let mut offset = offset;
 
-        let mut index_bytes_holder = BytesMut::new();
-        let mut data_chain = Vec::with_capacity(blocks.len());
+        let blocks_len = blocks.len();
+        let mut index_bytes_holder = BytesMut::with_capacity(blocks_len * 40);
+        let mut data_chain = Vec::with_capacity(blocks_len);
 
         let mut total_size = 0;
         for block in blocks {
@@ -274,7 +275,7 @@ pub trait Store {
 
         Ok(ShuffleFileFormat {
             data: Composed(ComposedBytes::from(data_chain, total_size)),
-            index: Direct(index_bytes_holder.into()),
+            index: Direct(index_bytes_holder.freeze()),
             len: total_size,
             offset,
         })
