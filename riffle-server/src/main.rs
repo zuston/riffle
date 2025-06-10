@@ -77,6 +77,7 @@ pub mod server_state_manager;
 #[cfg(feature = "logforth")]
 mod logforth_service;
 
+pub mod arena;
 pub mod bits;
 pub mod block_id_manager;
 pub mod histogram;

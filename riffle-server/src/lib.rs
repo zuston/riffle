@@ -60,6 +60,7 @@ pub mod historical_apps;
 pub mod panic_hook;
 pub mod server_state_manager;
 
+mod arena;
 pub mod config_ref;
 mod dashmap_extension;
 

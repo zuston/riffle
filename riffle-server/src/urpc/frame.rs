@@ -1,3 +1,4 @@
+use crate::arena::ARENA_ALLOCATOR;
 use crate::error::WorkerError;
 use crate::error::WorkerError::{STREAM_INCOMPLETE, STREAM_INCORRECT};
 use crate::store::ResponseData::Mem;
@@ -445,7 +446,10 @@ fn get_bytes(src: &mut Cursor<&[u8]>) -> Result<Option<Bytes>, WorkerError> {
         )));
     }
 
-    let data = Bytes::copy_from_slice(&Buf::chunk(src)[..bytes_data_len as usize]);
+    let src_slice = &Buf::chunk(src)[..bytes_data_len as usize];
+    let data = ARENA_ALLOCATOR.slice_copy(src_slice);
+
+    // let data = Bytes::copy_from_slice(&Buf::chunk(src)[..bytes_data_len as usize]);
     skip(src, bytes_data_len as usize)?;
     Ok(Some(data))
 }
