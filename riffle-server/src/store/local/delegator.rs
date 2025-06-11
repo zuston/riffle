@@ -259,7 +259,7 @@ impl LocalDiskDelegator {
         self.delete(&detection_file).await?;
 
         let written_data = Bytes::copy_from_slice(b"hello world");
-        self.direct_append(&detection_file, written_data.len(), BytesWrapper::Direct(written_data.clone())).await?;
+        self.direct_append(&detection_file, 0, BytesWrapper::Direct(written_data.clone())).await?;
         let read_data = self.read(&detection_file, 0, None).await?;
 
         if written_data != read_data {
