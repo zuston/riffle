@@ -35,7 +35,7 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::timeout;
+use tokio::time::{timeout, Instant};
 use tracing::{info, Instrument};
 
 #[derive(Clone)]
@@ -153,11 +153,12 @@ impl LocalDiskDelegator {
 
     async fn schedule_check(&self) -> Result<()> {
         loop {
-            tokio::time::sleep(Duration::from_secs(self.inner.healthy_check_interval_sec))
-                .instrument_await("sleeping")
-                .await;
             if self.is_corrupted()? {
-                continue;
+                info!(
+                    "No longer detection for [{}] due to disk corruption",
+                    &self.inner.root
+                );
+                return Ok(());
             }
 
             let mut health_tag = if let Err(e) = self
@@ -190,6 +191,10 @@ impl LocalDiskDelegator {
             GAUGE_LOCAL_DISK_IS_HEALTHY
                 .with_label_values(&[&self.inner.root])
                 .set(if health_tag { 0 } else { 1 });
+
+            tokio::time::sleep(Duration::from_secs(self.inner.healthy_check_interval_sec))
+                .instrument_await("sleeping")
+                .await;
         }
     }
 
@@ -252,20 +257,38 @@ impl LocalDiskDelegator {
 
     async fn write_read_check(&self) -> Result<()> {
         // Bound the server_id to ensure unique if having another instance in the same machine
-        let default_id = "unknown".to_string();
-        let shuffle_server_id = SHUFFLE_SERVER_ID.get().unwrap_or(&default_id);
-        let detection_file = format!("corruption_check.file.{}", shuffle_server_id);
+        let detection_file = "corruption_check.file";
 
         self.delete(&detection_file).await?;
 
-        let written_data = Bytes::copy_from_slice(b"hello world");
-        self.write(&detection_file, written_data.clone()).await?;
+        // 10MB data
+        let written_data = Bytes::copy_from_slice(&[0u8; 1024 * 1024 * 10]);
+        // slow disk if exceeding 5 seconds
+        // todo: add disk speed latency metrics to report to coordinator
+        let timer = Instant::now();
+        let f = self.direct_append(
+            &detection_file,
+            0,
+            BytesWrapper::Direct(written_data.clone()),
+        );
+        timeout(Duration::from_secs(5), f).await??;
+        let write_time = timer.elapsed().as_millis();
+
+        let timer = Instant::now();
         let read_data = self.read(&detection_file, 0, None).await?;
+        let read_time = timer.elapsed().as_millis();
+
+        info!(
+            "[{}] Check duration of write/read: {}/{} (millis)",
+            &self.inner.root, write_time, read_time
+        );
 
         if written_data != read_data {
             error!(
-                "The local disk has been corrupted. path: {}. expected: {:?}, actual: {:?}",
-                &self.inner.root, &written_data, &read_data
+                "The local disk has been corrupted. path: {}. length(expected/actual): {:?}/{:?}",
+                &self.inner.root,
+                &written_data.len(),
+                &read_data.len()
             );
             self.mark_corrupted()?;
         }
