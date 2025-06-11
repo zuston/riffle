@@ -35,7 +35,7 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::timeout;
+use tokio::time::{timeout, Instant};
 use tracing::{info, Instrument};
 
 #[derive(Clone)]
@@ -258,14 +258,33 @@ impl LocalDiskDelegator {
 
         self.delete(&detection_file).await?;
 
-        let written_data = Bytes::copy_from_slice(b"hello world");
-        self.direct_append(&detection_file, 0, BytesWrapper::Direct(written_data.clone())).await?;
+        // 100MB data
+        let written_data = Bytes::copy_from_slice(&[0u8; 1024 * 1024 * 100]);
+        // slow disk if exceeding 5 seconds
+        let timer = Instant::now();
+        let f = self.direct_append(
+            &detection_file,
+            0,
+            BytesWrapper::Direct(written_data.clone()),
+        );
+        timeout(Duration::from_secs(5), f).await??;
+        let write_time = timer.elapsed().as_millis();
+
+        let timer = Instant::now();
         let read_data = self.read(&detection_file, 0, None).await?;
+        let read_time = timer.elapsed().as_millis();
+
+        info!(
+            "Write+Read check duration: {}/{} (millis)",
+            write_time, read_time
+        );
 
         if written_data != read_data {
             error!(
-                "The local disk has been corrupted. path: {}. expected: {:?}, actual: {:?}",
-                &self.inner.root, &written_data, &read_data
+                "The local disk has been corrupted. path: {}. length(expected/actual): {:?}/{:?}",
+                &self.inner.root,
+                &written_data.len(),
+                &read_data.len()
             );
             self.mark_corrupted()?;
         }
