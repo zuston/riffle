@@ -257,9 +257,7 @@ impl LocalDiskDelegator {
 
     async fn write_read_check(&self) -> Result<()> {
         // Bound the server_id to ensure unique if having another instance in the same machine
-        let default_id = "unknown".to_string();
-        let shuffle_server_id = SHUFFLE_SERVER_ID.get().unwrap_or(&default_id);
-        let detection_file = format!("corruption_check.file.{}", shuffle_server_id);
+        let detection_file = "corruption_check.file";
 
         self.delete(&detection_file).await?;
 
