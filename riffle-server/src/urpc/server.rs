@@ -133,20 +133,20 @@ impl Handler {
     }
 }
 
-pub async fn run(listener: TcpListener, shutdown: impl Future, app_manager_ref: AppManagerRef) {
+pub async fn run(
+    listener: TcpListener,
+    shutdown: impl Future,
+    app_manager_ref: AppManagerRef,
+    handler_runtime: tokio::runtime::Runtime,
+) {
     let (notify_shutdown, _) = broadcast::channel(1);
     let (shutdown_complete_tx, mut shutdown_complete_rx) = mpsc::channel(1);
-
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
     let mut server = Listener {
         listener,
         limit_connections: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
         notify_shutdown,
         shutdown_complete_tx,
-        handler_runtime: runtime,
+        handler_runtime,
     };
 
     tokio::select! {

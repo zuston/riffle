@@ -22,6 +22,7 @@ use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::num::NonZeroUsize;
 use tokio::net::TcpListener;
+use tokio::runtime::Runtime;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::{Receiver, Sender};
 use tokio_stream::wrappers::TcpListenerStream;
@@ -82,11 +83,15 @@ impl DefaultRpcService {
 
             std::thread::spawn(move || {
                 core_affinity::set_for_current(core_id);
+                let handler_runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
                 tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .unwrap()
-                    .block_on(urpc_serve(addr, shutdown(rx), app_manager));
+                    .block_on(urpc_serve(addr, shutdown(rx), app_manager, handler_runtime));
             });
         }
 
@@ -188,7 +193,12 @@ impl DefaultRpcService {
     }
 }
 
-async fn urpc_serve(addr: SocketAddr, shutdown: impl Future, app_manager_ref: AppManagerRef) {
+async fn urpc_serve(
+    addr: SocketAddr,
+    shutdown: impl Future,
+    app_manager_ref: AppManagerRef,
+    handler_runtime: Runtime,
+) {
     let sock = socket2::Socket::new(
         match addr {
             SocketAddr::V4(_) => socket2::Domain::IPV4,
@@ -206,7 +216,7 @@ async fn urpc_serve(addr: SocketAddr, shutdown: impl Future, app_manager_ref: Ap
     sock.listen(8192).unwrap();
 
     let listener = TcpListener::from_std(sock.into()).unwrap();
-    let _ = urpc::server::run(listener, shutdown, app_manager_ref).await;
+    let _ = urpc::server::run(listener, shutdown, app_manager_ref, handler_runtime).await;
 }
 
 async fn grpc_serve(
