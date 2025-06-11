@@ -27,6 +27,7 @@ struct Listener {
     limit_connections: Arc<Semaphore>,
     notify_shutdown: broadcast::Sender<()>,
     shutdown_complete_tx: mpsc::Sender<()>,
+    handler_runtime: tokio::runtime::Runtime,
 }
 
 impl Listener {
@@ -56,14 +57,15 @@ impl Listener {
             let await_root = await_registry
                 .register(format!("urpc connection with remote client: {}", addr))
                 .await;
-            tokio::spawn(await_root.instrument(async move {
-                URPC_CONNECTION_NUMBER.inc();
-                if let Err(error) = handler.run(app_manager).await {
-                    error!("Errors on handling the request. {:#?}", error);
-                }
-                drop(permit);
-                URPC_CONNECTION_NUMBER.dec();
-            }));
+            self.handler_runtime
+                .spawn(await_root.instrument(async move {
+                    URPC_CONNECTION_NUMBER.inc();
+                    if let Err(error) = handler.run(app_manager).await {
+                        error!("Errors on handling the request. {:#?}", error);
+                    }
+                    drop(permit);
+                    URPC_CONNECTION_NUMBER.dec();
+                }));
         }
     }
 
@@ -135,11 +137,16 @@ pub async fn run(listener: TcpListener, shutdown: impl Future, app_manager_ref: 
     let (notify_shutdown, _) = broadcast::channel(1);
     let (shutdown_complete_tx, mut shutdown_complete_rx) = mpsc::channel(1);
 
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     let mut server = Listener {
         listener,
         limit_connections: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
         notify_shutdown,
         shutdown_complete_tx,
+        handler_runtime: runtime,
     };
 
     tokio::select! {
