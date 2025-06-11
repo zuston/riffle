@@ -153,11 +153,12 @@ impl LocalDiskDelegator {
 
     async fn schedule_check(&self) -> Result<()> {
         loop {
-            tokio::time::sleep(Duration::from_secs(self.inner.healthy_check_interval_sec))
-                .instrument_await("sleeping")
-                .await;
             if self.is_corrupted()? {
-                continue;
+                info!(
+                    "No longer detection for [{}] due to disk corruption",
+                    &self.inner.root
+                );
+                return Ok(());
             }
 
             let mut health_tag = if let Err(e) = self
@@ -190,6 +191,10 @@ impl LocalDiskDelegator {
             GAUGE_LOCAL_DISK_IS_HEALTHY
                 .with_label_values(&[&self.inner.root])
                 .set(if health_tag { 0 } else { 1 });
+
+            tokio::time::sleep(Duration::from_secs(self.inner.healthy_check_interval_sec))
+                .instrument_await("sleeping")
+                .await;
         }
     }
 
@@ -258,9 +263,10 @@ impl LocalDiskDelegator {
 
         self.delete(&detection_file).await?;
 
-        // 100MB data
-        let written_data = Bytes::copy_from_slice(&[0u8; 1024 * 1024 * 100]);
+        // 10MB data
+        let written_data = Bytes::copy_from_slice(&[0u8; 1024 * 1024 * 10]);
         // slow disk if exceeding 5 seconds
+        // todo: add disk speed latency metrics to report to coordinator
         let timer = Instant::now();
         let f = self.direct_append(
             &detection_file,
@@ -275,8 +281,8 @@ impl LocalDiskDelegator {
         let read_time = timer.elapsed().as_millis();
 
         info!(
-            "Write+Read check duration: {}/{} (millis)",
-            write_time, read_time
+            "[{}] Check duration of write/read: {}/{} (millis)",
+            &self.inner.root, write_time, read_time
         );
 
         if written_data != read_data {
