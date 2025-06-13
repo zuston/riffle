@@ -195,10 +195,7 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
 mod test {
     use crate::config_ref::{ConfRef, ConfigOption, DynamicConfRef, StaticConfRef};
     use crate::event_bus::{Event, EventBus, Subscriber};
-    use crate::metric::{
-        TOTAL_APP_FLUSHED_BYTES, TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE,
-        TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE,
-    };
+    use crate::metric::{TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE, TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE};
     use crate::runtime::manager::create_runtime;
     use async_trait::async_trait;
     use std::sync::atomic::Ordering::{Relaxed, SeqCst};
