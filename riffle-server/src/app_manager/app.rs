@@ -33,8 +33,8 @@ use log::{error, info, warn};
 use parking_lot::RwLock;
 use std::collections::HashSet;
 use std::hash::BuildHasherDefault;
-use std::sync::atomic::Ordering::SeqCst;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering::{Relaxed, SeqCst};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 pub struct App {
@@ -70,6 +70,9 @@ pub struct App {
 
     // reconfiguration manager
     reconf_manager: ReconfigurableConfManager,
+
+    // partition split triggered tag
+    partition_split_triggered: AtomicBool,
 }
 
 impl App {
@@ -148,6 +151,7 @@ impl App {
             partition_split_enable,
             partition_split_threshold,
             reconf_manager: reconf_manager.clone(),
+            partition_split_triggered: AtomicBool::new(false),
         }
     }
 
@@ -179,6 +183,10 @@ impl App {
         Ok(())
     }
 
+    pub fn is_partition_split_triggered(&self) -> bool {
+        self.partition_split_triggered.load(Relaxed)
+    }
+
     pub async fn insert(&self, ctx: WritingViewContext) -> anyhow::Result<i32, WorkerError> {
         let len: u64 = ctx.data_size;
 
@@ -203,6 +211,7 @@ impl App {
             && partition_size > self.partition_split_threshold.get().as_u64()
         {
             partition_meta.mark_as_split();
+            self.partition_split_triggered.store(true, Relaxed);
         }
 
         self.store.insert(ctx).await?;

@@ -123,6 +123,7 @@ struct AppInfo {
     partition_number: usize,
     huge_partition_number: u64,
     reported_block_id_number: u64,
+    partition_split_triggered: bool,
 }
 
 impl From<&Arc<App>> for AppInfo {
@@ -140,6 +141,7 @@ impl From<&Arc<App>> for AppInfo {
             huge_partition_number: app.huge_partition_number(),
             reported_block_id_number: app.reported_block_id_number(),
             resident_bytes: app.total_resident_data_size(),
+            partition_split_triggered: app.is_partition_split_triggered(),
         }
     }
 }
