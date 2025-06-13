@@ -428,7 +428,7 @@ impl Frame {
     }
 }
 
-fn get_bytes(src: &mut Cursor<&[u8]>) -> Result<Option<Bytes>, WorkerError> {
+pub fn get_bytes(src: &mut Cursor<&[u8]>) -> Result<Option<Bytes>, WorkerError> {
     if !Buf::has_remaining(src) {
         return Err(STREAM_INCORRECT("get_bytes".into()));
     }
@@ -458,7 +458,7 @@ fn get_i64(src: &mut Cursor<&[u8]>) -> Result<i64, WorkerError> {
     Ok(src.get_i64())
 }
 
-fn get_i32(src: &mut Cursor<&[u8]>) -> Result<i32, WorkerError> {
+pub fn get_i32(src: &mut Cursor<&[u8]>) -> Result<i32, WorkerError> {
     if !Buf::has_remaining(src) {
         return Err(STREAM_INCORRECT("get_i32".into()));
     }
