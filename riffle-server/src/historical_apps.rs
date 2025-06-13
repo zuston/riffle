@@ -41,6 +41,8 @@ pub struct HistoricalAppInfo {
 
     pub start_timestamp: u128,
     pub end_timestamp: u128,
+
+    pub partition_split_triggered: bool,
 }
 
 impl HistoricalAppManager {
@@ -142,6 +144,7 @@ impl HistoricalAppManager {
             min_huge_partition_bytes: min_size,
             start_timestamp: app.start_timestamp,
             end_timestamp: now_timestamp_as_millis(),
+            partition_split_triggered: app.is_partition_split_triggered(),
         };
         info!(
             "Saved historical app: {} cost {}(ms)",
@@ -239,6 +242,7 @@ mod tests {
             min_huge_partition_bytes: 256,
             start_timestamp: 1000,
             end_timestamp: 2000,
+            partition_split_triggered: false,
         };
 
         // Save

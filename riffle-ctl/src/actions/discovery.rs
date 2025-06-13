@@ -16,6 +16,7 @@ pub struct ActiveAppInfo {
     pub huge_partition_number: u64,
     pub reported_block_id_number: u64,
     pub received_bytes: u64,
+    pub partition_split_triggered: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
