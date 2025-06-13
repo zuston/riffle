@@ -27,11 +27,10 @@ use crate::config::{Config, HistoricalAppStoreConfig, StorageType};
 use crate::error::WorkerError;
 use crate::metric::{
     BLOCK_ID_NUMBER, GAUGE_APP_NUMBER, GAUGE_HUGE_PARTITION_NUMBER, GAUGE_PARTITION_NUMBER,
-    GAUGE_TOPN_APP_RESIDENT_BYTES, PURGE_FAILED_COUNTER, RESIDENT_BYTES, TOTAL_APP_FLUSHED_BYTES,
-    TOTAL_APP_NUMBER, TOTAL_HUGE_PARTITION_NUMBER, TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED,
-    TOTAL_PARTITION_NUMBER, TOTAL_READ_DATA, TOTAL_READ_DATA_FROM_LOCALFILE,
-    TOTAL_READ_DATA_FROM_MEMORY, TOTAL_READ_INDEX_FROM_LOCALFILE, TOTAL_RECEIVED_DATA,
-    TOTAL_REQUIRE_BUFFER_FAILED,
+    PURGE_FAILED_COUNTER, RESIDENT_BYTES, TOTAL_APP_NUMBER, TOTAL_HUGE_PARTITION_NUMBER,
+    TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED, TOTAL_PARTITION_NUMBER, TOTAL_READ_DATA,
+    TOTAL_READ_DATA_FROM_LOCALFILE, TOTAL_READ_DATA_FROM_MEMORY, TOTAL_READ_INDEX_FROM_LOCALFILE,
+    TOTAL_RECEIVED_DATA, TOTAL_REQUIRE_BUFFER_FAILED,
 };
 
 use crate::readable_size::ReadableSize;
@@ -184,39 +183,6 @@ impl AppManager {
                     }
                 }
         });
-
-        // calculate topN app shuffle data size
-        let app_manager_ref = app_ref.clone();
-        runtime_manager
-            .default_runtime
-            .spawn_with_await_tree("App statictics", async move {
-                info!("Starting calculating topN app shuffle data size...");
-                loop {
-                    tokio::time::sleep(Duration::from_secs(10))
-                        .instrument_await("sleeping for 10s...")
-                        .await;
-
-                    let view = app_manager_ref.apps.clone().into_read_only();
-                    let mut apps: Vec<_> = view.values().collect();
-                    apps.sort_by_key(|x| 0 - x.total_resident_data_size());
-
-                    let top_n = 10;
-                    let limit = if apps.len() > top_n {
-                        top_n
-                    } else {
-                        apps.len()
-                    };
-                    for idx in 0..limit {
-                        let app = apps[idx];
-                        if app.total_resident_data_size() <= 0 {
-                            continue;
-                        }
-                        GAUGE_TOPN_APP_RESIDENT_BYTES
-                            .with_label_values(&[&app.app_id])
-                            .set(apps[idx].total_resident_data_size() as i64);
-                    }
-                }
-            });
 
         let app_manager_cloned = app_ref.clone();
         runtime_manager

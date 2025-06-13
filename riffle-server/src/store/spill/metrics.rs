@@ -2,8 +2,7 @@ use crate::app_manager::application_identifier::ApplicationId;
 use crate::config::StorageType;
 use crate::metric::{
     GAUGE_MEMORY_SPILL_IN_FLUSHING_BYTES, GAUGE_MEMORY_SPILL_IN_FLUSHING_OPERATION,
-    MEMORY_SPILL_IN_FLUSHING_BYTES_HISTOGRAM, TOTAL_APP_FLUSHED_BYTES,
-    TOTAL_MEMORY_SPILL_IN_FLUSHING_OPERATION,
+    MEMORY_SPILL_IN_FLUSHING_BYTES_HISTOGRAM, TOTAL_MEMORY_SPILL_IN_FLUSHING_OPERATION,
 };
 
 const ALL_STORAGE_TYPE: &str = "ALL";
@@ -43,11 +42,6 @@ impl FlushingMetricsMonitor {
             MEMORY_SPILL_IN_FLUSHING_BYTES_HISTOGRAM
                 .with_label_values(&[&stype])
                 .observe(size as f64);
-
-            let raw_app_id = app_id.to_string();
-            TOTAL_APP_FLUSHED_BYTES
-                .with_label_values(&[raw_app_id.as_str(), &stype])
-                .inc_by(size as u64);
         }
 
         Self {

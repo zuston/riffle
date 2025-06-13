@@ -594,24 +594,6 @@ pub static GAUGE_RUNTIME_IDLE_THREAD_NUM: Lazy<IntGaugeVec> = Lazy::new(|| {
 pub static RESIDENT_BYTES: Lazy<IntGauge> =
     Lazy::new(|| IntGauge::new("resident_bytes", "resident_bytes").unwrap());
 
-pub static GAUGE_TOPN_APP_RESIDENT_BYTES: Lazy<IntGaugeVec> = Lazy::new(|| {
-    register_int_gauge_vec!(
-        "topN_app_resident_bytes",
-        "topN app resident bytes",
-        &["app_id"]
-    )
-    .unwrap()
-});
-
-pub static TOTAL_APP_FLUSHED_BYTES: Lazy<IntCounterVec> = Lazy::new(|| {
-    register_int_counter_vec!(
-        "app_flushed_bytes",
-        "total app used bytes in persistent storage",
-        &["app_id", "storage_type"]
-    )
-    .unwrap()
-});
-
 pub static RPC_BATCH_DATA_BYTES_HISTOGRAM: Lazy<HistogramVec> = Lazy::new(|| {
     let opts = histogram_opts!(
         "rpc_batch_data_bytes_histogram",
@@ -896,14 +878,6 @@ fn register_custom_metrics() {
         .register(Box::new(
             TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND.clone(),
         ))
-        .expect("");
-
-    REGISTRY
-        .register(Box::new(GAUGE_TOPN_APP_RESIDENT_BYTES.clone()))
-        .expect("");
-
-    REGISTRY
-        .register(Box::new(TOTAL_APP_FLUSHED_BYTES.clone()))
         .expect("");
 
     REGISTRY
