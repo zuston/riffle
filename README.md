@@ -270,3 +270,19 @@ To enable this feature, add the following configuration to your config.toml file
 capacity = 1G
 ```
 
+## Cluster Inspection and Maintenance with SQL
+
+Riffle provides an elegant way to inspect and maintain your clusters directly from the command line using riffle-ctl.
+You can execute SQL queries against the coordinator to retrieve information about active or historical applications, 
+or even decommission specific servers based on your criteria.
+
+### Query Applications
+```shell
+./riffle-ctl query --coordinator http://xxxx:21001 --sql "select * from active_apps"
+./riffle-ctl query --coordinator http://xxxx:21001 --sql "select * from historical_apps"
+```
+
+### Identify and Decommission Servers
+```shell
+./riffle-ctl query -c http://xx:21001 -s "select * from instances where tags like '%sata%'" -p | ./riffle-ctl update --status DECOMMISSIONING
+```
