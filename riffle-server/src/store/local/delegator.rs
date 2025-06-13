@@ -123,18 +123,22 @@ impl LocalDiskDelegator {
             }),
         };
 
-        let runtime = runtime_manager.clone().default_runtime.clone();
-        let io_delegator = delegator.clone();
-        let span = format!("disk[{}] checker", root);
-        runtime.spawn_with_await_tree(&span, async move {
-            info!("starting the disk[{}] checker", &io_delegator.inner.root);
-            if let Err(e) = io_delegator.schedule_check().await {
-                error!(
-                    "disk[{}] checker exit. err: {:?}",
-                    &io_delegator.inner.root, e
-                )
-            }
-        });
+        // in test env, this disk detection will always make disk unhealthy status
+        #[cfg(not(test))]
+        {
+            let runtime = runtime_manager.clone().default_runtime.clone();
+            let io_delegator = delegator.clone();
+            let span = format!("disk[{}] checker", root);
+            runtime.spawn_with_await_tree(&span, async move {
+                info!("starting the disk[{}] checker", &io_delegator.inner.root);
+                if let Err(e) = io_delegator.schedule_check().await {
+                    error!(
+                        "disk[{}] checker exit. err: {:?}",
+                        &io_delegator.inner.root, e
+                    )
+                }
+            });
+        }
 
         delegator
     }
