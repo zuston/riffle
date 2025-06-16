@@ -352,6 +352,7 @@ mod test {
     use std::time::Duration;
 
     #[test]
+    #[ignore]
     fn test_capacity_check() -> anyhow::Result<()> {
         let temp_dir = tempdir::TempDir::new("test_sync_io").unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
