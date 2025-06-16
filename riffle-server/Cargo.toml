@@ -34,7 +34,6 @@ name = "riffle_server"
 path = "src/lib.rs"
 
 [features]
-default = ["hdrs"]
 #default = ["jemalloc", "allocator-analysis"]
 
 # whether to use jemalloc as the global allocator or not
