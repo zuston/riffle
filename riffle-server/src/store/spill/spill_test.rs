@@ -340,10 +340,11 @@ mod tests {
         );
         config.hybrid_store.memory_spill_high_watermark = 1.0;
 
-        let store = create_hybrid_store(&config, &warm, Some(&cold));
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
+        let store = create_hybrid_store(&config, &warm, Some(&cold), &reconf_manager);
 
-        let app_id = "single_buffer_spill-app";
-        let ctx = mock_writing_context(app_id, 1, 0, 1, 20);
+        let app_id = ApplicationId::mock();
+        let ctx = mock_writing_context(&app_id, 1, 0, 1, 20);
         let _ = store.insert(ctx).await;
 
         awaitility::at_most(Duration::from_secs(1))
@@ -354,8 +355,7 @@ mod tests {
         assert_eq!(
             0,
             store
-                .get_memory_buffer_size(&PartitionUId::new(app_id.to_string(), 1, 0))
-                .await
+                .get_memory_buffer_size(&PartitionUId::new(&app_id, 1, 0))
                 .unwrap()
         );
         assert_eq!(0, store.get_spill_event_num().unwrap());
@@ -390,11 +390,12 @@ mod tests {
         );
         config.hybrid_store.memory_spill_high_watermark = 1.0;
 
-        let store = create_hybrid_store(&config, &warm, Some(&cold));
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
+        let store = create_hybrid_store(&config, &warm, Some(&cold), &reconf_manager);
 
         warm_healthy.store(false, SeqCst);
-        let app_id = "test_localfile_disk_unhealthy-app";
-        let ctx = mock_writing_context(app_id, 1, 0, 1, 20);
+        let app_id = ApplicationId::mock();
+        let ctx = mock_writing_context(&app_id, 1, 0, 1, 20);
         let _ = store.insert(ctx).await;
 
         awaitility::at_most(Duration::from_secs(1))
@@ -405,8 +406,7 @@ mod tests {
         assert_eq!(
             0,
             store
-                .get_memory_buffer_size(&PartitionUId::new(app_id.to_string(), 1, 0))
-                .await
+                .get_memory_buffer_size(&PartitionUId::new(&app_id, 1, 0))
                 .unwrap()
         );
         assert_eq!(0, store.get_spill_event_num().unwrap());

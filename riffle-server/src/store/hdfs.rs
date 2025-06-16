@@ -15,11 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::app_manager::{
-    PartitionedUId, PurgeDataContext, PurgeReason, ReadingIndexViewContext, ReadingViewContext,
-    RegisterAppContext, ReleaseTicketContext, RequireBufferContext, WritingViewContext,
-    SHUFFLE_SERVER_ID,
-};
 use crate::config::{HdfsStoreConfig, StorageType};
 use crate::error::WorkerError;
 
@@ -39,13 +34,20 @@ use log::{error, info, warn};
 
 use std::path::Path;
 
+use crate::app_manager::application_identifier::ApplicationId;
+use crate::app_manager::partition_identifier::PartitionUId;
+use crate::app_manager::purge_event::PurgeReason;
+use crate::app_manager::request_context::{
+    PurgeDataContext, ReadingIndexViewContext, ReadingViewContext, RegisterAppContext,
+    ReleaseTicketContext, RequireBufferContext, WritingViewContext,
+};
+use crate::app_manager::SHUFFLE_SERVER_ID;
 use crate::error::WorkerError::Other;
 use crate::kerberos::KerberosTask;
 use crate::lazy_initializer::LazyInit;
 use crate::runtime::manager::RuntimeManager;
 use crate::semaphore_with_index::SemaphoreWithIndex;
 use crate::store::hadoop::{get_hdfs_client, HdfsClient};
-use libc::stat;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
@@ -83,7 +85,7 @@ pub struct HdfsStore {
     concurrency_access_limiter: Semaphore,
 
     // key: app_id, value: hdfs_native_client
-    pub(crate) app_remote_clients: DashMap<String, Arc<LazyInit<Box<dyn HdfsClient>>>>,
+    pub(crate) app_remote_clients: DashMap<ApplicationId, Arc<LazyInit<Box<dyn HdfsClient>>>>,
 
     // key: data_file_path
     partition_file_locks: DashMap<String, Arc<SemaphoreWithIndex>>,
@@ -124,16 +126,16 @@ impl HdfsStore {
         }
     }
 
-    fn get_app_dir(&self, app_id: &str) -> String {
+    fn get_app_dir(&self, app_id: &ApplicationId) -> String {
         format!("{}/", app_id)
     }
 
     /// the dir created with app_id/shuffle_id
-    fn get_shuffle_dir(&self, app_id: &str, shuffle_id: i32) -> String {
+    fn get_shuffle_dir(&self, app_id: &ApplicationId, shuffle_id: i32) -> String {
         format!("{}/{}/", app_id, shuffle_id)
     }
 
-    fn get_file_path_prefix_by_uid(&self, uid: &PartitionedUId) -> (String, String) {
+    fn get_file_path_prefix_by_uid(&self, uid: &PartitionUId) -> (String, String) {
         let app_id = &uid.app_id;
         let shuffle_id = &uid.shuffle_id;
         let p_id = &uid.partition_id;
@@ -147,7 +149,7 @@ impl HdfsStore {
 
     async fn data_insert(
         &self,
-        uid: PartitionedUId,
+        uid: PartitionUId,
         data_blocks: Vec<&Block>,
     ) -> Result<(), WorkerError> {
         if !self.is_healthy().await? {
@@ -420,8 +422,8 @@ impl Store for HdfsStore {
         let filesystem = fs.get_or_init();
 
         let dir = match shuffle_id_option {
-            Some(shuffle_id) => self.get_shuffle_dir(app_id.as_str(), shuffle_id),
-            _ => self.get_app_dir(app_id.as_str()),
+            Some(shuffle_id) => self.get_shuffle_dir(&app_id, shuffle_id),
+            _ => self.get_app_dir(&app_id),
         };
 
         let keys_to_delete: Vec<_> = self
@@ -515,7 +517,7 @@ impl Store for HdfsStore {
             .expect("Errors on getting hdfs client")
         });
 
-        let app_id = ctx.app_id.clone();
+        let app_id = ApplicationId::from(ctx.app_id.as_str());
         self.app_remote_clients
             .entry(app_id)
             .or_insert_with(|| Arc::new(client));
@@ -545,8 +547,11 @@ impl Store for HdfsStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::app_manager::{PartitionedUId, PurgeReason, SHUFFLE_SERVER_ID};
-    use crate::app_manager::{PurgeDataContext, WritingViewContext};
+    use crate::app_manager::application_identifier::ApplicationId;
+    use crate::app_manager::partition_identifier::PartitionUId;
+    use crate::app_manager::purge_event::PurgeReason;
+    use crate::app_manager::request_context::{PurgeDataContext, WritingViewContext};
+    use crate::app_manager::SHUFFLE_SERVER_ID;
     use crate::config::HdfsStoreConfig;
     use crate::error::WorkerError;
     use crate::lazy_initializer::LazyInit;
@@ -644,7 +649,8 @@ mod tests {
     #[test]
     fn oom_test() -> anyhow::Result<()> {
         SHUFFLE_SERVER_ID.get_or_init(|| "10.0.0.1".to_owned());
-        let app_id = "oom_test_app_id";
+        let app_id = ApplicationId::mock();
+        let raw_app_id = app_id.to_string();
 
         let config = HdfsStoreConfig::default();
         let runtime_manager = RuntimeManager::default();
@@ -661,7 +667,7 @@ mod tests {
             .app_remote_clients
             .insert(app_id.to_owned(), client);
 
-        let uid = PartitionedUId::from(app_id.to_owned(), 1, 1);
+        let uid = PartitionUId::new(&app_id, 1, 1);
         let writing_ctx = WritingViewContext::create_for_test(
             uid,
             vec![Block {
@@ -688,7 +694,8 @@ mod tests {
     #[test]
     fn partial_delete_test() -> anyhow::Result<()> {
         SHUFFLE_SERVER_ID.get_or_init(|| "10.0.0.1".to_owned());
-        let app_id = "partial_delete_test";
+        let app_id = ApplicationId::mock();
+        let raw_app_id = app_id.to_string();
 
         let config = HdfsStoreConfig::default();
         let runtime_manager = RuntimeManager::default();
@@ -774,7 +781,7 @@ mod tests {
             .app_remote_clients
             .insert(app_id.to_owned(), client.clone());
 
-        let uid = PartitionedUId::from(app_id.to_owned(), 1, 1);
+        let uid = PartitionUId::new(&app_id, 1, 1);
         let writing_ctx = WritingViewContext::create_for_test(
             uid,
             vec![Block {
@@ -793,7 +800,7 @@ mod tests {
             .block_on(hdfs.insert(writing_ctx))?;
 
         // create data with another shuffle_server_id
-        let uid = PartitionedUId::from(app_id.to_owned(), 2, 1);
+        let uid = PartitionUId::new(&app_id, 2, 1);
         let writing_ctx = WritingViewContext::create_for_test(
             uid,
             vec![Block {
@@ -831,9 +838,10 @@ mod tests {
 
         // touch file with another shuffle_server_id
         let complete_file = format!(
-            "{}/{}",
+            "{}/{}/{}",
             temp_path.as_str(),
-            "partial_delete_test/3/1-1/10.0.0.2_0_0.data"
+            &raw_app_id,
+            "3/1-1/10.0.0.2_0_0.data"
         );
         let parent_dir = Path::new(complete_file.as_str())
             .parent()
@@ -848,10 +856,7 @@ mod tests {
         runtime_manager
             .default_runtime
             .block_on(hdfs_store.purge(&PurgeDataContext {
-                purge_reason: PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(
-                    "partial_delete_test".to_string(),
-                    1,
-                ),
+                purge_reason: PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(app_id.clone(), 1),
             }))?;
         assert_eq!(2 + 1, file_number_recursively(temp_path.as_str()));
         println!("Done with shuffle_level purge");
@@ -860,9 +865,7 @@ mod tests {
         runtime_manager
             .default_runtime
             .block_on(hdfs_store.purge(&PurgeDataContext {
-                purge_reason: PurgeReason::APP_LEVEL_HEARTBEAT_TIMEOUT(
-                    "partial_delete_test".to_string(),
-                ),
+                purge_reason: PurgeReason::APP_LEVEL_HEARTBEAT_TIMEOUT(app_id.clone()),
             }))?;
         assert_eq!(1, file_number_recursively(temp_path.as_str()));
         println!("Done with heartbeat timeout app level purge");
@@ -873,7 +876,8 @@ mod tests {
     #[test]
     fn append_test() -> anyhow::Result<()> {
         SHUFFLE_SERVER_ID.get_or_init(|| "10.0.0.1".to_owned());
-        let app_id = "append_app_id";
+        let app_id = ApplicationId::mock();
+        let raw_app_id = app_id.to_string();
 
         let config = HdfsStoreConfig::default();
         let runtime_manager = RuntimeManager::default();
@@ -892,7 +896,7 @@ mod tests {
             .app_remote_clients
             .insert(app_id.to_owned(), client);
 
-        let uid = PartitionedUId::from(app_id.to_owned(), 1, 1);
+        let uid = PartitionUId::new(&app_id, 1, 1);
         let writing_ctx = WritingViewContext::create_for_test(
             uid,
             vec![

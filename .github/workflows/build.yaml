@@ -73,34 +73,15 @@ jobs:
         working-directory: ./
         run: cargo test --verbose ${{ matrix.features }} -- --test-threads=1
 
-#  with-hdrs:
-#    runs-on: ubuntu-latest
-#    steps:
-#      - name: Install Protoc
-#        uses: arduino/setup-protoc@v2
-#        with:
-#          version: "23.2"
-#      - uses: actions/checkout@v4
-#      - name: Setup java env
-#        uses: actions/setup-java@v4
-#        with:
-#          distribution: temurin
-#          java-version: "11"
-#
-#      - name: Setup hadoop env
-#        shell: bash
-#        run: |
-#          curl -LsSf https://dlcdn.apache.org/hadoop/common/hadoop-3.3.5/hadoop-3.3.5.tar.gz | tar zxf - -C /home/runner
-#          echo "HADOOP_HOME=/home/runner/hadoop-3.3.5" >> $GITHUB_ENV
-#
-#      - name: Build and test
-#        shell: bash
-#        run: |
-#          export CLASSPATH=$(${HADOOP_HOME}/bin/hadoop classpath --glob)
-#          cargo build --features hdrs --release
-#          cargo test --features hdrs -- --test-threads=1
-#        env:
-#          LD_LIBRARY_PATH: ${{ env.JAVA_HOME }}/lib/server:${{ env.HADOOP_HOME}}/lib/native
-#          HDRS_TEST: on
-#          HDRS_NAMENODE: default
-#          HDRS_WORKDIR: /tmp/hdrs/
+  with-hdrs:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Remove unnecessary files (Linux only)
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: docker compose -f dev/centos7/amd64/docker-compose.yml up
