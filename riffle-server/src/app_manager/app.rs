@@ -203,12 +203,14 @@ impl App {
         let partition_size = partition_meta.inc_size(len) + len;
         if self.partition_limit_enable
             && partition_size > self.partition_limit_threshold.get().as_u64()
+            && !partition_meta.is_huge_partition()
         {
             partition_meta.mark_as_huge_partition();
             self.add_huge_partition_metric();
         }
         if self.partition_split_enable
             && partition_size > self.partition_split_threshold.get().as_u64()
+            && !partition_meta.is_split()
         {
             partition_meta.mark_as_split();
             self.partition_split_triggered.store(true, Relaxed);
