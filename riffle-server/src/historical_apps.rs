@@ -85,10 +85,10 @@ impl HistoricalAppManager {
     async fn purge(self: &Self) -> Result<()> {
         info!("Purging expired historical apps...");
         let timer = Instant::now();
-        let now = util::now_timestamp_as_sec() as u128;
+        let now = now_timestamp_as_millis();
         let mut purge_candidates = vec![];
         for app in self.app_store.load().await? {
-            if (now - app.end_timestamp) > (self.retention_days * 24 * 60 * 60) as u128 {
+            if (now - app.end_timestamp) > (self.retention_days * 24 * 60 * 60 * 1000) as u128 {
                 purge_candidates.push(app.app_id.to_owned());
             }
         }
