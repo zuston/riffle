@@ -694,7 +694,7 @@ mod test {
 
         // case1: mark the local disk unhealthy, that will the following flush throw exception directly.
         let local_disk = local_store.local_disks[0].clone();
-        local_disk.mark_unhealthy();
+        local_disk.mark_operation_abnormal();
 
         let writing_view_ctx = create_writing_ctx();
         let insert_result = runtime.wait(local_store.insert(writing_view_ctx));
@@ -704,7 +704,7 @@ mod test {
         }
 
         // case2: mark the local disk healthy, all things work!
-        local_disk.mark_healthy();
+        local_disk.mark_operation_normal();
         let writing_view_ctx = create_writing_ctx();
         let insert_result = runtime.wait(local_store.insert(writing_view_ctx));
         match insert_result {

@@ -3,8 +3,8 @@ use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::config::LocalfileStoreConfig;
 use crate::error::WorkerError;
 use crate::metric::{
-    GAUGE_LOCAL_DISK_CAPACITY, GAUGE_LOCAL_DISK_IS_HEALTHY, GAUGE_LOCAL_DISK_USED,
-    GAUGE_LOCAL_DISK_USED_RATIO, LOCALFILE_DISK_APPEND_OPERATION_DURATION,
+    GAUGE_LOCAL_DISK_CAPACITY, GAUGE_LOCAL_DISK_IS_CORRUPTED, GAUGE_LOCAL_DISK_IS_HEALTHY,
+    GAUGE_LOCAL_DISK_USED, GAUGE_LOCAL_DISK_USED_RATIO, LOCALFILE_DISK_APPEND_OPERATION_DURATION,
     LOCALFILE_DISK_DELETE_OPERATION_DURATION, LOCALFILE_DISK_DIRECT_APPEND_OPERATION_DURATION,
     LOCALFILE_DISK_DIRECT_READ_OPERATION_DURATION, LOCALFILE_DISK_READ_OPERATION_DURATION,
     TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER, TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER,
@@ -59,8 +59,9 @@ struct Inner {
 
     io_handler: Handler,
 
-    is_healthy: Arc<AtomicBool>,
     is_corrupted: Arc<AtomicBool>,
+    is_space_enough: Arc<AtomicBool>,
+    is_operation_normal: Arc<AtomicBool>,
 
     high_watermark: f32,
     low_watermark: f32,
@@ -113,8 +114,9 @@ impl LocalDiskDelegator {
             inner: Arc::new(Inner {
                 root: root.to_owned(),
                 io_handler,
-                is_healthy: Arc::new(AtomicBool::new(true)),
                 is_corrupted: Arc::new(AtomicBool::new(false)),
+                is_space_enough: Arc::new(AtomicBool::new(true)),
+                is_operation_normal: Arc::new(AtomicBool::new(true)),
                 high_watermark,
                 low_watermark,
                 healthy_check_interval_sec: config.disk_healthy_check_interval_sec,
@@ -165,36 +167,49 @@ impl LocalDiskDelegator {
                 return Ok(());
             }
 
-            let mut health_tag = if let Err(e) = self
+            match self
                 .capacity_check()
-                .instrument_await("capacity checking")
+                .instrument_await("capacity check")
                 .await
             {
-                error!(
-                    "Errors on checking the disk:{} capacity. err: {:#?}",
-                    &self.inner.root, e
-                );
-                false
-            } else {
-                true
-            };
+                Err(e) => {
+                    error!(
+                        "Errors on checking disk capacity: {}. err: {:#?}",
+                        &self.inner.root, e
+                    );
+                    self.mark_space_insufficient();
+                }
+                Ok(is_space_enough) => {
+                    if is_space_enough {
+                        self.mark_space_sufficient();
+                    } else {
+                        self.mark_space_insufficient();
+                    }
+                }
+            }
 
-            if let Err(e) = self
+            match self
                 .write_read_check()
                 .instrument_await("write+read checking")
                 .await
             {
-                error!(
-                    "Errors on checking the disk:{} write+read. err: {:#?}",
-                    &self.inner.root, e
-                );
-                self.mark_corrupted()?;
-                health_tag = false;
+                Err(error) => match error {
+                    WorkerError::FUTURE_EXEC_TIMEOUT(e) => {
+                        error!("write+read check:{} timed out: {}", &self.inner.root, e);
+                        self.mark_operation_abnormal();
+                    }
+                    error => {
+                        error!(
+                            "Errors on checking the disk:{} write+read. err: {:#?}",
+                            &self.inner.root, error
+                        );
+                        self.mark_corrupted()?;
+                    }
+                },
+                Ok(_) => {
+                    self.mark_operation_normal();
+                }
             }
-
-            GAUGE_LOCAL_DISK_IS_HEALTHY
-                .with_label_values(&[&self.inner.root])
-                .set(if health_tag { 0 } else { 1 });
 
             tokio::time::sleep(Duration::from_secs(self.inner.healthy_check_interval_sec))
                 .instrument_await("sleeping")
@@ -235,31 +250,22 @@ impl LocalDiskDelegator {
             .with_label_values(&[&self.inner.root])
             .set(used_ratio);
 
-        let healthy_stat = self.is_healthy()?;
-        let mut is_health = true;
+        let previous_status = self.is_space_enough()?;
 
-        if healthy_stat && used_ratio > self.inner.high_watermark as f64 {
+        if previous_status && used_ratio > self.inner.high_watermark as f64 {
             warn!("Disk={} has been unhealthy", &self.inner.root);
-            self.mark_unhealthy()?;
-            GAUGE_LOCAL_DISK_IS_HEALTHY
-                .with_label_values(&[&self.inner.root])
-                .set(1i64);
-            is_health = false;
+            return Ok(false);
         }
 
-        if !healthy_stat && used_ratio < self.inner.low_watermark as f64 {
+        if !previous_status && used_ratio < self.inner.low_watermark as f64 {
             warn!("Disk={} has been healthy.", &self.inner.root);
-            self.mark_healthy()?;
-            GAUGE_LOCAL_DISK_IS_HEALTHY
-                .with_label_values(&[&self.inner.root])
-                .set(0i64);
-            is_health = true;
+            self.mark_space_sufficient()?;
+            return Ok(true);
         }
-
-        Ok(is_health)
+        Ok(true)
     }
 
-    async fn write_read_check(&self) -> Result<()> {
+    async fn write_read_check(&self) -> Result<(), WorkerError> {
         // Bound the server_id to ensure unique if having another instance in the same machine
         let detection_file = "corruption_check.file";
 
@@ -275,7 +281,7 @@ impl LocalDiskDelegator {
             0,
             BytesWrapper::Direct(written_data.clone()),
         );
-        timeout(Duration::from_secs(5), f).await??;
+        timeout(Duration::from_secs(60), f).await??;
         let write_time = timer.elapsed().as_millis();
 
         let timer = Instant::now();
@@ -294,7 +300,7 @@ impl LocalDiskDelegator {
                 &written_data.len(),
                 &read_data.len()
             );
-            self.mark_corrupted()?;
+            return Err(WorkerError::INTERNAL_ERROR);
         }
 
         Ok(())
@@ -313,37 +319,65 @@ impl LocalDiskDelegator {
         }
         Ok(fs2::available_space(&self.inner.root)?)
     }
+
+    pub fn mark_space_sufficient(&self) -> Result<()> {
+        GAUGE_LOCAL_DISK_IS_HEALTHY
+            .with_label_values(&[&self.inner.root])
+            .set(0);
+        self.inner.is_space_enough.store(true, SeqCst);
+        Ok(())
+    }
+
+    pub fn mark_space_insufficient(&self) -> Result<()> {
+        GAUGE_LOCAL_DISK_IS_HEALTHY
+            .with_label_values(&[&self.inner.root])
+            .set(1);
+        self.inner.is_space_enough.store(false, SeqCst);
+        Ok(())
+    }
+
+    pub fn mark_corrupted(&self) -> Result<()> {
+        GAUGE_LOCAL_DISK_IS_CORRUPTED
+            .with_label_values(&[&self.inner.root])
+            .set(1);
+        self.inner.is_corrupted.store(true, SeqCst);
+        Ok(())
+    }
+
+    pub fn mark_operation_abnormal(&self) -> Result<()> {
+        self.inner.is_operation_normal.store(false, SeqCst);
+        Ok(())
+    }
+
+    pub fn mark_operation_normal(&self) -> Result<()> {
+        self.inner.is_operation_normal.store(true, SeqCst);
+        Ok(())
+    }
+
+    fn is_space_enough(&self) -> Result<bool> {
+        Ok(self.inner.is_space_enough.load(SeqCst))
+    }
 }
 
 impl LocalDiskStorage for LocalDiskDelegator {
     fn is_healthy(&self) -> Result<bool> {
-        Ok(self.inner.is_healthy.load(SeqCst))
+        if self.inner.is_operation_normal.load(SeqCst) && self.inner.is_space_enough.load(SeqCst) {
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     fn is_corrupted(&self) -> Result<bool> {
         Ok(self.inner.is_corrupted.load(SeqCst))
-    }
-
-    fn mark_healthy(&self) -> Result<()> {
-        self.inner.is_healthy.store(true, SeqCst);
-        Ok(())
-    }
-
-    fn mark_unhealthy(&self) -> Result<()> {
-        self.inner.is_healthy.store(false, SeqCst);
-        Ok(())
-    }
-
-    fn mark_corrupted(&self) -> Result<()> {
-        self.inner.is_corrupted.store(true, SeqCst);
-        Ok(())
     }
 }
 
 #[cfg(test)]
 mod test {
     use crate::config::LocalfileStoreConfig;
-    use crate::runtime::manager::RuntimeManager;
+    use crate::runtime::manager::{create_runtime, RuntimeManager};
+    use crate::runtime::Runtime;
     use crate::store::local::delegator::LocalDiskDelegator;
     use crate::store::local::LocalDiskStorage;
     use std::sync::atomic::AtomicU64;
@@ -382,6 +416,122 @@ mod test {
         available.store(90, SeqCst);
         awaitility::at_most(Duration::from_secs(5))
             .until(|| delegator.is_healthy().unwrap() == true);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_capacity_check_behavior() -> anyhow::Result<()> {
+        use crate::config::LocalfileStoreConfig;
+        use crate::runtime::manager::RuntimeManager;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        let temp_dir = tempdir::TempDir::new("test_capacity_check_behavior").unwrap();
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+
+        let mut config = LocalfileStoreConfig::new(vec![temp_path.clone()]);
+        config.disk_high_watermark = 0.8;
+        config.disk_low_watermark = 0.5;
+
+        let runtime = create_runtime(1, "");
+        let runtime_manager = RuntimeManager::default();
+        let delegator = LocalDiskDelegator::new(&runtime_manager, &temp_path, &config);
+
+        let capacity = Arc::new(AtomicU64::new(100));
+        let available = Arc::new(AtomicU64::new(30)); // 70 used, 70/100 = 0.7
+
+        delegator.with_capacity(capacity.clone());
+        delegator.with_available(available.clone());
+
+        assert_eq!(runtime.block_on(delegator.capacity_check())?, true);
+
+        available.store(15, Ordering::SeqCst); // 85 used, 85/100 = 0.85
+        assert_eq!(runtime.block_on(delegator.capacity_check())?, false);
+
+        available.store(60, Ordering::SeqCst); // 40 used, 40/100 = 0.4
+        assert_eq!(runtime.block_on(delegator.capacity_check())?, true);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_write_read_check_behavior() -> anyhow::Result<()> {
+        use crate::config::LocalfileStoreConfig;
+        use crate::runtime::manager::RuntimeManager;
+        use std::str::FromStr;
+
+        let temp_dir = tempdir::TempDir::new("test_write_read_check").unwrap();
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+
+        let mut config = LocalfileStoreConfig::new(vec![temp_path.clone()]);
+        config.disk_high_watermark = 0.8;
+        config.disk_low_watermark = 0.5;
+
+        let runtime = create_runtime(1, "");
+        let runtime_manager = RuntimeManager::default();
+        let delegator = LocalDiskDelegator::new(&runtime_manager, &temp_path, &config);
+
+        runtime.block_on(delegator.write_read_check())?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_schedule_check_behavior() -> anyhow::Result<()> {
+        use crate::config::LocalfileStoreConfig;
+        use crate::runtime::manager::RuntimeManager;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let temp_dir = tempdir::TempDir::new("test_schedule_check_behavior").unwrap();
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+
+        let mut config = LocalfileStoreConfig::new(vec![temp_path.clone()]);
+        config.disk_high_watermark = 0.8;
+        config.disk_low_watermark = 0.5;
+        config.disk_healthy_check_interval_sec = 1;
+
+        let runtime = create_runtime(1, "");
+        let runtime_manager = RuntimeManager::default();
+        let delegator = LocalDiskDelegator::new(&runtime_manager, &temp_path, &config);
+
+        let capacity = Arc::new(AtomicU64::new(100));
+        let available = Arc::new(AtomicU64::new(90));
+        delegator.with_capacity(capacity.clone());
+        delegator.with_available(available.clone());
+
+        let delegator_clone = delegator.clone();
+        let handle = runtime.spawn(async move {
+            let mut count = 0;
+            loop {
+                if count >= 3 {
+                    break;
+                }
+                delegator_clone.schedule_check().await.ok();
+                count += 1;
+            }
+        });
+
+        awaitility::at_most(Duration::from_secs(3))
+            .until(|| delegator.is_healthy().unwrap() == true);
+
+        available.store(10, Ordering::SeqCst);
+        awaitility::at_most(Duration::from_secs(3))
+            .until(|| delegator.is_healthy().unwrap() == false);
+
+        available.store(90, Ordering::SeqCst);
+        awaitility::at_most(Duration::from_secs(3))
+            .until(|| delegator.is_healthy().unwrap() == true);
+
+        delegator.mark_operation_abnormal();
+        assert!(!delegator.is_healthy().unwrap());
+
+        delegator.mark_operation_normal();
+        assert!(delegator.is_healthy().unwrap());
+
+        drop(handle);
 
         Ok(())
     }
