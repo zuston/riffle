@@ -49,7 +49,6 @@ use crate::metric::{
     GRPC_SEND_DATA_PROCESS_TIME, GRPC_SEND_DATA_TRANSPORT_TIME, RPC_BATCH_BYTES_OPERATION,
     RPC_BATCH_DATA_BYTES_HISTOGRAM, TOTAL_MEMORY_USED,
 };
-use crate::reject::RejectionPolicyGateway;
 use crate::server_state_manager::{ServerState, ServerStateManager};
 use crate::store::{Block, PartitionedData, ResponseDataIndex};
 use crate::util;
@@ -73,19 +72,16 @@ pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
 #[derive(Clone)]
 pub struct DefaultShuffleServer {
     app_manager_ref: AppManagerRef,
-    rejection_policy_gateway: RejectionPolicyGateway,
     server_state_manager: ServerStateManager,
 }
 
 impl DefaultShuffleServer {
     pub fn from(
         app_manager_ref: AppManagerRef,
-        rejection_policy_gateway: &RejectionPolicyGateway,
         server_state_manager: &ServerStateManager,
     ) -> DefaultShuffleServer {
         DefaultShuffleServer {
             app_manager_ref,
-            rejection_policy_gateway: rejection_policy_gateway.clone(),
             server_state_manager: server_state_manager.clone(),
         }
     }

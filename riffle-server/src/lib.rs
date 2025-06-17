@@ -43,7 +43,6 @@ pub mod util;
 pub mod event_bus;
 mod health_service;
 mod kerberos;
-mod reject;
 pub mod semaphore_with_index;
 pub mod storage;
 
