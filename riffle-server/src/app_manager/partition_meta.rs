@@ -29,18 +29,16 @@ impl PartitionMeta {
     }
 
     pub fn get_size(&self) -> u64 {
-        self.inner.total_size.load(Ordering::Relaxed)
+        self.inner.total_size.load(Ordering::SeqCst)
     }
 
     pub fn inc_size(&self, data_size: u64) -> u64 {
-        self.inner
-            .total_size
-            .fetch_add(data_size, Ordering::Relaxed)
+        self.inner.total_size.fetch_add(data_size, Ordering::SeqCst)
     }
 
     // about huge partition
     pub fn is_huge_partition(&self) -> bool {
-        self.inner.is_huge_partition.load(Ordering::Relaxed)
+        self.inner.is_huge_partition.load(Ordering::SeqCst)
     }
 
     pub fn mark_as_huge_partition(&self) {
@@ -49,7 +47,7 @@ impl PartitionMeta {
 
     // about partition split tag
     pub fn is_split(&self) -> bool {
-        self.inner.is_split.load(Ordering::Relaxed)
+        self.inner.is_split.load(Ordering::SeqCst)
     }
 
     pub fn mark_as_split(&self) {
