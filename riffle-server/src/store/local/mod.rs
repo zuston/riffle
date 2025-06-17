@@ -62,10 +62,6 @@ pub trait LocalIO: Send + Sync {
 pub trait LocalDiskStorage {
     fn is_healthy(&self) -> Result<bool>;
     fn is_corrupted(&self) -> Result<bool>;
-
-    fn mark_healthy(&self) -> Result<()>;
-    fn mark_unhealthy(&self) -> Result<()>;
-    fn mark_corrupted(&self) -> Result<()>;
 }
 
 pub struct DiskStat {

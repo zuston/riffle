@@ -561,6 +561,15 @@ pub static GAUGE_LOCAL_DISK_USED_RATIO: Lazy<GaugeVec> = Lazy::new(|| {
     .unwrap()
 });
 
+pub static GAUGE_LOCAL_DISK_IS_CORRUPTED: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "local_disk_is_corrupted",
+        "local disk is_corrupted for root path",
+        &["root"]
+    )
+    .unwrap()
+});
+
 pub static GAUGE_LOCAL_DISK_IS_HEALTHY: Lazy<IntGaugeVec> = Lazy::new(|| {
     register_int_gauge_vec!(
         "local_disk_is_healthy",
@@ -910,6 +919,10 @@ fn register_custom_metrics() {
 
     REGISTRY
         .register(Box::new(GAUGE_LOCAL_DISK_SERVICE_USED_RATIO.clone()))
+        .expect("");
+
+    REGISTRY
+        .register(Box::new(GAUGE_LOCAL_DISK_IS_CORRUPTED.clone()))
         .expect("");
 
     REGISTRY

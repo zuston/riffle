@@ -3,8 +3,8 @@ use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::config::LocalfileStoreConfig;
 use crate::error::WorkerError;
 use crate::metric::{
-    GAUGE_LOCAL_DISK_CAPACITY, GAUGE_LOCAL_DISK_IS_HEALTHY, GAUGE_LOCAL_DISK_USED,
-    GAUGE_LOCAL_DISK_USED_RATIO, LOCALFILE_DISK_APPEND_OPERATION_DURATION,
+    GAUGE_LOCAL_DISK_CAPACITY, GAUGE_LOCAL_DISK_IS_CORRUPTED, GAUGE_LOCAL_DISK_IS_HEALTHY,
+    GAUGE_LOCAL_DISK_USED, GAUGE_LOCAL_DISK_USED_RATIO, LOCALFILE_DISK_APPEND_OPERATION_DURATION,
     LOCALFILE_DISK_DELETE_OPERATION_DURATION, LOCALFILE_DISK_DIRECT_APPEND_OPERATION_DURATION,
     LOCALFILE_DISK_DIRECT_READ_OPERATION_DURATION, LOCALFILE_DISK_READ_OPERATION_DURATION,
     TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER, TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER,
@@ -59,8 +59,9 @@ struct Inner {
 
     io_handler: Handler,
 
-    is_healthy: Arc<AtomicBool>,
     is_corrupted: Arc<AtomicBool>,
+    is_space_enough: Arc<AtomicBool>,
+    is_operation_normal: Arc<AtomicBool>,
 
     high_watermark: f32,
     low_watermark: f32,
@@ -113,8 +114,9 @@ impl LocalDiskDelegator {
             inner: Arc::new(Inner {
                 root: root.to_owned(),
                 io_handler,
-                is_healthy: Arc::new(AtomicBool::new(true)),
                 is_corrupted: Arc::new(AtomicBool::new(false)),
+                is_space_enough: Arc::new(AtomicBool::new(true)),
+                is_operation_normal: Arc::new(AtomicBool::new(true)),
                 high_watermark,
                 low_watermark,
                 healthy_check_interval_sec: config.disk_healthy_check_interval_sec,
@@ -179,17 +181,32 @@ impl LocalDiskDelegator {
                 true
             };
 
-            if let Err(e) = self
+            match self
                 .write_read_check()
                 .instrument_await("write+read checking")
                 .await
             {
-                error!(
-                    "Errors on checking the disk:{} write+read. err: {:#?}",
-                    &self.inner.root, e
-                );
-                self.mark_corrupted()?;
-                health_tag = false;
+                Err(error) => match error {
+                    WorkerError::FUTURE_EXEC_TIMEOUT(e) => {
+                        error!("write+read check:{} timed out: {}", &self.inner.root, e);
+                        self.mark_operation_abnormal();
+                    }
+                    error => {
+                        error!(
+                            "Errors on checking the disk:{} write+read. err: {:#?}",
+                            &self.inner.root, error
+                        );
+                        self.mark_corrupted()?;
+                        health_tag = false;
+
+                        GAUGE_LOCAL_DISK_IS_CORRUPTED
+                            .with_label_values(&[&self.inner.root])
+                            .set(1);
+                    }
+                },
+                Ok(_) => {
+                    self.mark_operation_normal();
+                }
             }
 
             GAUGE_LOCAL_DISK_IS_HEALTHY
@@ -239,8 +256,8 @@ impl LocalDiskDelegator {
         let mut is_health = true;
 
         if healthy_stat && used_ratio > self.inner.high_watermark as f64 {
-            warn!("Disk={} has been unhealthy", &self.inner.root);
-            self.mark_unhealthy()?;
+            println!("Disk={} has been unhealthy", &self.inner.root);
+            self.mark_space_insufficient()?;
             GAUGE_LOCAL_DISK_IS_HEALTHY
                 .with_label_values(&[&self.inner.root])
                 .set(1i64);
@@ -248,8 +265,8 @@ impl LocalDiskDelegator {
         }
 
         if !healthy_stat && used_ratio < self.inner.low_watermark as f64 {
-            warn!("Disk={} has been healthy.", &self.inner.root);
-            self.mark_healthy()?;
+            println!("Disk={} has been healthy.", &self.inner.root);
+            self.mark_space_sufficient()?;
             GAUGE_LOCAL_DISK_IS_HEALTHY
                 .with_label_values(&[&self.inner.root])
                 .set(0i64);
@@ -259,7 +276,7 @@ impl LocalDiskDelegator {
         Ok(is_health)
     }
 
-    async fn write_read_check(&self) -> Result<()> {
+    async fn write_read_check(&self) -> Result<(), WorkerError> {
         // Bound the server_id to ensure unique if having another instance in the same machine
         let detection_file = "corruption_check.file";
 
@@ -275,7 +292,7 @@ impl LocalDiskDelegator {
             0,
             BytesWrapper::Direct(written_data.clone()),
         );
-        timeout(Duration::from_secs(5), f).await??;
+        timeout(Duration::from_secs(60), f).await??;
         let write_time = timer.elapsed().as_millis();
 
         let timer = Instant::now();
@@ -313,30 +330,44 @@ impl LocalDiskDelegator {
         }
         Ok(fs2::available_space(&self.inner.root)?)
     }
+
+    pub fn mark_space_sufficient(&self) -> Result<()> {
+        self.inner.is_space_enough.store(true, SeqCst);
+        Ok(())
+    }
+
+    pub fn mark_space_insufficient(&self) -> Result<()> {
+        self.inner.is_space_enough.store(false, SeqCst);
+        Ok(())
+    }
+
+    pub fn mark_corrupted(&self) -> Result<()> {
+        self.inner.is_corrupted.store(true, SeqCst);
+        Ok(())
+    }
+
+    pub fn mark_operation_abnormal(&self) -> Result<()> {
+        self.inner.is_operation_normal.store(false, SeqCst);
+        Ok(())
+    }
+
+    pub fn mark_operation_normal(&self) -> Result<()> {
+        self.inner.is_operation_normal.store(true, SeqCst);
+        Ok(())
+    }
 }
 
 impl LocalDiskStorage for LocalDiskDelegator {
     fn is_healthy(&self) -> Result<bool> {
-        Ok(self.inner.is_healthy.load(SeqCst))
+        if self.inner.is_operation_normal.load(SeqCst) && self.inner.is_space_enough.load(SeqCst) {
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     fn is_corrupted(&self) -> Result<bool> {
         Ok(self.inner.is_corrupted.load(SeqCst))
-    }
-
-    fn mark_healthy(&self) -> Result<()> {
-        self.inner.is_healthy.store(true, SeqCst);
-        Ok(())
-    }
-
-    fn mark_unhealthy(&self) -> Result<()> {
-        self.inner.is_healthy.store(false, SeqCst);
-        Ok(())
-    }
-
-    fn mark_corrupted(&self) -> Result<()> {
-        self.inner.is_corrupted.store(true, SeqCst);
-        Ok(())
     }
 }
 
