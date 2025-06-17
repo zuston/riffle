@@ -184,7 +184,7 @@ impl App {
     }
 
     pub fn is_partition_split_triggered(&self) -> bool {
-        self.partition_split_triggered.load(Relaxed)
+        self.partition_split_triggered.load(SeqCst)
     }
 
     pub async fn insert(&self, ctx: WritingViewContext) -> anyhow::Result<i32, WorkerError> {
@@ -213,7 +213,7 @@ impl App {
             && !partition_meta.is_split()
         {
             partition_meta.mark_as_split();
-            self.partition_split_triggered.store(true, Relaxed);
+            self.partition_split_triggered.store(true, SeqCst);
         }
 
         self.store.insert(ctx).await?;
