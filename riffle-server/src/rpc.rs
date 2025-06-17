@@ -8,7 +8,6 @@ use crate::grpc::protobuf::uniffle::shuffle_server_internal_server::ShuffleServe
 use crate::grpc::protobuf::uniffle::shuffle_server_server::ShuffleServerServer;
 use crate::grpc::service::{DefaultShuffleServer, MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use crate::metric::GRPC_LATENCY_TIME_SEC;
-use crate::reject::RejectionPolicyGateway;
 use crate::runtime::manager::RuntimeManager;
 use crate::server_state_manager::ServerStateManager;
 use crate::signal::details::graceful_wait_for_signal;
@@ -60,7 +59,6 @@ impl DefaultRpcService {
         runtime_manager: RuntimeManager,
         tx: Sender<()>,
         app_manager_ref: AppManagerRef,
-        rejection_gateway: &RejectionPolicyGateway,
     ) -> Result<()> {
         let urpc_port = config.urpc_port.unwrap();
         info!("Starting urpc server with port:[{}] ......", urpc_port);
@@ -98,7 +96,6 @@ impl DefaultRpcService {
         runtime_manager: RuntimeManager,
         tx: Sender<()>,
         app_manager_ref: AppManagerRef,
-        rejection_gateway: &RejectionPolicyGateway,
         server_state_manager: &ServerStateManager,
     ) -> Result<()> {
         let grpc_port = config.grpc_port;
@@ -109,11 +106,8 @@ impl DefaultRpcService {
 
         let core_ids = core_affinity::get_core_ids().unwrap();
         for (_, core_id) in core_ids.into_iter().enumerate() {
-            let shuffle_server = DefaultShuffleServer::from(
-                app_manager_ref.clone(),
-                rejection_gateway,
-                server_state_manager,
-            );
+            let shuffle_server =
+                DefaultShuffleServer::from(app_manager_ref.clone(), server_state_manager);
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), grpc_port as u16);
             let service = ShuffleServerServer::new(shuffle_server.clone())
                 .max_decoding_message_size(usize::MAX)
@@ -149,8 +143,6 @@ impl DefaultRpcService {
         app_manager_ref: AppManagerRef,
         server_state_manager: &ServerStateManager,
     ) -> Result<()> {
-        let rejection_gateway = RejectionPolicyGateway::new(&app_manager_ref, config);
-
         let (tx, _) = broadcast::channel(1);
 
         let grpc_port = config.grpc_port;
@@ -163,7 +155,6 @@ impl DefaultRpcService {
             runtime_manager.clone(),
             tx.clone(),
             app_manager_ref.clone(),
-            &rejection_gateway,
             server_state_manager,
         )?;
 
@@ -178,7 +169,6 @@ impl DefaultRpcService {
                 runtime_manager.clone(),
                 tx.clone(),
                 app_manager_ref.clone(),
-                &rejection_gateway,
             )?;
         }
 

@@ -83,7 +83,6 @@ pub mod histogram;
 mod mem_allocator;
 mod metric;
 mod readable_size;
-pub mod reject;
 pub mod rpc;
 pub mod runtime;
 pub mod semaphore_with_index;
