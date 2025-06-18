@@ -27,14 +27,14 @@ impl PostgresServerAction {
 impl Action for PostgresServerAction {
     async fn act(&self) -> anyhow::Result<()> {
         let context_manager =
-            SessionContextExtend::new(self.coordinator_server_url.as_str()).await?;
+            SessionContextExtend::new(self.coordinator_server_url.as_str(), None).await?;
         let context = context_manager.get_context();
 
         tokio::spawn(async move {
             loop {
                 // refresh table
                 tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
-                if let Err(e) = context_manager.reload().await {
+                if let Err(e) = context_manager.reload(None).await {
                     println!("Error reloading session: {}", e);
                 }
             }
