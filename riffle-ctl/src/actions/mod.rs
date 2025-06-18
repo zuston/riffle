@@ -29,50 +29,6 @@ pub trait Action {
     async fn act(&self) -> anyhow::Result<()>;
 }
 
-pub enum OutputFormat {
-    TABLE,
-    JSON,
-}
-
-pub struct QueryAction {
-    sql: String,
-    format: OutputFormat,
-    coordinator_url: String,
-}
-
-impl QueryAction {
-    pub fn new(sql: String, format: OutputFormat, coordinator_url: String) -> Self {
-        Self {
-            sql,
-            format,
-            coordinator_url,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl Action for QueryAction {
-    async fn act(&self) -> anyhow::Result<()> {
-        let context = SessionContextExtend::new(self.coordinator_url.as_str()).await?;
-        let df = context.sql(self.sql.as_str()).await?;
-        match &self.format {
-            OutputFormat::TABLE => {
-                df.show().await?;
-            }
-            OutputFormat::JSON => {
-                let temp_dir = tempfile::tempdir().unwrap();
-                let file_path = temp_dir.path().join("output.json");
-                let absolute_file_path = file_path.to_str().unwrap();
-                df.write_json(absolute_file_path, DataFrameWriteOptions::new(), None)
-                    .await?;
-                let contents = fs::read_to_string(absolute_file_path)?;
-                println!("{}", contents);
-            }
-        }
-        Ok(())
-    }
-}
-
 pub struct ValidateAction {
     index_path: String,
     data_path: String,

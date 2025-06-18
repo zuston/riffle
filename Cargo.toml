@@ -86,6 +86,7 @@ tracing-subscriber = "0.3"
 dashmap = "5.4.0"
 pgwire = "0.28.0"
 datafusion-postgres = { git = "https://github.com/zuston/datafusion-postgres.git", branch = "extended" }
+sqlparser = "0.56.0"
 
 [profile.release]
 debug = 1
