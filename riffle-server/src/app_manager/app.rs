@@ -296,26 +296,6 @@ impl App {
         }
     }
 
-    pub async fn is_backpressure_of_partition(&self, uid: &PartitionUId) -> anyhow::Result<bool> {
-        if !self.is_huge_partition(uid)? {
-            return Ok(false);
-        }
-        let ratio = self.partition_limit_mem_backpressure_ratio.get();
-        let threshold = (self.memory_capacity as f64 * ratio) as u64;
-        let used = self.store.get_memory_buffer_size(uid)?;
-
-        if used > threshold {
-            info!(
-                "[{:?}] with huge partition (used/limited: {}/{}), it has been limited of writing speed",
-                uid, used, threshold
-            );
-            TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED.inc();
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
     pub fn dec_allocated_from_budget(&self, size: i64) -> anyhow::Result<bool> {
         self.store.release_allocated_from_hot_store(size)
     }
@@ -326,10 +306,10 @@ impl App {
 
     pub fn is_huge_partition(&self, uid: &PartitionUId) -> Result<bool> {
         if self.partition_limit_enable {
-            Ok(false)
-        } else {
             let partition_meta = self.get_partition_meta(uid);
             Ok(partition_meta.is_huge_partition())
+        } else {
+            Ok(false)
         }
     }
 
