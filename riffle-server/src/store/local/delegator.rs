@@ -12,6 +12,7 @@ use crate::metric::{
 };
 use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
+use crate::store::local::detection::disk_availability_detect;
 use crate::store::local::io_layer_await_tree::AwaitTreeLayer;
 use crate::store::local::io_layer_metrics::MetricsLayer;
 use crate::store::local::io_layer_retry::{IoLayerRetry, RETRY_MAX_TIMES};
@@ -22,7 +23,7 @@ use crate::store::local::sync_io::SyncLocalIO;
 use crate::store::local::{DiskStat, FileStat, LocalDiskStorage, LocalIO};
 use crate::store::BytesWrapper;
 use crate::util;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
@@ -30,6 +31,7 @@ use clap::error::ErrorKind::Io;
 use log::{error, warn};
 use once_cell::sync::OnceCell;
 use std::ops::Deref;
+use std::process::Command;
 use std::str::FromStr;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -78,7 +80,7 @@ impl LocalDiskDelegator {
         runtime_manager: &RuntimeManager,
         root: &str,
         config: &LocalfileStoreConfig,
-    ) -> LocalDiskDelegator {
+    ) -> Result<Self> {
         let high_watermark = config.disk_high_watermark;
         let low_watermark = config.disk_low_watermark;
         let write_capacity = ReadableSize::from_str(&config.disk_write_buf_capacity).unwrap();
@@ -125,6 +127,14 @@ impl LocalDiskDelegator {
             }),
         };
 
+        #[cfg(not(test))]
+        disk_availability_detect(root, 90).map_err(|e| {
+            GAUGE_LOCAL_DISK_IS_CORRUPTED
+                .with_label_values(&[root])
+                .set(1);
+            e
+        })?;
+
         // in test env, this disk detection will always make disk unhealthy status
         #[cfg(not(test))]
         {
@@ -142,7 +152,7 @@ impl LocalDiskDelegator {
             });
         }
 
-        delegator
+        Ok(delegator)
     }
 
     pub fn with_capacity(&self, capacity_ref: Arc<AtomicU64>) {
@@ -396,7 +406,7 @@ mod test {
         config.disk_healthy_check_interval_sec = 2;
 
         let runtime_manager = RuntimeManager::default();
-        let delegator = LocalDiskDelegator::new(&runtime_manager, &temp_path, &config);
+        let delegator = LocalDiskDelegator::new(&runtime_manager, &temp_path, &config)?;
 
         let capacity = Arc::new(AtomicU64::new(100));
         let available = Arc::new(AtomicU64::new(90));
@@ -436,7 +446,7 @@ mod test {
 
         let runtime = create_runtime(1, "");
         let runtime_manager = RuntimeManager::default();
-        let delegator = LocalDiskDelegator::new(&runtime_manager, &temp_path, &config);
+        let delegator = LocalDiskDelegator::new(&runtime_manager, &temp_path, &config)?;
 
         let capacity = Arc::new(AtomicU64::new(100));
         let available = Arc::new(AtomicU64::new(30)); // 70 used, 70/100 = 0.7
@@ -470,7 +480,7 @@ mod test {
 
         let runtime = create_runtime(1, "");
         let runtime_manager = RuntimeManager::default();
-        let delegator = LocalDiskDelegator::new(&runtime_manager, &temp_path, &config);
+        let delegator = LocalDiskDelegator::new(&runtime_manager, &temp_path, &config)?;
 
         runtime.block_on(delegator.write_read_check())?;
 
@@ -495,7 +505,7 @@ mod test {
 
         let runtime = create_runtime(1, "");
         let runtime_manager = RuntimeManager::default();
-        let delegator = LocalDiskDelegator::new(&runtime_manager, &temp_path, &config);
+        let delegator = LocalDiskDelegator::new(&runtime_manager, &temp_path, &config)?;
 
         let capacity = Arc::new(AtomicU64::new(100));
         let available = Arc::new(AtomicU64::new(90));
