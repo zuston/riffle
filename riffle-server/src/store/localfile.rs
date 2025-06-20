@@ -109,7 +109,17 @@ impl LocalFileStore {
         let runtime_manager: RuntimeManager = Default::default();
         let config = LocalfileStoreConfig::new(local_disks.clone());
         for path in &local_disks {
-            local_disk_instances.push(LocalDiskDelegator::new(&runtime_manager, &path, &config));
+            match LocalDiskDelegator::new(&runtime_manager, &path, &config) {
+                Ok(handler) => {
+                    local_disk_instances.push(handler);
+                }
+                Err(e) => {
+                    error!(
+                        "Errors loading local disk handler of [{}]. error: {:?}",
+                        &path, e
+                    );
+                }
+            }
         }
         LocalFileStore {
             local_disks: local_disk_instances,
@@ -149,11 +159,17 @@ impl LocalFileStore {
                     );
                 }
             }
-            local_disk_instances.push(LocalDiskDelegator::new(
-                &runtime_manager,
-                &path,
-                &localfile_config,
-            ));
+            match LocalDiskDelegator::new(&runtime_manager, &path, &localfile_config) {
+                Ok(handler) => {
+                    local_disk_instances.push(handler);
+                }
+                Err(e) => {
+                    error!(
+                        "Errors on load local disk handler of [{}]. error: {:?}",
+                        &path, e
+                    );
+                }
+            }
         }
 
         let len = local_disk_instances.len();

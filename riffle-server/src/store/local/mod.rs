@@ -23,6 +23,7 @@ use bytes::Bytes;
 use std::sync::Arc;
 
 pub mod delegator;
+mod detection;
 mod io_layer_await_tree;
 mod io_layer_metrics;
 mod io_layer_retry;
