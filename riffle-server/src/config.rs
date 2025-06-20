@@ -130,7 +130,7 @@ pub struct LocalfileStoreConfig {
     pub io_limiter: Option<IoLimiterConfig>,
 
     #[serde(default = "bool::default")]
-    pub disk_availability_detection_enable: bool,
+    pub disk_availability_precheck_enable: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -203,7 +203,7 @@ impl LocalfileStoreConfig {
             io_duration_threshold_sec: as_default_io_duration_threshold_sec(),
             index_consistency_detection_enable: false,
             io_limiter: None,
-            disk_availability_detection_enable: false,
+            disk_availability_precheck_enable: false,
         }
     }
 }

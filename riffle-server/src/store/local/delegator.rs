@@ -127,7 +127,7 @@ impl LocalDiskDelegator {
             }),
         };
 
-        if config.disk_availability_detection_enable {
+        if config.disk_availability_precheck_enable {
             #[cfg(not(test))]
             disk_availability_detect(root, 90).map_err(|e| {
                 GAUGE_LOCAL_DISK_IS_CORRUPTED
