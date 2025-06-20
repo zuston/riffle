@@ -127,13 +127,15 @@ impl LocalDiskDelegator {
             }),
         };
 
-        #[cfg(not(test))]
-        disk_availability_detect(root, 90).map_err(|e| {
-            GAUGE_LOCAL_DISK_IS_CORRUPTED
-                .with_label_values(&[root])
-                .set(1);
-            e
-        })?;
+        if config.disk_availability_detection_enable {
+            #[cfg(not(test))]
+            disk_availability_detect(root, 90).map_err(|e| {
+                GAUGE_LOCAL_DISK_IS_CORRUPTED
+                    .with_label_values(&[root])
+                    .set(1);
+                e
+            })?;
+        }
 
         // in test env, this disk detection will always make disk unhealthy status
         #[cfg(not(test))]
