@@ -24,7 +24,7 @@ RUN yum install -y llvm-toolset-7
 RUN echo '. /opt/rh/llvm-toolset-7/enable' >> ~/.bashrc
 
 # install rust nightly toolchain
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain nightly-2025-06-15
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain nightly-2025-06-01
 ENV PATH="/root/.cargo/bin:${PATH}"
 RUN rustc --version
 
