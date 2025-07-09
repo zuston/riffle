@@ -3650,7 +3650,7 @@ checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
 [[package]]
 name = "logforth"
 version = "0.26.1"
-source = "git+https://github.com/zuston/logforth?branch=debug#6827501ce8469716e0d86f18e24f7417edad6557"
+source = "git+https://github.com/zuston/logforth?branch=debug2#27047a70cfd850f51de02ec12421aa520901f22a"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
