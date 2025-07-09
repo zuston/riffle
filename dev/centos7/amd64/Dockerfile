@@ -24,9 +24,9 @@ RUN yum install -y llvm-toolset-7
 RUN echo '. /opt/rh/llvm-toolset-7/enable' >> ~/.bashrc
 
 # install rust nightly toolchain
-RUN curl https://sh.rustup.rs > /rustup-init
-RUN chmod +x /rustup-init
-RUN /rustup-init -y --default-toolchain nightly-2025-06-01-x86_64-unknown-linux-gnu
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain nightly-2025-06-15
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN rustc --version
 
 # install java
 RUN yum install -y java-1.8.0-openjdk java-1.8.0-openjdk-devel
