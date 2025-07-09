@@ -124,7 +124,7 @@ serde_json = { workspace = true }
 governor = { workspace = true }
 nonzero_ext = { workspace = true }
 sled = { workspace = true }
-logforth= { workspace = true, features = ["rolling-file"], optional = true }
+logforth= { workspace = true, features = ["append-rolling-file"], optional = true }
 mimalloc= { workspace = true, optional = true }
 cap= { workspace = true, optional = true }
 hdfs-native= { workspace = true, optional = true }
