@@ -46,7 +46,7 @@ indicatif = "0.17.11"
 jemalloc_pprof = "0.7.0"
 libc = "0.2.169"
 log = "0.4.17"
-logforth = { git = "https://github.com/zuston/logforth", branch = "debug2" }
+logforth = { git = "https://github.com/zuston/logforth", branch = "debug3" }
 mimalloc = "0.1.39"
 nonzero_ext = "0.3.0"
 num_enum = "0.7.0"
