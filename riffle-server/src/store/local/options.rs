@@ -29,7 +29,7 @@ impl WriteOptions {
 
     pub fn with_append_of_buffer_io(data: DataBytes) -> Self {
         Self {
-            append: false,
+            append: true,
             data,
             offset: None,
         }
