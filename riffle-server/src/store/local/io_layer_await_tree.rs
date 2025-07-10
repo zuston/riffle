@@ -2,7 +2,7 @@ use crate::error::WorkerError;
 use crate::store::local::layers::{Handler, Layer};
 use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
 use crate::store::local::{FileStat, LocalIO};
-use crate::store::BytesWrapper;
+use crate::store::DataBytes;
 use anyhow::Context;
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
@@ -64,7 +64,7 @@ impl LocalIO for AwaitTreeLayerWrapper {
         &self,
         path: &str,
         options: ReadOptions,
-    ) -> anyhow::Result<BytesWrapper, WorkerError> {
+    ) -> anyhow::Result<DataBytes, WorkerError> {
         let data = self
             .handler
             .read(path, options)

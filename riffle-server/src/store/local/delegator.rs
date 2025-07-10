@@ -21,7 +21,7 @@ use crate::store::local::layers::{Handler, OperatorBuilder};
 use crate::store::local::options::{ReadOptions, WriteOptions};
 use crate::store::local::sync_io::SyncLocalIO;
 use crate::store::local::{DiskStat, FileStat, LocalDiskStorage, LocalIO};
-use crate::store::BytesWrapper;
+use crate::store::DataBytes;
 use crate::util;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -278,7 +278,7 @@ impl LocalDiskDelegator {
         // todo: add disk speed latency metrics to report to coordinator
         let timer = Instant::now();
         let options =
-            WriteOptions::with_append_of_direct_io(BytesWrapper::Direct(written_data.clone()), 0);
+            WriteOptions::with_append_of_direct_io(DataBytes::Direct(written_data.clone()), 0);
         let f = self.write(&detection_file, options);
         timeout(Duration::from_secs(60), f).await??;
         let write_time = timer.elapsed().as_millis();

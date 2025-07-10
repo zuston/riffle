@@ -1,7 +1,7 @@
 use crate::error::WorkerError;
 use crate::error::WorkerError::{STREAM_INCOMPLETE, STREAM_INCORRECT};
 use crate::store::ResponseData::Mem;
-use crate::store::{Block, BytesWrapper};
+use crate::store::{Block, DataBytes};
 use crate::urpc::command::{
     GetLocalDataIndexRequestCommand, GetLocalDataIndexResponseCommand, GetLocalDataRequestCommand,
     GetLocalDataResponseCommand, GetMemoryDataRequestCommand, GetMemoryDataResponseCommand,

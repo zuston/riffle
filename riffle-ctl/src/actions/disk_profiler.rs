@@ -6,7 +6,7 @@ use riffle_server::runtime::{Runtime, RuntimeRef};
 use riffle_server::store::local::options::WriteOptions;
 use riffle_server::store::local::sync_io::SyncLocalIO;
 use riffle_server::store::local::LocalIO;
-use riffle_server::store::BytesWrapper;
+use riffle_server::store::DataBytes;
 use riffle_server::util;
 use std::sync::Arc;
 use std::time::{Duration, Instant};

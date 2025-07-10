@@ -17,7 +17,7 @@
 
 use crate::error::WorkerError;
 use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
-use crate::store::BytesWrapper;
+use crate::store::DataBytes;
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -41,7 +41,7 @@ pub struct FileStat {
 pub trait LocalIO: Send + Sync {
     async fn create(&self, path: &str, options: CreateOptions) -> Result<(), WorkerError>;
     async fn write(&self, path: &str, options: WriteOptions) -> Result<(), WorkerError>;
-    async fn read(&self, path: &str, options: ReadOptions) -> Result<BytesWrapper, WorkerError>;
+    async fn read(&self, path: &str, options: ReadOptions) -> Result<DataBytes, WorkerError>;
     async fn delete(&self, path: &str) -> Result<(), WorkerError>;
     async fn file_stat(&self, path: &str) -> Result<FileStat, WorkerError>;
 }

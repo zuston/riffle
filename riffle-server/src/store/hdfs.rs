@@ -20,7 +20,7 @@ use crate::error::WorkerError;
 
 use crate::metric::TOTAL_HDFS_USED;
 use crate::store::{
-    Block, BytesWrapper, Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex,
+    Block, DataBytes, Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex,
     SpillWritingViewContext, Store,
 };
 use anyhow::{anyhow, Result};
@@ -308,9 +308,9 @@ impl HdfsStore {
         &self,
         filesystem: &Box<dyn HdfsClient>,
         data_file_path: &String,
-        data_bytes_holder: BytesWrapper,
+        data_bytes_holder: DataBytes,
         index_file_path: &String,
-        index_bytes_holder: BytesWrapper,
+        index_bytes_holder: DataBytes,
     ) -> Result<(), WorkerError> {
         let data_len = data_bytes_holder.len();
         filesystem
@@ -559,7 +559,7 @@ mod tests {
     use crate::semaphore_with_index::SemaphoreWithIndex;
     use crate::store::hadoop::{FileStatus, HdfsClient};
     use crate::store::hdfs::HdfsStore;
-    use crate::store::{Block, BytesWrapper, Store};
+    use crate::store::{Block, DataBytes, Store};
     use anyhow::anyhow;
     use async_trait::async_trait;
     use bytes::Bytes;
@@ -606,7 +606,7 @@ mod tests {
         async fn append(
             &self,
             file_path: &str,
-            data: BytesWrapper,
+            data: DataBytes,
         ) -> anyhow::Result<(), WorkerError> {
             if self.oom_failure.load(SeqCst) {
                 return Err(
@@ -721,7 +721,7 @@ mod tests {
             async fn append(
                 &self,
                 file_path: &str,
-                data: BytesWrapper,
+                data: DataBytes,
             ) -> anyhow::Result<(), WorkerError> {
                 Ok(())
             }

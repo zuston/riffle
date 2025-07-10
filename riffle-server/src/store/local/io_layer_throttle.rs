@@ -5,7 +5,7 @@ use crate::runtime::RuntimeRef;
 use crate::store::local::layers::{Handler, Layer};
 use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
 use crate::store::local::{FileStat, LocalIO};
-use crate::store::BytesWrapper;
+use crate::store::DataBytes;
 use crate::util;
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
@@ -178,7 +178,7 @@ impl LocalIO for ThrottleLayerWrapper {
         &self,
         path: &str,
         options: ReadOptions,
-    ) -> anyhow::Result<BytesWrapper, WorkerError> {
+    ) -> anyhow::Result<DataBytes, WorkerError> {
         if self.read_enabled {
             self.limiter
                 .acquire(PER_READ_BYTES)

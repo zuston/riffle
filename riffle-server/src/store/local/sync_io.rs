@@ -10,7 +10,7 @@ use crate::store::alignment::io_bytes::IoBuffer;
 use crate::store::alignment::{ALIGN, IO_BUFFER_ALLOCATOR};
 use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
 use crate::store::local::{FileStat, LocalIO};
-use crate::store::BytesWrapper;
+use crate::store::DataBytes;
 use allocator_api2::SliceExt;
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -75,7 +75,7 @@ impl SyncLocalIO {
         &self,
         path: &str,
         written_bytes: usize,
-        raw_data: BytesWrapper,
+        raw_data: DataBytes,
     ) -> anyhow::Result<(), WorkerError> {
         let raw_path = self.with_root(path);
         let r = self
@@ -100,8 +100,8 @@ impl SyncLocalIO {
                     (file_len, None)
                 };
                 let mut batch_bytes = match raw_data {
-                    BytesWrapper::Direct(bytes) => vec![bytes],
-                    BytesWrapper::Composed(composed) => composed.to_vec(),
+                    DataBytes::Direct(bytes) => vec![bytes],
+                    DataBytes::Composed(composed) => composed.to_vec(),
                 };
                 if let Some(remain_bytes) = remain_bytes {
                     batch_bytes.insert(0, remain_bytes);
@@ -164,7 +164,7 @@ impl SyncLocalIO {
     async fn append_with_buffer_io(
         &self,
         path: &str,
-        data: BytesWrapper,
+        data: DataBytes,
     ) -> anyhow::Result<(), WorkerError> {
         let path = self.with_root(path);
         let buffer_capacity = self.inner.buf_writer_capacity.clone();
@@ -181,8 +181,8 @@ impl SyncLocalIO {
                 };
 
                 match data {
-                    BytesWrapper::Direct(bytes) => buf_writer.write_all(&bytes)?,
-                    BytesWrapper::Composed(composed) => {
+                    DataBytes::Direct(bytes) => buf_writer.write_all(&bytes)?,
+                    DataBytes::Composed(composed) => {
                         buf_writer.write_all(&composed.freeze())?;
                     }
                 }
@@ -409,7 +409,7 @@ impl LocalIO for SyncLocalIO {
         &self,
         path: &str,
         options: ReadOptions,
-    ) -> anyhow::Result<BytesWrapper, WorkerError> {
+    ) -> anyhow::Result<DataBytes, WorkerError> {
         let result = if options.is_direct_io() {
             self.read_with_direct_io(path, options.offset, options.length.unwrap())
                 .await?
@@ -417,7 +417,7 @@ impl LocalIO for SyncLocalIO {
             self.read_with_buffer_io(path, options.offset, options.length)
                 .await?
         };
-        Ok(BytesWrapper::Direct(result))
+        Ok(DataBytes::Direct(result))
     }
 
     async fn delete(&self, path: &str) -> anyhow::Result<(), WorkerError> {

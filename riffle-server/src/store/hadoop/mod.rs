@@ -11,7 +11,7 @@ use crate::store::hadoop::hdrs::HdrsClient;
 
 use crate::error::WorkerError;
 use crate::store::hadoop::delegator::HdfsClientDelegator;
-use crate::store::BytesWrapper;
+use crate::store::DataBytes;
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -20,7 +20,7 @@ use std::path::PathBuf;
 #[async_trait]
 pub(crate) trait HdfsClient: Send + Sync {
     async fn touch(&self, file_path: &str) -> Result<()>;
-    async fn append(&self, file_path: &str, data: BytesWrapper) -> Result<(), WorkerError>;
+    async fn append(&self, file_path: &str, data: DataBytes) -> Result<(), WorkerError>;
     async fn len(&self, file_path: &str) -> Result<u64>;
 
     async fn create_dir(&self, dir: &str) -> Result<()>;

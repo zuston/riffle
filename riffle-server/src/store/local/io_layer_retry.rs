@@ -2,7 +2,7 @@ use crate::error::WorkerError;
 use crate::store::local::layers::{Handler, Layer};
 use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
 use crate::store::local::{FileStat, LocalIO};
-use crate::store::BytesWrapper;
+use crate::store::DataBytes;
 use async_trait::async_trait;
 use bytes::Bytes;
 use clap::builder::Str;
@@ -80,7 +80,7 @@ impl LocalIO for IoLayerRetryImpl {
         &self,
         path: &str,
         options: ReadOptions,
-    ) -> anyhow::Result<BytesWrapper, WorkerError> {
+    ) -> anyhow::Result<DataBytes, WorkerError> {
         self.handler.read(path, options).await
     }
 

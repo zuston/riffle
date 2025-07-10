@@ -1,7 +1,7 @@
 use crate::composed_bytes;
 use crate::composed_bytes::ComposedBytes;
 use crate::constant::INVALID_BLOCK_ID;
-use crate::store::BytesWrapper;
+use crate::store::DataBytes;
 use crate::store::{Block, DataSegment, PartitionedMemoryData};
 use anyhow::Result;
 use croaring::Treemap;
@@ -221,7 +221,7 @@ impl MemoryBuffer {
         let composed_bytes = ComposedBytes::from(block_bytes, offset as usize);
         Ok(PartitionedMemoryData {
             shuffle_data_block_segments: segments,
-            data: BytesWrapper::Composed(composed_bytes),
+            data: DataBytes::Composed(composed_bytes),
         })
     }
 

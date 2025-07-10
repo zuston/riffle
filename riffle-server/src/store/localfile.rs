@@ -28,7 +28,7 @@ use crate::metric::{
 };
 use crate::store::ResponseDataIndex::Local;
 use crate::store::{
-    Block, BytesWrapper, LocalDataIndex, PartitionedLocalData, Persistent, RequireBufferResponse,
+    Block, DataBytes, LocalDataIndex, PartitionedLocalData, Persistent, RequireBufferResponse,
     ResponseData, ResponseDataIndex, Store,
 };
 use std::cmp::min;
@@ -530,7 +530,7 @@ impl Store for LocalFileStore {
 
                 // Detect inconsistent data
                 if self.conf.index_consistency_detection_enable && data.len() > INDEX_BLOCK_SIZE {
-                    data = BytesWrapper::Direct(data.freeze());
+                    data = DataBytes::Direct(data.freeze());
                     if let Err(e) = LocalFileStore::detect_index_inconsistency(
                         &data.get_direct(),
                         len as i64,

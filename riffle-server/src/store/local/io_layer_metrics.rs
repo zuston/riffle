@@ -10,7 +10,7 @@ use crate::store::local::io_layer_timeout::TimeoutLayer;
 use crate::store::local::layers::{Handler, Layer};
 use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
 use crate::store::local::{FileStat, LocalIO};
-use crate::store::BytesWrapper;
+use crate::store::DataBytes;
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::sync::Arc;
@@ -89,7 +89,7 @@ impl LocalIO for MetricsLayerWrapper {
         &self,
         path: &str,
         options: ReadOptions,
-    ) -> anyhow::Result<BytesWrapper, WorkerError> {
+    ) -> anyhow::Result<DataBytes, WorkerError> {
         let timer = if options.direct_io {
             LOCALFILE_DISK_DIRECT_READ_OPERATION_DURATION
                 .with_label_values(&[&self.root])
