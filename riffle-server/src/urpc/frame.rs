@@ -8,7 +8,7 @@ use crate::urpc::command::{
     RpcResponseCommand, SendDataRequestCommand,
 };
 use anyhow::{Error, Result};
-use bytes::{Buf, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use log::warn;
 use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
 use std::collections::HashMap;
@@ -82,7 +82,11 @@ pub enum Frame {
 }
 
 impl Frame {
-    pub async fn write(stream: &mut BufWriter<TcpStream>, frame: &Frame) -> Result<()> {
+    pub async fn write(
+        stream: &mut TcpStream,
+        frame: &Frame,
+        write_buf: &mut BytesMut,
+    ) -> Result<()> {
         match frame {
             Frame::GetLocalDataResponse(resp) => {
                 debug!("gotten the localfile data response");
@@ -96,23 +100,22 @@ impl Frame {
                 let data = &resp.data;
 
                 // header
-                stream.write_i32(msg_bytes.len() as i32 + 8 + 4 + 4).await?;
-                stream
-                    .write_u8(MessageType::GetLocalDataResponse as u8)
-                    .await?;
-                stream.write_i32(data.len() as i32).await?;
+                write_buf.put_i32(msg_bytes.len() as i32 + 8 + 4 + 4);
+                write_buf.put_u8(MessageType::GetLocalDataResponse as u8);
+                write_buf.put_i32(data.len() as i32);
 
                 // partial content with general response info
-                stream.write_i64(request_id).await?;
-                stream.write_i32(status_code).await?;
+                write_buf.put_i64(request_id);
+                write_buf.put_i32(status_code);
 
-                stream.write_i32(msg_bytes.len() as i32).await?;
-                stream.write_all(msg_bytes).await?;
+                write_buf.put_i32(msg_bytes.len() as i32);
+                write_buf.put(msg_bytes);
 
+                stream.write_all(&write_buf.split()).await?;
                 // write all data
                 stream.write_all(data).await?;
 
-                return Ok(());
+                Ok(())
             }
             Frame::GetLocalDataIndexResponse(resp) => {
                 debug!("gotten the localfile index response");
@@ -127,28 +130,26 @@ impl Frame {
                 let data_file_len = resp.data_index.data_file_len;
 
                 // header
-                stream
-                    .write_i32(msg_bytes.len() as i32 + 8 + 4 + 4 + 8)
-                    .await?;
-                stream
-                    .write_u8(MessageType::GetLocalDataIndexResponse as u8)
-                    .await?;
-                stream.write_i32(index_bytes.len() as i32).await?;
+                write_buf.put_i32(msg_bytes.len() as i32 + 8 + 4 + 4 + 8);
+                write_buf.put_u8(MessageType::GetLocalDataIndexResponse as u8);
+                write_buf.put_i32(index_bytes.len() as i32);
 
                 // partial content with general response info
-                stream.write_i64(request_id).await?;
-                stream.write_i32(status_code).await?;
+                write_buf.put_i64(request_id);
+                write_buf.put_i32(status_code);
 
-                stream.write_i32(msg_bytes.len() as i32).await?;
-                stream.write_all(msg_bytes).await?;
+                write_buf.put_i32(msg_bytes.len() as i32);
+                write_buf.put(msg_bytes);
 
                 // write the data length
-                stream.write_i64(data_file_len).await?;
+                write_buf.put_i64(data_file_len);
+
+                stream.write_all(&write_buf.split()).await?;
                 // write the all bytes
                 let data = index_bytes.freeze();
                 stream.write_all(&data).await?;
 
-                return Ok(());
+                Ok(())
             }
             Frame::GetMemoryDataResponse(resp) => {
                 let request_id = resp.request_id;
@@ -170,37 +171,34 @@ impl Frame {
                 let segments_encode_len = (4 + segments.len() * (3 * 8 + 3 * 4)) as i32;
 
                 // header
-                stream
-                    .write_i32(msg_bytes.len() as i32 + 8 + 4 + 4 + segments_encode_len)
-                    .await?;
-                stream
-                    .write_u8(MessageType::GetMemoryDataResponse as u8)
-                    .await?;
-                stream.write_i32(data_bytes_len).await?;
+                write_buf.put_i32(msg_bytes.len() as i32 + 8 + 4 + 4 + segments_encode_len);
+                write_buf.put_u8(MessageType::GetMemoryDataResponse as u8);
+                write_buf.put_i32(data_bytes_len);
 
                 // partial content with general response info
-                stream.write_i64(request_id).await?;
-                stream.write_i32(status_code).await?;
+                write_buf.put_i64(request_id);
+                write_buf.put_i32(status_code);
 
-                stream.write_i32(msg_bytes.len() as i32).await?;
-                stream.write_all(msg_bytes).await?;
+                write_buf.put_i32(msg_bytes.len() as i32);
+                write_buf.put(msg_bytes);
 
                 // write segment
-                stream.write_i32(segments.len() as i32).await?;
+                write_buf.put_i32(segments.len() as i32);
                 for segment in segments {
-                    stream.write_i64(segment.block_id).await?;
-                    stream.write_i32(segment.offset as i32).await?;
-                    stream.write_i32(segment.length).await?;
-                    stream.write_i32(segment.uncompress_length).await?;
-                    stream.write_i64(segment.crc).await?;
-                    stream.write_i64(segment.task_attempt_id).await?;
+                    write_buf.put_i64(segment.block_id);
+                    write_buf.put_i32(segment.offset as i32);
+                    write_buf.put_i32(segment.length);
+                    write_buf.put_i32(segment.uncompress_length);
+                    write_buf.put_i64(segment.crc);
+                    write_buf.put_i64(segment.task_attempt_id);
                 }
+                stream.write_all(&write_buf.split()).await?;
 
                 // data_bytes
                 for composed_byte in data_bytes_wrapper.always_composed().iter() {
                     stream.write_all(&composed_byte).await?;
                 }
-                return Ok(());
+                Ok(())
             }
             Frame::RpcResponse(resp) => {
                 let request_id = resp.request_id;
@@ -210,20 +208,22 @@ impl Frame {
                 let msg_bytes = msg.as_bytes();
 
                 // header
-                stream.write_i32(msg_bytes.len() as i32 + 8 + 4 + 4).await?;
-                stream.write_u8(MessageType::RpcResponse as u8).await?;
-                stream.write_i32(0).await?;
+                write_buf.put_i32(msg_bytes.len() as i32 + 8 + 4 + 4);
+                write_buf.put_u8(MessageType::RpcResponse as u8);
+                write_buf.put_i32(0);
 
                 // content
-                stream.write_i64(request_id).await?;
-                stream.write_i32(status_code).await?;
+                write_buf.put_i64(request_id);
+                write_buf.put_i32(status_code);
 
-                stream.write_i32(msg_bytes.len() as i32).await?;
-                stream.write_all(msg_bytes).await?;
-                return Ok(());
+                write_buf.put_i32(msg_bytes.len() as i32);
+                write_buf.put(msg_bytes);
+
+                stream.write_all(&write_buf.split()).await?;
+                Ok(())
             }
             _ => todo!(),
-        };
+        }
     }
 
     pub fn check(src: &mut Cursor<&[u8]>) -> Result<(), WorkerError> {
