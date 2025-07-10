@@ -12,20 +12,22 @@ const INITIAL_BUFFER_LENGTH: usize = 1024 * 1024;
 
 #[derive(Debug)]
 pub struct Connection {
-    stream: BufWriter<TcpStream>,
-    buffer: BytesMut,
+    stream: TcpStream,
+    read_buf: BytesMut,
+    write_buf: BytesMut,
 }
 
 impl Connection {
     pub fn new(socket: TcpStream) -> Self {
         Connection {
-            stream: BufWriter::new(socket),
-            buffer: BytesMut::with_capacity(INITIAL_BUFFER_LENGTH),
+            stream: socket,
+            read_buf: BytesMut::with_capacity(INITIAL_BUFFER_LENGTH),
+            write_buf: BytesMut::with_capacity(INITIAL_BUFFER_LENGTH),
         }
     }
 
     fn parse_frame(&mut self) -> Result<Option<Frame>> {
-        let mut buf = Cursor::new(&self.buffer[..]);
+        let mut buf = Cursor::new(&self.read_buf[..]);
 
         match Frame::check(&mut buf) {
             Ok(_) => {
@@ -33,7 +35,7 @@ impl Connection {
                 let len = buf.position() as usize;
                 buf.set_position(0);
                 let frame = Frame::parse(&mut buf)?;
-                self.buffer.advance(len);
+                self.read_buf.advance(len);
                 URPC_REQUEST_PARSING_LATENCY
                     .with_label_values(&[&format!("{}", &frame)])
                     .observe(timer.elapsed().as_secs_f64());
@@ -45,7 +47,7 @@ impl Connection {
     }
 
     pub async fn write_frame(&mut self, frame: &Frame) -> Result<()> {
-        Frame::write(&mut self.stream, frame).await?;
+        Frame::write(&mut self.stream, frame, &mut self.write_buf).await?;
         self.stream.flush().await?;
         Ok(())
     }
@@ -63,12 +65,12 @@ impl Connection {
             //
             // On success, the number of bytes is returned. `0` indicates "end
             // of stream".
-            if 0 == self.stream.read_buf(&mut self.buffer).await? {
+            if 0 == self.stream.read_buf(&mut self.read_buf).await? {
                 // The remote closed the connection. For this to be a clean
                 // shutdown, there should be no data in the read buffer. If
                 // there is, this means that the peer closed the socket while
                 // sending a frame.
-                if self.buffer.is_empty() {
+                if self.read_buf.is_empty() {
                     return Ok(None);
                 } else {
                     return Err(WorkerError::STREAM_ABNORMAL);
