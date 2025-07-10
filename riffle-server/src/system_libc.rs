@@ -71,8 +71,8 @@ pub async fn send_file_full(
 mod tests {
     use super::*;
     use std::fs::{File, OpenOptions};
-    use std::io::Write;
     use std::io::Seek;
+    use std::io::Write;
     use std::os::fd::AsRawFd;
     use tempfile::tempfile;
     use tokio::io::AsyncReadExt;
