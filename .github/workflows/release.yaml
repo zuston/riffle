@@ -9,10 +9,6 @@ on:
   pull_request:
     types: [labeled, synchronize]
 
-concurrency:
-  group: pr-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: true
-
 jobs:
   build-and-upload:
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'build-artifacts')
