@@ -142,7 +142,7 @@ impl Frame {
                             stream,
                             raw.fd,
                             Some(raw.offset as i64),
-                            raw.length.unwrap() as usize,
+                            raw.length as usize,
                         )
                         .await?;
                     }

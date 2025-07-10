@@ -208,7 +208,7 @@ impl SyncLocalIO {
         &self,
         path: &str,
         offset: u64,
-        length: Option<u64>,
+        length: u64,
     ) -> anyhow::Result<DataBytes, WorkerError> {
         let path = self.with_root(path);
         let mut file = File::open(path)?;
@@ -431,8 +431,8 @@ impl LocalIO for SyncLocalIO {
                 .read_with_direct_io(path, options.offset, options.length.unwrap())
                 .await?;
             DataBytes::Direct(r)
-        } else if options.is_sendfile() {
-            self.read_with_sendfile(path, options.offset, options.length)?
+        } else if options.is_sendfile() && options.length.is_some() {
+            self.read_with_sendfile(path, options.offset, options.length.unwrap())?
         } else {
             let r = self
                 .read_with_buffer_io(path, options.offset, options.length)
