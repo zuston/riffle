@@ -20,25 +20,25 @@ jobs:
           - name: macos-arm64
             os: macos-latest
             build_command: cargo build --release --bin riffle-ctl
-            artifact_name: riffle-ctl-macos-arm64-${{ github.ref_name }}
+            artifact_name: riffle-ctl-macos-arm64-${{ steps.vars.outputs.name }}
             artifact_path: target/release/riffle-ctl
             docker_compose: ""
           - name: linux-arm64-anolisos8
             os: ubuntu-22.04-arm
             build_command: docker compose -f dev/anolisos8/arm64/docker-compose.yml up
-            artifact_name: riffle-server-linux-arm64-anolisos8-${{ github.ref_name }}
+            artifact_name: riffle-server-linux-arm64-anolisos8-${{ steps.vars.outputs.name }}
             artifact_path: target-docker/release/riffle-server
             docker_compose: dev/anolisos8/arm64/docker-compose.yml
           - name: linux-amd64-centos7
             os: ubuntu-22.04
             build_command: docker compose -f dev/centos7/amd64/docker-compose.yml up
-            artifact_name: riffle-server-linux-amd64-centos7-${{ github.ref_name }}
+            artifact_name: riffle-server-linux-amd64-centos7-${{ steps.vars.outputs.name }}
             artifact_path: target-docker/release/riffle-server
             docker_compose: dev/centos7/amd64/docker-compose.yml
           - name: linux-amd64-anolisos8
             os: ubuntu-22.04
             build_command: docker compose -f dev/anolisos8/amd64/docker-compose.yml up
-            artifact_name: riffle-server-linux-amd64-anolisos8-${{ github.ref_name }}
+            artifact_name: riffle-server-linux-amd64-anolisos8-${{ steps.vars.outputs.name }}
             artifact_path: target-docker/release/riffle-server
             docker_compose: dev/anolisos8/amd64/docker-compose.yml
 
@@ -50,6 +50,13 @@ jobs:
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
 
       - uses: actions/checkout@v4
+
+      - name: Sanitize ref name
+        id: vars
+        run: |
+          RAW_NAME="${{ github.ref_name || github.head_ref }}"
+          SAFE_NAME="${RAW_NAME//\//-}"
+          echo "name=$SAFE_NAME" >> $GITHUB_OUTPUT
 
       - name: Set up cache for Cargo (macOS only)
         if: ${{ matrix.os == 'macos-latest' }}
