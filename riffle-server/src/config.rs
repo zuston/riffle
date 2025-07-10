@@ -546,7 +546,34 @@ pub struct LogConfig {
     pub path: String,
     #[serde(default = "as_default_rotation_config")]
     pub rotation: RotationConfig,
+
+    #[serde(default = "as_default_max_file_size")]
+    pub max_file_size: String,
+    #[serde(default = "as_default_max_log_files")]
+    pub max_log_files: usize,
+    #[serde(default = "as_default_log_level")]
+    pub log_level: LogLevel,
 }
+
+fn as_default_log_level() -> LogLevel {
+    LogLevel::INFO
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum LogLevel {
+    DEBUG,
+    INFO,
+    WARN,
+}
+
+fn as_default_max_file_size() -> String {
+    "512M".to_string()
+}
+
+fn as_default_max_log_files() -> usize {
+    10
+}
+
 fn as_default_rotation_config() -> RotationConfig {
     RotationConfig::Daily
 }
@@ -556,6 +583,9 @@ impl Default for LogConfig {
         LogConfig {
             path: "/tmp/".to_string(),
             rotation: RotationConfig::Hourly,
+            max_file_size: as_default_max_file_size(),
+            max_log_files: as_default_max_log_files(),
+            log_level: as_default_log_level(),
         }
     }
 }
