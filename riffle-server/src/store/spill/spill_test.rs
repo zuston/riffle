@@ -8,7 +8,6 @@ mod tests {
     use crate::config::StorageType::{HDFS, LOCALFILE};
     use crate::config::{Config, StorageType};
     use crate::config_reconfigure::ReconfigurableConfManager;
-    use crate::log_service::LogService;
     use crate::metric::{
         GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES, TOTAL_MEMORY_SPILL_BYTES,
         TOTAL_MEMORY_SPILL_OPERATION_FAILED, TOTAL_SPILL_EVENTS_DROPPED,
@@ -27,11 +26,6 @@ mod tests {
     use std::sync::atomic::Ordering::SeqCst;
     use std::sync::Arc;
     use std::time::Duration;
-
-    static LOG: Lazy<()> = Lazy::new(|| {
-        LogService::init_for_test();
-        ()
-    });
 
     #[test]
     fn test_enum_display() {
@@ -101,7 +95,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_flush_after_app_purged() -> anyhow::Result<()> {
-        let _ = LOG;
         GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.set(0);
         TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND.reset();
         TOTAL_MEMORY_SPILL_BYTES.reset();
@@ -152,7 +145,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_flush_failed() {
-        let _ = LOG;
         TOTAL_MEMORY_SPILL_OPERATION_FAILED.reset();
         TOTAL_SPILL_EVENTS_DROPPED.reset();
 

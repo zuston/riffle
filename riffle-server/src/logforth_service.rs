@@ -1,24 +1,35 @@
-use crate::app_manager::SHUFFLE_SERVER_ID;
-use crate::config::LogConfig;
+use crate::config::{LogConfig, LogLevel, RotationConfig};
+use crate::util;
 use logforth::append::rolling_file::{RollingFileBuilder, Rotation};
 use logforth::append::{rolling_file, RollingFile};
 use logforth::DropGuard;
 
-const LOG_FILE_NAME: &str = "riffle-server";
+const LOG_FILE_NAME_PREFIX: &str = "riffle-server";
 
 pub struct LogService;
 impl LogService {
     pub fn init(log: &LogConfig) -> DropGuard {
-        let (rolling_writer, _guard) = RollingFileBuilder::new("logs")
-            .rotation(Rotation::Daily)
-            .filename_prefix(LOG_FILE_NAME)
-            .max_file_size(512 * 1024 * 1024)
-            .max_log_files(10)
+        let rotation = match log.rotation {
+            RotationConfig::Hourly => Rotation::Hourly,
+            RotationConfig::Daily => Rotation::Daily,
+            RotationConfig::Never => Rotation::Never,
+        };
+        let max_file_size = util::parse_raw_to_bytesize(&log.max_file_size);
+        let (rolling_writer, _guard) = RollingFileBuilder::new(&log.path)
+            .rotation(rotation)
+            .filename_prefix(LOG_FILE_NAME_PREFIX)
+            .max_file_size(max_file_size as usize)
+            .max_log_files(log.max_log_files)
             .build()
             .unwrap();
 
+        let log_level = match log.log_level {
+            LogLevel::DEBUG => log::LevelFilter::Debug,
+            LogLevel::INFO => log::LevelFilter::Info,
+            LogLevel::WARN => log::LevelFilter::Warn,
+        };
         logforth::builder()
-            .dispatch(|d| d.filter(log::LevelFilter::Info).append(rolling_writer))
+            .dispatch(|d| d.filter(log_level).append(rolling_writer))
             .apply();
 
         _guard
