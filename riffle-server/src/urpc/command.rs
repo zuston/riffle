@@ -7,7 +7,7 @@ use crate::app_manager::AppManagerRef;
 use crate::constant::StatusCode;
 use crate::metric::URPC_SEND_DATA_TRANSPORT_TIME;
 use crate::store::ResponseDataIndex::Local;
-use crate::store::{Block, LocalDataIndex, ResponseData};
+use crate::store::{Block, DataBytes, LocalDataIndex, ResponseData};
 use crate::urpc::connection::Connection;
 use crate::urpc::frame::Frame;
 use crate::urpc::shutdown::Shutdown;
@@ -128,7 +128,7 @@ pub struct GetLocalDataResponseCommand {
     pub(crate) request_id: i64,
     pub(crate) status_code: i32,
     pub(crate) ret_msg: String,
-    pub(crate) data: Bytes,
+    pub(crate) data: DataBytes,
 }
 
 #[derive(Debug, Default)]
@@ -198,7 +198,7 @@ impl GetLocalDataRequestCommand {
                         request_id,
                         status_code: StatusCode::SUCCESS.into(),
                         ret_msg: "".to_string(),
-                        data: data.data.freeze(),
+                        data: data.data,
                     }
                 } else {
                     GetLocalDataResponseCommand {

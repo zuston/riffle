@@ -2,6 +2,7 @@ use crate::error::WorkerError;
 use crate::error::WorkerError::{STREAM_INCOMPLETE, STREAM_INCORRECT};
 use crate::store::ResponseData::Mem;
 use crate::store::{Block, DataBytes};
+use crate::system_libc::send_file_full;
 use crate::urpc::command::{
     GetLocalDataIndexRequestCommand, GetLocalDataIndexResponseCommand, GetLocalDataRequestCommand,
     GetLocalDataResponseCommand, GetMemoryDataRequestCommand, GetMemoryDataResponseCommand,
@@ -14,9 +15,10 @@ use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
+use std::io;
 use std::io::{Cursor, IoSlice};
 use strum_macros::EnumVariantNames;
-use tokio::io::{AsyncWriteExt, BufWriter};
+use tokio::io::{AsyncWriteExt, BufWriter, Interest};
 use tokio::net::TcpStream;
 use tracing::{debug, info};
 
@@ -82,6 +84,20 @@ pub enum Frame {
 }
 
 impl Frame {
+    pub async fn async_io<R>(
+        stream: &mut TcpStream,
+        interest: Interest,
+        mut f: impl FnMut() -> Result<R>,
+    ) -> Result<R> {
+        let res = stream
+            .async_io(interest, || {
+                f().map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+            })
+            .await?;
+
+        Ok(res)
+    }
+
     pub async fn write(
         stream: &mut TcpStream,
         frame: &Frame,
@@ -112,8 +128,25 @@ impl Frame {
                 write_buf.put(msg_bytes);
 
                 stream.write_all(&write_buf.split()).await?;
+
                 // write all data
-                stream.write_all(data).await?;
+                match data {
+                    DataBytes::Direct(val) => {
+                        stream.write_all(val).await?;
+                    }
+                    DataBytes::Composed(val) => {
+                        stream.write_all(val.freeze().as_ref()).await?;
+                    }
+                    DataBytes::RawIO(raw) => {
+                        send_file_full(
+                            stream,
+                            raw.fd,
+                            Some(raw.offset as i64),
+                            raw.length.unwrap() as usize,
+                        )
+                        .await?;
+                    }
+                }
 
                 Ok(())
             }

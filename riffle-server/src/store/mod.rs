@@ -43,6 +43,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 
 use crate::composed_bytes::ComposedBytes;
 use crate::config_reconfigure::ReconfigurableConfManager;
+use crate::raw_io::RawIO;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::index_codec::IndexCodec;
 use crate::store::spill::SpillWritingViewContext;
@@ -133,6 +134,7 @@ pub struct PartitionedMemoryData {
 pub enum DataBytes {
     Direct(Bytes),
     Composed(ComposedBytes),
+    RawIO(RawIO),
 }
 
 impl Into<DataBytes> for Bytes {
@@ -152,6 +154,7 @@ impl DataBytes {
         match self {
             DataBytes::Direct(bytes) => bytes.len(),
             DataBytes::Composed(composed) => composed.len(),
+            DataBytes::RawIO(_) => todo!(),
         }
     }
 

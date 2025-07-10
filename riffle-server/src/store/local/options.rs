@@ -45,6 +45,7 @@ impl WriteOptions {
 }
 
 pub struct ReadOptions {
+    pub sendfile: bool,
     pub direct_io: bool,
     pub offset: u64,
     pub length: Option<u64>,
@@ -54,6 +55,7 @@ impl ReadOptions {
     // reading all from the file.
     pub fn with_read_all() -> Self {
         Self {
+            sendfile: false,
             direct_io: false,
             offset: 0,
             length: None,
@@ -62,6 +64,7 @@ impl ReadOptions {
 
     pub fn with_read_of_direct_io(offset: u64, length: u64) -> Self {
         Self {
+            sendfile: false,
             direct_io: true,
             offset,
             length: Some(length),
@@ -70,6 +73,16 @@ impl ReadOptions {
 
     pub fn with_read_of_buffer_io(offset: u64, length: u64) -> Self {
         Self {
+            sendfile: false,
+            direct_io: false,
+            offset,
+            length: Some(length),
+        }
+    }
+
+    pub fn with_sendfile(offset: u64, length: u64) -> Self {
+        Self {
+            sendfile: true,
             direct_io: false,
             offset,
             length: Some(length),
@@ -82,6 +95,10 @@ impl ReadOptions {
 
     pub fn is_direct_io(&self) -> bool {
         self.direct_io
+    }
+
+    pub fn is_sendfile(&self) -> bool {
+        self.sendfile
     }
 }
 
