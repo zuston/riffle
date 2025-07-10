@@ -1,7 +1,8 @@
 use crate::error::WorkerError;
 use crate::store::local::layers::{Handler, Layer};
+use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
 use crate::store::local::{FileStat, LocalIO};
-use crate::store::BytesWrapper;
+use crate::store::DataBytes;
 use async_trait::async_trait;
 use bytes::Bytes;
 use clap::builder::Str;
@@ -67,21 +68,20 @@ unsafe impl Sync for IoLayerRetryImpl {}
 
 #[async_trait]
 impl LocalIO for IoLayerRetryImpl {
-    async fn create_dir(&self, dir: &str) -> anyhow::Result<(), WorkerError> {
-        self.handler.create_dir(dir).await
+    async fn create(&self, dir: &str, options: CreateOptions) -> anyhow::Result<(), WorkerError> {
+        self.handler.create(dir, options).await
     }
 
-    async fn append(&self, path: &str, data: BytesWrapper) -> anyhow::Result<(), WorkerError> {
-        self.handler.append(path, data).await
+    async fn write(&self, path: &str, options: WriteOptions) -> anyhow::Result<(), WorkerError> {
+        self.handler.write(path, options).await
     }
 
     async fn read(
         &self,
         path: &str,
-        offset: i64,
-        length: Option<i64>,
-    ) -> anyhow::Result<Bytes, WorkerError> {
-        self.handler.read(path, offset, length).await
+        options: ReadOptions,
+    ) -> anyhow::Result<DataBytes, WorkerError> {
+        self.handler.read(path, options).await
     }
 
     async fn delete(&self, path: &str) -> anyhow::Result<(), WorkerError> {
@@ -95,29 +95,7 @@ impl LocalIO for IoLayerRetryImpl {
         }
     }
 
-    async fn write(&self, path: &str, data: Bytes) -> anyhow::Result<(), WorkerError> {
-        self.handler.write(path, data).await
-    }
-
     async fn file_stat(&self, path: &str) -> anyhow::Result<FileStat, WorkerError> {
         self.handler.file_stat(path).await
-    }
-
-    async fn direct_append(
-        &self,
-        path: &str,
-        written_bytes: usize,
-        data: BytesWrapper,
-    ) -> anyhow::Result<(), WorkerError> {
-        self.handler.direct_append(path, written_bytes, data).await
-    }
-
-    async fn direct_read(
-        &self,
-        path: &str,
-        offset: i64,
-        length: i64,
-    ) -> anyhow::Result<Bytes, WorkerError> {
-        self.handler.direct_read(path, offset, length).await
     }
 }

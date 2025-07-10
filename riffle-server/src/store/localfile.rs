@@ -28,8 +28,8 @@ use crate::metric::{
 };
 use crate::store::ResponseDataIndex::Local;
 use crate::store::{
-    Block, LocalDataIndex, PartitionedLocalData, Persistent, RequireBufferResponse, ResponseData,
-    ResponseDataIndex, Store,
+    Block, DataBytes, LocalDataIndex, PartitionedLocalData, Persistent, RequireBufferResponse,
+    ResponseData, ResponseDataIndex, Store,
 };
 use std::cmp::min;
 use std::fs;
@@ -54,6 +54,7 @@ use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::index_codec::{IndexCodec, INDEX_BLOCK_SIZE};
 use crate::store::local::delegator::LocalDiskDelegator;
+use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
 use crate::store::local::{LocalDiskStorage, LocalIO, LocalfileStoreStat};
 use crate::store::spill::SpillWritingViewContext;
 use crate::util;
@@ -297,22 +298,19 @@ impl LocalFileStore {
             if let Some(path) = Path::new(&data_file_path).parent() {
                 let path = format!("{}/", path.to_str().unwrap()).as_str().to_owned();
                 local_disk
-                    .create_dir(path.as_str())
+                    .create(path.as_str(), CreateOptions::DIR)
                     .instrument_await(format!("creating the directory: {}", path.as_str()))
                     .await?;
             }
         }
 
         let shuffle_file_format = self.create_shuffle_format(blocks, next_offset as i64)?;
-        let append_future = if self.direct_io_enable && self.direct_io_append_enable {
-            local_disk.direct_append(
-                &data_file_path,
-                next_offset as usize,
-                shuffle_file_format.data,
-            )
+        let options = if self.direct_io_enable && self.direct_io_append_enable {
+            WriteOptions::with_append_of_direct_io(shuffle_file_format.data, next_offset)
         } else {
-            local_disk.append(&data_file_path, shuffle_file_format.data)
+            WriteOptions::with_append_of_buffer_io(shuffle_file_format.data)
         };
+        let append_future = local_disk.write(&data_file_path, options);
         append_future
             .instrument_await(format!(
                 "data flushing with {} bytes. path: {}",
@@ -321,7 +319,10 @@ impl LocalFileStore {
             .await?;
         let index_bytes_len = shuffle_file_format.index.len();
         local_disk
-            .append(&index_file_path, shuffle_file_format.index)
+            .write(
+                &index_file_path,
+                WriteOptions::with_append_of_buffer_io(shuffle_file_format.index),
+            )
             .instrument_await(format!(
                 "index flushing with {} bytes. path: {}",
                 index_bytes_len, &index_file_path
@@ -463,12 +464,12 @@ impl Store for LocalFileStore {
                         local_disk.root(),
                     ));
                 }
-
-                let future_read = if self.direct_io_enable && self.direct_io_read_enable {
-                    local_disk.direct_read(&data_file_path, offset, len)
+                let read_options = if self.direct_io_enable && self.direct_io_read_enable {
+                    ReadOptions::with_read_of_direct_io(offset as u64, len as u64)
                 } else {
-                    local_disk.read(&data_file_path, offset, Some(len))
+                    ReadOptions::with_read_of_buffer_io(offset as u64, len as u64)
                 };
+                let future_read = local_disk.read(&data_file_path, read_options);
                 let data = future_read
                     .instrument_await(format!(
                         "getting data from offset:{} with expected {} bytes from localfile: {}",
@@ -514,8 +515,8 @@ impl Store for LocalFileStore {
                     ));
                 }
                 let len = partition_coordinator.pointer.load(SeqCst);
-                let data = local_disk
-                    .read(&index_file_path, 0, None)
+                let mut data = local_disk
+                    .read(&index_file_path, ReadOptions::with_read_all())
                     .instrument_await(format!(
                         "reading index data from file: {:?}",
                         &index_file_path
@@ -529,8 +530,9 @@ impl Store for LocalFileStore {
 
                 // Detect inconsistent data
                 if self.conf.index_consistency_detection_enable && data.len() > INDEX_BLOCK_SIZE {
+                    data = DataBytes::Direct(data.freeze());
                     if let Err(e) = LocalFileStore::detect_index_inconsistency(
-                        &data,
+                        &data.get_direct(),
                         len as i64,
                         &local_disk.root(),
                         &index_file_path,
@@ -897,7 +899,7 @@ mod test {
 
             match read_result.unwrap() {
                 ResponseData::Local(partitioned_data) => {
-                    assert_eq!(expected, partitioned_data.data.as_ref());
+                    assert_eq!(expected, partitioned_data.data.freeze().as_ref());
                 }
                 _ => panic!(),
             }
@@ -933,7 +935,7 @@ mod test {
 
         match result.unwrap() {
             ResponseDataIndex::Local(data) => {
-                let mut index = data.index_data;
+                let mut index = data.index_data.freeze();
                 let offset_1 = index.get_i64();
                 assert_eq!(0, offset_1);
                 let length_1 = index.get_i32();

@@ -8,8 +8,9 @@ use crate::runtime::RuntimeRef;
 use crate::store::alignment::io_buffer_pool::{IoBufferPool, RecycledIoBuffer};
 use crate::store::alignment::io_bytes::IoBuffer;
 use crate::store::alignment::{ALIGN, IO_BUFFER_ALLOCATOR};
+use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
 use crate::store::local::{FileStat, LocalIO};
-use crate::store::BytesWrapper;
+use crate::store::DataBytes;
 use allocator_api2::SliceExt;
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -69,6 +70,188 @@ impl SyncLocalIO {
     fn with_root(&self, path: &str) -> String {
         format!("{}/{}", &self.inner.root, path)
     }
+
+    async fn append_with_direct_io(
+        &self,
+        path: &str,
+        written_bytes: usize,
+        raw_data: DataBytes,
+    ) -> anyhow::Result<(), WorkerError> {
+        let raw_path = self.with_root(path);
+        let r = self
+            .inner
+            .write_runtime_ref
+            .spawn_blocking(move || {
+                let path = Path::new(&raw_path);
+                let file_len = match fs::metadata(&path) {
+                    Ok(metadata) => {
+                        let len = metadata.len();
+                        len
+                    }
+                    Err(_) => 0,
+                };
+                let (mut next_offset, remain_bytes) = if file_len != written_bytes as u64 {
+                    let left = align_down(ALIGN, written_bytes);
+                    // todo: will only read 4k, but will use 16M io_buffer, it should be optimized
+                    let remaining_bytes =
+                        inner_direct_read(&raw_path, left as u64, (written_bytes - left) as u64)?;
+                    (left as u64, Some(remaining_bytes))
+                } else {
+                    (file_len, None)
+                };
+                let mut batch_bytes = match raw_data {
+                    DataBytes::Direct(bytes) => vec![bytes],
+                    DataBytes::Composed(composed) => composed.to_vec(),
+                };
+                if let Some(remain_bytes) = remain_bytes {
+                    batch_bytes.insert(0, remain_bytes);
+                }
+                let total_len = batch_bytes.iter().map(|b| b.len()).sum::<usize>();
+
+                let mut opts = OpenOptions::new();
+                opts.create(true).write(true);
+                #[cfg(target_os = "linux")]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    opts.custom_flags(libc::O_DIRECT | libc::O_NOATIME);
+                }
+                let file = opts.open(path)?;
+
+                let mut io_buffer = IO_BUFFER_POOL.acquire();
+                let written = fill_buffer_and_write(
+                    &mut io_buffer,
+                    IO_BUFFER_POOL.buffer_size(),
+                    batch_bytes,
+                    &file,
+                    next_offset as usize,
+                )?;
+                if written != total_len {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!(
+                            "Errors on direct appending. expected: {}, actual: {}",
+                            total_len, written
+                        ),
+                    ));
+                }
+                file.sync_all()?;
+                Ok::<(), io::Error>(())
+            })
+            .instrument_await("wait the spawned block future")
+            .await
+            .map_err(|e| anyhow!(e))??;
+
+        Ok(r)
+    }
+
+    async fn read_with_direct_io(
+        &self,
+        path: &str,
+        offset: u64,
+        len: u64,
+    ) -> anyhow::Result<Bytes, WorkerError> {
+        let path = self.with_root(path);
+        let r = self
+            .inner
+            .read_runtime_ref
+            .spawn_blocking(move || inner_direct_read(&path, offset, len))
+            .instrument_await("wait the spawned block future")
+            .await??;
+
+        Ok(r)
+    }
+
+    async fn append_with_buffer_io(
+        &self,
+        path: &str,
+        data: DataBytes,
+    ) -> anyhow::Result<(), WorkerError> {
+        let path = self.with_root(path);
+        let buffer_capacity = self.inner.buf_writer_capacity.clone();
+
+        let r = self
+            .inner
+            .write_runtime_ref
+            .spawn_blocking(move || {
+                let path = Path::new(&path);
+                let mut file = OpenOptions::new().append(true).create(true).open(path)?;
+                let mut buf_writer = match buffer_capacity {
+                    Some(capacity) => BufWriter::with_capacity(capacity, file),
+                    _ => BufWriter::new(file),
+                };
+
+                match data {
+                    DataBytes::Direct(bytes) => buf_writer.write_all(&bytes)?,
+                    DataBytes::Composed(composed) => {
+                        buf_writer.write_all(&composed.freeze())?;
+                    }
+                }
+                buf_writer.flush()?;
+
+                let file = buf_writer.into_inner()?;
+                file.sync_all()?;
+
+                Ok::<(), io::Error>(())
+            })
+            .instrument_await("wait the spawned block future")
+            .await
+            .map_err(|e| anyhow!(e))??;
+
+        Ok(())
+    }
+
+    async fn read_with_buffer_io(
+        &self,
+        path: &str,
+        offset: u64,
+        length: Option<u64>,
+    ) -> anyhow::Result<Bytes, WorkerError> {
+        let path = self.with_root(path);
+        let buf = self.inner.buf_reader_capacity.clone();
+
+        let r = self
+            .inner
+            .read_runtime_ref
+            .spawn_blocking(move || {
+                let path = Path::new(&path);
+                if length.is_none() {
+                    let data = fs::read(path)?;
+                    return Ok(Bytes::from(data));
+                }
+
+                let len = length.unwrap() as usize;
+                let mut file = File::open(path)?;
+
+                let start = Instant::now();
+                let mut buffer = vec![0; len];
+                LOCALFILE_READ_MEMORY_ALLOCATION_LATENCY.record(start.elapsed().as_nanos() as u64);
+
+                let bytes_read = match buf {
+                    Some(capacity) => {
+                        let mut reader = BufReader::with_capacity(capacity, file);
+                        reader.seek(SeekFrom::Start(offset))?;
+                        reader.read(&mut buffer)?
+                    }
+                    _ => {
+                        file.seek(SeekFrom::Start(offset))?;
+                        file.read(&mut buffer)?
+                    }
+                };
+
+                if bytes_read != len {
+                    return Err(anyhow!(format!(
+                        "Not expected bytes reading. expected: {}, actual: {}",
+                        len, bytes_read
+                    )));
+                }
+
+                Ok(Bytes::from(buffer))
+            })
+            .instrument_await("wait the spawned block future")
+            .await??;
+
+        Ok(r)
+    }
 }
 
 fn fill_buffer_and_write(
@@ -127,7 +310,7 @@ fn fill_buffer_and_write(
     Ok(written_len)
 }
 
-fn inner_direct_read(path: &str, offset: i64, len: i64) -> Result<Bytes, Error> {
+fn inner_direct_read(path: &str, offset: u64, len: u64) -> Result<Bytes, Error> {
     let left_boundary = align_down(ALIGN, offset as usize);
     let right_boundary = align_up(ALIGN, (offset + len) as usize);
     let range = right_boundary - left_boundary;
@@ -186,103 +369,55 @@ fn inner_direct_read(path: &str, offset: i64, len: i64) -> Result<Bytes, Error> 
 
 #[async_trait]
 impl LocalIO for SyncLocalIO {
-    async fn create_dir(&self, dir: &str) -> anyhow::Result<(), WorkerError> {
-        let dir = self.with_root(dir);
-        let r = self
-            .inner
-            .write_runtime_ref
-            .spawn_blocking(move || fs::create_dir_all(dir))
-            .instrument_await("wait the spawned block future")
-            .await??;
-        Ok(())
+    async fn create(&self, path: &str, options: CreateOptions) -> anyhow::Result<(), WorkerError> {
+        match options {
+            CreateOptions::FILE => Err(WorkerError::Other(anyhow!("Not support of FILE create!"))),
+            CreateOptions::DIR => {
+                let dir = self.with_root(path);
+                let r = self
+                    .inner
+                    .write_runtime_ref
+                    .spawn_blocking(move || fs::create_dir_all(dir))
+                    .instrument_await("wait the spawned block future")
+                    .await??;
+                Ok(())
+            }
+        }
     }
 
-    async fn append(&self, path: &str, data: BytesWrapper) -> anyhow::Result<(), WorkerError> {
-        let path = self.with_root(path);
-        let buffer_capacity = self.inner.buf_writer_capacity.clone();
-
-        let r = self
-            .inner
-            .write_runtime_ref
-            .spawn_blocking(move || {
-                let path = Path::new(&path);
-                let mut file = OpenOptions::new().append(true).create(true).open(path)?;
-                let mut buf_writer = match buffer_capacity {
-                    Some(capacity) => BufWriter::with_capacity(capacity, file),
-                    _ => BufWriter::new(file),
-                };
-
-                match data {
-                    BytesWrapper::Direct(bytes) => buf_writer.write_all(&bytes)?,
-                    BytesWrapper::Composed(composed) => {
-                        buf_writer.write_all(&composed.freeze())?;
-                    }
-                }
-                buf_writer.flush()?;
-
-                let file = buf_writer.into_inner()?;
-                file.sync_all()?;
-
-                Ok::<(), io::Error>(())
-            })
-            .instrument_await("wait the spawned block future")
-            .await
-            .map_err(|e| anyhow!(e))??;
-
+    async fn write(&self, path: &str, options: WriteOptions) -> anyhow::Result<(), WorkerError> {
+        if options.is_append() {
+            if options.is_direct_io() {
+                let offset = options.offset.unwrap();
+                self.append_with_direct_io(path, offset as usize, options.data)
+                    .await?;
+            } else {
+                self.append_with_buffer_io(path, options.data).await?;
+            }
+        } else {
+            let path = self.with_root(path);
+            let data = options.data.freeze();
+            self.inner
+                .write_runtime_ref
+                .spawn_blocking(move || fs::write(path, data))
+                .await??;
+        }
         Ok(())
     }
 
     async fn read(
         &self,
         path: &str,
-        offset: i64,
-        length: Option<i64>,
-    ) -> anyhow::Result<Bytes, WorkerError> {
-        let path = self.with_root(path);
-        let buf = self.inner.buf_reader_capacity.clone();
-
-        let r = self
-            .inner
-            .read_runtime_ref
-            .spawn_blocking(move || {
-                let path = Path::new(&path);
-                if length.is_none() {
-                    let data = fs::read(path)?;
-                    return Ok(Bytes::from(data));
-                }
-
-                let len = length.unwrap() as usize;
-                let mut file = File::open(path)?;
-
-                let start = Instant::now();
-                let mut buffer = vec![0; len];
-                LOCALFILE_READ_MEMORY_ALLOCATION_LATENCY.record(start.elapsed().as_nanos() as u64);
-
-                let bytes_read = match buf {
-                    Some(capacity) => {
-                        let mut reader = BufReader::with_capacity(capacity, file);
-                        reader.seek(SeekFrom::Start(offset as u64))?;
-                        reader.read(&mut buffer)?
-                    }
-                    _ => {
-                        file.seek(SeekFrom::Start(offset as u64))?;
-                        file.read(&mut buffer)?
-                    }
-                };
-
-                if bytes_read != len {
-                    return Err(anyhow!(format!(
-                        "Not expected bytes reading. expected: {}, actual: {}",
-                        len, bytes_read
-                    )));
-                }
-
-                Ok(Bytes::from(buffer))
-            })
-            .instrument_await("wait the spawned block future")
-            .await??;
-
-        Ok(r)
+        options: ReadOptions,
+    ) -> anyhow::Result<DataBytes, WorkerError> {
+        let result = if options.is_direct_io() {
+            self.read_with_direct_io(path, options.offset, options.length.unwrap())
+                .await?
+        } else {
+            self.read_with_buffer_io(path, options.offset, options.length)
+                .await?
+        };
+        Ok(DataBytes::Direct(result))
     }
 
     async fn delete(&self, path: &str) -> anyhow::Result<(), WorkerError> {
@@ -306,16 +441,6 @@ impl LocalIO for SyncLocalIO {
         Ok(())
     }
 
-    async fn write(&self, path: &str, data: Bytes) -> anyhow::Result<(), WorkerError> {
-        let path = self.with_root(path);
-        let r = self
-            .inner
-            .write_runtime_ref
-            .spawn_blocking(move || fs::write(path, data))
-            .await??;
-        Ok(())
-    }
-
     async fn file_stat(&self, path: &str) -> anyhow::Result<FileStat, WorkerError> {
         let path = self.with_root(path);
         let r = self
@@ -327,96 +452,6 @@ impl LocalIO for SyncLocalIO {
             content_length: r.len(),
         })
     }
-
-    async fn direct_append(
-        &self,
-        path: &str,
-        written_bytes: usize,
-        raw_data: BytesWrapper,
-    ) -> anyhow::Result<(), WorkerError> {
-        let raw_path = self.with_root(path);
-        let r = self
-            .inner
-            .write_runtime_ref
-            .spawn_blocking(move || {
-                let path = Path::new(&raw_path);
-                let file_len = match fs::metadata(&path) {
-                    Ok(metadata) => {
-                        let len = metadata.len();
-                        len
-                    }
-                    Err(_) => 0,
-                };
-                let (mut next_offset, remain_bytes) = if file_len != written_bytes as u64 {
-                    let left = align_down(ALIGN, written_bytes);
-                    // todo: will only read 4k, but will use 16M io_buffer, it should be optimized
-                    let remaining_bytes =
-                        inner_direct_read(&raw_path, left as i64, (written_bytes - left) as i64)?;
-                    (left as u64, Some(remaining_bytes))
-                } else {
-                    (file_len, None)
-                };
-                let mut batch_bytes = match raw_data {
-                    BytesWrapper::Direct(bytes) => vec![bytes],
-                    BytesWrapper::Composed(composed) => composed.to_vec(),
-                };
-                if let Some(remain_bytes) = remain_bytes {
-                    batch_bytes.insert(0, remain_bytes);
-                }
-                let total_len = batch_bytes.iter().map(|b| b.len()).sum::<usize>();
-
-                let mut opts = OpenOptions::new();
-                opts.create(true).write(true);
-                #[cfg(target_os = "linux")]
-                {
-                    use std::os::unix::fs::OpenOptionsExt;
-                    opts.custom_flags(libc::O_DIRECT | libc::O_NOATIME);
-                }
-                let file = opts.open(path)?;
-
-                let mut io_buffer = IO_BUFFER_POOL.acquire();
-                let written = fill_buffer_and_write(
-                    &mut io_buffer,
-                    IO_BUFFER_POOL.buffer_size(),
-                    batch_bytes,
-                    &file,
-                    next_offset as usize,
-                )?;
-                if written != total_len {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        format!(
-                            "Errors on direct appending. expected: {}, actual: {}",
-                            total_len, written
-                        ),
-                    ));
-                }
-                file.sync_all()?;
-                Ok::<(), io::Error>(())
-            })
-            .instrument_await("wait the spawned block future")
-            .await
-            .map_err(|e| anyhow!(e))??;
-
-        Ok(r)
-    }
-
-    async fn direct_read(
-        &self,
-        path: &str,
-        offset: i64,
-        len: i64,
-    ) -> anyhow::Result<Bytes, WorkerError> {
-        let path = self.with_root(path);
-        let r = self
-            .inner
-            .read_runtime_ref
-            .spawn_blocking(move || inner_direct_read(&path, offset, len))
-            .instrument_await("wait the spawned block future")
-            .await??;
-
-        Ok(r)
-    }
 }
 
 #[cfg(test)]
@@ -426,6 +461,7 @@ mod test {
     use crate::runtime::manager::create_runtime;
     use crate::store::alignment::io_buffer_pool::IoBufferPool;
     use crate::store::alignment::io_bytes::IoBuffer;
+    use crate::store::local::options::{ReadOptions, WriteOptions};
     use crate::store::local::sync_io::{fill_buffer_and_write, SyncLocalIO, ALIGN};
     use crate::store::local::LocalIO;
     use bytes::{Bytes, BytesMut};
@@ -457,23 +493,33 @@ mod test {
         );
 
         // append
-        base_runtime_ref
-            .block_on(io_handler.append(data_file_name, Bytes::from(vec![0; 1000]).into()))?;
-        base_runtime_ref
-            .block_on(io_handler.append(data_file_name, Bytes::from(vec![0; 1000]).into()))?;
-        base_runtime_ref
-            .block_on(io_handler.append(data_file_name, Bytes::from(vec![0; 1000]).into()))?;
+        base_runtime_ref.block_on(io_handler.write(
+            data_file_name,
+            WriteOptions::with_append_of_buffer_io(Bytes::from(vec![0; 1000]).into()).into(),
+        ))?;
+        base_runtime_ref.block_on(io_handler.write(
+            data_file_name,
+            WriteOptions::with_append_of_buffer_io(Bytes::from(vec![0; 1000]).into()).into(),
+        ))?;
+        base_runtime_ref.block_on(io_handler.write(
+            data_file_name,
+            WriteOptions::with_append_of_buffer_io(Bytes::from(vec![0; 1000]).into()).into(),
+        ))?;
 
         // stat
         let stat = base_runtime_ref.block_on(io_handler.file_stat(data_file_name))?;
         assert_eq!(1000 * 3, stat.content_length);
 
         // read all
-        let data = base_runtime_ref.block_on(io_handler.read(data_file_name, 0, None))?;
+        let data = base_runtime_ref
+            .block_on(io_handler.read(data_file_name, ReadOptions::with_read_all()))?
+            .freeze();
         assert_eq!(vec![0; 3000], *data);
 
         // seek read
-        let data = base_runtime_ref.block_on(io_handler.read(data_file_name, 10, Some(20)))?;
+        let data = base_runtime_ref
+            .block_on(io_handler.read(data_file_name, ReadOptions::with_read_of_buffer_io(10, 20)))?
+            .freeze();
         assert_eq!(vec![0; 20], *data);
 
         // delete
@@ -597,30 +643,33 @@ mod test {
         let written_data = written_data.freeze();
 
         // append
-        let offset = base_runtime_ref.block_on(io_handler.direct_append(
+        let offset = base_runtime_ref.block_on(io_handler.write(
             data_file_name,
-            0,
-            written_data.clone().into(),
+            WriteOptions::with_append_of_direct_io(written_data.clone().into(), 0),
         ))?;
-        let offset = base_runtime_ref.block_on(io_handler.direct_append(
+        let offset = base_runtime_ref.block_on(io_handler.write(
             data_file_name,
-            10,
-            written_data.clone().into(),
+            WriteOptions::with_append_of_direct_io(written_data.clone().into(), 10),
         ))?;
-        let offset = base_runtime_ref.block_on(io_handler.direct_append(
+        let offset = base_runtime_ref.block_on(io_handler.write(
             data_file_name,
-            20,
-            Bytes::from(vec![b'a'; 4096 + 10]).into(),
+            WriteOptions::with_append_of_direct_io(Bytes::from(vec![b'a'; 4096 + 10]).into(), 20),
         ))?;
 
         // read
-        let data_1 = base_runtime_ref.block_on(io_handler.direct_read(data_file_name, 3, 3))?;
+        let data_1 = base_runtime_ref
+            .block_on(io_handler.read(data_file_name, ReadOptions::with_read_of_direct_io(3, 3)))?
+            .freeze();
         assert_eq!(vec![b'y', b'y', b'z'], data_1);
 
-        let data_2 = base_runtime_ref.block_on(io_handler.direct_read(data_file_name, 11, 4))?;
+        let data_2 = base_runtime_ref
+            .block_on(io_handler.read(data_file_name, ReadOptions::with_read_of_direct_io(11, 4)))?
+            .freeze();
         assert_eq!(vec![b'x', b'x', b'y', b'y'], data_2);
 
-        let data_3 = base_runtime_ref.block_on(io_handler.direct_read(data_file_name, 19, 2))?;
+        let data_3 = base_runtime_ref
+            .block_on(io_handler.read(data_file_name, ReadOptions::with_read_of_direct_io(19, 2)))?
+            .freeze();
         assert_eq!(vec![b'z', b'a'], data_3);
 
         assert_eq!(

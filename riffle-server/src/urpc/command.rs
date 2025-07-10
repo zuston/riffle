@@ -198,7 +198,7 @@ impl GetLocalDataRequestCommand {
                         request_id,
                         status_code: StatusCode::SUCCESS.into(),
                         ret_msg: "".to_string(),
-                        data: data.data,
+                        data: data.data.freeze(),
                     }
                 } else {
                     GetLocalDataResponseCommand {

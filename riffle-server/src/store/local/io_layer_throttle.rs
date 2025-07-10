@@ -3,8 +3,9 @@ use crate::error::WorkerError;
 use crate::runtime::manager::RuntimeManager;
 use crate::runtime::RuntimeRef;
 use crate::store::local::layers::{Handler, Layer};
+use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
 use crate::store::local::{FileStat, LocalIO};
-use crate::store::BytesWrapper;
+use crate::store::DataBytes;
 use crate::util;
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
@@ -23,7 +24,7 @@ use std::sync::Arc;
 use tokio::time::{self, Duration, Instant};
 
 // todo: using real retrieved byte size
-const READ_PER_BYTES: usize = 1024 * 1024 * 14;
+const PER_READ_BYTES: usize = 1024 * 1024 * 14;
 
 #[derive(Clone)]
 pub struct ThroughputBasedRateLimiter {
@@ -169,32 +170,27 @@ unsafe impl Sync for ThrottleLayerWrapper {}
 
 #[async_trait]
 impl LocalIO for ThrottleLayerWrapper {
-    async fn create_dir(&self, dir: &str) -> anyhow::Result<(), WorkerError> {
-        self.handler.create_dir(dir).await
-    }
-
-    async fn append(&self, path: &str, data: BytesWrapper) -> anyhow::Result<(), WorkerError> {
-        self.handler.append(path, data).await
+    async fn create(&self, path: &str, options: CreateOptions) -> anyhow::Result<(), WorkerError> {
+        self.handler.create(path, options).await
     }
 
     async fn read(
         &self,
         path: &str,
-        offset: i64,
-        length: Option<i64>,
-    ) -> anyhow::Result<Bytes, WorkerError> {
+        options: ReadOptions,
+    ) -> anyhow::Result<DataBytes, WorkerError> {
         if self.read_enabled {
             self.limiter
-                .acquire(READ_PER_BYTES)
+                .acquire(PER_READ_BYTES)
                 .instrument_await(format!(
-                    "[BUFFER_READ] Getting IO limiter permits: {}",
-                    READ_PER_BYTES
+                    "[READ] Getting IO limiter permits: {}",
+                    PER_READ_BYTES
                 ))
                 .await;
         }
 
         self.handler
-            .read(path, offset, length)
+            .read(path, options)
             .instrument_await("In throttle layer to read")
             .await
     }
@@ -203,56 +199,22 @@ impl LocalIO for ThrottleLayerWrapper {
         self.handler.delete(path).await
     }
 
-    async fn write(&self, path: &str, data: Bytes) -> anyhow::Result<(), WorkerError> {
-        self.handler.write(path, data).await
+    async fn write(&self, path: &str, options: WriteOptions) -> anyhow::Result<(), WorkerError> {
+        // only for append mode to check the permits
+        if self.write_enabled && options.append {
+            let acquired = options.data.len();
+            self.limiter
+                .acquire(acquired)
+                .instrument_await(format!("[APPEND] Getting IO limiter permits: {}", acquired))
+                .await;
+        }
+        self.handler
+            .write(path, options)
+            .instrument_await("Writing in throttle layer...")
+            .await
     }
 
     async fn file_stat(&self, path: &str) -> anyhow::Result<FileStat, WorkerError> {
         self.handler.file_stat(path).await
-    }
-
-    async fn direct_append(
-        &self,
-        path: &str,
-        written_bytes: usize,
-        data: BytesWrapper,
-    ) -> anyhow::Result<(), WorkerError> {
-        if self.write_enabled {
-            let acquired = data.len();
-            self.limiter
-                .acquire(acquired)
-                .instrument_await(format!(
-                    "[DIRECT_APPEND] Getting IO limiter permits: {}",
-                    acquired
-                ))
-                .await;
-        }
-
-        self.handler
-            .direct_append(path, written_bytes, data)
-            .instrument_await("In throttle layer to direct_append")
-            .await
-    }
-
-    async fn direct_read(
-        &self,
-        path: &str,
-        offset: i64,
-        length: i64,
-    ) -> anyhow::Result<Bytes, WorkerError> {
-        if self.read_enabled {
-            self.limiter
-                .acquire(READ_PER_BYTES)
-                .instrument_await(format!(
-                    "[DIRECT_READ] Getting IO limiter permits: {}",
-                    READ_PER_BYTES
-                ))
-                .await;
-        }
-
-        self.handler
-            .direct_read(path, offset, length)
-            .instrument_await("In throttle layer to direct_read")
-            .await
     }
 }

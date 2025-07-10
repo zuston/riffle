@@ -1,7 +1,7 @@
 use crate::error::WorkerError;
 use crate::error::WorkerError::{STREAM_INCOMPLETE, STREAM_INCORRECT};
 use crate::store::ResponseData::Mem;
-use crate::store::{Block, BytesWrapper};
+use crate::store::{Block, DataBytes};
 use crate::urpc::command::{
     GetLocalDataIndexRequestCommand, GetLocalDataIndexResponseCommand, GetLocalDataRequestCommand,
     GetLocalDataResponseCommand, GetMemoryDataRequestCommand, GetMemoryDataResponseCommand,
@@ -145,7 +145,8 @@ impl Frame {
                 // write the data length
                 stream.write_i64(data_file_len).await?;
                 // write the all bytes
-                stream.write_all(index_bytes).await?;
+                let data = index_bytes.freeze();
+                stream.write_all(&data).await?;
 
                 return Ok(());
             }

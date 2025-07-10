@@ -3,9 +3,10 @@ use bytes::Bytes;
 use bytesize;
 use indicatif::{ProgressBar, ProgressStyle};
 use riffle_server::runtime::{Runtime, RuntimeRef};
+use riffle_server::store::local::options::WriteOptions;
 use riffle_server::store::local::sync_io::SyncLocalIO;
 use riffle_server::store::local::LocalIO;
-use riffle_server::store::BytesWrapper;
+use riffle_server::store::DataBytes;
 use riffle_server::util;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -90,14 +91,16 @@ impl DiskProfiler {
                     while Instant::now() < end_time {
                         let bytes = Bytes::copy_from_slice(&data);
                         if let Ok(_) = io_handler
-                            .direct_append(
+                            .write(
                                 file_path.as_str(),
-                                file_written_bytes,
-                                BytesWrapper::Direct(bytes),
+                                WriteOptions::with_append_of_direct_io(
+                                    bytes.into(),
+                                    file_written_bytes,
+                                ),
                             )
                             .await
                         {
-                            file_written_bytes += block_size;
+                            file_written_bytes += block_size as u64;
                             total_bytes
                                 .fetch_add(block_size as u64, std::sync::atomic::Ordering::Relaxed);
                         }

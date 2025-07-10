@@ -918,7 +918,7 @@ pub(crate) mod tests {
 
         match local_index_data {
             ResponseDataIndex::Local(index) => {
-                let mut index_bytes = index.index_data;
+                let mut index_bytes = index.index_data.freeze();
                 while index_bytes.has_remaining() {
                     // index_bytes_holder.put_i64(next_offset);
                     // index_bytes_holder.put_i32(length);
@@ -990,7 +990,7 @@ pub(crate) mod tests {
         };
         match store.get_index(index_view_ctx).await.unwrap() {
             ResponseDataIndex::Local(index) => {
-                let mut index_data = index.index_data;
+                let mut index_data = index.index_data.freeze();
                 while index_data.has_remaining() {
                     let offset = index_data.get_i64();
                     let length = index_data.get_i32();
@@ -1008,7 +1008,7 @@ pub(crate) mod tests {
                     let read_data = store.get(reading_view_ctx).await.unwrap();
                     match read_data {
                         ResponseData::Local(local_data) => {
-                            assert_eq!(Bytes::copy_from_slice(data), local_data.data);
+                            assert_eq!(Bytes::copy_from_slice(data), local_data.data.freeze());
                         }
                         _ => panic!(),
                     }

@@ -46,7 +46,7 @@ use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::index_codec::IndexCodec;
 use crate::store::spill::SpillWritingViewContext;
-use crate::store::BytesWrapper::{Composed, Direct};
+use crate::store::DataBytes::{Composed, Direct};
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -92,7 +92,7 @@ pub enum ResponseDataIndex {
 
 #[derive(Default, Debug)]
 pub struct LocalDataIndex {
-    pub index_data: Bytes,
+    pub index_data: DataBytes,
     pub data_file_len: i64,
 }
 
@@ -103,7 +103,7 @@ pub enum ResponseData {
 }
 
 impl ResponseData {
-    pub fn from_local(self) -> Bytes {
+    pub fn from_local(self) -> DataBytes {
         match self {
             ResponseData::Local(data) => data.data,
             _ => Default::default(),
@@ -120,68 +120,68 @@ impl ResponseData {
 
 #[derive(Debug)]
 pub struct PartitionedLocalData {
-    pub data: Bytes,
+    pub data: DataBytes,
 }
 
 #[derive(Default, Debug)]
 pub struct PartitionedMemoryData {
     pub shuffle_data_block_segments: Vec<DataSegment>,
-    pub data: BytesWrapper,
+    pub data: DataBytes,
 }
 
 #[derive(Debug)]
-pub enum BytesWrapper {
+pub enum DataBytes {
     Direct(Bytes),
     Composed(ComposedBytes),
 }
 
-impl Into<BytesWrapper> for Bytes {
-    fn into(self) -> BytesWrapper {
-        BytesWrapper::Direct(self)
+impl Into<DataBytes> for Bytes {
+    fn into(self) -> DataBytes {
+        DataBytes::Direct(self)
     }
 }
 
-impl Into<BytesWrapper> for ComposedBytes {
-    fn into(self) -> BytesWrapper {
-        BytesWrapper::Composed(self)
+impl Into<DataBytes> for ComposedBytes {
+    fn into(self) -> DataBytes {
+        DataBytes::Composed(self)
     }
 }
 
-impl BytesWrapper {
+impl DataBytes {
     pub fn len(&self) -> usize {
         match self {
-            BytesWrapper::Direct(bytes) => bytes.len(),
-            BytesWrapper::Composed(composed) => composed.len(),
+            DataBytes::Direct(bytes) => bytes.len(),
+            DataBytes::Composed(composed) => composed.len(),
         }
     }
 
     pub fn freeze(&self) -> Bytes {
         match self {
-            BytesWrapper::Direct(bytes) => bytes.clone(),
-            BytesWrapper::Composed(composed) => composed.freeze(),
+            DataBytes::Direct(bytes) => bytes.clone(),
+            DataBytes::Composed(composed) => composed.freeze(),
             _ => panic!(),
         }
     }
 
     pub fn get_direct(&self) -> Bytes {
         match self {
-            BytesWrapper::Direct(bytes) => bytes.clone(),
+            DataBytes::Direct(bytes) => bytes.clone(),
             _ => panic!(),
         }
     }
 
     pub fn always_composed(&self) -> ComposedBytes {
         match self {
-            BytesWrapper::Composed(bytes) => bytes.clone(),
-            BytesWrapper::Direct(data) => ComposedBytes::from(vec![data.clone()], data.len()),
+            DataBytes::Composed(bytes) => bytes.clone(),
+            DataBytes::Direct(data) => ComposedBytes::from(vec![data.clone()], data.len()),
             _ => panic!(),
         }
     }
 }
 
-impl Default for BytesWrapper {
+impl Default for DataBytes {
     fn default() -> Self {
-        BytesWrapper::Direct(Default::default())
+        DataBytes::Direct(Default::default())
     }
 }
 
@@ -283,8 +283,8 @@ pub trait Store {
 }
 
 pub struct ShuffleFileFormat {
-    data: BytesWrapper,
-    index: BytesWrapper,
+    data: DataBytes,
+    index: DataBytes,
     len: usize,
     offset: i64,
 }

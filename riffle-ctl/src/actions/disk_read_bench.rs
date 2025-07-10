@@ -4,6 +4,7 @@ use crate::Commands::DiskAppendBench;
 use riffle_server::config::IoLimiterConfig;
 use riffle_server::runtime::manager::create_runtime;
 use riffle_server::runtime::RuntimeRef;
+use riffle_server::store::local::options::ReadOptions;
 use riffle_server::store::local::sync_io::SyncLocalIO;
 use riffle_server::store::local::LocalIO;
 use std::fs::{self, File, OpenOptions};
@@ -102,11 +103,11 @@ impl Action for DiskReadBenchAction {
                 for _batch_idx in 0..batch_number {
                     let batch_start = Instant::now();
                     let _data = handler
-                        .read(file_name.as_str(), offset, Some(read_size as i64))
+                        .read(file_name.as_str(), ReadOptions::with_read_of_buffer_io(offset, read_size))
                         .await;
                     let batch_elapsed = batch_start.elapsed();
                     latencies.push(batch_elapsed.as_secs_f64());
-                    offset += read_size as i64;
+                    offset += read_size as u64;
                 }
                 let elapsed = start.elapsed();
                 latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());

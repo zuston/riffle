@@ -1,7 +1,8 @@
 use crate::error::WorkerError;
 use crate::store::local::layers::{Handler, Layer};
+use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
 use crate::store::local::{FileStat, LocalIO};
-use crate::store::BytesWrapper;
+use crate::store::DataBytes;
 use anyhow::Context;
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
@@ -41,33 +42,32 @@ unsafe impl Sync for AwaitTreeLayerWrapper {}
 
 #[async_trait]
 impl LocalIO for AwaitTreeLayerWrapper {
-    async fn create_dir(&self, dir: &str) -> anyhow::Result<(), WorkerError> {
+    async fn create(&self, path: &str, options: CreateOptions) -> anyhow::Result<(), WorkerError> {
         self.handler
-            .create_dir(dir)
-            .instrument_await(format!("Creating dir: {}/{}", &self.root, dir))
+            .create(path, options)
+            .instrument_await(format!("Creating {}/{}", &self.root, path))
             .await
-            .with_context(|| format!("failed to create dir: {}", dir))?;
+            .with_context(|| format!("failed to create [{}]", path))?;
         Ok(())
     }
 
-    async fn append(&self, path: &str, data: BytesWrapper) -> anyhow::Result<(), WorkerError> {
+    async fn write(&self, path: &str, options: WriteOptions) -> anyhow::Result<(), WorkerError> {
         self.handler
-            .append(path, data)
-            .instrument_await(format!("Appending to file: {}/{}", &self.root, path))
+            .write(path, options)
+            .instrument_await(format!("Writing to file: {}/{}", &self.root, path))
             .await
-            .with_context(|| format!("failed to append to file: {}/{}", &self.root, path))?;
+            .with_context(|| format!("failed to write to file: {}/{}", &self.root, path))?;
         Ok(())
     }
 
     async fn read(
         &self,
         path: &str,
-        offset: i64,
-        length: Option<i64>,
-    ) -> anyhow::Result<Bytes, WorkerError> {
+        options: ReadOptions,
+    ) -> anyhow::Result<DataBytes, WorkerError> {
         let data = self
             .handler
-            .read(path, offset, length)
+            .read(path, options)
             .instrument_await(format!("Reading from file: {}/{}", &self.root, path))
             .await
             .with_context(|| format!("failed to read from file: {}/{}", &self.root, path))?;
@@ -83,15 +83,6 @@ impl LocalIO for AwaitTreeLayerWrapper {
         Ok(())
     }
 
-    async fn write(&self, path: &str, data: Bytes) -> anyhow::Result<(), WorkerError> {
-        self.handler
-            .write(path, data)
-            .instrument_await(format!("Writing file: {}/{}", &self.root, path))
-            .await
-            .with_context(|| format!("failed to write file: {}/{}", &self.root, path))?;
-        Ok(())
-    }
-
     async fn file_stat(&self, path: &str) -> anyhow::Result<FileStat, WorkerError> {
         let stat = self
             .handler
@@ -100,34 +91,5 @@ impl LocalIO for AwaitTreeLayerWrapper {
             .await
             .with_context(|| format!("failed to state file: {}/{}", &self.root, path))?;
         Ok(stat)
-    }
-
-    async fn direct_append(
-        &self,
-        path: &str,
-        written_bytes: usize,
-        data: BytesWrapper,
-    ) -> anyhow::Result<(), WorkerError> {
-        self.handler
-            .direct_append(path, written_bytes, data)
-            .instrument_await(format!("Direct appending file: {}/{}", &self.root, path))
-            .await
-            .with_context(|| format!("failed to direct append file: {}/{}", &self.root, path))?;
-        Ok(())
-    }
-
-    async fn direct_read(
-        &self,
-        path: &str,
-        offset: i64,
-        length: i64,
-    ) -> anyhow::Result<Bytes, WorkerError> {
-        let bytes = self
-            .handler
-            .direct_read(path, offset, length)
-            .instrument_await(format!("Direct reading file: {}/{}", &self.root, path))
-            .await
-            .with_context(|| format!("failed to direct read file: {}/{}", &self.root, path))?;
-        Ok(bytes)
     }
 }

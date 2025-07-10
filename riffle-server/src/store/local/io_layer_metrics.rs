@@ -8,8 +8,9 @@ use crate::metric::{
 };
 use crate::store::local::io_layer_timeout::TimeoutLayer;
 use crate::store::local::layers::{Handler, Layer};
+use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
 use crate::store::local::{FileStat, LocalIO};
-use crate::store::BytesWrapper;
+use crate::store::DataBytes;
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::sync::Arc;
@@ -46,40 +47,61 @@ unsafe impl Sync for MetricsLayerWrapper {}
 
 #[async_trait]
 impl LocalIO for MetricsLayerWrapper {
-    async fn create_dir(&self, dir: &str) -> anyhow::Result<(), WorkerError> {
-        self.handler.create_dir(dir).await
+    async fn create(&self, dir: &str, options: CreateOptions) -> anyhow::Result<(), WorkerError> {
+        self.handler.create(dir, options).await
     }
 
-    async fn append(&self, path: &str, data: BytesWrapper) -> anyhow::Result<(), WorkerError> {
-        let len = data.len();
-        let timer = LOCALFILE_DISK_APPEND_OPERATION_DURATION
-            .with_label_values(&[&self.root])
-            .start_timer();
-        self.handler.append(path, data).await?;
-        timer.observe_duration();
+    async fn write(&self, path: &str, options: WriteOptions) -> anyhow::Result<(), WorkerError> {
+        let len = options.data.len();
+        let is_append = options.append;
+        // only record for the append mode
+        let _timer = if is_append {
+            // for buffer io
+            Some(if options.offset.is_none() {
+                LOCALFILE_DISK_APPEND_OPERATION_DURATION
+                    .with_label_values(&[&self.root])
+                    .start_timer()
+            } else {
+                // for direct io
+                LOCALFILE_DISK_DIRECT_APPEND_OPERATION_DURATION
+                    .with_label_values(&[&self.root])
+                    .start_timer()
+            })
+        } else {
+            None
+        };
 
-        TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER
-            .with_label_values(&[&self.root])
-            .inc_by(len as u64);
-        TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER
-            .with_label_values(&[&self.root])
-            .inc();
+        self.handler.write(path, options).await?;
+
+        if is_append {
+            TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER
+                .with_label_values(&[&self.root])
+                .inc_by(len as u64);
+            TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER
+                .with_label_values(&[&self.root])
+                .inc();
+        }
+
         Ok(())
     }
 
     async fn read(
         &self,
         path: &str,
-        offset: i64,
-        length: Option<i64>,
-    ) -> anyhow::Result<Bytes, WorkerError> {
-        let timer = LOCALFILE_DISK_READ_OPERATION_DURATION
-            .with_label_values(&[&self.root])
-            .start_timer();
+        options: ReadOptions,
+    ) -> anyhow::Result<DataBytes, WorkerError> {
+        let timer = if options.direct_io {
+            LOCALFILE_DISK_DIRECT_READ_OPERATION_DURATION
+                .with_label_values(&[&self.root])
+                .start_timer()
+        } else {
+            LOCALFILE_DISK_READ_OPERATION_DURATION
+                .with_label_values(&[&self.root])
+                .start_timer()
+        };
 
-        let bytes = self.handler.read(path, offset, length).await?;
+        let bytes = self.handler.read(path, options).await?;
 
-        timer.observe_duration();
         TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER
             .with_label_values(&[&self.root])
             .inc_by(bytes.len() as u64);
@@ -98,59 +120,7 @@ impl LocalIO for MetricsLayerWrapper {
         Ok(())
     }
 
-    async fn write(&self, path: &str, data: Bytes) -> anyhow::Result<(), WorkerError> {
-        self.handler.write(path, data).await
-    }
-
     async fn file_stat(&self, path: &str) -> anyhow::Result<FileStat, WorkerError> {
         self.handler.file_stat(path).await
-    }
-
-    async fn direct_append(
-        &self,
-        path: &str,
-        written_bytes: usize,
-        data: BytesWrapper,
-    ) -> anyhow::Result<(), WorkerError> {
-        let len = data.len();
-
-        let timer = LOCALFILE_DISK_DIRECT_APPEND_OPERATION_DURATION
-            .with_label_values(&[&self.root])
-            .start_timer();
-
-        self.handler
-            .direct_append(path, written_bytes, data)
-            .await?;
-
-        TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER
-            .with_label_values(&[&self.root])
-            .inc_by(len as u64);
-        TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER
-            .with_label_values(&[&self.root])
-            .inc();
-
-        Ok(())
-    }
-
-    async fn direct_read(
-        &self,
-        path: &str,
-        offset: i64,
-        length: i64,
-    ) -> anyhow::Result<Bytes, WorkerError> {
-        let timer = LOCALFILE_DISK_DIRECT_READ_OPERATION_DURATION
-            .with_label_values(&[&self.root])
-            .start_timer();
-
-        let data = self.handler.direct_read(path, offset, length).await?;
-
-        TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER
-            .with_label_values(&[&self.root])
-            .inc_by(data.len() as u64);
-        TOTAL_LOCAL_DISK_READ_OPERATION_COUNTER
-            .with_label_values(&[&self.root])
-            .inc();
-
-        Ok(data)
     }
 }

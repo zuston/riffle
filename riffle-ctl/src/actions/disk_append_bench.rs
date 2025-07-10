@@ -7,8 +7,9 @@ use riffle_server::config::{Config, IoLimiterConfig, RuntimeConfig};
 use riffle_server::http::HttpMonitorService;
 use riffle_server::runtime::manager::{create_runtime, RuntimeManager};
 use riffle_server::runtime::{Runtime, RuntimeRef};
+use riffle_server::store::local::options::WriteOptions;
 use riffle_server::store::local::sync_io::SyncLocalIO;
-use riffle_server::store::BytesWrapper;
+use riffle_server::store::DataBytes;
 use riffle_server::util;
 use std::sync::Arc;
 use std::time::Duration;
@@ -151,15 +152,17 @@ impl Action for DiskAppendBenchAction {
                 for batch in 0..batch_number {
                     let bytes = Bytes::copy_from_slice(&data);
                     match io_handler
-                        .direct_append(
+                        .write(
                             file_path.as_str(),
-                            file_written_bytes,
-                            BytesWrapper::Direct(bytes),
+                            WriteOptions::with_append_of_direct_io(
+                                bytes.into(),
+                                file_written_bytes,
+                            ),
                         )
                         .await
                     {
                         Ok(_) => {
-                            file_written_bytes += write_size;
+                            file_written_bytes += write_size as u64;
                             written_bytes
                                 .fetch_add(write_size as u64, std::sync::atomic::Ordering::Relaxed);
                             progress.inc(1);

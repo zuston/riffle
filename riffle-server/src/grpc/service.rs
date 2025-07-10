@@ -550,7 +550,7 @@ impl ShuffleServer for DefaultShuffleServer {
                 info!("[get_local_shuffle_index] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
                     duration, data_index.data_file_len, &raw_app_id, shuffle_id, &partition_id.partition_id);
                 Ok(Response::new(GetLocalShuffleIndexResponse {
-                    index_data: data_index.index_data,
+                    index_data: data_index.index_data.freeze(),
                     status: StatusCode::SUCCESS.into(),
                     ret_msg: "".to_string(),
                     data_file_len: data_index.data_file_len,
@@ -625,7 +625,7 @@ impl ShuffleServer for DefaultShuffleServer {
             duration, data.len(), &raw_app_id, shuffle_id, &partition_id.partition_id);
 
         Ok(Response::new(GetLocalShuffleDataResponse {
-            data,
+            data: data.freeze(),
             status: StatusCode::SUCCESS.into(),
             ret_msg: "".to_string(),
         }))

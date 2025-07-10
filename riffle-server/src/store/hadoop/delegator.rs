@@ -1,6 +1,6 @@
 use crate::error::WorkerError;
 use crate::store::hadoop::{FileStatus, HdfsClient};
-use crate::store::BytesWrapper;
+use crate::store::DataBytes;
 use anyhow::Context;
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
@@ -29,7 +29,7 @@ impl HdfsClient for HdfsClientDelegator {
         self.inner.touch(file_path).await
     }
 
-    async fn append(&self, file_path: &str, data: BytesWrapper) -> anyhow::Result<(), WorkerError> {
+    async fn append(&self, file_path: &str, data: DataBytes) -> anyhow::Result<(), WorkerError> {
         let f = self.inner.append(file_path, data);
         timeout(Duration::from_secs(self.operation_duration_secs), f)
             .await
