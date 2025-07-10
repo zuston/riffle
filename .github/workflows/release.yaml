@@ -6,9 +6,12 @@ on:
       - "master"
     tags:
       - "v*.*.*"
+  pull_request:
+    types: [labeled]
 
 jobs:
   build-and-upload:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'build-artifacts')
     name: Build and Upload
     runs-on: ${{ matrix.os }}
     strategy:
