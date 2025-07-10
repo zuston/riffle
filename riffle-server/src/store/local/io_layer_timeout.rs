@@ -1,5 +1,6 @@
 use crate::error::WorkerError;
 use crate::store::local::layers::{Handler, Layer};
+use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
 use crate::store::local::{FileStat, LocalIO};
 use crate::store::BytesWrapper;
 use anyhow::Context;
@@ -41,14 +42,8 @@ unsafe impl Sync for TimeoutLayerWrapper {}
 
 #[async_trait]
 impl LocalIO for TimeoutLayerWrapper {
-    async fn create_dir(&self, dir: &str) -> anyhow::Result<(), WorkerError> {
-        let f = self.handler.create_dir(dir);
-        timeout(Duration::from_secs(self.threshold_seconds), f).await??;
-        Ok(())
-    }
-
-    async fn append(&self, path: &str, data: BytesWrapper) -> anyhow::Result<(), WorkerError> {
-        let f = self.handler.append(path, data);
+    async fn create(&self, path: &str, options: CreateOptions) -> anyhow::Result<(), WorkerError> {
+        let f = self.handler.create(path, options);
         timeout(Duration::from_secs(self.threshold_seconds), f).await??;
         Ok(())
     }
@@ -56,10 +51,9 @@ impl LocalIO for TimeoutLayerWrapper {
     async fn read(
         &self,
         path: &str,
-        offset: i64,
-        length: Option<i64>,
-    ) -> anyhow::Result<Bytes, WorkerError> {
-        let f = self.handler.read(path, offset, length);
+        options: ReadOptions,
+    ) -> anyhow::Result<BytesWrapper, WorkerError> {
+        let f = self.handler.read(path, options);
         let bytes = timeout(Duration::from_secs(self.threshold_seconds), f).await??;
         Ok(bytes)
     }
@@ -70,8 +64,8 @@ impl LocalIO for TimeoutLayerWrapper {
         Ok(())
     }
 
-    async fn write(&self, path: &str, data: Bytes) -> anyhow::Result<(), WorkerError> {
-        let f = self.handler.write(path, data);
+    async fn write(&self, path: &str, options: WriteOptions) -> anyhow::Result<(), WorkerError> {
+        let f = self.handler.write(path, options);
         timeout(Duration::from_secs(self.threshold_seconds), f).await??;
         Ok(())
     }
@@ -80,27 +74,5 @@ impl LocalIO for TimeoutLayerWrapper {
         let f = self.handler.file_stat(path);
         let stat = timeout(Duration::from_secs(self.threshold_seconds), f).await??;
         Ok(stat)
-    }
-
-    async fn direct_append(
-        &self,
-        path: &str,
-        written_bytes: usize,
-        data: BytesWrapper,
-    ) -> anyhow::Result<(), WorkerError> {
-        let f = self.handler.direct_append(path, written_bytes, data);
-        timeout(Duration::from_secs(self.threshold_seconds), f).await??;
-        Ok(())
-    }
-
-    async fn direct_read(
-        &self,
-        path: &str,
-        offset: i64,
-        length: i64,
-    ) -> anyhow::Result<Bytes, WorkerError> {
-        let f = self.handler.direct_read(path, offset, length);
-        let bytes = timeout(Duration::from_secs(self.threshold_seconds), f).await??;
-        Ok(bytes)
     }
 }

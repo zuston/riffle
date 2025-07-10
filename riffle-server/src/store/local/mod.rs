@@ -16,6 +16,7 @@
 // under the License.
 
 use crate::error::WorkerError;
+use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
 use crate::store::BytesWrapper;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -29,6 +30,7 @@ mod io_layer_retry;
 pub mod io_layer_throttle;
 mod io_layer_timeout;
 pub mod layers;
+pub mod options;
 pub mod sync_io;
 
 pub struct FileStat {
@@ -37,26 +39,11 @@ pub struct FileStat {
 
 #[async_trait]
 pub trait LocalIO: Send + Sync {
-    async fn create_dir(&self, dir: &str) -> Result<(), WorkerError>;
-    async fn append(&self, path: &str, data: BytesWrapper) -> Result<(), WorkerError>;
-    async fn read(
-        &self,
-        path: &str,
-        offset: i64,
-        length: Option<i64>,
-    ) -> Result<Bytes, WorkerError>;
+    async fn create(&self, path: &str, options: CreateOptions) -> Result<(), WorkerError>;
+    async fn write(&self, path: &str, options: WriteOptions) -> Result<(), WorkerError>;
+    async fn read(&self, path: &str, options: ReadOptions) -> Result<BytesWrapper, WorkerError>;
     async fn delete(&self, path: &str) -> Result<(), WorkerError>;
-    async fn write(&self, path: &str, data: Bytes) -> Result<(), WorkerError>;
     async fn file_stat(&self, path: &str) -> Result<FileStat, WorkerError>;
-
-    async fn direct_append(
-        &self,
-        path: &str,
-        written_bytes: usize,
-        data: BytesWrapper,
-    ) -> Result<(), WorkerError>;
-    async fn direct_read(&self, path: &str, offset: i64, length: i64)
-        -> Result<Bytes, WorkerError>;
 }
 
 pub trait LocalDiskStorage {

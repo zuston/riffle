@@ -18,6 +18,7 @@ use crate::store::local::io_layer_retry::{IoLayerRetry, RETRY_MAX_TIMES};
 use crate::store::local::io_layer_throttle::{ThrottleLayer, ThroughputBasedRateLimiter};
 use crate::store::local::io_layer_timeout::TimeoutLayer;
 use crate::store::local::layers::{Handler, OperatorBuilder};
+use crate::store::local::options::{ReadOptions, WriteOptions};
 use crate::store::local::sync_io::SyncLocalIO;
 use crate::store::local::{DiskStat, FileStat, LocalDiskStorage, LocalIO};
 use crate::store::BytesWrapper;
@@ -276,16 +277,16 @@ impl LocalDiskDelegator {
         // slow disk if exceeding 5 seconds
         // todo: add disk speed latency metrics to report to coordinator
         let timer = Instant::now();
-        let f = self.direct_append(
-            &detection_file,
-            0,
-            BytesWrapper::Direct(written_data.clone()),
-        );
+        let options =
+            WriteOptions::with_append_of_direct_io(BytesWrapper::Direct(written_data.clone()), 0);
+        let f = self.write(&detection_file, options);
         timeout(Duration::from_secs(60), f).await??;
         let write_time = timer.elapsed().as_millis();
 
         let timer = Instant::now();
-        let read_data = self.read(&detection_file, 0, None).await?;
+        let options = ReadOptions::with_read_all();
+        let read_data = self.read(&detection_file, options).await?;
+        let read_data = read_data.freeze();
         let read_time = timer.elapsed().as_millis();
 
         info!(

@@ -92,7 +92,7 @@ pub enum ResponseDataIndex {
 
 #[derive(Default, Debug)]
 pub struct LocalDataIndex {
-    pub index_data: Bytes,
+    pub index_data: BytesWrapper,
     pub data_file_len: i64,
 }
 
@@ -103,7 +103,7 @@ pub enum ResponseData {
 }
 
 impl ResponseData {
-    pub fn from_local(self) -> Bytes {
+    pub fn from_local(self) -> BytesWrapper {
         match self {
             ResponseData::Local(data) => data.data,
             _ => Default::default(),
@@ -120,7 +120,7 @@ impl ResponseData {
 
 #[derive(Debug)]
 pub struct PartitionedLocalData {
-    pub data: Bytes,
+    pub data: BytesWrapper,
 }
 
 #[derive(Default, Debug)]
