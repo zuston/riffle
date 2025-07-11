@@ -44,6 +44,8 @@ mod tests {
         }
 
         let _app_ref = mini_riffle::start(&config).await?;
+        // wait all setup
+        tokio::time::sleep(Duration::from_secs(1)).await;
 
         // after one batch write/read process, the allocated memory size should be 0
         assert_eq!(0, GAUGE_MEMORY_ALLOCATED.get());
