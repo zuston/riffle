@@ -213,7 +213,7 @@ impl SyncLocalIO {
         let path = self.with_root(path);
         let mut file = File::open(path)?;
         let fd: i32 = file.as_raw_fd();
-        Ok(DataBytes::RawIO(RawIO::new(fd, offset, length)))
+        Ok(DataBytes::RawIO(RawIO::new(file, fd, offset, length)))
     }
 
     async fn read_with_buffer_io(

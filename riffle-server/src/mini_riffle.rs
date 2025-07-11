@@ -105,7 +105,7 @@ pub async fn shuffle_testing(config: &Config) -> anyhow::Result<()> {
     let mut all_bytes_data = BytesMut::new();
     let mut block_ids = vec![];
 
-    let batch_size = 3000;
+    let batch_size = 30;
 
     for idx in 0..batch_size {
         block_ids.push(idx as i64);

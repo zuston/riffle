@@ -30,12 +30,12 @@ mod tests {
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("temp file path: {} created", &temp_path);
 
-        let grpc_port = util::find_available_port().unwrap();
-        let urpc_port = util::find_available_port().unwrap();
+        let grpc_port = 20011;
+        let urpc_port = 20012;
         let mut config =
-            Config::create_mem_localfile_config(grpc_port as i32, "1G".to_string(), temp_path);
-        // config.urpc_port = Some(urpc_port);
-        // config.hybrid_store.memory_single_buffer_max_spill_size = Some("1B".to_string());
+            Config::create_mem_localfile_config(grpc_port, "1G".to_string(), temp_path);
+        config.urpc_port = Some(urpc_port);
+        config.hybrid_store.memory_single_buffer_max_spill_size = Some("1B".to_string());
 
         #[cfg(target_os = "linux")]
         {

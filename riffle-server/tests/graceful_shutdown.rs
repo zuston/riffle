@@ -41,9 +41,8 @@ mod test {
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("temp file path: {} created", &temp_path);
 
-        let grpc_port = util::find_available_port().unwrap();
-        let config =
-            Config::create_mem_localfile_config(grpc_port as i32, "1G".to_string(), temp_path);
+        let grpc_port = 20011;
+        let config = Config::create_mem_localfile_config(grpc_port, "1G".to_string(), temp_path);
         let _ = mini_riffle::start(&config).await?;
 
         let jh = tokio::spawn(async move { shuffle_testing(&config).await });
