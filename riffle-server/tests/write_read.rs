@@ -37,8 +37,11 @@ mod tests {
         config.urpc_port = Some(urpc_port);
         config.hybrid_store.memory_single_buffer_max_spill_size = Some("1B".to_string());
 
-        // let localfile_config = config.localfile_store.as_mut().unwrap();
-        // localfile_config.read_io_sendfile_enable = true;
+        #[cfg(target_os = "linux")]
+        {
+            let localfile_config = config.localfile_store.as_mut().unwrap();
+            localfile_config.read_io_sendfile_enable = true;
+        }
 
         let _app_ref = mini_riffle::start(&config).await?;
 

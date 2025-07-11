@@ -154,7 +154,7 @@ impl DataBytes {
         match self {
             DataBytes::Direct(bytes) => bytes.len(),
             DataBytes::Composed(composed) => composed.len(),
-            DataBytes::RawIO(_) => todo!(),
+            DataBytes::RawIO(io_handle) => io_handle.length as usize,
         }
     }
 
