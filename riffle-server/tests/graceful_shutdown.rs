@@ -19,12 +19,13 @@
 mod test {
     use signal_hook::consts::SIGTERM;
     use signal_hook::low_level::raise;
+    use std::time::Duration;
     use tonic::transport::Channel;
 
     use riffle_server::config::Config;
     use riffle_server::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
-    use riffle_server::mini_riffle;
     use riffle_server::mini_riffle::shuffle_testing;
+    use riffle_server::{mini_riffle, util};
 
     async fn get_data_from_remote(
         _client: &ShuffleServerClient<Channel>,
@@ -38,14 +39,16 @@ mod test {
     async fn graceful_shutdown_test() -> anyhow::Result<()> {
         let temp_dir = tempdir::TempDir::new("test_write_read").unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
-        println!("created the temp file path: {}", &temp_path);
+        println!("temp file path: {} created", &temp_path);
 
-        let grpc_port = 21101;
-        let urpc_port = 21102;
-        let config = Config::create_mem_localfile_config(grpc_port, "1G".to_string(), temp_path);
+        let grpc_port = util::find_available_port().unwrap();
+        let config =
+            Config::create_mem_localfile_config(grpc_port as i32, "1G".to_string(), temp_path);
         let _ = mini_riffle::start(&config).await?;
 
         let jh = tokio::spawn(async move { shuffle_testing(&config).await });
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
 
         // raise shutdown signal
         tokio::spawn(async {
