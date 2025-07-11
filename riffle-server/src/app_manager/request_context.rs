@@ -104,7 +104,7 @@ pub struct ReadingViewContext {
     pub rpc_source: RpcType,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RpcType {
     GRPC,
     URPC,
