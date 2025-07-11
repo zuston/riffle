@@ -20,6 +20,7 @@ mod tests {
     use anyhow::Result;
     use riffle_server::config::Config;
     use riffle_server::{mini_riffle, util};
+    use std::time::Duration;
 
     use riffle_server::metric::GAUGE_MEMORY_ALLOCATED;
     use riffle_server::mini_riffle::shuffle_testing;
