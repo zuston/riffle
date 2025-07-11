@@ -252,6 +252,8 @@ pub async fn shuffle_testing(config: &Config) -> anyhow::Result<()> {
         bytes.get_i64();
         let id = bytes.get_i64();
         accepted_block_ids.insert(id);
+        
+        println!("read partition:{} len: {}", idx, len);
 
         // getting the localfile data from the grpc
         let partitioned_local_data = grpc_client
