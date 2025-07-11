@@ -30,8 +30,8 @@ mod tests {
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("temp file path: {} created", &temp_path);
 
-        let grpc_port = 20011;
-        let urpc_port = 20012;
+        let grpc_port = 21101;
+        let urpc_port = 21102;
         let mut config =
             Config::create_mem_localfile_config(grpc_port, "1G".to_string(), temp_path);
         config.urpc_port = Some(urpc_port);

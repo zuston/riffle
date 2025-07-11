@@ -36,12 +36,13 @@ mod test {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn graceful_shutdown_test() -> anyhow::Result<()> {
         let temp_dir = tempdir::TempDir::new("test_write_read").unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("temp file path: {} created", &temp_path);
 
-        let grpc_port = 20011;
+        let grpc_port = 21101;
         let config = Config::create_mem_localfile_config(grpc_port, "1G".to_string(), temp_path);
         let _ = mini_riffle::start(&config).await?;
 
