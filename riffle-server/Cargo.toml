@@ -143,6 +143,7 @@ prost-build = { workspace = true }
 env_logger = { workspace = true }
 awaitility = { workspace = true }
 criterion = { workspace = true }
+nix = { workspace = true }
 
 [profile.dev]
 # re-enable debug assertions when pprof-rs fixed the reports for misaligned pointer dereferences

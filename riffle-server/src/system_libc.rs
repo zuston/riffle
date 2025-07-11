@@ -70,6 +70,7 @@ pub async fn send_file_full(
 #[cfg(target_os = "linux")]
 mod tests {
     use super::*;
+    use libc::{shutdown, SHUT_WR};
     use std::fs::{File, OpenOptions};
     use std::io::Seek;
     use std::io::Write;
@@ -102,9 +103,8 @@ mod tests {
             .await
             .expect("send_file_full failed");
 
-        use nix::sys::socket::Shutdown;
-        use nix::unistd::shutdown;
-        shutdown(stream.as_raw_fd(), Shutdown::Write).unwrap();
+        let ret = unsafe { shutdown(stream.as_raw_fd(), SHUT_WR) };
+        assert_eq!(ret, 0, "shutdown failed");
 
         let received = server.await.unwrap();
         assert_eq!(&received, data);
