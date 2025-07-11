@@ -13,6 +13,12 @@ fn _send_file_linux(fd_in: i32, fd_out: i32, off: Option<&mut i64>, len: usize) 
         None => std::ptr::null_mut(),
     };
     let res = unsafe { libc::sendfile(fd_out, fd_in, off, len as libc::size_t) };
+
+    let file = unsafe { std::fs::File::from_raw_fd(fd_in) };
+    let size = file.metadata()?.len();
+    println!("file size = {}", size);
+    std::mem::forget(file);
+
     Ok(res.try_into().unwrap())
 }
 
