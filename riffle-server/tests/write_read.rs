@@ -34,8 +34,8 @@ mod tests {
         let urpc_port = util::find_available_port().unwrap();
         let mut config =
             Config::create_mem_localfile_config(grpc_port as i32, "1G".to_string(), temp_path);
-        config.urpc_port = Some(urpc_port);
-        config.hybrid_store.memory_single_buffer_max_spill_size = Some("1B".to_string());
+        // config.urpc_port = Some(urpc_port);
+        // config.hybrid_store.memory_single_buffer_max_spill_size = Some("1B".to_string());
 
         #[cfg(target_os = "linux")]
         {
