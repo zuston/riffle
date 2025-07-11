@@ -1,7 +1,7 @@
 use crate::app_manager::application_identifier::ApplicationId;
 use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::request_context::{
-    ReadingIndexViewContext, ReadingOptions, ReadingViewContext, WritingViewContext,
+    ReadingIndexViewContext, ReadingOptions, ReadingViewContext, RpcType, WritingViewContext,
 };
 use crate::app_manager::AppManagerRef;
 use crate::constant::StatusCode;
@@ -94,14 +94,14 @@ impl GetMemoryDataRequestCommand {
 
         let app = app.unwrap();
         let uid = PartitionUId::new(&application_id, shuffle_id, partition_id);
-        let ctx = ReadingViewContext {
+        let ctx = ReadingViewContext::new(
             uid,
-            reading_options: ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(
+            ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(
                 last_block_id,
                 read_buffer_size as i64,
             ),
-            serialized_expected_task_ids_bitmap: None,
-        };
+            RpcType::URPC,
+        );
 
         let response = match app.select(ctx).await {
             Err(e) => GetMemoryDataResponseCommand {
@@ -176,11 +176,11 @@ impl GetLocalDataRequestCommand {
 
         let app = app.unwrap();
         let uid = PartitionUId::new(&application_id, shuffle_id, partition_id);
-        let ctx = ReadingViewContext {
+        let ctx = ReadingViewContext::new(
             uid,
-            reading_options: ReadingOptions::FILE_OFFSET_AND_LEN(offset, length as i64),
-            serialized_expected_task_ids_bitmap: None,
-        };
+            ReadingOptions::FILE_OFFSET_AND_LEN(offset, length as i64),
+            RpcType::URPC,
+        );
         let command = match app
             .select(ctx)
             .instrument_await(format!("getting local shuffle data for app:{}", &app_id))

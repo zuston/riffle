@@ -271,11 +271,9 @@ impl Store for MemoryStore {
         let buffer = self.get_buffer(&uid)?;
         let options = ctx.reading_options;
         let read_data = match options {
-            MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(last_block_id, max_size) => buffer.get_v2(
-                last_block_id,
-                max_size,
-                ctx.serialized_expected_task_ids_bitmap,
-            )?,
+            MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(last_block_id, max_size) => {
+                buffer.get_v2(last_block_id, max_size, ctx.task_ids_filter)?
+            }
             _ => panic!("Should not happen."),
         };
         RPC_BATCH_DATA_BYTES_HISTOGRAM
@@ -405,7 +403,7 @@ impl From<(i64, i64, i64)> for MemorySnapshot {
 #[cfg(test)]
 mod test {
     use crate::app_manager::request_context::{
-        PurgeDataContext, ReadingOptions, ReadingViewContext, RequireBufferContext,
+        PurgeDataContext, ReadingOptions, ReadingViewContext, RequireBufferContext, RpcType,
         WritingViewContext,
     };
 
@@ -598,14 +596,14 @@ mod test {
         store: &MemoryStore,
         uid: PartitionUId,
     ) -> PartitionedMemoryData {
-        let ctx = ReadingViewContext {
-            uid: uid.clone(),
-            reading_options: ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(
+        let ctx = ReadingViewContext::new(
+            uid.clone(),
+            ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(
                 last_block_id,
                 default_single_read_size,
             ),
-            serialized_expected_task_ids_bitmap: Default::default(),
-        };
+            RpcType::GRPC,
+        );
         if let Ok(data) = store.get(ctx).await {
             match data {
                 Mem(mem_data) => mem_data,
@@ -692,11 +690,11 @@ mod test {
         );
         runtime.wait(store.insert(writing_ctx)).expect("");
 
-        let reading_ctx = ReadingViewContext {
-            uid: uid.clone(),
-            reading_options: ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(-1, 1000000),
-            serialized_expected_task_ids_bitmap: Default::default(),
-        };
+        let reading_ctx = ReadingViewContext::new(
+            uid.clone(),
+            ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(-1, 1000000),
+            RpcType::GRPC,
+        );
         let data = runtime.wait(store.get(reading_ctx.clone())).expect("");
         assert_eq!(1, data.from_memory().shuffle_data_block_segments.len());
 
@@ -768,11 +766,11 @@ mod test {
         );
         runtime.wait(store.insert(writing_ctx)).unwrap();
 
-        let reading_ctx = ReadingViewContext {
-            uid: Default::default(),
-            reading_options: ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(-1, 1000000),
-            serialized_expected_task_ids_bitmap: Default::default(),
-        };
+        let reading_ctx = ReadingViewContext::new(
+            Default::default(),
+            ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(-1, 1000000),
+            RpcType::GRPC,
+        );
 
         match runtime.wait(store.get(reading_ctx)).unwrap() {
             ResponseData::Mem(data) => {
@@ -814,11 +812,11 @@ mod test {
         runtime.wait(store.insert(writing_ctx)).unwrap();
 
         // 2. block_ids_filter is empty, should return 2 blocks
-        let mut reading_ctx = ReadingViewContext {
-            uid: Default::default(),
-            reading_options: ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(-1, 1000000),
-            serialized_expected_task_ids_bitmap: Default::default(),
-        };
+        let mut reading_ctx = ReadingViewContext::new(
+            Default::default(),
+            ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(-1, 1000000),
+            RpcType::GRPC,
+        );
 
         match runtime.wait(store.get(reading_ctx)).unwrap() {
             Mem(data) => {
@@ -830,11 +828,11 @@ mod test {
         // 3. set serialized_expected_task_ids_bitmap, and set last_block_id equals 1, should return 1 block
         let mut bitmap = Treemap::default();
         bitmap.add(1);
-        reading_ctx = ReadingViewContext {
-            uid: Default::default(),
-            reading_options: ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(0, 1000000),
-            serialized_expected_task_ids_bitmap: Option::from(bitmap.clone()),
-        };
+        reading_ctx = ReadingViewContext::new(
+            Default::default(),
+            ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(0, 1000000),
+            RpcType::GRPC,
+        );
 
         match runtime.wait(store.get(reading_ctx)).unwrap() {
             Mem(data) => {

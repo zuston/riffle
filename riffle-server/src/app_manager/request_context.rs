@@ -100,7 +100,39 @@ impl WritingViewContext {
 pub struct ReadingViewContext {
     pub uid: PartitionUId,
     pub reading_options: ReadingOptions,
-    pub serialized_expected_task_ids_bitmap: Option<Treemap>,
+    pub task_ids_filter: Option<Treemap>,
+    pub rpc_source: RpcType,
+}
+
+#[derive(Debug, Clone)]
+pub enum RpcType {
+    GRPC,
+    URPC,
+}
+
+impl ReadingViewContext {
+    pub fn with_task_ids_filter(
+        uid: PartitionUId,
+        reading_options: ReadingOptions,
+        bitmap: Treemap,
+        rpc_source: RpcType,
+    ) -> Self {
+        ReadingViewContext {
+            uid,
+            reading_options,
+            task_ids_filter: Some(bitmap),
+            rpc_source,
+        }
+    }
+
+    pub fn new(uid: PartitionUId, reading_options: ReadingOptions, rpc_source: RpcType) -> Self {
+        ReadingViewContext {
+            uid,
+            reading_options,
+            task_ids_filter: None,
+            rpc_source,
+        }
+    }
 }
 
 pub struct ReadingIndexViewContext {

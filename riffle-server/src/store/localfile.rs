@@ -633,7 +633,7 @@ mod test {
     use std::path::Path;
 
     use crate::app_manager::request_context::{
-        PurgeDataContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
+        PurgeDataContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext, RpcType,
         WritingViewContext,
     };
     use crate::store::localfile::LocalFileStore;
@@ -885,11 +885,11 @@ mod test {
             size: i64,
             expected: &[u8],
         ) {
-            let reading_ctx = ReadingViewContext {
+            let reading_ctx = ReadingViewContext::new(
                 uid,
-                reading_options: ReadingOptions::FILE_OFFSET_AND_LEN(0, size as i64),
-                serialized_expected_task_ids_bitmap: Default::default(),
-            };
+                ReadingOptions::FILE_OFFSET_AND_LEN(0, size as i64),
+                RpcType::GRPC,
+            );
 
             let read_result = local_store.get(reading_ctx).await;
             if read_result.is_err() {
