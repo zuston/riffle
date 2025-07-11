@@ -96,6 +96,9 @@ pub mod util;
 #[cfg(feature = "deadlock-detection")]
 pub mod deadlock;
 
+pub mod raw_io;
+pub mod system_libc;
+
 pub mod historical_apps;
 
 pub mod config_reconfigure;

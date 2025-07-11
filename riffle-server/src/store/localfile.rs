@@ -18,7 +18,7 @@
 use crate::app_manager::request_context::ReadingOptions::FILE_OFFSET_AND_LEN;
 use crate::app_manager::request_context::{
     PurgeDataContext, ReadingIndexViewContext, ReadingViewContext, RegisterAppContext,
-    ReleaseTicketContext, RequireBufferContext, WritingViewContext,
+    ReleaseTicketContext, RequireBufferContext, RpcType, WritingViewContext,
 };
 use crate::config::{LocalfileStoreConfig, StorageType};
 use crate::error::WorkerError;
@@ -95,6 +95,9 @@ pub struct LocalFileStore {
     direct_io_read_enable: bool,
     direct_io_append_enable: bool,
 
+    // This is only valid in urpc mode.
+    read_io_sendfile_enable: bool,
+
     conf: LocalfileStoreConfig,
 }
 
@@ -124,6 +127,7 @@ impl LocalFileStore {
             direct_io_enable: config.direct_io_enable,
             direct_io_read_enable: config.direct_io_read_enable,
             direct_io_append_enable: config.direct_io_append_enable,
+            read_io_sendfile_enable: false,
             conf: Default::default(),
         }
     }
@@ -182,6 +186,7 @@ impl LocalFileStore {
             direct_io_enable: localfile_config.direct_io_enable,
             direct_io_read_enable: localfile_config.direct_io_read_enable,
             direct_io_append_enable: localfile_config.direct_io_append_enable,
+            read_io_sendfile_enable: localfile_config.read_io_sendfile_enable,
             conf: localfile_config.clone(),
         }
     }
@@ -434,8 +439,9 @@ impl Store for LocalFileStore {
 
     async fn get(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
         let uid = ctx.uid;
+        let rpc_source = ctx.rpc_source;
         let (offset, len) = match ctx.reading_options {
-            FILE_OFFSET_AND_LEN(offset, len) => (offset, len),
+            FILE_OFFSET_AND_LEN(offset, len) => (offset as u64, len as u64),
             _ => (0, 0),
         };
 
@@ -465,9 +471,11 @@ impl Store for LocalFileStore {
                     ));
                 }
                 let read_options = if self.direct_io_enable && self.direct_io_read_enable {
-                    ReadOptions::with_read_of_direct_io(offset as u64, len as u64)
+                    ReadOptions::with_read_of_direct_io(offset, len)
+                } else if (self.read_io_sendfile_enable && rpc_source == RpcType::URPC) {
+                    ReadOptions::with_sendfile(offset, len)
                 } else {
-                    ReadOptions::with_read_of_buffer_io(offset as u64, len as u64)
+                    ReadOptions::with_read_of_buffer_io(offset, len)
                 };
                 let future_read = local_disk.read(&data_file_path, read_options);
                 let data = future_read
@@ -633,7 +641,7 @@ mod test {
     use std::path::Path;
 
     use crate::app_manager::request_context::{
-        PurgeDataContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
+        PurgeDataContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext, RpcType,
         WritingViewContext,
     };
     use crate::store::localfile::LocalFileStore;
@@ -885,11 +893,11 @@ mod test {
             size: i64,
             expected: &[u8],
         ) {
-            let reading_ctx = ReadingViewContext {
+            let reading_ctx = ReadingViewContext::new(
                 uid,
-                reading_options: ReadingOptions::FILE_OFFSET_AND_LEN(0, size as i64),
-                serialized_expected_task_ids_bitmap: Default::default(),
-            };
+                ReadingOptions::FILE_OFFSET_AND_LEN(0, size as i64),
+                RpcType::GRPC,
+            );
 
             let read_result = local_store.get(reading_ctx).await;
             if read_result.is_err() {

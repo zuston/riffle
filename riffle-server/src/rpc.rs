@@ -54,7 +54,7 @@ pub trait RpcService {
 
 pub struct DefaultRpcService;
 impl DefaultRpcService {
-    fn start_urpc(
+    fn _start_urpc(
         config: &Config,
         runtime_manager: RuntimeManager,
         tx: Sender<()>,
@@ -136,6 +136,25 @@ impl DefaultRpcService {
         Ok(())
     }
 
+    // Only for tests.
+    pub fn start_urpc(
+        &self,
+        config: &Config,
+        runtime_manager: RuntimeManager,
+        app_manager_ref: AppManagerRef,
+        server_state_manager: &ServerStateManager,
+    ) -> Result<Sender<()>> {
+        let (tx, _) = broadcast::channel(1);
+        let urpc_port = config.urpc_port.unwrap();
+        DefaultRpcService::_start_urpc(
+            config,
+            runtime_manager.clone(),
+            tx.clone(),
+            app_manager_ref.clone(),
+        )?;
+        Ok(tx)
+    }
+
     pub fn start(
         &self,
         config: &Config,
@@ -164,7 +183,7 @@ impl DefaultRpcService {
                 panic!("The urpc port of {:?} has been used.", urpc_port.unwrap());
             }
 
-            DefaultRpcService::start_urpc(
+            DefaultRpcService::_start_urpc(
                 config,
                 runtime_manager.clone(),
                 tx.clone(),

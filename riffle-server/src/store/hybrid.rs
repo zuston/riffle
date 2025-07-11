@@ -745,7 +745,7 @@ impl Store for HybridStore {
 pub(crate) mod tests {
     use crate::app_manager::request_context::ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE;
     use crate::app_manager::request_context::{
-        ReadingIndexViewContext, ReadingOptions, ReadingViewContext, WritingViewContext,
+        ReadingIndexViewContext, ReadingOptions, ReadingViewContext, RpcType, WritingViewContext,
     };
     use crate::config::{
         Config, HybridStoreConfig, LocalfileStoreConfig, MemoryStoreConfig, StorageType,
@@ -901,11 +901,11 @@ pub(crate) mod tests {
         thread::sleep(Duration::from_secs(1));
 
         // read from memory and then from localfile
-        let response_data = runtime.wait(store.get(ReadingViewContext {
-            uid: uid.clone(),
-            reading_options: MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(-1, 1024 * 1024 * 1024),
-            serialized_expected_task_ids_bitmap: Default::default(),
-        }))?;
+        let response_data = runtime.wait(store.get(ReadingViewContext::new(
+            uid.clone(),
+            MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(-1, 1024 * 1024 * 1024),
+            RpcType::GRPC,
+        )))?;
 
         let mut accepted_block_ids: HashSet<i64> = HashSet::new();
         for segment in response_data.from_memory().shuffle_data_block_segments {
@@ -960,14 +960,11 @@ pub(crate) mod tests {
 
         // case1: all data has been flushed to localfile. the data in memory should be empty
         let last_block_id = -1;
-        let reading_view_ctx = ReadingViewContext {
-            uid: uid.clone(),
-            reading_options: ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(
-                last_block_id,
-                data_len as i64,
-            ),
-            serialized_expected_task_ids_bitmap: None,
-        };
+        let reading_view_ctx = ReadingViewContext::new(
+            uid.clone(),
+            ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(last_block_id, data_len as i64),
+            RpcType::GRPC,
+        );
 
         let read_data = store.get(reading_view_ctx).await;
         if read_data.is_err() {
@@ -999,11 +996,11 @@ pub(crate) mod tests {
                     let _block_id = index_data.get_i64();
                     let _task_id = index_data.get_i64();
 
-                    let reading_view_ctx = ReadingViewContext {
-                        uid: uid.clone(),
-                        reading_options: ReadingOptions::FILE_OFFSET_AND_LEN(offset, length as i64),
-                        serialized_expected_task_ids_bitmap: None,
-                    };
+                    let reading_view_ctx = ReadingViewContext::new(
+                        uid.clone(),
+                        ReadingOptions::FILE_OFFSET_AND_LEN(offset, length as i64),
+                        RpcType::GRPC,
+                    );
                     println!("reading. offset: {:?}. len: {:?}", offset, length);
                     let read_data = store.get(reading_view_ctx).await.unwrap();
                     match read_data {
@@ -1043,14 +1040,11 @@ pub(crate) mod tests {
         let mut last_block_id = -1;
         // read data one by one
         for idx in 0..=10 {
-            let reading_view_ctx = ReadingViewContext {
-                uid: uid.clone(),
-                reading_options: ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(
-                    last_block_id,
-                    data_len as i64,
-                ),
-                serialized_expected_task_ids_bitmap: Default::default(),
-            };
+            let reading_view_ctx = ReadingViewContext::new(
+                uid.clone(),
+                ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(last_block_id, data_len as i64),
+                RpcType::GRPC,
+            );
 
             let read_data = runtime.wait(store.get(reading_view_ctx));
             if read_data.is_err() {

@@ -20,7 +20,7 @@ use crate::app_manager::application_identifier::ApplicationId;
 use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::request_context::{
     GetMultiBlockIdsContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
-    ReportMultiBlockIdsContext, RequireBufferContext, WritingViewContext,
+    ReportMultiBlockIdsContext, RequireBufferContext, RpcType, WritingViewContext,
 };
 use crate::app_manager::AppManagerRef;
 use crate::constant::StatusCode;
@@ -591,11 +591,11 @@ impl ShuffleServer for DefaultShuffleServer {
         let partition_id = PartitionUId::new(&app_id, shuffle_id, partition_id);
         let data_fetched_result = app
             .unwrap()
-            .select(ReadingViewContext {
-                uid: partition_id.clone(),
-                reading_options: ReadingOptions::FILE_OFFSET_AND_LEN(req.offset, req.length as i64),
-                serialized_expected_task_ids_bitmap: Default::default(),
-            })
+            .select(ReadingViewContext::new(
+                partition_id.clone(),
+                ReadingOptions::FILE_OFFSET_AND_LEN(req.offset, req.length as i64),
+                RpcType::GRPC,
+            ))
             .instrument_await(format!(
                 "select data from localfile. uid: {:?}",
                 &partition_id
@@ -667,25 +667,26 @@ impl ShuffleServer for DefaultShuffleServer {
 
         let partition_id = PartitionUId::new(&app_id, shuffle_id, partition_id);
 
-        let serialized_expected_task_ids_bitmap =
-            if !req.serialized_expected_task_ids_bitmap.is_empty() {
-                let bitmap =
-                    Treemap::deserialize::<JvmLegacy>(&req.serialized_expected_task_ids_bitmap);
-                Some(bitmap)
-            } else {
-                None
-            };
+        let reading_options = ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(
+            req.last_block_id,
+            req.read_buffer_size as i64,
+        );
+        let reading_ctx = if !req.serialized_expected_task_ids_bitmap.is_empty() {
+            let bitmap =
+                Treemap::deserialize::<JvmLegacy>(&req.serialized_expected_task_ids_bitmap);
+            ReadingViewContext::with_task_ids_filter(
+                partition_id.clone(),
+                reading_options,
+                bitmap,
+                RpcType::GRPC,
+            )
+        } else {
+            ReadingViewContext::new(partition_id.clone(), reading_options, RpcType::GRPC)
+        };
 
         let data_fetched_result = app
             .unwrap()
-            .select(ReadingViewContext {
-                uid: partition_id.clone(),
-                reading_options: ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(
-                    req.last_block_id,
-                    req.read_buffer_size as i64,
-                ),
-                serialized_expected_task_ids_bitmap,
-            })
+            .select(reading_ctx)
             .instrument_await(format!("select data from memory. uid: {:?}", &partition_id))
             .await;
 
