@@ -36,12 +36,14 @@ use std::str::FromStr;
 
 use crate::app_manager::partition_identifier::PartitionUId;
 use crate::dashmap_extension::DashMapExtend;
+use crate::runtime::manager::RuntimeManager;
 use crate::store::mem::budget::MemoryBudget;
 use crate::store::mem::buffer::MemoryBuffer;
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::mem::ticket::TicketManager;
 use crate::store::spill::SpillWritingViewContext;
 use anyhow::anyhow;
+use anyhow::Result;
 use croaring::Treemap;
 use fastrace::trace;
 use fxhash::{FxBuildHasher, FxHasher};

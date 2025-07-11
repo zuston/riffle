@@ -43,7 +43,7 @@ impl From<TryFromPrimitiveError<MessageType>> for WorkerError {
 #[allow(non_camel_case_types)]
 #[derive(Debug, Eq, PartialEq, TryFromPrimitive)]
 #[repr(u8)]
-enum MessageType {
+pub enum MessageType {
     SendShuffleData = 3,
     GetMemoryData = 6,
     GetMemoryDataResponse = 16,
@@ -484,7 +484,7 @@ pub fn get_bytes(src: &mut Cursor<&[u8]>) -> Result<Option<Bytes>, WorkerError> 
     Ok(Some(data))
 }
 
-fn get_i64(src: &mut Cursor<&[u8]>) -> Result<i64, WorkerError> {
+pub fn get_i64(src: &mut Cursor<&[u8]>) -> Result<i64, WorkerError> {
     if !Buf::has_remaining(src) {
         return Err(STREAM_INCORRECT("get_i64".into()));
     }
@@ -527,7 +527,7 @@ fn skip_string(src: &mut Cursor<&[u8]>) -> Result<(), WorkerError> {
     Ok(())
 }
 
-fn get_string(src: &mut Cursor<&[u8]>) -> Result<String, WorkerError> {
+pub fn get_string(src: &mut Cursor<&[u8]>) -> Result<String, WorkerError> {
     if !Buf::has_remaining(src) {
         return Err(STREAM_INCORRECT("get_string 1".into()));
     }
@@ -550,7 +550,7 @@ fn get_string(src: &mut Cursor<&[u8]>) -> Result<String, WorkerError> {
     Ok(String::from_utf8(msg.to_vec())?)
 }
 
-fn get_u8(src: &mut Cursor<&[u8]>) -> Result<u8, WorkerError> {
+pub fn get_u8(src: &mut Cursor<&[u8]>) -> Result<u8, WorkerError> {
     if !Buf::has_remaining(src) {
         return Err(STREAM_INCORRECT("get_u8".into()));
     }

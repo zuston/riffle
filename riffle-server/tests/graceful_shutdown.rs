@@ -17,15 +17,14 @@
 
 #[cfg(test)]
 mod test {
-    use std::time::Duration;
-
     use signal_hook::consts::SIGTERM;
     use signal_hook::low_level::raise;
     use tonic::transport::Channel;
 
     use riffle_server::config::Config;
     use riffle_server::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
-    use riffle_server::{start_uniffle_worker, write_read_for_one_time};
+    use riffle_server::mini_riffle;
+    use riffle_server::mini_riffle::shuffle_testing;
 
     async fn get_data_from_remote(
         _client: &ShuffleServerClient<Channel>,
@@ -35,31 +34,18 @@ mod test {
     ) {
     }
 
-    async fn start_embedded_worker(path: String, port: i32) {
-        let config = Config::create_mem_localfile_config(port, "1G".to_string(), path);
-        let _ = start_uniffle_worker(config).await;
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
-
     #[tokio::test]
-    async fn graceful_shutdown_test_with_embedded_worker_successfully_shutdown() {
+    async fn graceful_shutdown_test() -> anyhow::Result<()> {
         let temp_dir = tempdir::TempDir::new("test_write_read").unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("created the temp file path: {}", &temp_path);
 
-        let port = 21101;
-        let _ = start_embedded_worker(temp_path, port).await;
+        let grpc_port = 21101;
+        let urpc_port = 21102;
+        let config = Config::create_mem_localfile_config(grpc_port, "1G".to_string(), temp_path);
+        let _ = mini_riffle::start(&config).await?;
 
-        let client =
-            match ShuffleServerClient::connect(format!("http://{}:{}", "0.0.0.0", port)).await {
-                Ok(client) => client,
-                Err(e) => {
-                    // Handle the error, e.g., by panicking or logging it.
-                    panic!("Failed to connect: {}", e);
-                }
-            };
-
-        let jh = tokio::spawn(async move { write_read_for_one_time(client).await });
+        let jh = tokio::spawn(async move { shuffle_testing(&config).await });
 
         // raise shutdown signal
         tokio::spawn(async {
@@ -68,5 +54,7 @@ mod test {
         });
 
         let _ = jh.await.expect("Task panicked or failed.");
+
+        Ok(())
     }
 }
