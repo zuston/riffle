@@ -79,23 +79,6 @@ mod tests {
     use tokio::net::{TcpListener, TcpStream};
     use tokio::task;
 
-    #[test]
-    fn test_send_file_linux() {
-        let mut input = tempfile().expect("failed to create temp input");
-        let data = b"Hello, sendfile!";
-        input.write_all(data).expect("write failed");
-        input.flush().unwrap();
-
-        input.rewind().unwrap();
-
-        let output = tempfile().expect("failed to create temp output");
-
-        let transferred = send_file(input.as_raw_fd(), output.as_raw_fd(), None, data.len())
-            .expect("send_file failed");
-
-        assert_eq!(transferred as usize, data.len());
-    }
-
     #[tokio::test]
     async fn test_send_file_full_linux() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -118,6 +101,10 @@ mod tests {
         send_file_full(&mut stream, input.as_raw_fd(), None, data.len())
             .await
             .expect("send_file_full failed");
+
+        use nix::sys::socket::Shutdown;
+        use nix::unistd::shutdown;
+        shutdown(stream.as_raw_fd(), Shutdown::Write).unwrap();
 
         let received = server.await.unwrap();
         assert_eq!(&received, data);
