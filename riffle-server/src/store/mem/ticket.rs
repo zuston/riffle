@@ -176,10 +176,6 @@ impl TicketManager {
                     discard_tickets.push(ticket.1);
                 }
             }
-            info!(
-                "Before purging timeout tickets, allocated tickets' memory size is {}",
-                total_allocated
-            );
 
             let mut total_removed_size = 0i64;
             for ticket in discard_tickets.iter() {
