@@ -140,7 +140,7 @@ impl Frame {
                     DataBytes::RawIO(raw) => {
                         send_file_full(
                             stream,
-                            raw.fd,
+                            raw.raw_fd,
                             Some(raw.offset as i64),
                             raw.length as usize,
                         )
