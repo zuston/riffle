@@ -10,7 +10,7 @@ use crate::urpc::command::{
 };
 use anyhow::{Error, Result};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use log::warn;
+use log::{error, warn};
 use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
@@ -138,14 +138,16 @@ impl Frame {
                         stream.write_all(val.freeze().as_ref()).await?;
                     }
                     DataBytes::RawIO(raw) => {
-                        info!("Getting localfile data. offset: {}. len: {}", raw.offset, raw.length);
                         send_file_full(
                             stream,
                             raw.raw_fd,
                             Some(raw.offset as i64),
                             raw.length as usize,
                         )
-                        .await?;
+                        .await.map_err(|e| {
+                            error!("Errors on getting localfile data by sendfile. off:{}. length:{}. e: {}", raw.offset, raw.length, &e);
+                            e
+                        })?;
                     }
                 }
 
