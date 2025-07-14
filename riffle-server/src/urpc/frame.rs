@@ -138,6 +138,7 @@ impl Frame {
                         stream.write_all(val.freeze().as_ref()).await?;
                     }
                     DataBytes::RawIO(raw) => {
+                        info!("Getting localfile data. offset: {}. len: {}", raw.offset, raw.length);
                         send_file_full(
                             stream,
                             raw.raw_fd,
