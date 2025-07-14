@@ -1,5 +1,6 @@
 use crate::urpc::frame::Frame;
 use anyhow::{anyhow, Result};
+use log::warn;
 use std::os::fd::AsRawFd;
 use tokio::io::Interest;
 use tokio::net::TcpStream;
@@ -56,6 +57,7 @@ pub async fn send_file_full(
                 if e.downcast_ref::<std::io::Error>()
                     .map_or(false, |ioe| ioe.kind() == std::io::ErrorKind::WouldBlock) =>
             {
+                warn!("sendfile error: {}", e);
                 continue;
             }
 
