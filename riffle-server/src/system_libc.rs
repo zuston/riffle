@@ -27,8 +27,43 @@ fn _send_file_linux(
     Err(anyhow!("sendfile is only supported on Linux"))
 }
 
+#[cfg(target_os = "macos")]
+fn _send_file_macos(fd_in: i32, fd_out: i32, off: Option<&mut i64>, len: usize) -> Result<CInt> {
+    use libc::{c_int, off_t};
+    use std::ptr;
+    let mut offset: off_t = off.map(|v| *v as off_t).unwrap_or(0);
+    let mut len64: off_t = len as off_t;
+    // macOS sendfile: int sendfile(int fd, int s, off_t offset, off_t *len, struct sf_hdtr *hdtr, int flags);
+    let ret = unsafe {
+        libc::sendfile(
+            fd_in,
+            fd_out,
+            offset,
+            &mut len64 as *mut off_t,
+            ptr::null_mut(),
+            0,
+        )
+    };
+    if ret == -1 {
+        let err = std::io::Error::last_os_error();
+        return Err(anyhow!("sendfile error: {}", err));
+    }
+    Ok(len64 as CInt)
+}
+
 pub fn send_file(fd_in: i32, fd_out: i32, off: Option<&mut i64>, len: usize) -> Result<CInt> {
-    _send_file_linux(fd_in, fd_out, off, len)
+    #[cfg(target_os = "linux")]
+    {
+        _send_file_linux(fd_in, fd_out, off, len)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        _send_file_macos(fd_in, fd_out, off, len)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        Err(anyhow!("sendfile is only supported on Linux and macOS"))
+    }
 }
 
 pub async fn send_file_full(
@@ -69,7 +104,7 @@ pub async fn send_file_full(
 }
 
 #[cfg(test)]
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod tests {
     use super::*;
     use libc::{shutdown, SHUT_WR};

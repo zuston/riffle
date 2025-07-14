@@ -19,7 +19,7 @@
 mod tests {
     use anyhow::Result;
     use riffle_server::config::Config;
-    use riffle_server::{mini_riffle, util};
+    use riffle_server::mini_riffle;
     use std::time::Duration;
 
     use riffle_server::metric::GAUGE_MEMORY_ALLOCATED;
@@ -38,7 +38,7 @@ mod tests {
         config.urpc_port = Some(urpc_port);
         config.hybrid_store.memory_single_buffer_max_spill_size = Some("1B".to_string());
 
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             let localfile_config = config.localfile_store.as_mut().unwrap();
             localfile_config.read_io_sendfile_enable = true;
