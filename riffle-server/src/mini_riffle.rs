@@ -1,3 +1,6 @@
+use crate::app_manager::application_identifier::ApplicationId;
+use crate::app_manager::partition_identifier::PartitionUId;
+use crate::app_manager::request_context::{ReadingOptions, ReadingViewContext, RpcType};
 use crate::app_manager::{AppManager, AppManagerRef};
 use crate::common::init_global_variable;
 use crate::config;
@@ -70,7 +73,7 @@ pub async fn start(config: &Config) -> anyhow::Result<AppManagerRef> {
     Ok(app_manager_ref)
 }
 
-pub async fn shuffle_testing(config: &Config) -> anyhow::Result<()> {
+pub async fn shuffle_testing(config: &Config, app_ref: AppManagerRef) -> anyhow::Result<()> {
     let grpc_port = config.grpc_port;
     let urpc_port = config.urpc_port;
 
@@ -87,10 +90,11 @@ pub async fn shuffle_testing(config: &Config) -> anyhow::Result<()> {
         Some(port) => Some(UrpcClient::connect("0.0.0.0", port as usize).await?),
     };
 
-    let app_id = "shuffling_app_id".to_string();
+    let app_id = ApplicationId::mock();
+    let raw_app_id = app_id.to_string();
     let register_response = grpc_client
         .register_shuffle(ShuffleRegisterRequest {
-            app_id: app_id.clone(),
+            app_id: raw_app_id.clone(),
             shuffle_id: 0,
             partition_ranges: vec![],
             remote_storage: None,
@@ -106,11 +110,10 @@ pub async fn shuffle_testing(config: &Config) -> anyhow::Result<()> {
     let mut block_ids = vec![];
 
     let batch_size = 30;
-
+    let data = b"hello world";
     for idx in 0..batch_size {
         block_ids.push(idx as i64);
 
-        let data = b"hello world";
         let len = data.len();
 
         all_bytes_data.extend_from_slice(data);
@@ -118,7 +121,7 @@ pub async fn shuffle_testing(config: &Config) -> anyhow::Result<()> {
         let buffer_required_resp = grpc_client
             .require_buffer(RequireBufferRequest {
                 require_size: len as i32,
-                app_id: app_id.clone(),
+                app_id: raw_app_id.clone(),
                 shuffle_id: 0,
                 partition_ids: vec![],
             })
@@ -129,7 +132,7 @@ pub async fn shuffle_testing(config: &Config) -> anyhow::Result<()> {
 
         let response = grpc_client
             .send_shuffle_data(SendShuffleDataRequest {
-                app_id: app_id.clone(),
+                app_id: raw_app_id.clone(),
                 shuffle_id: 0,
                 require_buffer_id: buffer_required_resp.require_buffer_id,
                 shuffle_data: vec![ShuffleData {
@@ -157,7 +160,7 @@ pub async fn shuffle_testing(config: &Config) -> anyhow::Result<()> {
         let block_id = DEFAULT_BLOCK_ID_LAYOUT.get_block_id(1, partition_id as i64, 1);
         grpc_client
             .report_shuffle_result(ReportShuffleResultRequest {
-                app_id: app_id.clone(),
+                app_id: raw_app_id.clone(),
                 shuffle_id: 0,
                 task_attempt_id: 0,
                 bitmap_num: 0,
@@ -174,6 +177,33 @@ pub async fn shuffle_testing(config: &Config) -> anyhow::Result<()> {
 
     tokio::time::sleep(Duration::from_secs(1)).await;
 
+    // check from the riffle-server point
+    assert_eq!(1, app_ref.apps.len());
+    let app = app_ref.get_app(&app_id).unwrap();
+    let uid = PartitionUId::new(&app_id, 0, 0);
+    let response = app
+        .select(ReadingViewContext {
+            uid: uid.clone(),
+            reading_options: ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(-1, 10000000),
+            task_ids_filter: None,
+            rpc_source: RpcType::GRPC,
+        })
+        .await?;
+    let mut total_partition_len = 0;
+    let xdata = response.from_memory();
+    total_partition_len += xdata.data.len();
+    let response = app
+        .select(ReadingViewContext {
+            uid: uid.clone(),
+            reading_options: ReadingOptions::FILE_OFFSET_AND_LEN(0, data.len() as i64),
+            task_ids_filter: None,
+            rpc_source: RpcType::GRPC,
+        })
+        .await?;
+    let xdata = response.from_local();
+    total_partition_len += xdata.len();
+    assert_eq!(data.len(), total_partition_len);
+
     let mut accepted_block_ids = HashSet::new();
     let mut accepted_data_bytes = BytesMut::new();
 
@@ -184,7 +214,7 @@ pub async fn shuffle_testing(config: &Config) -> anyhow::Result<()> {
     for idx in 0..batch_size {
         let block_id_result = grpc_client
             .get_shuffle_result(GetShuffleResultRequest {
-                app_id: app_id.clone(),
+                app_id: raw_app_id.clone(),
                 shuffle_id: 0,
                 partition_id: idx,
                 block_id_layout: None,
@@ -206,7 +236,7 @@ pub async fn shuffle_testing(config: &Config) -> anyhow::Result<()> {
 
         let response_data = grpc_client
             .get_memory_shuffle_data(GetMemoryShuffleDataRequest {
-                app_id: app_id.clone(),
+                app_id: raw_app_id.clone(),
                 shuffle_id: 0,
                 partition_id: idx,
                 last_block_id: -1,
@@ -228,7 +258,7 @@ pub async fn shuffle_testing(config: &Config) -> anyhow::Result<()> {
     for idx in 0..batch_size {
         let local_index_data = grpc_client
             .get_local_shuffle_index(GetLocalShuffleIndexRequest {
-                app_id: app_id.clone(),
+                app_id: raw_app_id.clone(),
                 shuffle_id: 0,
                 partition_id: idx,
                 partition_num_per_range: 1,
@@ -256,7 +286,7 @@ pub async fn shuffle_testing(config: &Config) -> anyhow::Result<()> {
         // getting the localfile data from the grpc
         let partitioned_local_data = grpc_client
             .get_local_shuffle_data(GetLocalShuffleDataRequest {
-                app_id: app_id.clone(),
+                app_id: raw_app_id.clone(),
                 shuffle_id: 0,
                 partition_id: idx,
                 partition_num_per_range: 0,
@@ -275,7 +305,7 @@ pub async fn shuffle_testing(config: &Config) -> anyhow::Result<()> {
             let data = u_client
                 .get_local_shuffle_data(GetLocalDataRequestCommand {
                     request_id: 0,
-                    app_id: app_id.clone(),
+                    app_id: raw_app_id.clone(),
                     shuffle_id: 0,
                     partition_id: idx,
                     partition_num_per_range: 0,

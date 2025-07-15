@@ -18,18 +18,23 @@
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
+    use log::info;
     use riffle_server::config::Config;
+    use riffle_server::metric::GAUGE_MEMORY_ALLOCATED;
     use riffle_server::mini_riffle;
+    use riffle_server::mini_riffle::shuffle_testing;
     use std::time::Duration;
 
-    use riffle_server::metric::GAUGE_MEMORY_ALLOCATED;
-    use riffle_server::mini_riffle::shuffle_testing;
+    fn init_logger() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn shuffle_write_read_testing() -> Result<()> {
+        init_logger();
         let temp_dir = tempdir::TempDir::new("test_write_read").unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
-        println!("temp file path: {} created", &temp_path);
+        info!("temp file path: {} created", &temp_path);
 
         let grpc_port = 21101;
         let urpc_port = 21102;
@@ -37,11 +42,12 @@ mod tests {
             Config::create_mem_localfile_config(grpc_port, "1G".to_string(), temp_path);
         config.urpc_port = Some(urpc_port);
         config.hybrid_store.memory_single_buffer_max_spill_size = Some("1B".to_string());
+        config.localfile_store.as_mut().unwrap().disk_high_watermark = 1.0;
 
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             let localfile_config = config.localfile_store.as_mut().unwrap();
-            localfile_config.read_io_sendfile_enable = true;
+            localfile_config.read_io_sendfile_enable = true
         }
 
         let _app_ref = mini_riffle::start(&config).await?;
@@ -51,6 +57,6 @@ mod tests {
         // after one batch write/read process, the allocated memory size should be 0
         assert_eq!(0, GAUGE_MEMORY_ALLOCATED.get());
 
-        shuffle_testing(&config).await
+        shuffle_testing(&config, _app_ref).await
     }
 }

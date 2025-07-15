@@ -129,6 +129,7 @@ impl LocalDiskDelegator {
         // in test env, this disk detection will always make disk unhealthy status
         #[cfg(not(test))]
         {
+            info!("Starting the disk:{} checker", root);
             let runtime = runtime_manager.clone().default_runtime.clone();
             let io_delegator = delegator.clone();
             let span = format!("disk[{}] checker", root);
