@@ -315,6 +315,36 @@ pub async fn shuffle_testing(config: &Config, app_ref: AppManagerRef) -> anyhow:
                     timestamp: 0,
                 })
                 .await?;
+
+            // split the getting request into 2 requests
+            let data_1 = u_client
+                .get_local_shuffle_data(GetLocalDataRequestCommand {
+                    request_id: 0,
+                    app_id: raw_app_id.clone(),
+                    shuffle_id: 0,
+                    partition_id: idx,
+                    partition_num_per_range: 0,
+                    partition_num: 0,
+                    offset: 0,
+                    length: len - 1,
+                    timestamp: 0,
+                })
+                .await?;
+            let data_2 = u_client
+                .get_local_shuffle_data(GetLocalDataRequestCommand {
+                    request_id: 0,
+                    app_id: raw_app_id.clone(),
+                    shuffle_id: 0,
+                    partition_id: idx,
+                    partition_num_per_range: 0,
+                    partition_num: 0,
+                    offset: (len - 1) as i64,
+                    length: 1,
+                    timestamp: 0,
+                })
+                .await?;
+            assert_eq!(len - 1, data_1.len() as i32);
+            assert_eq!(1, data_2.len() as i32);
             urpc_accepted_data_bytes_from_localfile.extend_from_slice(&data);
         }
     }
