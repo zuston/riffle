@@ -383,8 +383,7 @@ pub struct Config {
     pub coordinator_quorum: Vec<String>,
     pub tags: Option<Vec<String>>,
 
-    #[serde(default = "as_default_log_config")]
-    pub log: LogConfig,
+    pub log: Option<LogConfig>,
 
     #[serde(default = "as_default_app_config")]
     pub app_config: AppConfig,
@@ -433,10 +432,6 @@ fn as_default_hybrid_store_config() -> HybridStoreConfig {
 }
 fn as_default_http_port() -> u16 {
     20010
-}
-
-fn as_default_log_config() -> LogConfig {
-    Default::default()
 }
 
 fn as_default_storage_type() -> StorageType {
