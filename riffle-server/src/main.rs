@@ -20,7 +20,7 @@
 
 use crate::app_manager::{AppManager, APP_MANAGER_REF};
 use crate::common::init_global_variable;
-use crate::config::Config;
+use crate::config::{Config, LogConfig};
 use crate::health_service::HealthService;
 use crate::heartbeat::HeartbeatTask;
 use crate::http::{HTTPServer, HttpMonitorService};
@@ -48,7 +48,8 @@ use crate::util::inject_into_env;
 use anyhow::Result;
 use clap::builder::Str;
 use clap::{Arg, Parser};
-use log::info;
+use log::{info, LevelFilter};
+use logforth::append;
 use std::str::FromStr;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -117,11 +118,33 @@ fn main() -> Result<()> {
     let args = Args::parse();
     let mut config = Config::from(&args.config);
 
-    #[cfg(not(feature = "logforth"))]
-    let _guard = LogService::init(&config.log);
+    let _ = match &config.log {
+        None => {
+            #[cfg(feature = "logforth")]
+            {
+                logforth::builder()
+                    .dispatch(|d| {
+                        d.filter(LevelFilter::Info)
+                            .append(append::Stdout::default())
+                    })
+                    .apply();
+            }
+            None
+        }
+        Some(log_config) => {
+            #[cfg(not(feature = "logforth"))]
+            {
+                let _guard = LogService::init(log_config);
+                Some(_guard)
+            }
 
-    #[cfg(feature = "logforth")]
-    let _guard = LogService::init(&config.log);
+            #[cfg(feature = "logforth")]
+            {
+                let _guard = LogService::init(log_config);
+                Some(_guard)
+            }
+        }
+    };
 
     info!(
         "Riffle is built on the git commit hash: {}",
