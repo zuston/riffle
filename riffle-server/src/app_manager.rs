@@ -328,7 +328,7 @@ pub(crate) mod test {
     use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::request_context::{
         GetMultiBlockIdsContext, ReadingOptions, ReadingViewContext, ReportMultiBlockIdsContext,
-        RequireBufferContext, WritingViewContext,
+        RequireBufferContext, RpcType, WritingViewContext,
     };
     use crate::app_manager::{AppManager, PurgeReason};
     use crate::config::{Config, HybridStoreConfig, LocalfileStoreConfig, MemoryStoreConfig};
@@ -565,11 +565,11 @@ pub(crate) mod test {
                 panic!()
             }
 
-            let reading_ctx = ReadingViewContext {
-                uid: PartitionUId::new(&app_id, 1, 0),
-                reading_options: ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(-1, 1000000),
-                serialized_expected_task_ids_bitmap: Default::default(),
-            };
+            let reading_ctx = ReadingViewContext::new(
+                PartitionUId::new(&app_id, 1, 0),
+                ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(-1, 1000000),
+                RpcType::GRPC,
+            );
 
             // case2: get
             let f = app.select(reading_ctx);

@@ -4,6 +4,7 @@ use crate::error::WorkerError;
 use crate::metric::{
     ALIGNMENT_BUFFER_POOL_READ_ACQUIRE_MISS, LOCALFILE_READ_MEMORY_ALLOCATION_LATENCY,
 };
+use crate::raw_io::RawIO;
 use crate::runtime::RuntimeRef;
 use crate::store::alignment::io_buffer_pool::{IoBufferPool, RecycledIoBuffer};
 use crate::store::alignment::io_bytes::IoBuffer;
@@ -21,6 +22,7 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Error, Read, Seek, SeekFrom, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::sync::Arc;
@@ -102,6 +104,7 @@ impl SyncLocalIO {
                 let mut batch_bytes = match raw_data {
                     DataBytes::Direct(bytes) => vec![bytes],
                     DataBytes::Composed(composed) => composed.to_vec(),
+                    _ => todo!(),
                 };
                 if let Some(remain_bytes) = remain_bytes {
                     batch_bytes.insert(0, remain_bytes);
@@ -185,6 +188,7 @@ impl SyncLocalIO {
                     DataBytes::Composed(composed) => {
                         buf_writer.write_all(&composed.freeze())?;
                     }
+                    DataBytes::RawIO(_) => todo!(),
                 }
                 buf_writer.flush()?;
 
@@ -198,6 +202,17 @@ impl SyncLocalIO {
             .map_err(|e| anyhow!(e))??;
 
         Ok(())
+    }
+
+    fn read_with_sendfile(
+        &self,
+        path: &str,
+        offset: u64,
+        length: u64,
+    ) -> anyhow::Result<DataBytes, WorkerError> {
+        let path = self.with_root(path);
+        let file = File::open(path)?;
+        Ok(DataBytes::RawIO(RawIO::new(file, offset, length)))
     }
 
     async fn read_with_buffer_io(
@@ -411,13 +426,19 @@ impl LocalIO for SyncLocalIO {
         options: ReadOptions,
     ) -> anyhow::Result<DataBytes, WorkerError> {
         let result = if options.is_direct_io() {
-            self.read_with_direct_io(path, options.offset, options.length.unwrap())
-                .await?
+            let r = self
+                .read_with_direct_io(path, options.offset, options.length.unwrap())
+                .await?;
+            DataBytes::Direct(r)
+        } else if options.is_sendfile() && options.length.is_some() {
+            self.read_with_sendfile(path, options.offset, options.length.unwrap())?
         } else {
-            self.read_with_buffer_io(path, options.offset, options.length)
-                .await?
+            let r = self
+                .read_with_buffer_io(path, options.offset, options.length)
+                .await?;
+            DataBytes::Direct(r)
         };
-        Ok(DataBytes::Direct(result))
+        Ok(result)
     }
 
     async fn delete(&self, path: &str) -> anyhow::Result<(), WorkerError> {

@@ -2,6 +2,7 @@ use crate::error::WorkerError;
 use crate::error::WorkerError::{STREAM_INCOMPLETE, STREAM_INCORRECT};
 use crate::store::ResponseData::Mem;
 use crate::store::{Block, DataBytes};
+use crate::system_libc::send_file_full;
 use crate::urpc::command::{
     GetLocalDataIndexRequestCommand, GetLocalDataIndexResponseCommand, GetLocalDataRequestCommand,
     GetLocalDataResponseCommand, GetMemoryDataRequestCommand, GetMemoryDataResponseCommand,
@@ -9,14 +10,15 @@ use crate::urpc::command::{
 };
 use anyhow::{Error, Result};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use log::warn;
+use log::{error, warn};
 use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
+use std::io;
 use std::io::{Cursor, IoSlice};
 use strum_macros::EnumVariantNames;
-use tokio::io::{AsyncWriteExt, BufWriter};
+use tokio::io::{AsyncWriteExt, BufWriter, Interest};
 use tokio::net::TcpStream;
 use tracing::{debug, info};
 
@@ -41,7 +43,7 @@ impl From<TryFromPrimitiveError<MessageType>> for WorkerError {
 #[allow(non_camel_case_types)]
 #[derive(Debug, Eq, PartialEq, TryFromPrimitive)]
 #[repr(u8)]
-enum MessageType {
+pub enum MessageType {
     SendShuffleData = 3,
     GetMemoryData = 6,
     GetMemoryDataResponse = 16,
@@ -82,6 +84,20 @@ pub enum Frame {
 }
 
 impl Frame {
+    pub async fn async_io<R>(
+        stream: &mut TcpStream,
+        interest: Interest,
+        mut f: impl FnMut() -> Result<R>,
+    ) -> Result<R> {
+        let res = stream
+            .async_io(interest, || {
+                f().map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+            })
+            .await?;
+
+        Ok(res)
+    }
+
     pub async fn write(
         stream: &mut TcpStream,
         frame: &Frame,
@@ -112,8 +128,28 @@ impl Frame {
                 write_buf.put(msg_bytes);
 
                 stream.write_all(&write_buf.split()).await?;
+
                 // write all data
-                stream.write_all(data).await?;
+                match data {
+                    DataBytes::Direct(val) => {
+                        stream.write_all(val).await?;
+                    }
+                    DataBytes::Composed(val) => {
+                        stream.write_all(val.freeze().as_ref()).await?;
+                    }
+                    DataBytes::RawIO(raw) => {
+                        send_file_full(
+                            stream,
+                            raw.raw_fd,
+                            Some(raw.offset as i64),
+                            raw.length as usize,
+                        )
+                        .await.map_err(|e| {
+                            error!("Errors on getting localfile data by sendfile. off:{}. length:{}. e: {}", raw.offset, raw.length, &e);
+                            e
+                        })?;
+                    }
+                }
 
                 Ok(())
             }
@@ -451,7 +487,7 @@ pub fn get_bytes(src: &mut Cursor<&[u8]>) -> Result<Option<Bytes>, WorkerError> 
     Ok(Some(data))
 }
 
-fn get_i64(src: &mut Cursor<&[u8]>) -> Result<i64, WorkerError> {
+pub fn get_i64(src: &mut Cursor<&[u8]>) -> Result<i64, WorkerError> {
     if !Buf::has_remaining(src) {
         return Err(STREAM_INCORRECT("get_i64".into()));
     }
@@ -494,7 +530,7 @@ fn skip_string(src: &mut Cursor<&[u8]>) -> Result<(), WorkerError> {
     Ok(())
 }
 
-fn get_string(src: &mut Cursor<&[u8]>) -> Result<String, WorkerError> {
+pub fn get_string(src: &mut Cursor<&[u8]>) -> Result<String, WorkerError> {
     if !Buf::has_remaining(src) {
         return Err(STREAM_INCORRECT("get_string 1".into()));
     }
@@ -517,7 +553,7 @@ fn get_string(src: &mut Cursor<&[u8]>) -> Result<String, WorkerError> {
     Ok(String::from_utf8(msg.to_vec())?)
 }
 
-fn get_u8(src: &mut Cursor<&[u8]>) -> Result<u8, WorkerError> {
+pub fn get_u8(src: &mut Cursor<&[u8]>) -> Result<u8, WorkerError> {
     if !Buf::has_remaining(src) {
         return Err(STREAM_INCORRECT("get_u8".into()));
     }
