@@ -84,20 +84,6 @@ pub enum Frame {
 }
 
 impl Frame {
-    pub async fn async_io<R>(
-        stream: &mut TcpStream,
-        interest: Interest,
-        mut f: impl FnMut() -> Result<R>,
-    ) -> Result<R> {
-        let res = stream
-            .async_io(interest, || {
-                f().map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-            })
-            .await?;
-
-        Ok(res)
-    }
-
     pub async fn write(
         stream: &mut TcpStream,
         frame: &Frame,
