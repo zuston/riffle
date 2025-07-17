@@ -183,6 +183,14 @@ message ShufflePartitionRange {
   int32 end = 2;
 }
 
+message MergeContext {
+  string keyClass = 1;
+  string valueClass = 2;
+  string comparatorClass = 3;
+  int32 mergedBlockSize = 4;
+  string mergeClassLoader = 5;
+}
+
 message ShuffleRegisterRequest {
   string appId = 1;
   int32 shuffleId = 2;
@@ -191,6 +199,8 @@ message ShuffleRegisterRequest {
   string user = 5;
   DataDistribution shuffleDataDistribution = 6;
   int32 maxConcurrencyPerPartitionToWrite = 7;
+  MergeContext mergeContext = 8;
+  map<string, string> properties = 9;
 }
 
 enum DataDistribution {

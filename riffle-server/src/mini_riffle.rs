@@ -101,6 +101,8 @@ pub async fn shuffle_testing(config: &Config, app_ref: AppManagerRef) -> anyhow:
             user: "".to_string(),
             shuffle_data_distribution: 1,
             max_concurrency_per_partition_to_write: 10,
+            merge_context: None,
+            properties: Default::default(),
         })
         .await?
         .into_inner();

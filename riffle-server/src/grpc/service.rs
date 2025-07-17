@@ -23,6 +23,7 @@ use crate::app_manager::request_context::{
     ReportMultiBlockIdsContext, RequireBufferContext, RpcType, WritingViewContext,
 };
 use crate::app_manager::AppManagerRef;
+use crate::client_configs::ClientRssConf;
 use crate::constant::StatusCode;
 use crate::error::WorkerError;
 use crate::grpc::protobuf::uniffle::shuffle_server_internal_server::ShuffleServerInternal;
@@ -261,10 +262,12 @@ impl ShuffleServer for DefaultShuffleServer {
         // todo: fast fail when hdfs is enabled but empty remote storage info.
         let remote_storage_info = inner.remote_storage.map(|x| RemoteStorageConfig::from(x));
         // todo: add more options: huge_partition_threshold. and so on...
+        let rss_config = ClientRssConf::from(inner.properties);
         let app_config_option = AppConfigOptions::new(
             DataDistribution::LOCAL_ORDER,
             inner.max_concurrency_per_partition_to_write,
             remote_storage_info,
+            rss_config,
         );
 
         let status = match self.app_manager_ref.register(
