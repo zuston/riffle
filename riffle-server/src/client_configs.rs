@@ -2,6 +2,7 @@ use clap::builder::Str;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 
+/// The configuration options related to riffle-servers on the Uniffle client side.
 pub static SENDFILE_ENABLED_OPTION: Lazy<ClientConfigOption<bool>> = Lazy::new(|| {
     ClientConfigOption::key("spark.rss.client.urpcSendfileEnabled")
         .default_value(false)
