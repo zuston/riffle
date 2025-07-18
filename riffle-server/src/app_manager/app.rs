@@ -124,10 +124,16 @@ impl App {
 
         let block_id_manager = get_block_id_manager(&config.app_config.block_id_manager_type);
 
-        info!("App=[{}]. block_manager_type: {}. partition_limit/threshold/ratio: {}/{}/{}. partition_split/threshold: {}/{}",
-                &app_id, &config.app_config.block_id_manager_type,
-                partition_limit_enable, partition_limit_threshold.get(), partition_limit_mem_backpressure_ratio.get(),
-                partition_split_enable, partition_split_threshold.get());
+        info!("App=[{}]. sendfile_enable: {}. block_manager_type: {}. partition_limit/threshold/ratio: {}/{}/{}. partition_split/threshold: {}/{}",
+            &app_id,
+            config_options.sendfile_enable,
+            &config.app_config.block_id_manager_type,
+            partition_limit_enable,
+            partition_limit_threshold.get(),
+            partition_limit_mem_backpressure_ratio.get(),
+            partition_split_enable,
+            partition_split_threshold.get()
+        );
 
         App {
             app_id,
