@@ -223,6 +223,11 @@ impl App {
     pub async fn select(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
         self.heartbeat()?;
 
+        let ctx = if (self.app_config_options.sendfile_enable) {
+            ReadingViewContext::with_sendfile_enabled(ctx)
+        } else {
+            ctx
+        };
         let response = self.store.get(ctx).await;
         response.map(|data| {
             match &data {
