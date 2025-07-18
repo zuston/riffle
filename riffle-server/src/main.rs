@@ -123,7 +123,7 @@ fn main() -> Result<()> {
     let args = Args::parse();
     let mut config = Config::from(&args.config);
 
-    let _ = match &config.log {
+    let _guard = match &config.log {
         None => {
             #[cfg(feature = "logforth")]
             {
