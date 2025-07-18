@@ -440,6 +440,7 @@ impl Store for LocalFileStore {
     async fn get(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
         let uid = ctx.uid;
         let rpc_source = ctx.rpc_source;
+        let client_sendfile_enabled = ctx.sendfile_enabled;
         let (offset, len) = match ctx.reading_options {
             FILE_OFFSET_AND_LEN(offset, len) => (offset as u64, len as u64),
             _ => (0, 0),
@@ -472,7 +473,10 @@ impl Store for LocalFileStore {
                 }
                 let read_options = if self.direct_io_enable && self.direct_io_read_enable {
                     ReadOptions::with_read_of_direct_io(offset, len)
-                } else if (self.read_io_sendfile_enable && rpc_source == RpcType::URPC) {
+                } else if (self.read_io_sendfile_enable
+                    && rpc_source == RpcType::URPC
+                    && client_sendfile_enabled)
+                {
                     ReadOptions::with_sendfile(offset, len)
                 } else {
                     ReadOptions::with_read_of_buffer_io(offset, len)

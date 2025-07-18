@@ -102,6 +102,7 @@ pub struct ReadingViewContext {
     pub reading_options: ReadingOptions,
     pub task_ids_filter: Option<Treemap>,
     pub rpc_source: RpcType,
+    pub sendfile_enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -122,6 +123,7 @@ impl ReadingViewContext {
             reading_options,
             task_ids_filter: Some(bitmap),
             rpc_source,
+            sendfile_enabled: false,
         }
     }
 
@@ -131,6 +133,17 @@ impl ReadingViewContext {
             reading_options,
             task_ids_filter: None,
             rpc_source,
+            sendfile_enabled: false,
+        }
+    }
+
+    pub fn with_sendfile_enabled(ctx: ReadingViewContext) -> Self {
+        Self {
+            uid: ctx.uid,
+            reading_options: ctx.reading_options,
+            task_ids_filter: ctx.task_ids_filter,
+            rpc_source: ctx.rpc_source,
+            sendfile_enabled: true,
         }
     }
 }

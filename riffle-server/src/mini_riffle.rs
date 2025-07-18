@@ -189,6 +189,7 @@ pub async fn shuffle_testing(config: &Config, app_ref: AppManagerRef) -> anyhow:
             reading_options: ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(-1, 10000000),
             task_ids_filter: None,
             rpc_source: RpcType::GRPC,
+            sendfile_enabled: false,
         })
         .await?;
     let mut total_partition_len = 0;
@@ -200,6 +201,7 @@ pub async fn shuffle_testing(config: &Config, app_ref: AppManagerRef) -> anyhow:
             reading_options: ReadingOptions::FILE_OFFSET_AND_LEN(0, data.len() as i64),
             task_ids_filter: None,
             rpc_source: RpcType::GRPC,
+            sendfile_enabled: false,
         })
         .await?;
     let xdata = response.from_local();
