@@ -20,6 +20,7 @@
 
 pub mod app_manager;
 pub mod await_tree;
+pub mod client_configs;
 pub mod common;
 mod composed_bytes;
 pub mod config;

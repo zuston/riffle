@@ -1,3 +1,4 @@
+use crate::client_configs::{ClientRssConf, SENDFILE_ENABLED_OPTION};
 use crate::grpc::protobuf::uniffle::RemoteStorage;
 use std::collections::HashMap;
 
@@ -15,6 +16,7 @@ pub struct AppConfigOptions {
     pub data_distribution: DataDistribution,
     pub max_concurrency_per_partition_to_write: i32,
     pub remote_storage_config_option: Option<RemoteStorageConfig>,
+    pub sendfile_enable: bool,
 }
 
 impl AppConfigOptions {
@@ -22,11 +24,13 @@ impl AppConfigOptions {
         data_distribution: DataDistribution,
         max_concurrency_per_partition_to_write: i32,
         remote_storage_config_option: Option<RemoteStorageConfig>,
+        rss_config: ClientRssConf,
     ) -> Self {
         Self {
             data_distribution,
             max_concurrency_per_partition_to_write,
             remote_storage_config_option,
+            sendfile_enable: rss_config.get(&SENDFILE_ENABLED_OPTION).unwrap_or(false),
         }
     }
 }
@@ -37,6 +41,7 @@ impl Default for AppConfigOptions {
             data_distribution: DataDistribution::LOCAL_ORDER,
             max_concurrency_per_partition_to_write: 20,
             remote_storage_config_option: None,
+            sendfile_enable: false,
         }
     }
 }
