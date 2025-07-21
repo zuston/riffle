@@ -17,6 +17,8 @@
 
 use crate::config::{HdfsStoreConfig, StorageType};
 use crate::error::WorkerError;
+use std::io;
+use std::io::ErrorKind;
 
 use crate::metric::TOTAL_HDFS_USED;
 use crate::store::{
@@ -53,7 +55,7 @@ use parking_lot::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
-use tokio::sync::Semaphore;
+use tokio::sync::{OnceCell, Semaphore};
 use tokio::time::Instant;
 use tracing::{debug, Instrument};
 
@@ -83,7 +85,7 @@ impl Default for WritingHandler {
     }
 }
 
-type PartitionFileLockHandler = Arc<(Arc<SemaphoreWithIndex>, Arc<tokio::sync::Mutex<()>>)>;
+type PartitionFileLockHandler = Arc<(Arc<SemaphoreWithIndex>, Arc<OnceCell<()>>)>;
 
 pub struct HdfsStore {
     concurrency_access_limiter: Semaphore,
@@ -169,20 +171,16 @@ impl HdfsStore {
 
         let (data_file_path, index_file_path) = self.get_file_path_prefix_by_uid(&uid);
 
-        let mut parent_dir_is_created = true;
-        let locks = match self.partition_file_locks.entry(data_file_path.clone()) {
-            Entry::Vacant(entry) => {
-                parent_dir_is_created = false;
-                let obj = entry.insert_entry(Arc::new((
+        let lock_handler = self
+            .partition_file_locks
+            .entry(data_file_path.clone())
+            .or_insert_with(|| {
+                Arc::new((
                     Arc::new(SemaphoreWithIndex::new(self.partition_write_concurrency)),
-                    Arc::new(tokio::sync::Mutex::new(())),
-                )));
-                obj.get().clone()
-            }
-            Entry::Occupied(entry) => entry.get().clone(),
-        };
-        let partition_concurrency_coordinator = locks.0.clone();
-        let partition_lock = locks.1.clone();
+                    Arc::new(OnceCell::new()),
+                ))
+            })
+            .clone();
 
         let fs_fork = self
             .app_remote_clients
@@ -190,24 +188,31 @@ impl HdfsStore {
             .ok_or(WorkerError::APP_HAS_BEEN_PURGED)?
             .clone();
         let filesystem = fs_fork.get_or_init();
-        let guard = partition_lock.lock().await;
-        if !parent_dir_is_created {
-            // setup the parent folder
-            let parent_dir = Path::new(data_file_path.as_str()).parent().unwrap();
-            let parent_path_str = format!("{}/", parent_dir.to_str().unwrap());
-            debug!("creating dir: {}", parent_path_str.as_str());
+        let partition_parent_dir_creating_coordinator = lock_handler.1.clone();
+        // setup the parent folder
+        let parent_dir = Path::new(data_file_path.as_str()).parent().unwrap();
+        let parent_path_str = format!("{}/", parent_dir.to_str().unwrap());
+        partition_parent_dir_creating_coordinator
+            .get_or_try_init(|| async move {
+                let timer = Instant::now();
+                info!("creating dir: {}", parent_path_str.as_str());
+                &filesystem
+                    .create_dir(parent_path_str.as_str())
+                    .await
+                    .map_err(|e| {
+                        error!("Errors on creating dir of {}", parent_path_str.as_str());
+                        Other(anyhow!("Failed to create directory: {}", e))
+                    })?;
+                info!(
+                    "created dir: {} cost {}(ms)",
+                    parent_path_str.as_str(),
+                    timer.elapsed().as_millis()
+                );
+                Ok::<(), WorkerError>(())
+            })
+            .await?;
 
-            &filesystem
-                .create_dir(parent_path_str.as_str())
-                .await
-                .map_err(|e| {
-                    error!("Errors on creating dir of {}", parent_path_str.as_str());
-                    e
-                })?;
-            debug!("creating dir: {}", parent_path_str.as_str());
-        }
-        drop(guard);
-
+        let partition_concurrency_coordinator = lock_handler.0.clone();
         let permit = partition_concurrency_coordinator
             .acquire()
             .instrument_await(format!(
