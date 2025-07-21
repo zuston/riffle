@@ -545,8 +545,12 @@ impl Store for HdfsStore {
                 "The remote config must be populated by app registry action!"
             ));
         }
-
+        let app_id = ApplicationId::from(ctx.app_id.as_str());
         let remote_storage_conf = remote_storage_conf_option.unwrap();
+        info!(
+            "registering app: {}. conf as follows \n{}",
+            &app_id, remote_storage_conf
+        );
         let client = LazyInit::new(move || {
             match get_hdfs_client(
                 remote_storage_conf.root.as_str(),
@@ -560,7 +564,6 @@ impl Store for HdfsStore {
             }
         });
 
-        let app_id = ApplicationId::from(ctx.app_id.as_str());
         self.app_remote_clients
             .entry(app_id)
             .or_insert_with(|| Arc::new(client));

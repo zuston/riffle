@@ -1,6 +1,7 @@
 use crate::client_configs::{ClientRssConf, SENDFILE_ENABLED_OPTION};
 use crate::grpc::protobuf::uniffle::RemoteStorage;
 use std::collections::HashMap;
+use std::fmt;
 
 pub const MAX_CONCURRENCY_PER_PARTITION_TO_WRITE: i32 = 20;
 
@@ -66,5 +67,17 @@ impl From<RemoteStorage> for RemoteStorageConfig {
             root,
             configs: confs,
         }
+    }
+}
+
+impl fmt::Display for RemoteStorageConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "RemoteStorageConfig:")?;
+        writeln!(f, "  Root: {}", self.root)?;
+        writeln!(f, "  Configs:")?;
+        for (key, value) in &self.configs {
+            writeln!(f, "    {}: {}", key, value)?;
+        }
+        Ok(())
     }
 }
