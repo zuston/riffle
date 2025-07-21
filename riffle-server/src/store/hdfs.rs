@@ -45,6 +45,7 @@ use crate::app_manager::request_context::{
     ReleaseTicketContext, RequireBufferContext, WritingViewContext,
 };
 use crate::app_manager::SHUFFLE_SERVER_ID;
+use crate::client_configs::HDFS_CLIENT_EAGER_LOADING_ENABLED_OPTION;
 use crate::error::WorkerError::Other;
 use crate::kerberos::KerberosTask;
 use crate::lazy_initializer::LazyInit;
@@ -563,6 +564,14 @@ impl Store for HdfsStore {
                 }
             }
         });
+        if ctx
+            .app_config_options
+            .client_configs
+            .get(&HDFS_CLIENT_EAGER_LOADING_ENABLED_OPTION)
+            .unwrap_or(false)
+        {
+            client.get_or_init();
+        }
 
         self.app_remote_clients
             .entry(app_id)

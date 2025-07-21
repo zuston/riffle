@@ -9,6 +9,15 @@ pub static SENDFILE_ENABLED_OPTION: Lazy<ClientConfigOption<bool>> = Lazy::new(|
         .with_description("This indicates whether the sendfile is enabled when urpc is activated")
 });
 
+pub static HDFS_CLIENT_EAGER_LOADING_ENABLED_OPTION: Lazy<ClientConfigOption<bool>> = Lazy::new(
+    || {
+        ClientConfigOption::key("spark.rss.riffle.hdfsClientEagerLoadingEnabled")
+        .default_value(false)
+        .with_description("Indicates whether the HDFS client should be eagerly loaded during registration on the Riffle server side.")
+    },
+);
+
+#[derive(Debug, Clone, Default)]
 pub struct ClientRssConf {
     properties: HashMap<String, String>,
 }
