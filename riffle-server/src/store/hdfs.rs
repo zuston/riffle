@@ -28,6 +28,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use bytes::{BufMut, BytesMut};
+use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 
 use log::{error, info, warn};
@@ -48,6 +49,7 @@ use crate::lazy_initializer::LazyInit;
 use crate::runtime::manager::RuntimeManager;
 use crate::semaphore_with_index::SemaphoreWithIndex;
 use crate::store::hadoop::{get_hdfs_client, HdfsClient};
+use parking_lot::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
@@ -81,14 +83,16 @@ impl Default for WritingHandler {
     }
 }
 
+type PartitionFileLockHandler = Arc<(Arc<SemaphoreWithIndex>, Arc<tokio::sync::Mutex<()>>)>;
+
 pub struct HdfsStore {
     concurrency_access_limiter: Semaphore,
 
     // key: app_id, value: hdfs_native_client
     pub(crate) app_remote_clients: DashMap<ApplicationId, Arc<LazyInit<Box<dyn HdfsClient>>>>,
 
-    // key: data_file_path
-    partition_file_locks: DashMap<String, Arc<SemaphoreWithIndex>>,
+    // key: data_file_path.
+    partition_file_locks: DashMap<String, PartitionFileLockHandler>,
 
     // key: data_file_path with the concurrency index
     partition_cached_meta: DashMap<String, WritingHandler>,
@@ -165,12 +169,46 @@ impl HdfsStore {
 
         let (data_file_path, index_file_path) = self.get_file_path_prefix_by_uid(&uid);
 
-        let lock_cloned = self
-            .partition_file_locks
-            .entry(data_file_path.clone())
-            .or_insert_with(|| Arc::new(SemaphoreWithIndex::new(self.partition_write_concurrency)))
+        let mut parent_dir_is_created = true;
+        let locks = match self.partition_file_locks.entry(data_file_path.clone()) {
+            Entry::Vacant(entry) => {
+                parent_dir_is_created = false;
+                let obj = entry.insert_entry(Arc::new((
+                    Arc::new(SemaphoreWithIndex::new(self.partition_write_concurrency)),
+                    Arc::new(tokio::sync::Mutex::new(())),
+                )));
+                obj.get().clone()
+            }
+            Entry::Occupied(entry) => entry.get().clone(),
+        };
+        let partition_concurrency_coordinator = locks.0.clone();
+        let partition_lock = locks.1.clone();
+
+        let fs_fork = self
+            .app_remote_clients
+            .get(&uid.app_id)
+            .ok_or(WorkerError::APP_HAS_BEEN_PURGED)?
             .clone();
-        let permit = lock_cloned
+        let filesystem = fs_fork.get_or_init();
+        let guard = partition_lock.lock().await;
+        if !parent_dir_is_created {
+            // setup the parent folder
+            let parent_dir = Path::new(data_file_path.as_str()).parent().unwrap();
+            let parent_path_str = format!("{}/", parent_dir.to_str().unwrap());
+            debug!("creating dir: {}", parent_path_str.as_str());
+
+            &filesystem
+                .create_dir(parent_path_str.as_str())
+                .await
+                .map_err(|e| {
+                    error!("Errors on creating dir of {}", parent_path_str.as_str());
+                    e
+                })?;
+            debug!("creating dir: {}", parent_path_str.as_str());
+        }
+        drop(guard);
+
+        let permit = partition_concurrency_coordinator
             .acquire()
             .instrument_await(format!(
                 "hdfs partition file lock. path: {}",
@@ -198,20 +236,6 @@ impl HdfsStore {
         let (mut next_offset, retry_time) =
             match self.partition_cached_meta.get(&data_file_path_prefix) {
                 None => {
-                    // setup the parent folder
-                    let parent_dir = Path::new(data_file_path_prefix.as_str()).parent().unwrap();
-                    let parent_path_str = format!("{}/", parent_dir.to_str().unwrap());
-                    debug!("creating dir: {}", parent_path_str.as_str());
-
-                    &filesystem
-                        .create_dir(parent_path_str.as_str())
-                        .await
-                        .map_err(|e| {
-                            error!("Errors on creating dir of {}", parent_path_str.as_str());
-                            e
-                        })?;
-                    debug!("creating dir: {}", parent_path_str.as_str());
-
                     let data_file_complete_path = format!("{}_{}.data", &data_file_path_prefix, 0);
                     let index_file_complete_path =
                         format!("{}_{}.index", &index_file_path_prefix, 0);
