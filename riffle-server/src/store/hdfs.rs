@@ -189,6 +189,11 @@ impl HdfsStore {
             .ok_or(WorkerError::APP_HAS_BEEN_PURGED)?
             .clone();
         let filesystem = fs_fork.get_or_init();
+        if filesystem.is_none() {
+            return Err(WorkerError::HDFS_CLIENT_INIT_FAILED);
+        }
+        let filesystem = filesystem.unwrap();
+
         let partition_parent_dir_creating_coordinator = lock_handler.1.clone();
         // setup the parent folder
         let parent_dir = Path::new(data_file_path.as_str()).parent().unwrap();
@@ -227,17 +232,6 @@ impl HdfsStore {
             format!("{}_{}", data_file_path, index),
             format!("{}_{}", index_file_path, index),
         );
-
-        let fs_fork = self
-            .app_remote_clients
-            .get(&uid.app_id)
-            .ok_or(WorkerError::APP_HAS_BEEN_PURGED)?
-            .clone();
-        let filesystem = fs_fork.get_or_init();
-        if filesystem.is_none() {
-            return Err(WorkerError::HDFS_CLIENT_INIT_FAILED);
-        }
-        let filesystem = filesystem.unwrap();
 
         let (mut next_offset, retry_time) =
             match self.partition_cached_meta.get(&data_file_path_prefix) {
@@ -548,28 +542,17 @@ impl Store for HdfsStore {
         }
         let app_id = ApplicationId::from(ctx.app_id.as_str());
         let remote_storage_conf = remote_storage_conf_option.unwrap();
-<<<<<<< HEAD
-        info!(
-            "registering app: {}. conf as follows \n{}",
-            &app_id, remote_storage_conf
-        );
-        let client = LazyInit::new(move || {
-            match get_hdfs_client(
-                remote_storage_conf.root.as_str(),
-                remote_storage_conf.configs,
-            ) {
+
+        let client = LazyInit::new({
+            let root = remote_storage_conf.root.clone();
+            let configs = remote_storage_conf.configs.clone();
+            move || match get_hdfs_client(root.as_str(), configs) {
                 Ok(client) => Some(client),
                 Err(e) => {
                     error!("Errors on getting hdfs client. error: {}", e);
                     None
                 }
             }
-=======
-        let client = LazyInit::new({
-            let root = remote_storage_conf.root.clone();
-            let configs = remote_storage_conf.configs.clone();
-            move || get_hdfs_client(root.as_str(), configs).expect("Errors on getting hdfs client")
->>>>>>> a0056a8 (enable logs for specified config key)
         });
 
         if ctx
