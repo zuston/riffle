@@ -2781,7 +2781,7 @@ dependencies = [
 [[package]]
 name = "hdrs"
 version = "0.3.2"
-source = "git+https://github.com/zuston/hdrs?rev=c742e613ec96ad5e86fb874778b06d3eb3a0d33d#c742e613ec96ad5e86fb874778b06d3eb3a0d33d"
+source = "git+https://github.com/zuston/hdrs?rev=24bc9949a24e14808440614a47d37e86756f515f#24bc9949a24e14808440614a47d37e86756f515f"
 dependencies = [
  "errno",
  "hdfs-sys",

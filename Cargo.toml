@@ -40,7 +40,7 @@ governor = "0.10.0"
 hashlink = "0.9.1"
 hdfs-native = "0.11.2"
 hdrhistogram = "7.5.4"
-hdrs = { git = "https://github.com/zuston/hdrs", rev = "c742e613ec96ad5e86fb874778b06d3eb3a0d33d" }
+hdrs = { git = "https://github.com/zuston/hdrs", rev = "24bc9949a24e14808440614a47d37e86756f515f" }
 hyper = "0.14"
 indicatif = "0.17.11"
 jemalloc_pprof = "0.7.0"
