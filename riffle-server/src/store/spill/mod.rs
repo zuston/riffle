@@ -137,7 +137,8 @@ async fn handle_spill_failure(
         | WorkerError::APP_HAS_BEEN_PURGED
         | WorkerError::APP_IS_NOT_FOUND
         | WorkerError::FUTURE_EXEC_TIMEOUT(_)
-        | WorkerError::DIR_OR_FILE_NOT_FOUND(_) => {
+        | WorkerError::DIR_OR_FILE_NOT_FOUND(_)
+        | WorkerError::HDFS_CLIENT_INIT_FAILED => {
             handle_spill_failure_whatever_error(message, store_ref, err).await;
             false
         }

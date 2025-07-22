@@ -4,15 +4,15 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::SeqCst;
 
 pub struct LazyInit<T> {
-    initializer: Mutex<Option<Box<dyn FnOnce() -> T + Send>>>,
-    value: OnceCell<T>,
+    initializer: Mutex<Option<Box<dyn FnOnce() -> Option<T> + Send>>>,
+    value: OnceCell<Option<T>>,
     initialized: AtomicBool,
 }
 
 impl<T> LazyInit<T> {
     pub fn new<F>(initializer: F) -> Self
     where
-        F: FnOnce() -> T + Send + 'static,
+        F: FnOnce() -> Option<T> + Send + 'static,
     {
         LazyInit {
             initializer: Mutex::new(Some(Box::new(initializer))),
@@ -21,13 +21,14 @@ impl<T> LazyInit<T> {
         }
     }
 
-    pub fn get_or_init(&self) -> &T {
-        self.value.get_or_init(|| {
+    pub fn get_or_init(&self) -> Option<&T> {
+        let v = self.value.get_or_init(|| {
             let initializer = self.initializer.lock().take().unwrap();
             let v = initializer();
             self.initialized.store(true, SeqCst);
             v
-        })
+        });
+        v.as_ref()
     }
 
     pub fn is_initialized(&self) -> bool {
@@ -49,6 +50,7 @@ mod tests {
         let lazy_value = LazyInit::new(move || {
             println!("Initializing...");
             tag_fork.fetch_add(1, SeqCst);
+            Some(())
         });
 
         let value = lazy_value.get_or_init();

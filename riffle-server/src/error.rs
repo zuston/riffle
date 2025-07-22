@@ -105,6 +105,9 @@ pub enum WorkerError {
 
     #[error(transparent)]
     Other(#[from] anyhow::Error),
+
+    #[error("HDFS client initialization failed")]
+    HDFS_CLIENT_INIT_FAILED,
 }
 
 impl From<AcquireError> for WorkerError {
