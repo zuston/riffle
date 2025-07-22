@@ -190,6 +190,10 @@ impl HdfsStore {
             .ok_or(WorkerError::APP_HAS_BEEN_PURGED)?
             .clone();
         let filesystem = fs_fork.get_or_init();
+        if filesystem.is_none() {
+            return Err(WorkerError::HDFS_CLIENT_INIT_FAILED);
+        }
+        let filesystem = filesystem.unwrap();
 
         let (mut next_offset, retry_time) =
             match self.partition_cached_meta.get(&data_file_path_prefix) {
@@ -420,6 +424,11 @@ impl Store for HdfsStore {
             return Ok(0);
         }
         let filesystem = fs.get_or_init();
+        // maybe initialization failed.
+        if filesystem.is_none() {
+            return Ok(0);
+        }
+        let filesystem = filesystem.unwrap();
 
         let dir = match shuffle_id_option {
             Some(shuffle_id) => self.get_shuffle_dir(&app_id, shuffle_id),
@@ -510,11 +519,16 @@ impl Store for HdfsStore {
 
         let remote_storage_conf = remote_storage_conf_option.unwrap();
         let client = LazyInit::new(move || {
-            get_hdfs_client(
+            match get_hdfs_client(
                 remote_storage_conf.root.as_str(),
                 remote_storage_conf.configs,
-            )
-            .expect("Errors on getting hdfs client")
+            ) {
+                Ok(client) => Some(client),
+                Err(e) => {
+                    error!("Errors on getting hdfs client. error: {}", e);
+                    None
+                }
+            }
         });
 
         let app_id = ApplicationId::from(ctx.app_id.as_str());
@@ -661,7 +675,7 @@ mod tests {
                 mark_failure: Arc::new(AtomicBool::new(false)),
                 oom_failure: Arc::new(AtomicBool::new(true)),
             });
-            client
+            Some(client)
         }));
         hdfs_store
             .app_remote_clients
@@ -775,7 +789,7 @@ mod tests {
             let client: Box<dyn HdfsClient> = Box::new(MockedHdfsClient {
                 root: root_internal,
             });
-            client
+            Some(client)
         }));
         hdfs_store
             .app_remote_clients
@@ -890,7 +904,7 @@ mod tests {
                 mark_failure: tag_fork,
                 oom_failure: Arc::new(AtomicBool::new(false)),
             });
-            client
+            Some(client)
         }));
         hdfs_store
             .app_remote_clients
