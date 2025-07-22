@@ -548,6 +548,7 @@ impl Store for HdfsStore {
         }
         let app_id = ApplicationId::from(ctx.app_id.as_str());
         let remote_storage_conf = remote_storage_conf_option.unwrap();
+<<<<<<< HEAD
         info!(
             "registering app: {}. conf as follows \n{}",
             &app_id, remote_storage_conf
@@ -563,14 +564,26 @@ impl Store for HdfsStore {
                     None
                 }
             }
+=======
+        let client = LazyInit::new({
+            let root = remote_storage_conf.root.clone();
+            let configs = remote_storage_conf.configs.clone();
+            move || get_hdfs_client(root.as_str(), configs).expect("Errors on getting hdfs client")
+>>>>>>> a0056a8 (enable logs for specified config key)
         });
+
         if ctx
             .app_config_options
             .client_configs
             .get(&HDFS_CLIENT_EAGER_LOADING_ENABLED_OPTION)
             .unwrap_or(false)
         {
+            info!(
+                "registering app: {}. conf as follows \n{}",
+                &app_id, remote_storage_conf
+            );
             client.get_or_init();
+            info!("Hdfs client has been initialized for app: {}", &app_id);
         }
 
         self.app_remote_clients
