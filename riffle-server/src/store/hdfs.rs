@@ -105,6 +105,8 @@ pub struct HdfsStore {
     partition_write_concurrency: usize,
 
     health: AtomicBool,
+
+    precheck_root_path: Option<String>,
 }
 
 unsafe impl Send for HdfsStore {}
@@ -130,6 +132,7 @@ impl HdfsStore {
 
             partition_write_concurrency: conf.partition_write_max_concurrency,
             health: AtomicBool::new(true),
+            precheck_root_path: conf.precheck_root_path,
         }
     }
 
@@ -395,6 +398,21 @@ impl HdfsStore {
         }
         Ok(())
     }
+
+    async fn pre_check_hadoop_env(&self) -> Result<(), WorkerError> {
+        match &self.precheck_root_path {
+            None => {
+                info!("Ignore pre_check due to the empty root path.");
+            }
+            Some(root_path) => {
+                info!("Prechecking...");
+                const FILE_NAME: &str = "hadoop_env_precheck.file";
+                let client = get_hdfs_client(&root_path, Default::default())?;
+                client.touch(FILE_NAME).await?;
+            }
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -593,6 +611,10 @@ impl Store for HdfsStore {
         self.data_insert(uid, data)
             .instrument_await("data insert")
             .await
+    }
+
+    async fn pre_check(&self) -> Result<(), WorkerError> {
+        self.pre_check_hadoop_env().await
     }
 }
 

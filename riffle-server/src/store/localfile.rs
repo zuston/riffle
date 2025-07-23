@@ -638,6 +638,11 @@ impl Store for LocalFileStore {
             .instrument_await("data insert")
             .await
     }
+
+    async fn pre_check(&self) -> Result<(), WorkerError> {
+        // todo: check the localfile permission
+        Ok(())
+    }
 }
 
 #[cfg(test)]

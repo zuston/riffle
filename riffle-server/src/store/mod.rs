@@ -283,6 +283,8 @@ pub trait Store {
             offset,
         })
     }
+
+    async fn pre_check(&self) -> Result<(), WorkerError>;
 }
 
 pub struct ShuffleFileFormat {

@@ -739,6 +739,19 @@ impl Store for HybridStore {
     async fn spill_insert(&self, _ctx: SpillWritingViewContext) -> Result<(), WorkerError> {
         todo!()
     }
+
+    async fn pre_check(&self) -> Result<(), WorkerError> {
+        async fn do_pre_check(store: Option<&Box<dyn PersistentStore>>) -> Result<(), WorkerError> {
+            match store {
+                Some(store) => store.pre_check().await,
+                _ => Ok(()),
+            }
+        }
+        self.hot_store.pre_check().await?;
+        do_pre_check(self.warm_store.as_ref()).await?;
+        do_pre_check(self.cold_store.as_ref()).await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

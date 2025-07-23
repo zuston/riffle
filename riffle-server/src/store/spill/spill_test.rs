@@ -555,5 +555,9 @@ mod mock {
 
             Ok(())
         }
+
+        async fn pre_check(&self) -> anyhow::Result<(), WorkerError> {
+            Ok(())
+        }
     }
 }
