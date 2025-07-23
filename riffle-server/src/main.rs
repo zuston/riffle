@@ -43,6 +43,7 @@ use crate::rpc::DefaultRpcService;
 use crate::runtime::manager::RuntimeManager;
 use crate::server_state_manager::{ServerStateManager, SERVER_STATE_MANAGER_REF};
 use crate::storage::StorageService;
+use crate::store::Store;
 use crate::tracing::FastraceWrapper;
 use crate::util::inject_into_env;
 use anyhow::Result;
@@ -195,6 +196,13 @@ fn main() -> Result<()> {
         &reconf_manager,
     );
     storage.with_app_manager(&app_manager_ref);
+
+    // prechecking
+    let s_fork = storage.clone();
+    runtime_manager
+        .default_runtime
+        .block_on(async { s_fork.pre_check().await })
+        .map_err(|e| anyhow::anyhow!("Prechecking failure: {}", e))?;
 
     let _ = APP_MANAGER_REF.set(app_manager_ref.clone());
 
