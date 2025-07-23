@@ -16,7 +16,7 @@
 // under the License.
 
 pub mod alignment;
-mod hadoop;
+pub mod hadoop;
 #[cfg(feature = "hdfs")]
 pub mod hdfs;
 pub mod hybrid;

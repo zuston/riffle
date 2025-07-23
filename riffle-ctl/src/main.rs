@@ -6,6 +6,7 @@ mod actions;
 use crate::actions::disk_append_bench::DiskAppendBenchAction;
 use crate::actions::disk_profiler::DiskProfiler;
 use crate::actions::disk_read_bench::DiskReadBenchAction;
+use crate::actions::hdfs_append::HdfsAppendAction;
 use crate::actions::kill_action::KillAction;
 use crate::actions::postgres_server::PostgresServerAction;
 use crate::actions::query::{OutputFormat, QueryAction};
@@ -13,6 +14,8 @@ use crate::actions::update_action::NodeUpdateAction;
 use crate::actions::{Action, ValidateAction};
 use crate::Commands::Kill;
 use clap::{Parser, Subcommand};
+use log::LevelFilter;
+use logforth::append;
 use tokio::runtime::Runtime;
 
 #[derive(Parser)]
@@ -111,11 +114,27 @@ enum Commands {
         #[arg(short, long)]
         instance: Option<String>,
     },
+    #[command(about = "Hdfs append test")]
+    HdfsAppendAction {
+        #[arg(short, long)]
+        file_path: String,
+        #[arg(short, long)]
+        total_size: String,
+        #[arg(short, long)]
+        batch_size: String,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let command = args.command;
+
+    logforth::builder()
+        .dispatch(|d| {
+            d.filter(LevelFilter::Info)
+                .append(append::Stdout::default())
+        })
+        .apply();
 
     let action: Box<dyn Action> = match command {
         Commands::PostgresServer {
@@ -197,7 +216,15 @@ fn main() -> anyhow::Result<()> {
             decommission_grpc_mode,
         )),
         Commands::Kill { force, instance } => Box::new(KillAction::new(force, instance)),
-
+        Commands::HdfsAppendAction {
+            file_path,
+            total_size,
+            batch_size,
+        } => Box::new(HdfsAppendAction::new(
+            file_path.as_str(),
+            total_size.as_str(),
+            batch_size.as_str(),
+        )),
         _ => panic!("Unknown command"),
     };
 
