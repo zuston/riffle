@@ -380,9 +380,12 @@ impl Store for MemoryStore {
         StorageType::MEMORY
     }
 
-    #[trace]
     async fn spill_insert(&self, _ctx: SpillWritingViewContext) -> Result<(), WorkerError> {
         todo!()
+    }
+
+    async fn pre_check(&self) -> Result<(), WorkerError> {
+        Ok(())
     }
 }
 
