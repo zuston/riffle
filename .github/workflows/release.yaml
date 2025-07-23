@@ -32,7 +32,9 @@ jobs:
           - name: linux-amd64-centos7
             os: ubuntu-22.04
             build_command: docker compose -f dev/centos7/amd64/docker-compose.yml up
-            artifact_path: target-docker/release/riffle-server
+            artifact_path: |
+              target-docker/release/riffle-server
+              target-docker/release/riffle-ctl
             docker_compose: dev/centos7/amd64/docker-compose.yml
             component: riffle-server
           - name: linux-amd64-anolisos8
@@ -83,6 +85,14 @@ jobs:
           toolchain: nightly
           override: true
 
+      - name: Cache target-docker
+        uses: actions/cache@v3
+        with:
+          path: target-docker
+          key: target-docker-${{ runner.os }}-${{ matrix.name }}
+          restore-keys: |
+            target-docker-${{ runner.os }}-${{ matrix.name }}-
+
       - name: Build
         run: ${{ matrix.build_command }}
 
@@ -96,11 +106,13 @@ jobs:
           name: ${{ steps.component.outputs.name }}-${{ matrix.name }}-${{ steps.vars.outputs.name }}
           path: ${{ matrix.artifact_path }}
 
-      - name: Upload binaries to release
+      - name: Upload each binary to release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ${{ matrix.artifact_path }}
-          asset_name: ${{ steps.component.outputs.name }}-${{ matrix.name }}-${{ steps.vars.outputs.name }}
-          tag: ${{ github.ref }}
+        shell: bash
+        run: |
+          for path in ${{ matrix.artifact_path }}; do
+            asset_name="${{ steps.component.outputs.name }}-${{ matrix.name }}-${{ steps.vars.outputs.name }}-$(basename $path)"
+            gh release upload "${{ github.ref_name }}" "$path" --repo "$GITHUB_REPOSITORY" --clobber --name "$asset_name"
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

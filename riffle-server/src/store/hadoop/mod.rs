@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[async_trait]
-pub(crate) trait HdfsClient: Send + Sync {
+pub trait HdfsClient: Send + Sync {
     async fn touch(&self, file_path: &str) -> Result<()>;
     async fn append(&self, file_path: &str, data: DataBytes) -> Result<(), WorkerError>;
     async fn len(&self, file_path: &str) -> Result<u64>;

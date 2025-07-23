@@ -19,6 +19,7 @@ pub mod discovery;
 pub mod disk_append_bench;
 pub mod disk_profiler;
 pub mod disk_read_bench;
+pub mod hdfs_append;
 pub mod kill_action;
 pub mod postgres_server;
 pub mod query;

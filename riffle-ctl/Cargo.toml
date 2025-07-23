@@ -7,6 +7,9 @@ edition = "2021"
 name = "riffle-ctl"
 path = "src/main.rs"
 
+[features]
+hdrs_append = ["riffle-server/hdrs"]
+
 [dependencies]
 riffle-server = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
@@ -34,6 +37,9 @@ pgwire = { workspace = true }
 datafusion-postgres = { workspace = true }
 
 sqlparser = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+logforth = { workspace = true }
 
 [dev-dependencies]
 poem = { workspace = true, features = ["rustls", "test", "anyhow"] }
