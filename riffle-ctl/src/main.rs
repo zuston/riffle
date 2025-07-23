@@ -115,7 +115,7 @@ enum Commands {
         instance: Option<String>,
     },
     #[command(about = "Hdfs append test")]
-    HdfsAppendAction {
+    HdfsAppend {
         #[arg(short, long)]
         file_path: String,
         #[arg(short, long)]
@@ -216,7 +216,7 @@ fn main() -> anyhow::Result<()> {
             decommission_grpc_mode,
         )),
         Commands::Kill { force, instance } => Box::new(KillAction::new(force, instance)),
-        Commands::HdfsAppendAction {
+        Commands::HdfsAppend {
             file_path,
             total_size,
             batch_size,
