@@ -22,21 +22,25 @@ jobs:
             build_command: cargo build --release --bin riffle-ctl
             artifact_path: target/release/riffle-ctl
             docker_compose: ""
+            component: riffle-ctl
           - name: linux-arm64-anolisos8
             os: ubuntu-22.04-arm
             build_command: docker compose -f dev/anolisos8/arm64/docker-compose.yml up
             artifact_path: target-docker/release/riffle-server
             docker_compose: dev/anolisos8/arm64/docker-compose.yml
+            component: riffle-server
           - name: linux-amd64-centos7
             os: ubuntu-22.04
             build_command: docker compose -f dev/centos7/amd64/docker-compose.yml up
             artifact_path: target-docker/release/riffle-server
             docker_compose: dev/centos7/amd64/docker-compose.yml
+            component: riffle-server
           - name: linux-amd64-anolisos8
             os: ubuntu-22.04
             build_command: docker compose -f dev/anolisos8/amd64/docker-compose.yml up
             artifact_path: target-docker/release/riffle-server
             docker_compose: dev/anolisos8/amd64/docker-compose.yml
+            component: riffle-server
 
     steps:
       - name: Remove unnecessary files (Linux only)
@@ -82,10 +86,14 @@ jobs:
       - name: Build
         run: ${{ matrix.build_command }}
 
+      - name: Set component name
+        id: component
+        run: echo "name=${{ matrix.component }}" >> $GITHUB_OUTPUT
+
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: riffle-${{ matrix.name }}-${{ steps.vars.outputs.name }}
+          name: ${{ steps.component.outputs.name }}-${{ matrix.name }}-${{ steps.vars.outputs.name }}
           path: ${{ matrix.artifact_path }}
 
       - name: Upload binaries to release
@@ -94,5 +102,5 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: ${{ matrix.artifact_path }}
-          asset_name: riffle-${{ matrix.name }}-${{ steps.vars.outputs.name }}
+          asset_name: ${{ steps.component.outputs.name }}-${{ matrix.name }}-${{ steps.vars.outputs.name }}
           tag: ${{ github.ref }}
