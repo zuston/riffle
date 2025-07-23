@@ -7,6 +7,9 @@ edition = "2021"
 name = "riffle-ctl"
 path = "src/main.rs"
 
+[features]
+hdrs_append = ["riffle-server/hdrs"]
+
 [dependencies]
 riffle-server = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
