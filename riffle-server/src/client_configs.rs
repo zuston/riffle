@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 /// The configuration options related to riffle-servers on the Uniffle client side.
 pub static SENDFILE_ENABLED_OPTION: Lazy<ClientConfigOption<bool>> = Lazy::new(|| {
-    ClientConfigOption::key("spark.rss.client.urpcSendfileEnabled")
+    ClientConfigOption::key("spark.rss.riffle.urpcSendfileEnabled")
         .default_value(false)
         .with_description("This indicates whether the sendfile is enabled when urpc is activated")
 });
@@ -81,7 +81,7 @@ mod tests {
     fn test_sendfile_enabled_option_set_true() {
         let mut props = HashMap::new();
         props.insert(
-            "spark.rss.client.urpcSendfileEnabled".to_string(),
+            "spark.rss.riffle.urpcSendfileEnabled".to_string(),
             "true".to_string(),
         );
         let conf = ClientRssConf { properties: props };
