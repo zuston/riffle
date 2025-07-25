@@ -147,7 +147,7 @@ pub fn read_ahead(file: &std::fs::File, off: i64, len: i64) -> Result<()> {
                 libc::POSIX_FADV_WILLNEED,
             );
             if res != 0 {
-                return Err(std::io::Error::from_raw_os_error(res));
+                return Err(std::io::Error::from_raw_os_error(res).into());
             }
             Ok(())
         }
