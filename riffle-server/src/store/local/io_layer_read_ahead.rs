@@ -148,7 +148,7 @@ impl ReadAheadTask {
     async fn do_read_ahead(&self, inner: &Inner, off: u64, len: u64) {
         info!(
             "Read ahead: {} with offset: {}, length: {}",
-            inner.absolute_path, inner.load_start_offset, len
+            inner.absolute_path, off, len
         );
         if let Err(e) = read_ahead(&inner.file, off as i64, len as i64) {
             // ignore failure

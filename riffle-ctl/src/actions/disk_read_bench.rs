@@ -14,7 +14,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub struct DiskReadBenchAction {
     dir: String,
@@ -120,6 +120,7 @@ impl Action for DiskReadBenchAction {
                     let batch_elapsed = batch_start.elapsed();
                     latencies.push(batch_elapsed.as_secs_f64());
                     offset += read_size as u64;
+                    tokio::time::sleep(Duration::from_millis(20)).await;
                 }
                 let elapsed = start.elapsed();
                 latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
