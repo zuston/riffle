@@ -69,7 +69,7 @@ impl LocalIO for ReadAheadLayerWrapper {
             let abs_path = format!("{}/{}", &self.root, path);
             let load_task = self
                 .load_tasks
-                .entry(self.root.to_owned())
+                .entry(path.to_owned())
                 .or_insert_with(|| match ReadAheadTask::new(&abs_path) {
                     Ok(task) => Some(task),
                     Err(_) => None,
