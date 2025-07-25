@@ -12,6 +12,7 @@ use log::{info, warn};
 use parking_lot::Mutex;
 use std::fs::File;
 use std::sync::Arc;
+use tokio::time::Instant;
 
 const BATCH_SIZE: usize = 1024 * 1024 * 14;
 const BATCH_NUMBER: usize = 4;
@@ -33,7 +34,7 @@ impl Layer for ReadAheadLayer {
         Arc::new(Box::new(ReadAheadLayerWrapper {
             handler,
             root: self.root.to_owned(),
-            load_tasks: Arc::new(Default::default()),
+            load_tasks: Default::default(),
         }))
     }
 }
@@ -43,8 +44,7 @@ struct ReadAheadLayerWrapper {
     handler: Handler,
     root: String,
 
-    // todo: add purge logic
-    load_tasks: Arc<DashMap<String, Option<ReadAheadTask>>>,
+    load_tasks: DashMap<String, Option<ReadAheadTask>>,
 }
 
 unsafe impl Send for ReadAheadLayerWrapper {}
@@ -69,7 +69,7 @@ impl LocalIO for ReadAheadLayerWrapper {
             let abs_path = format!("{}/{}", &self.root, path);
             let load_task = self
                 .load_tasks
-                .entry(abs_path.to_owned())
+                .entry(self.root.to_owned())
                 .or_insert_with(|| match ReadAheadTask::new(&abs_path) {
                     Ok(task) => Some(task),
                     Err(_) => None,
@@ -82,6 +82,28 @@ impl LocalIO for ReadAheadLayerWrapper {
     }
 
     async fn delete(&self, path: &str) -> anyhow::Result<(), WorkerError> {
+        let timer = Instant::now();
+        let normalize_path = if !path.ends_with("/") {
+            format!("{}/", path)
+        } else {
+            path.to_owned()
+        };
+        let mut deletion_keys = vec![];
+        let view = self.load_tasks.clone().into_read_only();
+        for (k, v) in view.iter() {
+            if k.starts_with(normalize_path.as_str()) {
+                deletion_keys.push(k.clone());
+            }
+        }
+        for deletion_key in deletion_keys {
+            self.load_tasks.remove(&deletion_key);
+        }
+        info!(
+            "Deletion cache with prefix:{} cost {} ms",
+            normalize_path,
+            timer.elapsed().as_millis()
+        );
+
         self.handler.delete(path).await
     }
 
@@ -90,6 +112,7 @@ impl LocalIO for ReadAheadLayerWrapper {
     }
 }
 
+#[derive(Clone)]
 struct ReadAheadTask {
     inner: Arc<tokio::sync::Mutex<Inner>>,
 }
