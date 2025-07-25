@@ -95,9 +95,8 @@ impl Action for DiskReadBenchAction {
             .collect();
 
         if files.is_empty() || files.len() < self.concurrency {
-            println!("Creating read_bench files to read...");
+            info!("Creating read_bench {} files to read...", self.concurrency);
             self.append_action.act().await?;
-            println!("Done!");
         }
 
         let mut futures = vec![];
