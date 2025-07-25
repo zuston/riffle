@@ -1,9 +1,12 @@
 use crate::actions::disk_append_bench::{DiskAppendBenchAction, FILE_PREFIX};
 use crate::actions::Action;
 use crate::Commands::DiskAppendBench;
+use log::info;
 use riffle_server::config::IoLimiterConfig;
 use riffle_server::runtime::manager::create_runtime;
 use riffle_server::runtime::RuntimeRef;
+use riffle_server::store::local::io_layer_read_ahead::ReadAheadLayer;
+use riffle_server::store::local::layers::Handler;
 use riffle_server::store::local::options::ReadOptions;
 use riffle_server::store::local::sync_io::SyncLocalIO;
 use riffle_server::store::local::LocalIO;
@@ -19,7 +22,7 @@ pub struct DiskReadBenchAction {
     batch_number: u64,
     concurrency: usize,
 
-    io_handler: SyncLocalIO,
+    io_handler: Arc<Handler>,
 
     append_action: DiskAppendBenchAction,
 
@@ -32,11 +35,21 @@ impl DiskReadBenchAction {
         read_size: String,
         batch_num: usize,
         concurrency: usize,
+        read_ahead_enable: bool,
     ) -> Self {
         let read_runtime = create_runtime(concurrency, "pool");
         let write_runtime = create_runtime(1, "pool");
         let underlying_io_handler =
             SyncLocalIO::new(&read_runtime, &write_runtime, dir.as_str(), None, None);
+
+        let mut builder = riffle_server::store::local::layers::OperatorBuilder::new(Arc::new(
+            Box::new(underlying_io_handler),
+        ));
+        if read_ahead_enable {
+            builder = builder.layer(ReadAheadLayer::new(dir.as_str()));
+            info!("Read ahead layer is enabled.");
+        }
+        let handler = Arc::new(builder.build());
 
         let mut r_runtimes = vec![];
         for idx in 0..concurrency {
@@ -57,7 +70,7 @@ impl DiskReadBenchAction {
             read_size: riffle_server::util::parse_raw_to_bytesize(&read_size),
             batch_number: batch_num as u64,
             concurrency,
-            io_handler: underlying_io_handler,
+            io_handler: handler,
             append_action,
             read_runtimes: r_runtimes,
         };
@@ -92,7 +105,7 @@ impl Action for DiskReadBenchAction {
         let read_size = self.read_size;
         for idx in 0..self.concurrency {
             let file_name = format!("{}{}", FILE_PREFIX, idx);
-            let handler: SyncLocalIO = self.io_handler.clone();
+            let handler = self.io_handler.clone();
             let batch_number = batch_number;
             let read_size = read_size;
             let rt = self.read_runtimes.get(idx).unwrap();

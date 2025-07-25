@@ -26,6 +26,7 @@ use std::sync::Arc;
 pub mod delegator;
 mod io_layer_await_tree;
 mod io_layer_metrics;
+pub mod io_layer_read_ahead;
 mod io_layer_retry;
 pub mod io_layer_throttle;
 mod io_layer_timeout;

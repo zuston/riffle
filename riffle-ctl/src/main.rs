@@ -47,6 +47,8 @@ enum Commands {
         batch_number: usize,
         #[arg(short, long)]
         concurrency: usize,
+        #[arg(short, long)]
+        read_ahead_enable: bool,
     },
     #[command(about = "Using the riffle IO scheduler to test local disk IO")]
     DiskAppendBench {
@@ -147,11 +149,13 @@ fn main() -> anyhow::Result<()> {
             read_size,
             batch_number,
             concurrency,
+            read_ahead_enable,
         } => Box::new(DiskReadBenchAction::new(
             dir,
             read_size,
             batch_number,
             concurrency,
+            read_ahead_enable,
         )),
         Commands::DiskAppendBench {
             dir,
