@@ -223,7 +223,11 @@ mod tests {
 
         let layer = ReadAheadLayer::new(root.as_str());
         let inner_handler: Arc<Box<dyn LocalIO>> = Arc::new(Box::new(MockHandler::new()));
-        let wrapped = layer.wrap(inner_handler);
+        let wrapped = ReadAheadLayerWrapper {
+            handler: inner_handler,
+            root: root.to_owned(),
+            load_tasks: Default::default(),
+        };
 
         // 1st read ahead
         let options = ReadOptions {
@@ -235,6 +239,9 @@ mod tests {
 
         let result = wrapped.read(file_name.as_str(), options).await;
         assert!(result.is_ok());
+
+        wrapped.delete(root.as_str()).await.unwrap();
+        assert_eq!(0, wrapped.load_tasks.len());
     }
 
     struct MockHandler;
