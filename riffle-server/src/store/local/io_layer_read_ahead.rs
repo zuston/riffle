@@ -170,7 +170,7 @@ impl ReadAheadTask {
         }
 
         let diff = inner.load_length - off;
-        let next_load_bytes = 2 * BATCH_NUMBER as u64;
+        let next_load_bytes = 2 * BATCH_SIZE as u64;
         if diff > 0 && diff < next_load_bytes {
             let load_len = next_load_bytes;
             self.do_read_ahead(
