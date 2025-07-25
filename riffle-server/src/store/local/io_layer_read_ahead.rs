@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use clap::builder::Str;
 use dashmap::DashMap;
 use libc::abs;
-use log::{info, warn};
+use log::{debug, info, warn};
 use parking_lot::Mutex;
 use std::fs::File;
 use std::sync::Arc;
@@ -146,7 +146,7 @@ impl ReadAheadTask {
     }
 
     async fn do_read_ahead(&self, inner: &Inner, off: u64, len: u64) {
-        info!(
+        debug!(
             "Read ahead: {} with offset: {}, length: {}",
             inner.absolute_path, off, len
         );

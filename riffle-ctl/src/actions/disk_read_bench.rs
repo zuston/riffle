@@ -1,6 +1,7 @@
 use crate::actions::disk_append_bench::{DiskAppendBenchAction, FILE_PREFIX};
 use crate::actions::Action;
 use crate::Commands::DiskAppendBench;
+use indicatif::{ProgressBar, ProgressStyle};
 use log::info;
 use riffle_server::config::IoLimiterConfig;
 use riffle_server::runtime::manager::create_runtime;
@@ -113,22 +114,40 @@ impl Action for DiskReadBenchAction {
             let batch_number = batch_number;
             let read_size = read_size;
             let rt = self.read_runtimes.get(idx).unwrap();
+
+            let pb = ProgressBar::new(batch_number);
+            pb.set_style(
+                ProgressStyle::default_bar()
+                    .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>3}/{len:3} | {msg}")
+                    .unwrap()
+                    .progress_chars("##-"),
+            );
+
             let f = rt.spawn(async move {
                 let mut offset = 0;
                 let mut latencies = Vec::with_capacity(batch_number as usize);
                 let start = Instant::now();
-                for _batch_idx in 0..batch_number {
+                for batch_idx in 0..batch_number {
                     let batch_start = Instant::now();
                     let _data = handler
                         .read(file_name.as_str(), ReadOptions::with_read_of_buffer_io(offset, read_size))
                         .await;
                     let batch_elapsed = batch_start.elapsed();
                     latencies.push(batch_elapsed.as_secs_f64());
+                    let avg = latencies.iter().sum::<f64>() / latencies.len() as f64;
+                    pb.set_message(format!(
+                        "batch {} took {:.4}s, avg {:.4}s",
+                        batch_idx,
+                        batch_elapsed.as_secs_f64(),
+                        avg
+                    ));
+                    pb.inc(1);
                     offset += read_size as u64;
                     if sleep_millis_per_batch > 0 {
                         tokio::time::sleep(Duration::from_millis(sleep_millis_per_batch as u64)).await;
                     }
                 }
+                pb.finish_with_message("Done");
                 let elapsed = start.elapsed();
                 latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
                 let min = latencies.first().cloned().unwrap_or(0.0);
