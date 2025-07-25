@@ -15,7 +15,6 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub struct DiskReadBenchAction {
