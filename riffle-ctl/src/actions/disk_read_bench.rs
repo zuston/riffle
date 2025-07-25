@@ -120,7 +120,7 @@ impl Action for DiskReadBenchAction {
             let pb = multi_pb.add(ProgressBar::new(batch_number));
             pb.set_style(
                 ProgressStyle::default_bar()
-                    .template(&format!("{{prefix}} [{elapsed_precise}] {{bar:40.cyan/blue}} {{pos:>3}}/{{len:3}} | {{msg}}"))
+                    .template("[{prefix}] [{elapsed_precise}] {bar:40.cyan/blue} {pos:>3}/{len:3} | {msg}")
                     .unwrap()
                     .progress_chars("##-"),
             );
