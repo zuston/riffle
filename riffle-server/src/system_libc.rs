@@ -129,6 +129,31 @@ pub async fn send_file_full(
     Ok(())
 }
 
+pub fn read_ahead(file: &std::fs::File, off: i64, len: i64) -> Result<()> {
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::io::AsRawFd;
+        unsafe {
+            let fd = file.as_raw_fd();
+            let res = libc::posix_fadvise(
+                fd,
+                off as libc::off_t,
+                len as libc::off_t,
+                libc::POSIX_FADV_WILLNEED,
+            );
+            if res != 0 {
+                return Err(std::io::Error::from_raw_os_error(res).into());
+            }
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod tests {

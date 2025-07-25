@@ -3,6 +3,7 @@ use bytes::Bytes;
 use bytesize;
 use clap::builder::Str;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use log::info;
 use riffle_server::config::{Config, IoLimiterConfig, RuntimeConfig};
 use riffle_server::http::HttpMonitorService;
 use riffle_server::runtime::manager::{create_runtime, RuntimeManager};
@@ -47,7 +48,7 @@ impl DiskAppendBenchAction {
         let mut config = Config::create_simple_config();
         let port = util::find_available_port().unwrap();
         config.http_port = port;
-        println!("Expose http service with port: {}", port);
+        info!("Expose http service with port: {}", port);
 
         let runtime_manager = RuntimeManager::from(RuntimeConfig {
             read_thread_num: 512,
@@ -118,7 +119,7 @@ impl Action for DiskAppendBenchAction {
         let write_size = self.write_size as usize;
 
         let total_bytes = (self.concurrency * batch_number * write_size) as u64;
-        println!(
+        info!(
             "Total data to write: {}",
             bytesize::to_string(total_bytes, true)
         );

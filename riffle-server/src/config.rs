@@ -134,6 +134,19 @@ pub struct LocalfileStoreConfig {
     // This is only for urpc
     #[serde(default = "as_default_read_io_sendfile_enable")]
     pub read_io_sendfile_enable: bool,
+
+    pub read_ahead_options: Option<ReadAheadConfig>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ReadAheadConfig {
+    // todo: add more options
+    #[serde(default = "as_default_read_ahead_batch_size")]
+    batch_size: String,
+}
+
+fn as_default_read_ahead_batch_size() -> String {
+    "14M".to_string()
 }
 
 fn as_default_read_io_sendfile_enable() -> bool {
@@ -211,6 +224,7 @@ impl LocalfileStoreConfig {
             index_consistency_detection_enable: false,
             io_limiter: None,
             read_io_sendfile_enable: as_default_read_io_sendfile_enable(),
+            read_ahead_options: None,
         }
     }
 }
