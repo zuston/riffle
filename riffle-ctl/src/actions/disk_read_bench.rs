@@ -1,7 +1,7 @@
 use crate::actions::disk_append_bench::{DiskAppendBenchAction, FILE_PREFIX};
 use crate::actions::Action;
 use crate::Commands::DiskAppendBench;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::info;
 use riffle_server::config::IoLimiterConfig;
 use riffle_server::runtime::manager::create_runtime;
@@ -14,6 +14,7 @@ use riffle_server::store::local::LocalIO;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -108,20 +109,22 @@ impl Action for DiskReadBenchAction {
         let batch_number = self.batch_number;
         let read_size = self.read_size;
         let sleep_millis_per_batch = self.sleep_millis_per_batch;
+        let multi_pb = Arc::new(MultiProgress::new());
         for idx in 0..self.concurrency {
             let file_name = format!("{}{}", FILE_PREFIX, idx);
             let handler = self.io_handler.clone();
             let batch_number = batch_number;
             let read_size = read_size;
             let rt = self.read_runtimes.get(idx).unwrap();
-
-            let pb = ProgressBar::new(batch_number);
+            let multi_pb = multi_pb.clone();
+            let pb = multi_pb.add(ProgressBar::new(batch_number));
             pb.set_style(
                 ProgressStyle::default_bar()
-                    .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>3}/{len:3} | {msg}")
+                    .template(&format!("{{prefix}} [{elapsed_precise}] {{bar:40.cyan/blue}} {{pos:>3}}/{{len:3}} | {{msg}}"))
                     .unwrap()
                     .progress_chars("##-"),
             );
+            pb.set_prefix(format!("T{}", idx));
 
             let f = rt.spawn(async move {
                 let mut offset = 0;
