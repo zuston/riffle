@@ -128,13 +128,14 @@ impl Action for DiskReadBenchAction {
             let f = rt.spawn(async move {
                 let mut offset = 0;
                 let mut latencies = Vec::with_capacity(batch_number as usize);
-                let start = Instant::now();
+                let mut duration = 0;
                 for batch_idx in 0..batch_number {
                     let batch_start = Instant::now();
                     let _data = handler
                         .read(file_name.as_str(), ReadOptions::with_read_of_buffer_io(offset, read_size))
                         .await;
                     let batch_elapsed = batch_start.elapsed();
+                    duration += batch_elapsed.as_millis() as u64;
                     latencies.push(batch_elapsed.as_secs_f64());
                     let avg = latencies.iter().sum::<f64>() / latencies.len() as f64;
                     pb.set_message(format!(
@@ -149,8 +150,6 @@ impl Action for DiskReadBenchAction {
                         tokio::time::sleep(Duration::from_millis(sleep_millis_per_batch as u64)).await;
                     }
                 }
-                pb.finish_with_message("Done");
-                let elapsed = start.elapsed();
                 latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
                 let min = latencies.first().cloned().unwrap_or(0.0);
                 let max = latencies.last().cloned().unwrap_or(0.0);
@@ -162,14 +161,14 @@ impl Action for DiskReadBenchAction {
                     let mid = latencies.len() / 2;
                     (latencies[mid - 1] + latencies[mid]) / 2.0
                 };
-                println!(
-                    "[concurrency {}] total read time: {:.3} secs, batch latency min/median/max: {:.6}/{:.6}/{:.6} secs",
-                    idx,
-                    elapsed.as_secs_f64(),
+                let msg = format!(
+                    "total read time: {:.3} millis, batch latency min/median/max: {:.6}/{:.6}/{:.6} secs",
+                    duration,
                     min,
                     median,
                     max
                 );
+                pb.finish_with_message(msg);
             });
             futures.push(f);
         }
