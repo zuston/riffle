@@ -27,6 +27,8 @@ pub struct DiskReadBenchAction {
     append_action: DiskAppendBenchAction,
 
     read_runtimes: Vec<RuntimeRef>,
+
+    sleep_millis_per_batch: usize,
 }
 
 impl DiskReadBenchAction {
@@ -36,6 +38,7 @@ impl DiskReadBenchAction {
         batch_num: usize,
         concurrency: usize,
         read_ahead_enable: bool,
+        sleep_millis_per_batch: usize,
     ) -> Self {
         let read_runtime = create_runtime(concurrency, "pool");
         let write_runtime = create_runtime(1, "pool");
@@ -73,6 +76,7 @@ impl DiskReadBenchAction {
             io_handler: handler,
             append_action,
             read_runtimes: r_runtimes,
+            sleep_millis_per_batch,
         };
         action
     }
@@ -102,6 +106,7 @@ impl Action for DiskReadBenchAction {
         let mut futures = vec![];
         let batch_number = self.batch_number;
         let read_size = self.read_size;
+        let sleep_millis_per_batch = self.sleep_millis_per_batch;
         for idx in 0..self.concurrency {
             let file_name = format!("{}{}", FILE_PREFIX, idx);
             let handler = self.io_handler.clone();
@@ -120,7 +125,9 @@ impl Action for DiskReadBenchAction {
                     let batch_elapsed = batch_start.elapsed();
                     latencies.push(batch_elapsed.as_secs_f64());
                     offset += read_size as u64;
-                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    if sleep_millis_per_batch > 0 {
+                        tokio::time::sleep(Duration::from_millis(sleep_millis_per_batch as u64)).await;
+                    }
                 }
                 let elapsed = start.elapsed();
                 latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());

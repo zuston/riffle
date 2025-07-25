@@ -67,13 +67,13 @@ impl LocalIO for ReadAheadLayerWrapper {
     ) -> anyhow::Result<DataBytes, WorkerError> {
         if options.length.is_some() {
             let abs_path = format!("{}/{}", &self.root, path);
-            let load_task = self
-                .load_tasks
-                .entry(path.to_owned())
-                .or_insert_with(|| match ReadAheadTask::new(&abs_path) {
-                    Ok(task) => Some(task),
-                    Err(_) => None,
-                });
+            let load_task =
+                self.load_tasks
+                    .entry(path.to_owned())
+                    .or_insert_with(|| match ReadAheadTask::new(&abs_path) {
+                        Ok(task) => Some(task),
+                        Err(_) => None,
+                    });
             if let Some(task) = load_task.value() {
                 task.load(options.offset, options.length.unwrap()).await?;
             }
