@@ -10,10 +10,14 @@ use crate::runtime::manager::RuntimeManager;
 use crate::server_state_manager::ServerStateManager;
 use await_tree::InstrumentAwait;
 use log::{error, info};
+use std::collections::HashSet;
 use std::time::Duration;
 use tonic::transport::{Channel, Error};
 
-const DEFAULT_SHUFFLE_SERVER_TAG: &str = "ss_v4";
+const LEGACY_VERSION_TAG: &str = "ss_v4";
+const VERSION_TAG: &str = "ss_v5";
+const GRPC_TAG: &str = "GRPC";
+const URPC_TAG: &str = "GRPC_NETTY";
 
 pub struct HeartbeatTask;
 
@@ -31,7 +35,7 @@ impl HeartbeatTask {
         let server_state_manager = server_state_manager.clone();
 
         let coordinator_quorum = config.coordinator_quorum.clone();
-        let tags = config.tags.clone().unwrap_or(vec![]);
+        let specified_tags = config.tags.clone().unwrap_or(vec![]);
 
         let grpc_port = config.grpc_port;
         let urpc_port = config.urpc_port.unwrap_or(0);
@@ -72,6 +76,17 @@ impl HeartbeatTask {
             panic!("No active coordinator server found");
         }
 
+        // Initialize service tags
+        let mut service_tags = HashSet::new();
+        service_tags.insert(String::from(LEGACY_VERSION_TAG));
+        service_tags.insert(String::from(VERSION_TAG));
+        service_tags.insert(String::from(GRPC_TAG));
+        if urpc_port > 0 {
+            service_tags.insert(String::from(URPC_TAG));
+        }
+        service_tags.extend(specified_tags);
+        info!("Service tags: {:?}", &service_tags);
+
         runtime_manager.default_runtime.spawn_with_await_tree(
             "Heartbeat task with multi coordinators",
             async move {
@@ -79,10 +94,6 @@ impl HeartbeatTask {
                     tokio::time::sleep(Duration::from_secs(interval_seconds as u64))
                         .instrument_await("sleeping")
                         .await;
-
-                    let mut all_tags = vec![];
-                    all_tags.push(DEFAULT_SHUFFLE_SERVER_TAG.to_string());
-                    all_tags.extend_from_slice(&*tags);
 
                     let mut healthy = health_service.is_healthy().await.unwrap_or(false);
                     SERVICE_IS_HEALTHY.set(if healthy { 0 } else { 1 });
@@ -108,7 +119,7 @@ impl HeartbeatTask {
                         pre_allocated_memory: memory_snapshot.allocated(),
                         available_memory: memory_snapshot.available(),
                         event_num_in_flush: memory_spill_event_num,
-                        tags: all_tags,
+                        tags: service_tags.iter().cloned().collect(),
                         is_healthy: Some(healthy),
                         status: server_state.into(),
                         storage_info: Default::default(),
