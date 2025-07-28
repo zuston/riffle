@@ -85,14 +85,6 @@ jobs:
           toolchain: nightly
           override: true
 
-      - name: Cache target-docker
-        uses: actions/cache@v3
-        with:
-          path: target-docker
-          key: target-docker-${{ runner.os }}-${{ matrix.name }}
-          restore-keys: |
-            target-docker-${{ runner.os }}-${{ matrix.name }}-
-
       - name: Build
         run: ${{ matrix.build_command }}
 
