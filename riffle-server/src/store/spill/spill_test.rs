@@ -443,6 +443,7 @@ mod tests {
         config
             .hybrid_store
             .huge_partition_memory_spill_to_hdfs_threshold_size = "1B".to_string();
+        config.hybrid_store.huge_partition_fallback_enable = true;
 
         let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
         let store = create_hybrid_store(&config, &warm, Some(&cold), &reconf_manager);

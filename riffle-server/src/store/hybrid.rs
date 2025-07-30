@@ -371,6 +371,7 @@ impl HybridStore {
                             && stype == StorageType::HDFS
                             && spill_message.get_retry_counter() > 1
                             && warm.is_healthy().await?
+                            && self.config.huge_partition_fallback_enable
                         {
                             candidate_store = warm;
                             info!(
