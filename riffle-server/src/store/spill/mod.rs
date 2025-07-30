@@ -12,6 +12,7 @@ use crate::store::mem::buffer::BatchMemoryBlock;
 use log::{debug, error, warn};
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
+use std::fmt::{Display, Formatter};
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
@@ -58,6 +59,20 @@ impl SpillMessage {
 
     pub fn get_retry_counter(&self) -> u32 {
         self.retry_cnt.load(SeqCst)
+    }
+}
+
+impl Display for SpillMessage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "uid: {:?}. size: {}. storage_type: {:?}. is_huge_partition: {:?}. retry_cnt: {}",
+            &self.ctx.uid,
+            self.size,
+            self.get_candidate_storage_type(),
+            self.huge_partition_tag.get(),
+            self.get_retry_counter()
+        )
     }
 }
 
@@ -155,8 +170,8 @@ async fn handle_spill_failure(
             }
             let uid = &message.ctx.uid;
             error!(
-                "Errors on spill memory data to persistent storage for uid: {:?}. The error: {:#?}",
-                uid, error
+                "Errors on spill memory data to persistent storage for {}. The error: {:#?}",
+                &message, error
             );
             // could be retry?
             true
