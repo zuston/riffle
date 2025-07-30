@@ -333,7 +333,7 @@ impl HybridStore {
         // The following spill policies.
         // 1. local store is unhealthy. spill to hdfs (This is disabled by default, which will slow down the performance)
         // 2. event flushed to localfile failed. and exceed retry max cnt, fallback to hdfs
-        // 3. huge partition directly flush to hdfs
+        // 3. huge partition directly flush to hdfs (if flushing failed, falllback to localfile)
 
         // normal assignment
         let mut candidate_store = if warm.is_healthy().await? {
@@ -347,6 +347,7 @@ impl HybridStore {
             cold
         };
 
+        let mut reset = false;
         // huge partition fallback to hdfs if size > threshold
         let app_manager = self.app_manager.get();
         if let Some(app_manager) = app_manager {
@@ -366,7 +367,20 @@ impl HybridStore {
                         && spill_size as u64
                             > self.huge_partition_memory_spill_to_hdfs_threshold_size
                     {
-                        candidate_store = cold;
+                        if let Some(stype) = spill_message.get_candidate_storage_type()
+                            && stype == StorageType::HDFS
+                            && spill_message.get_retry_counter() > 1
+                            && warm.is_healthy().await?
+                        {
+                            candidate_store = warm;
+                            info!(
+                                "Fallback to warm due to flushing HDFS failure for {:?}",
+                                &spill_message.ctx.uid
+                            );
+                        } else {
+                            candidate_store = cold;
+                        }
+                        reset = true;
                     }
                 }
                 _ => return Err(WorkerError::APP_IS_NOT_FOUND),
@@ -374,7 +388,7 @@ impl HybridStore {
         }
 
         // fallback assignment. propose hdfs always is active and stable
-        if spill_message.get_retry_counter() >= 1 {
+        if spill_message.get_retry_counter() >= 1 && !reset {
             candidate_store = cold;
         }
 
