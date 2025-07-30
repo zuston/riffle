@@ -407,6 +407,73 @@ mod tests {
         assert_eq!(0, snapshot.used());
         assert_eq!(0, snapshot.allocated());
     }
+
+    #[tokio::test]
+    #[cfg(feature = "hdfs")]
+    async fn test_hdfs_failure_for_huge_partition() -> anyhow::Result<()> {
+        GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.set(0);
+
+        // for the huge partition, when the hdfs flushing failed, it should fallback
+        // to localfile if it's healthy
+        let warm_healthy = Arc::new(AtomicBool::new(true));
+        let warm = MockStore::new(LOCALFILE, &warm_healthy, None, None);
+
+        let cold_spill_failure_tag = Arc::new(AtomicBool::new(false));
+        let cold_healthy = Arc::new(AtomicBool::new(true));
+        let cold = MockStore::new(
+            HDFS,
+            &cold_healthy,
+            Some(cold_spill_failure_tag.clone()),
+            None,
+        );
+
+        let temp_dir = tempdir::TempDir::new("test_local_store").unwrap();
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        println!("init local file path: {}", &temp_path);
+
+        let mut config = create_multi_level_config(
+            StorageType::MEMORY_LOCALFILE_HDFS,
+            1,
+            "1M".to_string(),
+            temp_path,
+        );
+        config.hybrid_store.memory_spill_high_watermark = 1.0;
+        // options for huge partition flushing
+        config.app_config.partition_limit_enable = true;
+        config
+            .hybrid_store
+            .huge_partition_memory_spill_to_hdfs_threshold_size = "1B".to_string();
+
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
+        let store = create_hybrid_store(&config, &warm, Some(&cold), &reconf_manager);
+        let runtime = store.runtime_manager.clone();
+        let app_manager_ref = AppManager::get_ref(runtime, config, &store, &reconf_manager);
+        store.with_app_manager(&app_manager_ref);
+
+        let app_id = ApplicationId::mock();
+        let shuffle_id = 1;
+        let partition_id = 0;
+
+        app_manager_ref.register(app_id.to_string(), 1, Default::default());
+        let app = app_manager_ref.get_app(&app_id).unwrap();
+        app.mark_huge_partition(&PartitionUId::new(&app_id, shuffle_id, partition_id))?;
+
+        // due to the huge partition, it will flush to HDFS
+        let ctx = mock_writing_context(&app_id, shuffle_id, partition_id, 1, 20);
+        store.insert(ctx).await?;
+
+        // step1: but the hdfs is broken, it should fallback to localfile after 1 retry time
+        cold_spill_failure_tag.store(true, SeqCst);
+        awaitility::at_most(Duration::from_secs(1000))
+            .until(|| cold.inner.spill_insert_ops.load(SeqCst) == 2);
+        assert_eq!(2, cold.inner.spill_insert_fail_ops.load(SeqCst));
+
+        // step2: after 2 times passed, it should fallback to localfile
+        awaitility::at_most(Duration::from_secs(1000))
+            .until(|| warm.inner.spill_insert_ops.load(SeqCst) == 1);
+
+        Ok(())
+    }
 }
 
 mod mock {
