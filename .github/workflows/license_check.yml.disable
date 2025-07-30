@@ -1,0 +1,23 @@
+name: License Checker
+
+on:
+  push:
+    branches:
+      - master
+      - release-*.*
+  pull_request:
+    branches:
+      - master
+      - "v*.*.*-rc"
+      - "v*.*.*"
+      - release-*.*
+jobs:
+  license-header-check:
+    runs-on: ubuntu-latest
+    name: license-header-check
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check License Header
+        uses: apache/skywalking-eyes/header@v0.6.0
