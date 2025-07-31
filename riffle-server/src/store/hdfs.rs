@@ -495,18 +495,25 @@ impl Store for HdfsStore {
             }
         }
 
+        let is_app_level_explicit_unregister =
+            if let PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(_) = ctx.purge_reason {
+                true
+            } else {
+                false
+            };
+        let is_app_level_heartbeat_timeout =
+            if let PurgeReason::APP_LEVEL_HEARTBEAT_TIMEOUT(_) = ctx.purge_reason {
+                true
+            } else {
+                false
+            };
+
         if !keys_to_delete.is_empty() {
             // app level purge if the app heartbeat is timeout or explicitly purge.
             // 1. But if the app heartbeat is timeout, we should only delete this server's own written files
             // 2. If the app is explicitly unregistered, delete all basic directory.
             // The detailed info could be referred from https://github.com/apache/incubator-uniffle/pull/1681
 
-            let is_app_level_explicit_unregister =
-                if let PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(_) = ctx.purge_reason {
-                    true
-                } else {
-                    false
-                };
             if shuffle_id_option.is_some() || is_app_level_explicit_unregister {
                 let timer = Instant::now();
                 filesystem.delete_dir(dir.as_str()).await?;
@@ -530,6 +537,61 @@ impl Store for HdfsStore {
                 }
                 info!("The hdfs data of path[{}] with prefix[{}] has been deleted recursively that costs [{}]ms",
                     &dir, prefix, timer.elapsed().as_millis());
+            }
+        } else {
+            info!(
+                "Now deleting the app level dir:{} since all child folders have been deleted",
+                &dir
+            );
+
+            // Image that when all the children folders have been deleted due to the explicitly unregister,
+            // the final app files from explicit app level unregister also should be
+            // deleted of the upper app level main dir.
+            let is_delete_app_dir = if is_app_level_explicit_unregister {
+                true
+            } else {
+                // if app is deleted by heartbeat timeout, we should check whether having any children folders
+                if is_app_level_heartbeat_timeout {
+                    match filesystem.list_status(dir.as_str()).await {
+                        Ok(file_stats) => {
+                            if file_stats.len() == 0 {
+                                true
+                            } else {
+                                warn!(
+                                    "Nothing to do since dir:{} has {} child folders",
+                                    dir.as_str(),
+                                    file_stats.len()
+                                );
+                                false
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Errors on listing dir: {}. err: {}", dir.as_str(), e);
+                            false
+                        }
+                    }
+                } else {
+                    warn!("Nothing to do due to non heartbeat-timeout and explicit-unregister of reason: {:?}",
+                        &ctx.purge_reason);
+                    false
+                }
+            };
+
+            if is_delete_app_dir {
+                let timer = Instant::now();
+                match filesystem.delete_dir(dir.as_str()).await {
+                    Ok(_) => {
+                        info!(
+                            "The dir:{} has been deleted that cost {}ms due to {:?}",
+                            &dir,
+                            timer.elapsed().as_millis(),
+                            &ctx.purge_reason
+                        );
+                    }
+                    Err(e) => {
+                        error!("Errors on delete dir: {}. err: {}", dir.as_str(), e);
+                    }
+                }
             }
         }
 
