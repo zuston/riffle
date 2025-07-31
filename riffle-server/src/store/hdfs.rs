@@ -1003,7 +1003,25 @@ mod tests {
                 purge_reason: PurgeReason::APP_LEVEL_HEARTBEAT_TIMEOUT(app_id.clone()),
             }))?;
         assert_eq!(1, file_number_recursively(temp_path.as_str()));
-        println!("Done with heartbeat timeout app level purge");
+
+        let app_abs_dir = format!("{}/{}", &temp_path, &app_id);
+        assert!(fs::exists(app_abs_dir.as_str())?);
+
+        // case3: It will delete with the app dir when accepting explicit-unregister
+
+        /// This case is to test the HDFS app root dir leak.
+        /// If the all shuffle level purges have been purged,
+        /// the parent dir should also be purged after
+        /// explicit-unregister or heartbeat-timeout
+        hdfs_store
+            .app_remote_clients
+            .insert(app_id.to_owned(), client.clone());
+        runtime_manager
+            .default_runtime
+            .block_on(hdfs_store.purge(&PurgeDataContext {
+                purge_reason: PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(app_id.clone()),
+            }))?;
+        assert!(!fs::exists(app_abs_dir.as_str())?);
 
         Ok(())
     }
