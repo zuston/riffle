@@ -493,6 +493,7 @@ pub(crate) mod test {
                 memory_spill_to_localfile_concurrency: None,
                 memory_spill_to_hdfs_concurrency: None,
                 huge_partition_memory_spill_to_hdfs_threshold_size: "64M".to_string(),
+                huge_partition_fallback_enable: false,
                 sensitive_watermark_spill_enable: false,
                 async_watermark_spill_trigger_enable: false,
                 async_watermark_spill_trigger_interval_ms: 0,
