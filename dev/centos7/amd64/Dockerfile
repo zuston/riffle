@@ -5,7 +5,7 @@ RUN sed -i 's|^mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-*.repo \
  && sed -i 's|^#baseurl=http://mirror.centos.org|baseurl=https://mirrors.aliyun.com|g' /etc/yum.repos.d/CentOS-*.repo
 
 # install common tools
-RUN curl -o /etc/yum.repos.d/CentOS-SCLo-scl.repo https://mirrors.aliyun.com/centos-vault/centos/7/sclo/x86_64/rh/CentOS-SCLo-scl.repo \
+RUN curl -o /etc/yum.repos.d/Centos-SCLo-scl.repo https://mirrors.aliyun.com/repo/Centos-7-scl.repo \
  && yum install -y epel-release
 
 # replace to aliyun mirror repo
