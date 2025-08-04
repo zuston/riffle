@@ -1,16 +1,19 @@
 FROM centos:7
 
-# install common tools
 RUN echo "sslverify=false" >> /etc/yum.conf
-RUN sed -i "s/mirror.centos.org/vault.centos.org/g" /etc/yum.repos.d/*.repo
-RUN sed -i "s/^#.*baseurl=http/baseurl=https/g" /etc/yum.repos.d/*.repo
-RUN sed -i "s/^mirrorlist/#mirrorlist/g" /etc/yum.repos.d/*.repo
+RUN sed -i 's|^mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-*.repo \
+ && sed -i 's|^#baseurl=http://mirror.centos.org|baseurl=https://mirrors.aliyun.com|g' /etc/yum.repos.d/CentOS-*.repo
+
+# install common tools
 RUN yum update -y
 RUN yum install -y centos-release-scl epel-release
-RUN sed -i "s/mirror.centos.org/vault.centos.org/g" /etc/yum.repos.d/*.repo
-RUN sed -i "s/^#.*baseurl=http/baseurl=https/g" /etc/yum.repos.d/*.repo
-RUN sed -i "s/^mirrorlist/#mirrorlist/g" /etc/yum.repos.d/*.repo
-RUN yum install -y libzip unzip wget cmake3 openssl-devel llvm clang-devel clang krb5-workstation clang-devel git gcc
+
+# replace to aliyun mirror repo
+RUN sed -i 's|^mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/epel.repo \
+ && sed -i 's|^#baseurl=http://download.fedoraproject.org/pub/epel|baseurl=https://mirrors.aliyun.com/epel|g' /etc/yum.repos.d/epel.repo
+
+RUN yum install -y epel-release \
+ && yum install -y libzip unzip wget cmake3 openssl-devel llvm clang-devel clang krb5-workstation clang-devel git gcc
 
 # install gcc-8
 #RUN yum install -y devtoolset-8-gcc devtoolset-8-gcc-c++
