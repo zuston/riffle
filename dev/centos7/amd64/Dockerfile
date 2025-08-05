@@ -2,7 +2,7 @@ FROM centos:7
 
 RUN echo "sslverify=false" >> /etc/yum.conf
 RUN sed -i 's|^mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-*.repo \
- && sed -i 's|^#baseurl=http://mirror.centos.org|baseurl=https://mirrors.tuna.tsinghua.edu.cn|g' /etc/yum.repos.d/CentOS-*.repo
+ && sed -i 's|^#baseurl=http://mirror.centos.org|baseurl=https://vault.centos.org|g' /etc/yum.repos.d/CentOS-*.repo
 
 # install common tools
 RUN yum install -y centos-release-scl epel-release
@@ -11,7 +11,7 @@ RUN yum install -y centos-release-scl epel-release
 RUN sed -i 's|^mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/epel.repo \
  && sed -i 's|^#baseurl=http://download.fedoraproject.org/pub/epel|baseurl=https://mirrors.tuna.tsinghua.edu.cn/epel|g' /etc/yum.repos.d/epel.repo
 
-RUN sed -i 's|^#baseurl=http://mirror.centos.org|baseurl=https://mirrors.tuna.tsinghua.edu.cn|g' /etc/yum.repos.d/CentOS-SCLo-scl.repo
+RUN sed -i 's|^#baseurl=http://mirror.centos.org|baseurl=https://vault.centos.org|g' /etc/yum.repos.d/CentOS-SCLo-scl.repo
 
 RUN yum install -y epel-release \
  && yum install -y libzip unzip wget cmake3 openssl-devel llvm clang-devel clang krb5-workstation clang-devel git gcc
