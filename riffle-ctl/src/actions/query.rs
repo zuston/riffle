@@ -1,5 +1,6 @@
 use crate::actions::discovery::{Discovery, ServerInfo, ServerStatus};
 use crate::actions::Action;
+use crate::meta;
 use anyhow::Result;
 use clap::builder::Str;
 use csv::Writer;
@@ -20,6 +21,7 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::TempDir;
+use url::{ParseError, Url};
 
 const INSTANCES_TABLE_NAME: &str = "instances";
 const HISTORICAL_APPS_TABLE_NAME: &str = "historical_apps";
@@ -172,11 +174,24 @@ pub struct QueryAction {
 }
 
 impl QueryAction {
-    pub fn new(sql: String, format: OutputFormat, coordinator_url: String) -> Self {
+    pub fn new(sql: String, format: OutputFormat, coordinator_name: String) -> Self {
+        let url = match Url::parse(coordinator_name.as_str()) {
+            Ok(url) => coordinator_name,
+            Err(_) => {
+                let meta = meta::Metadata::load(None);
+                let mapping = meta.get_cluster_ids();
+                let url = mapping.get(&coordinator_name);
+                if url.is_none() {
+                    panic!("Illegal coordinator url/cluster id. {}", &coordinator_name);
+                }
+                url.unwrap().into()
+            }
+        };
+
         Self {
             sql,
             format,
-            coordinator_url,
+            coordinator_url: url,
         }
     }
 }
