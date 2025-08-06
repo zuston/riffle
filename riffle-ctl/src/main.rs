@@ -12,10 +12,10 @@ use crate::actions::postgres_server::PostgresServerAction;
 use crate::actions::query::{OutputFormat, QueryAction};
 use crate::actions::update_action::NodeUpdateAction;
 use crate::actions::{Action, ValidateAction};
-use crate::Commands::Kill;
 use clap::{Parser, Subcommand};
 use log::LevelFilter;
 use logforth::append;
+use riffle_server::server_state_manager::ServerState;
 use tokio::runtime::Runtime;
 
 #[derive(Parser)]
@@ -102,14 +102,14 @@ enum Commands {
         #[arg(short)]
         pipeline: bool,
     },
-    #[command(about = "Update server status to make it decommission (pipeline mode supported)")]
+    #[command(
+        about = "Update server status to make it decommission/unhealthy (pipeline mode supported)"
+    )]
     Update {
         #[arg(short, long)]
         instance: Option<String>,
         #[arg(short, long)]
-        status: String,
-        #[arg(short, long)]
-        decommission_grpc_mode: bool,
+        status: ServerState,
     },
     #[command(about = "Kill riffle server")]
     Kill {
@@ -214,15 +214,7 @@ fn main() -> anyhow::Result<()> {
             Box::new(QueryAction::new(sql, table_format, coordinator_http_url))
         }
 
-        Commands::Update {
-            instance,
-            status,
-            decommission_grpc_mode,
-        } => Box::new(NodeUpdateAction::new(
-            instance,
-            status,
-            decommission_grpc_mode,
-        )),
+        Commands::Update { instance, status } => Box::new(NodeUpdateAction::new(instance, status)),
         Commands::Kill { force, instance } => Box::new(KillAction::new(force, instance)),
         Commands::HdfsAppend {
             file_path,

@@ -284,5 +284,5 @@ or even decommission specific servers based on your criteria.
 
 ### Identify and Decommission Servers
 ```shell
-./riffle-ctl query -c http://xx:21001 -s "select * from instances where tags like '%sata%'" -p | ./riffle-ctl update --status DECOMMISSIONING
+./riffle-ctl query -c http://xx:21001 -s "select * from instances where tags like '%sata%'" -p | ./riffle-ctl update --status unhealthy
 ```
