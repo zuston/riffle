@@ -367,19 +367,20 @@ impl HybridStore {
                         && spill_size as u64
                             > self.huge_partition_memory_spill_to_hdfs_threshold_size
                     {
-                        if let Some(stype) = spill_message.get_candidate_storage_type()
-                            && stype == StorageType::HDFS
-                            && spill_message.get_retry_counter() > 1
-                            && warm.is_healthy().await?
-                            && self.config.huge_partition_fallback_enable
-                        {
-                            candidate_store = warm;
-                            info!(
-                                "Fallback to warm due to flushing HDFS failure for {:?}",
-                                &spill_message.ctx.uid
-                            );
-                        } else {
-                            candidate_store = cold;
+                        candidate_store = cold;
+                        // REWRITE: expanded if-let-chain into nested ifs for clarity and correctness
+                        if let Some(stype) = spill_message.get_candidate_storage_type() {
+                            if stype == StorageType::HDFS
+                                && spill_message.get_retry_counter() > 1
+                                && warm.is_healthy().await?
+                                && self.config.huge_partition_fallback_enable
+                            {
+                                candidate_store = warm;
+                                info!(
+                                    "Fallback to warm due to flushing HDFS failure for {:?}",
+                                    &spill_message.ctx.uid
+                                );
+                            }
                         }
                         reset = true;
                     }

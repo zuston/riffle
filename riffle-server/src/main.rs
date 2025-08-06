@@ -17,7 +17,6 @@
 
 #![allow(dead_code, unused)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(let_chains)]
 
 use crate::app_manager::{AppManager, APP_MANAGER_REF};
 use crate::common::init_global_variable;
