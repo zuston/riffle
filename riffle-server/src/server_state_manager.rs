@@ -2,6 +2,7 @@ use crate::app_manager::AppManagerRef;
 use crate::config::Config;
 use crate::grpc::protobuf::uniffle::ServerStatus;
 use crate::util;
+use clap::ValueEnum;
 use log::{info, warn};
 use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
@@ -16,7 +17,7 @@ const INTERVAL: u64 = 60 * 10;
 pub static SERVER_STATE_MANAGER_REF: OnceCell<ServerStateManager> = OnceCell::new();
 
 #[allow(non_camel_case_types)]
-#[derive(Debug, Clone, PartialEq, Deserialize, EnumString, Display)]
+#[derive(Debug, Clone, PartialEq, Deserialize, EnumString, Display, ValueEnum)]
 pub enum ServerState {
     ACTIVE,
     DECOMMISSIONING,
