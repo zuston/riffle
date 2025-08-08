@@ -117,6 +117,13 @@ impl ResponseData {
             _ => Default::default(),
         }
     }
+
+    pub fn len(&self) -> usize {
+        match &self {
+            ResponseData::Local(data) => data.data.len(),
+            ResponseData::Mem(data) => data.data.len(),
+        }
+    }
 }
 
 #[derive(Debug)]

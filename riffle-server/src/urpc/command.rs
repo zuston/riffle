@@ -16,8 +16,9 @@ use anyhow::Result;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use croaring::{JvmLegacy, Treemap};
-use log::{debug, error};
+use log::{debug, error, info};
 use std::collections::HashMap;
+use tokio::time::Instant;
 
 #[derive(Debug)]
 pub enum Command {
@@ -74,6 +75,8 @@ impl GetMemoryDataRequestCommand {
         conn: &mut Connection,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
+        let timer = Instant::now();
+
         let request_id = self.request_id;
         let app_id = self.app_id.as_str();
         let shuffle_id = self.shuffle_id;
@@ -112,6 +115,7 @@ impl GetMemoryDataRequestCommand {
             _ => ctx,
         };
 
+        let mut len = 0;
         let response = match app.select(ctx).await {
             Err(e) => GetMemoryDataResponseCommand {
                 request_id,
@@ -119,15 +123,26 @@ impl GetMemoryDataRequestCommand {
                 ret_msg: format!("Errors on getting memory data. err: {:#?}", e),
                 data: ResponseData::Mem(Default::default()),
             },
-            Ok(res) => GetMemoryDataResponseCommand {
-                request_id,
-                status_code: StatusCode::SUCCESS.into(),
-                ret_msg: "".to_string(),
-                data: res,
-            },
+            Ok(res) => {
+                len = res.len();
+                GetMemoryDataResponseCommand {
+                    request_id,
+                    status_code: StatusCode::SUCCESS.into(),
+                    ret_msg: "".to_string(),
+                    data: res,
+                }
+            }
         };
         let frame = Frame::GetMemoryDataResponse(response);
         conn.write_frame(&frame).await?;
+        info!(
+            "[get_memory_data] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
+            timer.elapsed().as_millis(),
+            len,
+            app_id,
+            shuffle_id,
+            partition_id
+        );
         Ok(())
     }
 }
@@ -160,6 +175,8 @@ impl GetLocalDataRequestCommand {
         conn: &mut Connection,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
+        let timer = Instant::now();
+
         let request_id = self.request_id;
         let app_id = self.app_id.as_str();
         let shuffle_id = self.shuffle_id;
@@ -190,6 +207,7 @@ impl GetLocalDataRequestCommand {
             ReadingOptions::FILE_OFFSET_AND_LEN(offset, length as i64),
             RpcType::URPC,
         );
+        let mut len = 0;
         let command = match app
             .select(ctx)
             .instrument_await(format!("getting local shuffle data for app:{}", &app_id))
@@ -203,6 +221,7 @@ impl GetLocalDataRequestCommand {
             },
             Ok(result) => {
                 if let ResponseData::Local(data) = result {
+                    len = data.data.len();
                     GetLocalDataResponseCommand {
                         request_id,
                         status_code: StatusCode::SUCCESS.into(),
@@ -222,7 +241,15 @@ impl GetLocalDataRequestCommand {
 
         let frame = Frame::GetLocalDataResponse(command);
         conn.write_frame(&frame).await?;
-        return Ok(());
+        info!(
+            "[get_local_data] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
+            timer.elapsed().as_millis(),
+            len,
+            app_id,
+            shuffle_id,
+            partition_id,
+        );
+        Ok(())
     }
 }
 
@@ -251,6 +278,8 @@ impl GetLocalDataIndexRequestCommand {
         conn: &mut Connection,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
+        let timer = Instant::now();
+
         let request_id = self.request_id;
         let app_id = self.app_id.as_str();
         let shuffle_id = self.shuffle_id;
@@ -275,6 +304,7 @@ impl GetLocalDataIndexRequestCommand {
         let uid = PartitionUId::new(&application_id, shuffle_id, partition_id);
         let ctx = ReadingIndexViewContext { partition_id: uid };
 
+        let mut len = 0;
         let command = match app
             .list_index(ctx)
             .instrument_await(format!("listing localfile index for app:{}", &app_id))
@@ -288,6 +318,7 @@ impl GetLocalDataIndexRequestCommand {
             },
             Ok(index) => {
                 let Local(result) = index;
+                len = result.index_data.len();
                 GetLocalDataIndexResponseCommand {
                     request_id,
                     status_code: StatusCode::SUCCESS.into(),
@@ -298,6 +329,14 @@ impl GetLocalDataIndexRequestCommand {
         };
         let frame = Frame::GetLocalDataIndexResponse(command);
         conn.write_frame(&frame).await?;
+        info!(
+            "[get_local_index] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
+            timer.elapsed().as_millis(),
+            len,
+            app_id,
+            shuffle_id,
+            partition_id,
+        );
         Ok(())
     }
 }
@@ -339,6 +378,8 @@ impl SendDataRequestCommand {
         conn: &mut Connection,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
+        let timer = Instant::now();
+
         let request_id = self.request_id;
         let ticket_id = self.ticket_id;
         let shuffle_id = self.shuffle_id;
@@ -420,6 +461,13 @@ impl SendDataRequestCommand {
             },
         };
         write_response(conn, response).await?;
+        info!(
+            "[send_data] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}",
+            timer.elapsed().as_millis(),
+            insert_len,
+            app_id,
+            shuffle_id,
+        );
         Ok(())
     }
 }
