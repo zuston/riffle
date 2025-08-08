@@ -96,27 +96,20 @@ impl GetMemoryDataRequestCommand {
         let app = app.unwrap();
         let uid = PartitionUId::new(&application_id, shuffle_id, partition_id);
 
+        let ctx = ReadingViewContext::new(
+            uid,
+            ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(
+                last_block_id,
+                read_buffer_size as i64,
+            ),
+            RpcType::URPC,
+        );
         let ctx = match &self.expected_tasks_bitmap_raw {
             Some(raw) => {
                 let bitmap = Treemap::deserialize::<JvmLegacy>(raw);
-                ReadingViewContext::with_task_ids_filter(
-                    uid,
-                    ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(
-                        last_block_id,
-                        read_buffer_size as i64,
-                    ),
-                    bitmap,
-                    RpcType::URPC,
-                )
+                ctx.with_task_ids_filter(bitmap)
             }
-            _ => ReadingViewContext::new(
-                uid,
-                ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(
-                    last_block_id,
-                    read_buffer_size as i64,
-                ),
-                RpcType::URPC,
-            ),
+            _ => ctx,
         };
 
         let response = match app.select(ctx).await {

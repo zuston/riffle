@@ -674,17 +674,13 @@ impl ShuffleServer for DefaultShuffleServer {
             req.last_block_id,
             req.read_buffer_size as i64,
         );
+        let ctx = ReadingViewContext::new(partition_id.clone(), reading_options, RpcType::GRPC);
         let reading_ctx = if !req.serialized_expected_task_ids_bitmap.is_empty() {
             let bitmap =
                 Treemap::deserialize::<JvmLegacy>(&req.serialized_expected_task_ids_bitmap);
-            ReadingViewContext::with_task_ids_filter(
-                partition_id.clone(),
-                reading_options,
-                bitmap,
-                RpcType::GRPC,
-            )
+            ctx.with_task_ids_filter(bitmap)
         } else {
-            ReadingViewContext::new(partition_id.clone(), reading_options, RpcType::GRPC)
+            ctx
         };
 
         let data_fetched_result = app

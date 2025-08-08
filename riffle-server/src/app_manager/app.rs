@@ -230,7 +230,7 @@ impl App {
         self.heartbeat()?;
 
         let ctx = if (self.app_config_options.sendfile_enable) {
-            ReadingViewContext::with_sendfile_enabled(ctx)
+            ctx.with_sendfile_enabled()
         } else {
             ctx
         };
