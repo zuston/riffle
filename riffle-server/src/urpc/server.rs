@@ -18,6 +18,7 @@ use crate::metric::{
 use crate::urpc::command::Command;
 use anyhow::Result;
 use await_tree::InstrumentAwait;
+use socket2::SockRef;
 use tracing::Instrument;
 
 const MAX_CONNECTIONS: usize = 40000;
@@ -72,7 +73,13 @@ impl Listener {
 
         loop {
             match self.listener.accept().await {
-                Ok((socket, _)) => return Ok(socket),
+                Ok((socket, _)) => {
+                    // todo: fine-grained keep_alive options
+                    let sock_ref = SockRef::from(&socket);
+                    sock_ref.set_keepalive(true)?;
+                    sock_ref.set_nodelay(true)?;
+                    return Ok(socket);
+                }
                 Err(err) => {
                     if backoff > 64 {
                         return Err(err.into());
