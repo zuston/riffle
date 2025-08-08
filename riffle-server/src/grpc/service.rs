@@ -50,7 +50,7 @@ use crate::metric::{
     GRPC_SEND_DATA_PROCESS_TIME, GRPC_SEND_DATA_TRANSPORT_TIME, RPC_BATCH_BYTES_OPERATION,
     RPC_BATCH_DATA_BYTES_HISTOGRAM, TOTAL_MEMORY_USED,
 };
-use crate::server_state_manager::{ServerState, ServerStateManager};
+use crate::server_state_manager::{ServerState, ServerStateManager, TransitionReason};
 use crate::store::{Block, PartitionedData, ResponseDataIndex};
 use crate::util;
 use await_tree::{span, InstrumentAwait};
@@ -232,7 +232,7 @@ impl ShuffleServerInternal for DefaultShuffleServer {
         request: Request<DecommissionRequest>,
     ) -> Result<Response<DecommissionResponse>, Status> {
         self.server_state_manager
-            .as_state(ServerState::DECOMMISSIONING);
+            .as_state(ServerState::DECOMMISSIONING, TransitionReason::ADMIN_GRPC);
         Ok(Response::new(DecommissionResponse {
             status: StatusCode::SUCCESS.into(),
             ret_msg: "".to_string(),
@@ -243,8 +243,10 @@ impl ShuffleServerInternal for DefaultShuffleServer {
         &self,
         request: Request<CancelDecommissionRequest>,
     ) -> Result<Response<CancelDecommissionResponse>, Status> {
-        self.server_state_manager
-            .as_state(ServerState::CANCEL_DECOMMISSION);
+        self.server_state_manager.as_state(
+            ServerState::CANCEL_DECOMMISSION,
+            TransitionReason::ADMIN_GRPC,
+        );
         Ok(Response::new(CancelDecommissionResponse {
             status: StatusCode::SUCCESS.into(),
             ret_msg: "".to_string(),
