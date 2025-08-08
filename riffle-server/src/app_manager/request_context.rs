@@ -112,21 +112,6 @@ pub enum RpcType {
 }
 
 impl ReadingViewContext {
-    pub fn with_task_ids_filter(
-        uid: PartitionUId,
-        reading_options: ReadingOptions,
-        bitmap: Treemap,
-        rpc_source: RpcType,
-    ) -> Self {
-        ReadingViewContext {
-            uid,
-            reading_options,
-            task_ids_filter: Some(bitmap),
-            rpc_source,
-            sendfile_enabled: false,
-        }
-    }
-
     pub fn new(uid: PartitionUId, reading_options: ReadingOptions, rpc_source: RpcType) -> Self {
         ReadingViewContext {
             uid,
@@ -137,12 +122,22 @@ impl ReadingViewContext {
         }
     }
 
-    pub fn with_sendfile_enabled(ctx: ReadingViewContext) -> Self {
-        Self {
-            uid: ctx.uid,
-            reading_options: ctx.reading_options,
-            task_ids_filter: ctx.task_ids_filter,
-            rpc_source: ctx.rpc_source,
+    pub fn with_task_ids_filter(&self, bitmap: Treemap) -> Self {
+        ReadingViewContext {
+            uid: self.uid.clone(),
+            reading_options: self.reading_options.clone(),
+            task_ids_filter: Some(bitmap),
+            rpc_source: self.rpc_source.clone(),
+            sendfile_enabled: self.sendfile_enabled,
+        }
+    }
+
+    pub fn with_sendfile_enabled(&self) -> Self {
+        ReadingViewContext {
+            uid: self.uid.clone(),
+            reading_options: self.reading_options.clone(),
+            task_ids_filter: self.task_ids_filter.clone(),
+            rpc_source: self.rpc_source.clone(),
             sendfile_enabled: true,
         }
     }
