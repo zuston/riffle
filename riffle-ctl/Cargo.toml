@@ -40,6 +40,8 @@ sqlparser = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 logforth = { workspace = true }
+toml = { workspace = true }
+dirs = { workspace = true }
 
 [dev-dependencies]
 poem = { workspace = true, features = ["rustls", "test", "anyhow"] }

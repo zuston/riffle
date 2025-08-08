@@ -2,6 +2,7 @@
 #![feature(impl_trait_in_assoc_type)]
 
 mod actions;
+mod meta;
 
 use crate::actions::disk_append_bench::DiskAppendBenchAction;
 use crate::actions::disk_profiler::DiskProfiler;
@@ -13,16 +14,19 @@ use crate::actions::query::{OutputFormat, QueryAction};
 use crate::actions::update_action::NodeUpdateAction;
 use crate::actions::{Action, ValidateAction};
 use clap::{Parser, Subcommand};
-use log::LevelFilter;
+use log::{info, LevelFilter, Metadata};
 use logforth::append;
 use riffle_server::server_state_manager::ServerState;
 use tokio::runtime::Runtime;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
+#[command(arg_required_else_help = true)]
 struct Args {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
+    #[arg[short, long]]
+    config: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -130,9 +134,7 @@ enum Commands {
 }
 
 fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
-    let command = args.command;
-
+    // setup the log
     logforth::builder()
         .dispatch(|d| {
             d.filter(LevelFilter::Info)
@@ -140,6 +142,18 @@ fn main() -> anyhow::Result<()> {
         })
         .apply();
 
+    let args = Args::parse();
+    let config = args.config;
+
+    // Specify the config path to declare cluster ids mapping.
+    if config.is_some() {
+        let config = config.unwrap();
+        meta::Metadata::create(None, config.as_str());
+        info!("Succeed to setup config path");
+        return Ok(());
+    }
+
+    let command = args.command.unwrap();
     let action: Box<dyn Action> = match command {
         Commands::PostgresServer {
             coordinator_http_url,
