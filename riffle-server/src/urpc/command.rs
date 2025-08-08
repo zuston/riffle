@@ -15,6 +15,7 @@ use crate::util;
 use anyhow::Result;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
+use croaring::{JvmLegacy, Treemap};
 use log::{debug, error};
 use std::collections::HashMap;
 
@@ -94,14 +95,29 @@ impl GetMemoryDataRequestCommand {
 
         let app = app.unwrap();
         let uid = PartitionUId::new(&application_id, shuffle_id, partition_id);
-        let ctx = ReadingViewContext::new(
-            uid,
-            ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(
-                last_block_id,
-                read_buffer_size as i64,
+
+        let ctx = match &self.expected_tasks_bitmap_raw {
+            Some(raw) => {
+                let bitmap = Treemap::deserialize::<JvmLegacy>(raw);
+                ReadingViewContext::with_task_ids_filter(
+                    uid,
+                    ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(
+                        last_block_id,
+                        read_buffer_size as i64,
+                    ),
+                    bitmap,
+                    RpcType::URPC,
+                )
+            }
+            _ => ReadingViewContext::new(
+                uid,
+                ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(
+                    last_block_id,
+                    read_buffer_size as i64,
+                ),
+                RpcType::URPC,
             ),
-            RpcType::URPC,
-        );
+        };
 
         let response = match app.select(ctx).await {
             Err(e) => GetMemoryDataResponseCommand {
