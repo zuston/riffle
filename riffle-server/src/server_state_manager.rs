@@ -27,6 +27,15 @@ pub enum ServerState {
     HEALTHY,
 }
 
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone, PartialEq, Deserialize, EnumString, Display)]
+pub enum TransitionReason {
+    ADMIN_HTTP_API,
+    ADMIN_GRPC,
+    INTERNAL_HEALTH_CHECK,
+    IGNORE,
+}
+
 #[derive(Clone)]
 pub struct ServerStateManager {
     state: Arc<RwLock<ServerState>>,
@@ -66,13 +75,16 @@ impl ServerStateManager {
         Ok(())
     }
 
-    pub fn as_state(&self, state: ServerState) {
+    pub fn as_state(&self, state: ServerState, reason: TransitionReason) {
         let mut internal_state = self.state.write();
         if *internal_state == state {
             warn!("Same with internal server status. Ignoring");
             return;
         }
-        info!("Transition from {} to {}", internal_state, state);
+        info!(
+            "Transition from {} to {}. reason: {}",
+            internal_state, state, reason
+        );
         *internal_state = state;
         self.state_time.store(util::now_timestamp_as_sec(), SeqCst);
     }
@@ -102,7 +114,7 @@ impl ServerStateManager {
             && util::now_timestamp_as_sec() - self.state_time.load(SeqCst)
                 > self.kill_interval.load(SeqCst)
         {
-            self.as_state(ServerState::DECOMMISSIONED);
+            self.as_state(ServerState::DECOMMISSIONED, TransitionReason::IGNORE);
             info!("Decommission success and then to kill");
 
             if self.kill_signal_send_enable.load(SeqCst) {
@@ -135,7 +147,7 @@ mod tests {
     use crate::config_reconfigure::ReconfigurableConfManager;
     use crate::grpc::protobuf::uniffle::ServerStatus;
     use crate::runtime::manager::RuntimeManager;
-    use crate::server_state_manager::{ServerState, ServerStateManager};
+    use crate::server_state_manager::{ServerState, ServerStateManager, TransitionReason};
     use crate::storage::StorageService;
     use anyhow::Result;
     use std::sync::atomic::Ordering;
@@ -169,7 +181,7 @@ mod tests {
         let server_state_manager = ServerStateManager::new(&app_manager_ref, &config);
 
         // case1
-        server_state_manager.as_state(ServerState::DECOMMISSIONING);
+        server_state_manager.as_state(ServerState::DECOMMISSIONING, TransitionReason::IGNORE);
         assert_eq!(
             ServerState::DECOMMISSIONING,
             server_state_manager.get_state()

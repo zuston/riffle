@@ -1,5 +1,5 @@
 use crate::http::Handler;
-use crate::server_state_manager::{ServerState, SERVER_STATE_MANAGER_REF};
+use crate::server_state_manager::{ServerState, TransitionReason, SERVER_STATE_MANAGER_REF};
 use anyhow::Result;
 use clap::builder::Str;
 use poem::{handler, Request, RouteMethod};
@@ -48,7 +48,7 @@ fn admin_handler(req: &Request) -> poem::Result<String> {
         };
         server_state_manager_ref.shutdown(force);
     } else if let Some(state) = params.update_state {
-        server_state_manager_ref.as_state(state);
+        server_state_manager_ref.as_state(state, TransitionReason::ADMIN_HTTP_API);
     }
 
     Ok("Done".to_string())
