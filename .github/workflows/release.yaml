@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - "master"
-      - "fixRelease"
+      - "sendSync"
     tags:
       - "v*.*.*"
   pull_request:
