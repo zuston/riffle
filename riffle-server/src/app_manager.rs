@@ -196,7 +196,7 @@ impl AppManager {
                     .await
                 {
                     let reason = event.reason;
-                    info!("Purging data with reason: {:?}", &reason);
+                    info!("Purging data with reason: {}", &reason);
                     if let Err(err) = app_manager_cloned.purge_app_data(&reason).await {
                         PURGE_FAILED_COUNTER.inc();
                         error!(

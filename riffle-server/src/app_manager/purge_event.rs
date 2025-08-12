@@ -1,7 +1,8 @@
 use crate::app_manager::application_identifier::ApplicationId;
+use strum_macros::Display;
 
 #[allow(non_camel_case_types)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Display)]
 pub enum PurgeReason {
     SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(ApplicationId, i32),
     APP_LEVEL_EXPLICIT_UNREGISTER(ApplicationId),
