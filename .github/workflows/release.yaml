@@ -104,7 +104,9 @@ jobs:
         run: |
           for path in ${{ matrix.artifact_path }}; do
             asset_name="${{ steps.component.outputs.name }}-${{ matrix.name }}-${{ steps.vars.outputs.name }}-$(basename $path)"
-            gh release upload "${{ github.ref_name }}" "$path" --repo "$GITHUB_REPOSITORY" --clobber --name "$asset_name"
+            cp "$path" "./$asset_name"
+            gh release upload "${{ github.ref_name }}" "./$asset_name" --repo "$GITHUB_REPOSITORY" --clobber
+            rm "./$asset_name"
           done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
