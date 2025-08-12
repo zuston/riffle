@@ -32,9 +32,7 @@ jobs:
           - name: linux-amd64-centos7
             os: ubuntu-22.04
             build_command: docker compose -f dev/centos7/amd64/docker-compose.yml up
-            artifact_path: |
-              target-docker/release/riffle-server
-              target-docker/release/riffle-ctl
+            artifact_path: target-docker/release/riffle-server target-docker/release/riffle-ctl
             docker_compose: dev/centos7/amd64/docker-compose.yml
             component: riffle-server
           - name: linux-amd64-anolisos8
