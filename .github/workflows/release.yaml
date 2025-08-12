@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - "master"
-      - "fixRelease"
     tags:
       - "v*.*.*"
   pull_request:
@@ -83,7 +82,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2025-06-01
           override: true
 
       - name: Build
