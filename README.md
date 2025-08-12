@@ -1,6 +1,9 @@
-Another high-performance implementation of Apache Uniffle shuffle server
+# Riffle
 
-> The product is production-ready and has been extensively utilized for [iQIYI](https://github.com/iqiyi)'s hyperscale Spark jobs.
+A high-performance, fully compatible implementation of the [Apache Uniffle](https://github.com/apache/uniffle) shuffle server.
+
+> This project is production-ready and has been extensively deployed to support iQIYI’s hyperscale Spark workloads,   
+> handling nearly **10 petabytes** of data daily at a throughput of __500 gigabytes per second__.
 
 <details>
 
@@ -26,7 +29,7 @@ spark.shuffle.manager org.apache.spark.shuffle.RssShuffleManager
 spark.rss.storage.type MEMORY_LOCALFILE
 ```
 
-__Rust-based shuffle-server conf__
+__Riffle conf__
 ```
 store_type = "MEMORY_LOCALFILE"
 grpc_port = 21100
@@ -87,9 +90,9 @@ dispatch_thread_num = 10
 
 ## Build
 
-`cargo build --release --features hdfs,jemalloc`
+`cargo build --release --features hdfs,jemalloc,logforth`
 
-Uniffle-x currently treats all compiler warnings as error, with some dead-code warning excluded. When you are developing
+Riffle currently treats all compiler warnings as error, with some dead-code warning excluded. When you are developing
 and really want to ignore the warnings for now, you can use `cargo --config 'build.rustflags=["-W", "warnings"]' build`
 to restore the default behavior. However, before submit your pr, you should fix all the warnings.
 
