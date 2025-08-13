@@ -101,7 +101,7 @@ jobs:
         shell: bash
         run: |
           for path in ${{ matrix.artifact_path }}; do
-            asset_name="${{ steps.component.outputs.name }}-${{ matrix.name }}-${{ steps.vars.outputs.name }}-$(basename $path)"
+            asset_name="$(basename $path)-${{ matrix.name }}-${{ steps.vars.outputs.name }}"
             cp "$path" "./$asset_name"
             gh release upload "${{ github.ref_name }}" "./$asset_name" --repo "$GITHUB_REPOSITORY" --clobber
             rm "./$asset_name"
