@@ -283,27 +283,13 @@ impl App {
     fn add_huge_partition_metric(&self) {
         self.huge_partition_number.fetch_add(1, Ordering::SeqCst);
         TOTAL_HUGE_PARTITION_NUMBER.inc();
-        GAUGE_HUGE_PARTITION_NUMBER
-            .with_label_values(&[ALL_LABEL])
-            .inc();
-        GAUGE_HUGE_PARTITION_NUMBER
-            .with_label_values(&[self.app_id.as_str()])
-            .inc();
+        GAUGE_HUGE_PARTITION_NUMBER.inc();
     }
 
     fn sub_huge_partition_metric(&self) {
         let number = self.huge_partition_number.load(SeqCst);
         if number > 0 {
-            GAUGE_HUGE_PARTITION_NUMBER
-                .with_label_values(&vec![ALL_LABEL])
-                .sub(number as i64);
-
-            if let Err(e) = GAUGE_HUGE_PARTITION_NUMBER.remove_label_values(&[&self.app_id]) {
-                error!(
-                    "Errors on unregistering metric of huge partition number for app:{}. error: {}",
-                    &self.app_id, e
-                )
-            }
+            GAUGE_HUGE_PARTITION_NUMBER.sub(number as i64);
         }
     }
 
@@ -446,9 +432,7 @@ impl App {
                     }
                 }
             }
-            GAUGE_HUGE_PARTITION_NUMBER
-                .with_label_values(&vec![ALL_LABEL])
-                .sub(huge_partition_cnt as i64);
+            GAUGE_HUGE_PARTITION_NUMBER.sub(huge_partition_cnt as i64);
         } else {
             // app level deletion
             GAUGE_PARTITION_NUMBER.sub(self.partition_meta_infos.len() as i64);
