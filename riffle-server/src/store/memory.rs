@@ -326,7 +326,7 @@ impl Store for MemoryStore {
         self.budget.dec_used(used)?;
 
         info!(
-            "removed used buffer size:[{}] for [{:?}], [{:?}]",
+            "Removed used memory buffer size:[{}] for [{}], [{:?}]",
             used, &app_id, shuffle_id_option
         );
 
