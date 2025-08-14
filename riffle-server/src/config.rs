@@ -145,6 +145,14 @@ pub struct ReadAheadConfig {
     batch_size: String,
 }
 
+impl Default for ReadAheadConfig {
+    fn default() -> Self {
+        Self {
+            batch_size: as_default_read_ahead_batch_size(),
+        }
+    }
+}
+
 fn as_default_read_ahead_batch_size() -> String {
     "14M".to_string()
 }

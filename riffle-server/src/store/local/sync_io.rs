@@ -9,7 +9,8 @@ use crate::runtime::RuntimeRef;
 use crate::store::alignment::io_buffer_pool::{IoBufferPool, RecycledIoBuffer};
 use crate::store::alignment::io_bytes::IoBuffer;
 use crate::store::alignment::{ALIGN, IO_BUFFER_ALLOCATOR};
-use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
+use crate::store::local::options::{CreateOptions, WriteOptions};
+use crate::store::local::read_options::{IoMode, ReadOptions, ReadRange};
 use crate::store::local::{FileStat, LocalIO};
 use crate::store::DataBytes;
 use allocator_api2::SliceExt;
@@ -425,20 +426,42 @@ impl LocalIO for SyncLocalIO {
         path: &str,
         options: ReadOptions,
     ) -> anyhow::Result<DataBytes, WorkerError> {
-        let result = if options.is_direct_io() {
-            let r = self
-                .read_with_direct_io(path, options.offset, options.length.unwrap())
-                .await?;
-            DataBytes::Direct(r)
-        } else if options.is_sendfile() && options.length.is_some() {
-            self.read_with_sendfile(path, options.offset, options.length.unwrap())?
-        } else {
-            let r = self
-                .read_with_buffer_io(path, options.offset, options.length)
-                .await?;
-            DataBytes::Direct(r)
+        let data = match options.io_mode {
+            IoMode::SENDFILE => {
+                let (off, len) = match options.read_range {
+                    ReadRange::RANGE(off, len) => (off, len),
+                    _ => {
+                        return Err(anyhow!(
+                            "Illegal vars, read range must include (offset, length)"
+                        )
+                        .into())
+                    }
+                };
+                self.read_with_sendfile(path, off, len)?
+            }
+            IoMode::DIRECT_IO => {
+                let (off, len) = match options.read_range {
+                    ReadRange::RANGE(off, len) => (off, len),
+                    _ => {
+                        return Err(anyhow!(
+                            "Illegal vars, read range must include (offset, length)"
+                        )
+                        .into())
+                    }
+                };
+                let r = self.read_with_direct_io(path, off, len).await?;
+                DataBytes::Direct(r)
+            }
+            IoMode::BUFFER_IO => {
+                let (off, len) = match options.read_range {
+                    ReadRange::ALL => (0, None),
+                    ReadRange::RANGE(off, len) => (off, Some(len)),
+                };
+                let data = self.read_with_buffer_io(path, off, len).await?;
+                DataBytes::Direct(data)
+            }
         };
-        Ok(result)
+        Ok(data)
     }
 
     async fn delete(&self, path: &str) -> anyhow::Result<(), WorkerError> {
@@ -482,7 +505,8 @@ mod test {
     use crate::runtime::manager::create_runtime;
     use crate::store::alignment::io_buffer_pool::IoBufferPool;
     use crate::store::alignment::io_bytes::IoBuffer;
-    use crate::store::local::options::{ReadOptions, WriteOptions};
+    use crate::store::local::options::WriteOptions;
+    use crate::store::local::read_options::{ReadOptions, ReadRange};
     use crate::store::local::sync_io::{fill_buffer_and_write, SyncLocalIO, ALIGN};
     use crate::store::local::LocalIO;
     use bytes::{Bytes, BytesMut};
@@ -532,14 +556,18 @@ mod test {
         assert_eq!(1000 * 3, stat.content_length);
 
         // read all
+        let options = ReadOptions::default().with_read_all();
         let data = base_runtime_ref
-            .block_on(io_handler.read(data_file_name, ReadOptions::with_read_all()))?
+            .block_on(io_handler.read(data_file_name, options))?
             .freeze();
         assert_eq!(vec![0; 3000], *data);
 
         // seek read
+        let options = ReadOptions::default()
+            .with_buffer_io()
+            .with_read_range(ReadRange::RANGE(10, 20));
         let data = base_runtime_ref
-            .block_on(io_handler.read(data_file_name, ReadOptions::with_read_of_buffer_io(10, 20)))?
+            .block_on(io_handler.read(data_file_name, options))?
             .freeze();
         assert_eq!(vec![0; 20], *data);
 
@@ -678,18 +706,27 @@ mod test {
         ))?;
 
         // read
+        let options = ReadOptions::default()
+            .with_read_range(ReadRange::RANGE(3, 3))
+            .with_direct_io();
         let data_1 = base_runtime_ref
-            .block_on(io_handler.read(data_file_name, ReadOptions::with_read_of_direct_io(3, 3)))?
+            .block_on(io_handler.read(data_file_name, options))?
             .freeze();
         assert_eq!(vec![b'y', b'y', b'z'], data_1);
 
+        let options = ReadOptions::default()
+            .with_direct_io()
+            .with_read_range(ReadRange::RANGE(11, 4));
         let data_2 = base_runtime_ref
-            .block_on(io_handler.read(data_file_name, ReadOptions::with_read_of_direct_io(11, 4)))?
+            .block_on(io_handler.read(data_file_name, options))?
             .freeze();
         assert_eq!(vec![b'x', b'x', b'y', b'y'], data_2);
 
+        let options = ReadOptions::default()
+            .with_direct_io()
+            .with_read_range(ReadRange::RANGE(19, 2));
         let data_3 = base_runtime_ref
-            .block_on(io_handler.read(data_file_name, ReadOptions::with_read_of_direct_io(19, 2)))?
+            .block_on(io_handler.read(data_file_name, options))?
             .freeze();
         assert_eq!(vec![b'z', b'a'], data_3);
 

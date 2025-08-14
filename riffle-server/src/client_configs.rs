@@ -17,6 +17,12 @@ pub static HDFS_CLIENT_EAGER_LOADING_ENABLED_OPTION: Lazy<ClientConfigOption<boo
     },
 );
 
+pub static READ_AHEAD_ENABLED_OPTION: Lazy<ClientConfigOption<bool>> = Lazy::new(|| {
+    ClientConfigOption::key("spark.rss.riffle.readAheadEnabled")
+        .default_value(false)
+        .with_description("This indicates whether the localfile read ahead is enabled")
+});
+
 #[derive(Debug, Clone, Default)]
 pub struct ClientRssConf {
     properties: HashMap<String, String>,

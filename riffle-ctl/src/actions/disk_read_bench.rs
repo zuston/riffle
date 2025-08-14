@@ -8,7 +8,7 @@ use riffle_server::runtime::manager::create_runtime;
 use riffle_server::runtime::RuntimeRef;
 use riffle_server::store::local::io_layer_read_ahead::ReadAheadLayer;
 use riffle_server::store::local::layers::Handler;
-use riffle_server::store::local::options::ReadOptions;
+use riffle_server::store::local::read_options::{ReadOptions, ReadRange};
 use riffle_server::store::local::sync_io::SyncLocalIO;
 use riffle_server::store::local::LocalIO;
 use std::fs::{self, File, OpenOptions};
@@ -131,8 +131,9 @@ impl Action for DiskReadBenchAction {
                 let mut duration = 0;
                 for batch_idx in 0..batch_number {
                     let batch_start = Instant::now();
+                    let options = ReadOptions::default().with_buffer_io().with_read_range(ReadRange::RANGE(offset, read_size));
                     let _data = handler
-                        .read(file_name.as_str(), ReadOptions::with_read_of_buffer_io(offset, read_size))
+                        .read(file_name.as_str(), options)
                         .await;
                     let batch_elapsed = batch_start.elapsed();
                     duration += batch_elapsed.as_millis() as u64;

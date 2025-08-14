@@ -3,9 +3,9 @@ use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::partition_meta::PartitionMeta;
 use crate::app_manager::purge_event::PurgeReason;
 use crate::app_manager::request_context::{
-    GetMultiBlockIdsContext, PurgeDataContext, ReadingIndexViewContext, ReadingViewContext,
-    RegisterAppContext, ReleaseTicketContext, ReportMultiBlockIdsContext, RequireBufferContext,
-    WritingViewContext,
+    GetMultiBlockIdsContext, PurgeDataContext, ReadingIndexViewContext, ReadingOptions,
+    ReadingViewContext, RegisterAppContext, ReleaseTicketContext, ReportMultiBlockIdsContext,
+    RequireBufferContext, WritingViewContext,
 };
 use crate::block_id_manager::{get_block_id_manager, BlockIdManager};
 use crate::config::Config;
@@ -234,6 +234,26 @@ impl App {
         } else {
             ctx
         };
+
+        if self.app_config_options.read_ahead_enable {
+            // This is a workaround — we can infer sequential reads when the taskId filter bitmap is enabled.
+            match ctx.reading_options {
+                ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(_, _) => {
+                    if ctx.task_ids_filter.is_none() {
+                        let partition_meta = self.get_partition_meta(&ctx.uid);
+                        partition_meta.mark_as_sequential_read();
+                    }
+                }
+                _ => {
+                    // for the localfile getting, tag the sequential read
+                    let partition_meta = self.get_partition_meta(&ctx.uid);
+                    if (partition_meta.is_sequential_read()) {
+                        ctx.with_sequential();
+                    }
+                }
+            }
+        }
+
         let response = self.store.get(ctx).await;
         response.map(|data| {
             match &data {
@@ -363,7 +383,7 @@ impl App {
             .await
     }
 
-    fn get_partition_meta(&self, uid: &PartitionUId) -> PartitionMeta {
+    pub fn get_partition_meta(&self, uid: &PartitionUId) -> PartitionMeta {
         let shuffle_id = uid.shuffle_id;
         let partition_id = uid.partition_id;
         self.partition_meta_infos

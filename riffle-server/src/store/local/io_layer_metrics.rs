@@ -8,7 +8,8 @@ use crate::metric::{
 };
 use crate::store::local::io_layer_timeout::TimeoutLayer;
 use crate::store::local::layers::{Handler, Layer};
-use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
+use crate::store::local::options::{CreateOptions, WriteOptions};
+use crate::store::local::read_options::ReadOptions;
 use crate::store::local::{FileStat, LocalIO};
 use crate::store::DataBytes;
 use async_trait::async_trait;
@@ -90,15 +91,9 @@ impl LocalIO for MetricsLayerWrapper {
         path: &str,
         options: ReadOptions,
     ) -> anyhow::Result<DataBytes, WorkerError> {
-        let timer = if options.direct_io {
-            LOCALFILE_DISK_DIRECT_READ_OPERATION_DURATION
-                .with_label_values(&[&self.root])
-                .start_timer()
-        } else {
-            LOCALFILE_DISK_READ_OPERATION_DURATION
-                .with_label_values(&[&self.root])
-                .start_timer()
-        };
+        let timer = LOCALFILE_DISK_READ_OPERATION_DURATION
+            .with_label_values(&[&self.root])
+            .start_timer();
 
         let bytes = self.handler.read(path, options).await?;
 
