@@ -68,7 +68,9 @@ pub struct HdfsStoreConfig {
     pub partition_write_max_concurrency: usize,
 
     pub kerberos_security_config: Option<KerberosSecurityConfig>,
-    pub precheck_root_path: Option<String>,
+
+    #[serde(default = "bool::default")]
+    pub precheck_enable: bool,
 }
 fn as_default_max_concurrency() -> usize {
     50
@@ -83,7 +85,7 @@ impl Default for HdfsStoreConfig {
             max_concurrency: as_default_max_concurrency(),
             partition_write_max_concurrency: as_default_partition_write_max_concurrency(),
             kerberos_security_config: None,
-            precheck_root_path: None,
+            precheck_enable: false,
         }
     }
 }
