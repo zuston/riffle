@@ -243,7 +243,13 @@ impl App {
                     partition_meta.mark_as_sequential_read();
                 }
             }
-            _ => {}
+            _ => {
+                // for the localfile getting, tag the sequential read
+                let partition_meta = self.get_partition_meta(&ctx.uid);
+                if (partition_meta.is_sequential_read()) {
+                    ctx.with_sequential();
+                }
+            }
         }
 
         let response = self.store.get(ctx).await;

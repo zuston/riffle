@@ -67,16 +67,17 @@ impl LocalIO for ReadAheadLayerWrapper {
         options: ReadOptions,
     ) -> anyhow::Result<DataBytes, WorkerError> {
         if let ReadRange::RANGE(off, len) = options.read_range {
-            let abs_path = format!("{}/{}", &self.root, path);
-            let load_task =
-                self.load_tasks
-                    .entry(path.to_owned())
-                    .or_insert_with(|| match ReadAheadTask::new(&abs_path) {
+            if options.sequential {
+                let abs_path = format!("{}/{}", &self.root, path);
+                let load_task = self.load_tasks.entry(path.to_owned()).or_insert_with(|| {
+                    match ReadAheadTask::new(&abs_path) {
                         Ok(task) => Some(task),
                         Err(_) => None,
-                    });
-            if let Some(task) = load_task.value() {
-                task.load(off, len).await?;
+                    }
+                });
+                if let Some(task) = load_task.value() {
+                    task.load(off, len).await?;
+                }
             }
         }
         self.handler.read(&path, options).await

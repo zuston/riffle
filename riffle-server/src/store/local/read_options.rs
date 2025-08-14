@@ -57,6 +57,14 @@ impl ReadOptions {
         }
     }
 
+    pub fn with_sequential(self) -> Self {
+        Self {
+            io_mode: self.io_mode,
+            read_range: self.read_range,
+            sequential: true,
+        }
+    }
+
     pub fn with_read_all(self) -> Self {
         Self {
             io_mode: IoMode::BUFFER_IO,

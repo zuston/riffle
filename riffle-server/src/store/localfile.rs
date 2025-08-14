@@ -486,6 +486,11 @@ impl Store for LocalFileStore {
                 } else {
                     read_options.with_buffer_io()
                 };
+                let read_options = if ctx.sequential {
+                    read_options.with_sequential()
+                } else {
+                    read_options
+                };
 
                 let future_read = local_disk.read(&data_file_path, read_options);
                 let data = future_read
