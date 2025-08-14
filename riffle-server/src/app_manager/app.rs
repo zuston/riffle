@@ -235,19 +235,21 @@ impl App {
             ctx
         };
 
-        // This is a workaround — we can infer sequential reads when the taskId filter bitmap is enabled.
-        match ctx.reading_options {
-            ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(_, _) => {
-                if ctx.task_ids_filter.is_none() {
-                    let partition_meta = self.get_partition_meta(&ctx.uid);
-                    partition_meta.mark_as_sequential_read();
+        if self.app_config_options.read_ahead_enable {
+            // This is a workaround — we can infer sequential reads when the taskId filter bitmap is enabled.
+            match ctx.reading_options {
+                ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(_, _) => {
+                    if ctx.task_ids_filter.is_none() {
+                        let partition_meta = self.get_partition_meta(&ctx.uid);
+                        partition_meta.mark_as_sequential_read();
+                    }
                 }
-            }
-            _ => {
-                // for the localfile getting, tag the sequential read
-                let partition_meta = self.get_partition_meta(&ctx.uid);
-                if (partition_meta.is_sequential_read()) {
-                    ctx.with_sequential();
+                _ => {
+                    // for the localfile getting, tag the sequential read
+                    let partition_meta = self.get_partition_meta(&ctx.uid);
+                    if (partition_meta.is_sequential_read()) {
+                        ctx.with_sequential();
+                    }
                 }
             }
         }
