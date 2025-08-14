@@ -1,3 +1,4 @@
+use crate::app_manager::request_context::PurgeDataContext;
 use crate::store::DataBytes;
 
 /// If the append is false, the offset should be None.
@@ -45,60 +46,84 @@ impl WriteOptions {
 }
 
 pub struct ReadOptions {
-    pub sendfile: bool,
-    pub direct_io: bool,
-    pub offset: u64,
-    pub length: Option<u64>,
+    pub io_mode: IoMode,
+    pub read_range: ReadRange,
+    pub sequential: bool,
+}
+
+#[allow(non_camel_case_types)]
+#[derive(Clone, Debug)]
+pub enum ReadRange {
+    ALL,
+    // offset, length
+    RANGE(u64, u64),
+}
+
+#[derive(Clone, Debug)]
+#[allow(non_camel_case_types)]
+pub enum IoMode {
+    SENDFILE,
+    DIRECT_IO,
+    BUFFER_IO,
+}
+
+impl Default for ReadOptions {
+    fn default() -> Self {
+        Self {
+            io_mode: IoMode::BUFFER_IO,
+            read_range: ReadRange::ALL,
+            sequential: false,
+        }
+    }
 }
 
 impl ReadOptions {
-    // reading all from the file.
-    pub fn with_read_all() -> Self {
+    pub fn new(io_mode: IoMode, range: ReadRange, is_sequential: bool) -> Self {
         Self {
-            sendfile: false,
-            direct_io: false,
-            offset: 0,
-            length: None,
+            io_mode,
+            read_range: range,
+            sequential: is_sequential,
         }
     }
 
-    pub fn with_read_of_direct_io(offset: u64, length: u64) -> Self {
+    pub fn with_read_all(self) -> Self {
         Self {
-            sendfile: false,
-            direct_io: true,
-            offset,
-            length: Some(length),
+            io_mode: IoMode::BUFFER_IO,
+            read_range: ReadRange::ALL,
+            sequential: false,
         }
     }
 
-    pub fn with_read_of_buffer_io(offset: u64, length: u64) -> Self {
+    pub fn with_read_range(self, range: ReadRange) -> Self {
         Self {
-            sendfile: false,
-            direct_io: false,
-            offset,
-            length: Some(length),
+            io_mode: self.io_mode,
+            read_range: range,
+            sequential: self.sequential,
         }
     }
 
-    pub fn with_sendfile(offset: u64, length: u64) -> Self {
+    pub fn with_buffer_io(self) -> Self {
         Self {
-            sendfile: true,
-            direct_io: false,
-            offset,
-            length: Some(length),
+            io_mode: IoMode::BUFFER_IO,
+            read_range: self.read_range,
+            sequential: self.sequential,
         }
     }
 
-    pub fn is_read_all(&self) -> bool {
-        self.length.is_none()
+    pub fn with_direct_io(self) -> Self {
+        Self {
+            io_mode: IoMode::DIRECT_IO,
+            read_range: self.read_range,
+            sequential: self.sequential,
+        }
     }
 
-    pub fn is_direct_io(&self) -> bool {
-        self.direct_io
-    }
-
-    pub fn is_sendfile(&self) -> bool {
-        self.sendfile
+    pub fn with_sendfile(self) -> Self {
+        Self {
+            io_mode: IoMode::SENDFILE,
+            read_range: self.read_range,
+            sequential: self.sequential,
+        }
     }
 }
 

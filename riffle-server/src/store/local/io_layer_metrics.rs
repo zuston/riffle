@@ -90,15 +90,9 @@ impl LocalIO for MetricsLayerWrapper {
         path: &str,
         options: ReadOptions,
     ) -> anyhow::Result<DataBytes, WorkerError> {
-        let timer = if options.direct_io {
-            LOCALFILE_DISK_DIRECT_READ_OPERATION_DURATION
-                .with_label_values(&[&self.root])
-                .start_timer()
-        } else {
-            LOCALFILE_DISK_READ_OPERATION_DURATION
-                .with_label_values(&[&self.root])
-                .start_timer()
-        };
+        let timer = LOCALFILE_DISK_READ_OPERATION_DURATION
+            .with_label_values(&[&self.root])
+            .start_timer();
 
         let bytes = self.handler.read(path, options).await?;
 

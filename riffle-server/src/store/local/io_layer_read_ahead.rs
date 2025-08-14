@@ -1,6 +1,6 @@
 use crate::error::WorkerError;
 use crate::store::local::layers::{Handler, Layer};
-use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
+use crate::store::local::options::{CreateOptions, ReadOptions, ReadRange, WriteOptions};
 use crate::store::local::{FileStat, LocalIO};
 use crate::store::DataBytes;
 use crate::system_libc::read_ahead;
@@ -65,7 +65,7 @@ impl LocalIO for ReadAheadLayerWrapper {
         path: &str,
         options: ReadOptions,
     ) -> anyhow::Result<DataBytes, WorkerError> {
-        if options.length.is_some() {
+        if let ReadRange::RANGE(off, len) = options.read_range {
             let abs_path = format!("{}/{}", &self.root, path);
             let load_task =
                 self.load_tasks
@@ -75,7 +75,7 @@ impl LocalIO for ReadAheadLayerWrapper {
                         Err(_) => None,
                     });
             if let Some(task) = load_task.value() {
-                task.load(options.offset, options.length.unwrap()).await?;
+                task.load(off, len).await?;
             }
         }
         self.handler.read(&path, options).await
@@ -191,7 +191,7 @@ impl ReadAheadTask {
 mod tests {
     use super::*;
     use crate::error::WorkerError;
-    use crate::store::local::options::ReadOptions;
+    use crate::store::local::options::{ReadOptions, ReadRange};
     use crate::store::local::FileStat;
     use crate::store::local::{CreateOptions, LocalIO, WriteOptions};
     use crate::store::DataBytes;
@@ -230,13 +230,9 @@ mod tests {
         };
 
         // 1st read ahead
-        let options = ReadOptions {
-            sendfile: false,
-            direct_io: false,
-            offset: 0,
-            length: Some(5),
-        };
-
+        let options = ReadOptions::default()
+            .with_buffer_io()
+            .with_read_range(ReadRange::RANGE(0, 5));
         let result = wrapped.read(file_name.as_str(), options).await;
         assert!(result.is_ok());
 

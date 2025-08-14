@@ -290,7 +290,7 @@ impl LocalDiskDelegator {
         let write_time = timer.elapsed().as_millis();
 
         let timer = Instant::now();
-        let options = ReadOptions::with_read_all();
+        let options: ReadOptions = ReadOptions::default().with_read_all();
         let read_data = self.read(&detection_file, options).await?;
         let read_data = read_data.freeze();
         let read_time = timer.elapsed().as_millis();
