@@ -383,7 +383,7 @@ impl App {
             .await
     }
 
-    fn get_partition_meta(&self, uid: &PartitionUId) -> PartitionMeta {
+    pub fn get_partition_meta(&self, uid: &PartitionUId) -> PartitionMeta {
         let shuffle_id = uid.shuffle_id;
         let partition_id = uid.partition_id;
         self.partition_meta_infos
