@@ -8,7 +8,7 @@ use riffle_server::runtime::manager::create_runtime;
 use riffle_server::runtime::RuntimeRef;
 use riffle_server::store::local::io_layer_read_ahead::ReadAheadLayer;
 use riffle_server::store::local::layers::Handler;
-use riffle_server::store::local::options::{ReadOptions, ReadRange};
+use riffle_server::store::local::read_options::{ReadOptions, ReadRange};
 use riffle_server::store::local::sync_io::SyncLocalIO;
 use riffle_server::store::local::LocalIO;
 use std::fs::{self, File, OpenOptions};

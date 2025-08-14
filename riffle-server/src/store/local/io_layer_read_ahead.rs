@@ -1,6 +1,7 @@
 use crate::error::WorkerError;
 use crate::store::local::layers::{Handler, Layer};
-use crate::store::local::options::{CreateOptions, ReadOptions, ReadRange, WriteOptions};
+use crate::store::local::options::{CreateOptions, WriteOptions};
+use crate::store::local::read_options::{ReadOptions, ReadRange};
 use crate::store::local::{FileStat, LocalIO};
 use crate::store::DataBytes;
 use crate::system_libc::read_ahead;
@@ -191,7 +192,7 @@ impl ReadAheadTask {
 mod tests {
     use super::*;
     use crate::error::WorkerError;
-    use crate::store::local::options::{ReadOptions, ReadRange};
+    use crate::store::local::read_options::{ReadOptions, ReadRange};
     use crate::store::local::FileStat;
     use crate::store::local::{CreateOptions, LocalIO, WriteOptions};
     use crate::store::DataBytes;

@@ -19,7 +19,8 @@ use crate::store::local::io_layer_retry::{IoLayerRetry, RETRY_MAX_TIMES};
 use crate::store::local::io_layer_throttle::{ThrottleLayer, ThroughputBasedRateLimiter};
 use crate::store::local::io_layer_timeout::TimeoutLayer;
 use crate::store::local::layers::{Handler, OperatorBuilder};
-use crate::store::local::options::{ReadOptions, WriteOptions};
+use crate::store::local::options::WriteOptions;
+use crate::store::local::read_options::ReadOptions;
 use crate::store::local::sync_io::SyncLocalIO;
 use crate::store::local::{DiskStat, FileStat, LocalDiskStorage, LocalIO};
 use crate::store::DataBytes;
@@ -290,7 +291,7 @@ impl LocalDiskDelegator {
         let write_time = timer.elapsed().as_millis();
 
         let timer = Instant::now();
-        let options: ReadOptions = ReadOptions::default().with_read_all();
+        let options = ReadOptions::default().with_read_all();
         let read_data = self.read(&detection_file, options).await?;
         let read_data = read_data.freeze();
         let read_time = timer.elapsed().as_millis();

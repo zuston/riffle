@@ -8,7 +8,8 @@ use crate::metric::{
 };
 use crate::store::local::io_layer_timeout::TimeoutLayer;
 use crate::store::local::layers::{Handler, Layer};
-use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
+use crate::store::local::options::{CreateOptions, WriteOptions};
+use crate::store::local::read_options::ReadOptions;
 use crate::store::local::{FileStat, LocalIO};
 use crate::store::DataBytes;
 use async_trait::async_trait;

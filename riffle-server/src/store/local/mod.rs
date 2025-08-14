@@ -16,7 +16,8 @@
 // under the License.
 
 use crate::error::WorkerError;
-use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
+use crate::store::local::options::{CreateOptions, WriteOptions};
+use crate::store::local::read_options::ReadOptions;
 use crate::store::DataBytes;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -32,6 +33,7 @@ pub mod io_layer_throttle;
 mod io_layer_timeout;
 pub mod layers;
 pub mod options;
+pub mod read_options;
 pub mod sync_io;
 
 pub struct FileStat {
