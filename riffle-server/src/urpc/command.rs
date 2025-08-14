@@ -461,7 +461,7 @@ impl SendDataRequestCommand {
             },
         };
         write_response(conn, response).await?;
-        info!(
+        debug!(
             "[send_data] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}",
             timer.elapsed().as_millis(),
             insert_len,
