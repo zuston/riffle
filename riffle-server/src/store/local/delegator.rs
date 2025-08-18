@@ -106,8 +106,8 @@ impl LocalDiskDelegator {
                 root, conf.capacity
             );
         }
-        if let Some(_) = config.read_ahead_options.as_ref() {
-            operator_builder = operator_builder.layer(ReadAheadLayer::new(root));
+        if let Some(options) = config.read_ahead_options.as_ref() {
+            operator_builder = operator_builder.layer(ReadAheadLayer::new(root, options));
             info!("Read ahead layer is enabled for disk: {}.", root);
         }
         let io_handler = operator_builder

@@ -1,3 +1,4 @@
+use crate::config::ReadAheadConfig;
 use crate::error::WorkerError;
 use crate::store::local::layers::{Handler, Layer};
 use crate::store::local::options::{CreateOptions, WriteOptions};
@@ -5,6 +6,7 @@ use crate::store::local::read_options::{ReadOptions, ReadRange};
 use crate::store::local::{FileStat, LocalIO};
 use crate::store::DataBytes;
 use crate::system_libc::read_ahead;
+use crate::util;
 use async_trait::async_trait;
 use clap::builder::Str;
 use dashmap::DashMap;
@@ -15,27 +17,29 @@ use std::fs::File;
 use std::sync::Arc;
 use tokio::time::Instant;
 
-const BATCH_SIZE: usize = 1024 * 1024 * 14;
-const BATCH_NUMBER: usize = 4;
-
 pub struct ReadAheadLayer {
     root: String,
+    options: ReadAheadConfig,
 }
 
 impl ReadAheadLayer {
-    pub fn new(root: &str) -> Self {
+    pub fn new(root: &str, options: &ReadAheadConfig) -> Self {
         Self {
             root: root.to_owned(),
+            options: options.clone(),
         }
     }
 }
 
 impl Layer for ReadAheadLayer {
     fn wrap(&self, handler: Handler) -> Handler {
+        let options = &self.options;
         Arc::new(Box::new(ReadAheadLayerWrapper {
             handler,
             root: self.root.to_owned(),
             load_tasks: Default::default(),
+            ahead_batch_size: util::parse_raw_to_bytesize(options.batch_size.as_str()) as usize,
+            ahead_batch_number: options.batch_number,
         }))
     }
 }
@@ -46,6 +50,9 @@ struct ReadAheadLayerWrapper {
     root: String,
 
     load_tasks: DashMap<String, Option<ReadAheadTask>>,
+
+    ahead_batch_size: usize,
+    ahead_batch_number: usize,
 }
 
 unsafe impl Send for ReadAheadLayerWrapper {}
@@ -70,7 +77,11 @@ impl LocalIO for ReadAheadLayerWrapper {
             if options.sequential {
                 let abs_path = format!("{}/{}", &self.root, path);
                 let load_task = self.load_tasks.entry(path.to_owned()).or_insert_with(|| {
-                    match ReadAheadTask::new(&abs_path) {
+                    match ReadAheadTask::new(
+                        &abs_path,
+                        self.ahead_batch_size,
+                        self.ahead_batch_number,
+                    ) {
                         Ok(task) => Some(task),
                         Err(_) => None,
                     }
@@ -126,10 +137,13 @@ struct Inner {
     is_initialized: bool,
     load_start_offset: u64,
     load_length: u64,
+
+    batch_size: usize,
+    batch_number: usize,
 }
 
 impl ReadAheadTask {
-    fn new(abs_path: &str) -> anyhow::Result<Self> {
+    fn new(abs_path: &str, batch_size: usize, batch_number: usize) -> anyhow::Result<Self> {
         let file = File::options()
             .read(true)
             .write(true)
@@ -143,6 +157,8 @@ impl ReadAheadTask {
                 is_initialized: false,
                 load_start_offset: 0,
                 load_length: 0,
+                batch_size,
+                batch_number,
             })),
         })
     }
@@ -164,7 +180,7 @@ impl ReadAheadTask {
     async fn load(&self, off: u64, len: u64) -> anyhow::Result<bool> {
         let mut inner = self.inner.lock().await;
         if !inner.is_initialized && off == 0 {
-            let load_len = (BATCH_NUMBER * BATCH_SIZE) as u64;
+            let load_len = (inner.batch_number * inner.batch_size) as u64;
             self.do_read_ahead(&inner, 0, load_len).await;
             inner.is_initialized = true;
             inner.load_length = load_len;
@@ -172,7 +188,7 @@ impl ReadAheadTask {
         }
 
         let diff = inner.load_length - off;
-        let next_load_bytes = 2 * BATCH_SIZE as u64;
+        let next_load_bytes = 2 * inner.batch_size as u64;
         if diff > 0 && diff < next_load_bytes {
             let load_len = next_load_bytes;
             self.do_read_ahead(
@@ -223,12 +239,15 @@ mod tests {
         let root = path.parent().unwrap().to_str().unwrap().to_string();
         let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
 
-        let layer = ReadAheadLayer::new(root.as_str());
+        let option = ReadAheadConfig::default();
+        let layer = ReadAheadLayer::new(root.as_str(), &option);
         let inner_handler: Arc<Box<dyn LocalIO>> = Arc::new(Box::new(MockHandler::new()));
         let wrapped = ReadAheadLayerWrapper {
             handler: inner_handler,
             root: root.to_owned(),
             load_tasks: Default::default(),
+            ahead_batch_size: util::parse_raw_to_bytesize(option.batch_size.as_str()) as usize,
+            ahead_batch_number: option.batch_number,
         };
 
         // 1st read ahead
