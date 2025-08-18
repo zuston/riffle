@@ -3,7 +3,7 @@ use crate::actions::Action;
 use crate::Commands::DiskAppendBench;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::info;
-use riffle_server::config::IoLimiterConfig;
+use riffle_server::config::{IoLimiterConfig, ReadAheadConfig};
 use riffle_server::runtime::manager::create_runtime;
 use riffle_server::runtime::RuntimeRef;
 use riffle_server::store::local::io_layer_read_ahead::ReadAheadLayer;
@@ -50,7 +50,8 @@ impl DiskReadBenchAction {
             Box::new(underlying_io_handler),
         ));
         if read_ahead_enable {
-            builder = builder.layer(ReadAheadLayer::new(dir.as_str()));
+            let options = ReadAheadConfig::default();
+            builder = builder.layer(ReadAheadLayer::new(dir.as_str(), &options));
             info!("Read ahead layer is enabled.");
         }
         let handler = Arc::new(builder.build());
