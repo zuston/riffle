@@ -17,8 +17,8 @@
 
 use crate::app_manager::request_context::ReadingOptions::FILE_OFFSET_AND_LEN;
 use crate::app_manager::request_context::{
-    PurgeDataContext, ReadingIndexViewContext, ReadingViewContext, RegisterAppContext,
-    ReleaseTicketContext, RequireBufferContext, RpcType, WritingViewContext,
+    PurgeDataContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
+    RegisterAppContext, ReleaseTicketContext, RequireBufferContext, RpcType, WritingViewContext,
 };
 use crate::config::{LocalfileStoreConfig, StorageType};
 use crate::error::WorkerError;
@@ -54,7 +54,8 @@ use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::index_codec::{IndexCodec, INDEX_BLOCK_SIZE};
 use crate::store::local::delegator::LocalDiskDelegator;
-use crate::store::local::options::{CreateOptions, ReadOptions, WriteOptions};
+use crate::store::local::options::{CreateOptions, WriteOptions};
+use crate::store::local::read_options::{ReadOptions, ReadRange};
 use crate::store::local::{LocalDiskStorage, LocalIO, LocalfileStoreStat};
 use crate::store::spill::SpillWritingViewContext;
 use crate::util;
@@ -471,16 +472,26 @@ impl Store for LocalFileStore {
                         local_disk.root(),
                     ));
                 }
+
+                // Setting up the read options for downstream to determinize io mode ...
+                let read_options: ReadOptions =
+                    ReadOptions::default().with_read_range(ReadRange::RANGE(offset, len));
                 let read_options = if self.direct_io_enable && self.direct_io_read_enable {
-                    ReadOptions::with_read_of_direct_io(offset, len)
+                    read_options.with_direct_io()
                 } else if (self.read_io_sendfile_enable
                     && rpc_source == RpcType::URPC
                     && client_sendfile_enabled)
                 {
-                    ReadOptions::with_sendfile(offset, len)
+                    read_options.with_sendfile()
                 } else {
-                    ReadOptions::with_read_of_buffer_io(offset, len)
+                    read_options.with_buffer_io()
                 };
+                let read_options = if ctx.sequential {
+                    read_options.with_sequential()
+                } else {
+                    read_options
+                };
+
                 let future_read = local_disk.read(&data_file_path, read_options);
                 let data = future_read
                     .instrument_await(format!(
@@ -527,8 +538,11 @@ impl Store for LocalFileStore {
                     ));
                 }
                 let len = partition_coordinator.pointer.load(SeqCst);
+                let read_options = ReadOptions::default()
+                    .with_read_range(ReadRange::ALL)
+                    .with_buffer_io();
                 let mut data = local_disk
-                    .read(&index_file_path, ReadOptions::with_read_all())
+                    .read(&index_file_path, read_options)
                     .instrument_await(format!(
                         "reading index data from file: {:?}",
                         &index_file_path

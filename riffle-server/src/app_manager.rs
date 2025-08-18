@@ -324,6 +324,7 @@ impl AppManager {
 #[cfg(test)]
 pub(crate) mod test {
     use crate::app_manager::app::App;
+    use crate::app_manager::app_configs::{AppConfigOptions, DataDistribution};
     use crate::app_manager::application_identifier::ApplicationId;
     use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::request_context::{
@@ -331,7 +332,9 @@ pub(crate) mod test {
         RequireBufferContext, RpcType, WritingViewContext,
     };
     use crate::app_manager::{AppManager, PurgeReason};
-    use crate::config::{Config, HybridStoreConfig, LocalfileStoreConfig, MemoryStoreConfig};
+    use crate::config::{
+        Config, HybridStoreConfig, LocalfileStoreConfig, MemoryStoreConfig, ReadAheadConfig,
+    };
     use crate::config_reconfigure::ReconfigurableConfManager;
     use crate::error::WorkerError;
     use crate::id_layout::{to_layout, IdLayout, DEFAULT_BLOCK_ID_LAYOUT};
@@ -391,6 +394,60 @@ pub(crate) mod test {
             (block_len * block_batch) as u64,
         );
         writing_ctx
+    }
+
+    #[test]
+    fn app_read_ahead_mechanism_test() {
+        let app_id = ApplicationId::mock();
+        let raw_app_id = app_id.to_string();
+        let runtime_manager: RuntimeManager = Default::default();
+        let mut config = create_config_for_partition_features();
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
+
+        // activate read ahead layer for localfile store
+        config.localfile_store.as_mut().unwrap().read_ahead_options =
+            Some(ReadAheadConfig::default());
+
+        let storage = StorageService::init(&runtime_manager, &config, &reconf_manager);
+        let app_manager_ref =
+            AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
+
+        let shuffle_id = 1;
+        let partition_id = 1;
+        let app_options = AppConfigOptions {
+            data_distribution: DataDistribution::NORMAL,
+            max_concurrency_per_partition_to_write: 0,
+            remote_storage_config_option: None,
+            sendfile_enable: false,
+            // activate read ahead
+            read_ahead_enable: true,
+            client_configs: Default::default(),
+        };
+        app_manager_ref
+            .register(raw_app_id.to_string(), shuffle_id, app_options)
+            .unwrap();
+
+        let app = app_manager_ref.get_app(&app_id).unwrap();
+        let ctx = mock_writing_context(&app_id, shuffle_id, partition_id, 2, 3);
+        let f = app.insert(ctx);
+        if runtime_manager.wait(f).is_err() {
+            panic!()
+        }
+
+        // case1: read ahead is enabled when registering
+        let uid = PartitionUId::new(&app_id, shuffle_id, partition_id);
+        let context = ReadingViewContext::new(
+            uid.clone(),
+            ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(-1, 1000),
+            RpcType::GRPC,
+        );
+        context.with_task_ids_filter(Treemap::default());
+
+        let f = app.select(context);
+        let result = runtime_manager.wait(f).unwrap();
+
+        let meta = app.get_partition_meta(&uid);
+        assert!(meta.is_sequential_read());
     }
 
     #[test]

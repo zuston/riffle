@@ -15,6 +15,9 @@ struct Inner {
     total_size: AtomicU64,
     is_huge_partition: AtomicBool,
     is_split: AtomicBool,
+
+    // this option is for the read ahead mechanism in localfile
+    is_sequential_read: AtomicBool,
 }
 
 impl PartitionMeta {
@@ -24,6 +27,7 @@ impl PartitionMeta {
                 total_size: Default::default(),
                 is_huge_partition: Default::default(),
                 is_split: Default::default(),
+                is_sequential_read: AtomicBool::new(false),
             }),
         }
     }
@@ -52,5 +56,13 @@ impl PartitionMeta {
 
     pub fn mark_as_split(&self) {
         self.inner.is_split.store(true, Ordering::SeqCst);
+    }
+
+    pub fn mark_as_sequential_read(&self) {
+        self.inner.is_sequential_read.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_sequential_read(&self) -> bool {
+        self.inner.is_sequential_read.load(Ordering::SeqCst)
     }
 }

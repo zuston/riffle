@@ -103,6 +103,7 @@ pub struct ReadingViewContext {
     pub task_ids_filter: Option<Treemap>,
     pub rpc_source: RpcType,
     pub sendfile_enabled: bool,
+    pub sequential: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,6 +120,7 @@ impl ReadingViewContext {
             task_ids_filter: None,
             rpc_source,
             sendfile_enabled: false,
+            sequential: false,
         }
     }
 
@@ -129,6 +131,7 @@ impl ReadingViewContext {
             task_ids_filter: Some(bitmap),
             rpc_source: self.rpc_source.clone(),
             sendfile_enabled: self.sendfile_enabled,
+            sequential: self.sequential,
         }
     }
 
@@ -139,6 +142,18 @@ impl ReadingViewContext {
             task_ids_filter: self.task_ids_filter.clone(),
             rpc_source: self.rpc_source.clone(),
             sendfile_enabled: true,
+            sequential: self.sequential,
+        }
+    }
+
+    pub fn with_sequential(&self) -> Self {
+        ReadingViewContext {
+            uid: self.uid.clone(),
+            reading_options: self.reading_options.clone(),
+            task_ids_filter: self.task_ids_filter.clone(),
+            rpc_source: self.rpc_source.clone(),
+            sendfile_enabled: self.sendfile_enabled,
+            sequential: true,
         }
     }
 }
