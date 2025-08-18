@@ -144,15 +144,22 @@ pub struct LocalfileStoreConfig {
 pub struct ReadAheadConfig {
     // todo: add more options
     #[serde(default = "as_default_read_ahead_batch_size")]
-    batch_size: String,
+    pub batch_size: String,
+    #[serde(default = "as_default_read_ahead_batch_number")]
+    pub batch_number: usize,
 }
 
 impl Default for ReadAheadConfig {
     fn default() -> Self {
         Self {
             batch_size: as_default_read_ahead_batch_size(),
+            batch_number: as_default_read_ahead_batch_number(),
         }
     }
+}
+
+fn as_default_read_ahead_batch_number() -> usize {
+    4
 }
 
 fn as_default_read_ahead_batch_size() -> String {
