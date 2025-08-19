@@ -120,41 +120,24 @@ impl ReadingViewContext {
             task_ids_filter: None,
             rpc_source,
             sendfile_enabled: false,
-            sequential: false,
-        }
-    }
-
-    pub fn with_task_ids_filter(&self, bitmap: Treemap) -> Self {
-        ReadingViewContext {
-            uid: self.uid.clone(),
-            reading_options: self.reading_options.clone(),
-            task_ids_filter: Some(bitmap),
-            rpc_source: self.rpc_source.clone(),
-            sendfile_enabled: self.sendfile_enabled,
-            sequential: self.sequential,
-        }
-    }
-
-    pub fn with_sendfile_enabled(&self) -> Self {
-        ReadingViewContext {
-            uid: self.uid.clone(),
-            reading_options: self.reading_options.clone(),
-            task_ids_filter: self.task_ids_filter.clone(),
-            rpc_source: self.rpc_source.clone(),
-            sendfile_enabled: true,
-            sequential: self.sequential,
-        }
-    }
-
-    pub fn with_sequential(&self) -> Self {
-        ReadingViewContext {
-            uid: self.uid.clone(),
-            reading_options: self.reading_options.clone(),
-            task_ids_filter: self.task_ids_filter.clone(),
-            rpc_source: self.rpc_source.clone(),
-            sendfile_enabled: self.sendfile_enabled,
             sequential: true,
         }
+    }
+
+    // task_ids_filter and sequential_read are mutually exclusive.
+    pub fn with_task_ids_filter(mut self, bitmap: Treemap) -> Self {
+        self.task_ids_filter = Some(bitmap);
+        self
+    }
+
+    pub fn with_sendfile_enabled(mut self) -> Self {
+        self.sendfile_enabled = true;
+        self
+    }
+
+    pub fn with_sequential(mut self) -> Self {
+        self.sequential = true;
+        self
     }
 }
 

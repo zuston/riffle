@@ -441,7 +441,6 @@ pub(crate) mod test {
             ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(-1, 1000),
             RpcType::GRPC,
         );
-        context.with_task_ids_filter(Treemap::default());
 
         let f = app.select(context);
         let result = runtime_manager.wait(f).unwrap();
