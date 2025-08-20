@@ -200,7 +200,7 @@ impl AppManager {
                     if let Err(err) = app_manager_cloned.purge_app_data(&reason).await {
                         PURGE_FAILED_COUNTER.inc();
                         error!(
-                            "Errors on purging data with reason: {:?}. err: {:?}",
+                            "Errors on purging data with reason: {}. err: {:?}",
                             &reason, err
                         );
                     }
