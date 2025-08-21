@@ -124,9 +124,9 @@ impl App {
 
         let block_id_manager = get_block_id_manager(&config.app_config.block_id_manager_type);
 
-        info!("App=[{}]. sendfile_enable: {}. block_manager_type: {}. partition_limit/threshold/ratio: {}/{}/{}. partition_split/threshold: {}/{}",
+        info!("App=[{}]. {}. block_manager_type: {}. partition_limit/threshold/ratio: {}/{}/{}. partition_split/threshold: {}/{}",
             &app_id,
-            config_options.sendfile_enable,
+            &config_options,
             &config.app_config.block_id_manager_type,
             partition_limit_enable,
             partition_limit_threshold.get(),

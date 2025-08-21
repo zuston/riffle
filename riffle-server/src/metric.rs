@@ -688,6 +688,86 @@ pub static TOTAL_DETECTED_LOCALFILE_IN_CONSISTENCY: Lazy<IntCounter> = Lazy::new
     .expect("")
 });
 
+// Read-ahead related metrics - without root tag
+pub static READ_AHEAD_IGNORES: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new("read_ahead_ignores", "Number of read-ahead cache ignores")
+        .expect("metric should be created")
+});
+pub static READ_AHEAD_HITS: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new("read_ahead_hits", "Number of read-ahead cache hits")
+        .expect("metric should be created")
+});
+
+pub static READ_AHEAD_MISSES: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new("read_ahead_misses", "Number of read-ahead cache misses")
+        .expect("metric should be created")
+});
+
+// Read-ahead performance metrics
+pub static READ_WITH_AHEAD_HIT_DURATION: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "read_with_ahead_hit_duration_seconds",
+        "Duration of reads that hit read-ahead cache",
+    )
+    .buckets(Vec::from(DEFAULT_BUCKETS));
+    Histogram::with_opts(opts).unwrap()
+});
+
+pub static READ_WITH_AHEAD_MISS_DURATION: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "read_with_ahead_miss_duration_seconds",
+        "Duration of reads that miss read-ahead cache",
+    )
+    .buckets(Vec::from(DEFAULT_BUCKETS));
+    Histogram::with_opts(opts).unwrap()
+});
+
+pub static READ_WITHOUT_AHEAD_DURATION: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "read_without_ahead_duration_seconds",
+        "Duration of reads without read-ahead (non-sequential)",
+    )
+    .buckets(Vec::from(DEFAULT_BUCKETS));
+    Histogram::with_opts(opts).unwrap()
+});
+
+pub static READ_AHEAD_OPERATIONS: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new(
+        "read_ahead_operations",
+        "Total number of read-ahead operations performed",
+    )
+    .expect("metric should be created")
+});
+
+pub static READ_AHEAD_BYTES: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new("read_ahead_bytes", "Total bytes read ahead").expect("metric should be created")
+});
+
+pub static READ_AHEAD_WASTED_BYTES: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new(
+        "read_ahead_wasted_bytes",
+        "Bytes read ahead but never actually read",
+    )
+    .expect("metric should be created")
+});
+
+pub static READ_AHEAD_ACTIVE_TASKS: Lazy<IntGauge> = Lazy::new(|| {
+    IntGauge::new(
+        "read_ahead_active_tasks",
+        "Number of active read-ahead tasks",
+    )
+    .expect("metric should be created")
+});
+
+pub static READ_AHEAD_OPERATION_DURATION: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "read_ahead_operation_duration_seconds",
+        "Duration of read-ahead operations",
+    )
+    .buckets(Vec::from(DEFAULT_BUCKETS));
+    Histogram::with_opts(opts).unwrap()
+});
+
 // total timeout tickets
 pub static TOTAL_EVICT_TIMEOUT_TICKETS_NUM: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new(
@@ -1050,6 +1130,41 @@ fn register_custom_metrics() {
     REGISTRY
         .register(Box::new(TOTAL_DETECTED_LOCALFILE_IN_CONSISTENCY.clone()))
         .expect("");
+
+    // Register read-ahead metrics
+    REGISTRY
+        .register(Box::new(READ_AHEAD_IGNORES.clone()))
+        .expect("read_ahead_ignores must be registered");
+    REGISTRY
+        .register(Box::new(READ_AHEAD_HITS.clone()))
+        .expect("read_ahead_hits must be registered");
+    REGISTRY
+        .register(Box::new(READ_AHEAD_MISSES.clone()))
+        .expect("read_ahead_misses must be registered");
+    REGISTRY
+        .register(Box::new(READ_WITH_AHEAD_HIT_DURATION.clone()))
+        .expect("read_with_ahead_hit_duration must be registered");
+    REGISTRY
+        .register(Box::new(READ_WITH_AHEAD_MISS_DURATION.clone()))
+        .expect("read_with_ahead_miss_duration must be registered");
+    REGISTRY
+        .register(Box::new(READ_WITHOUT_AHEAD_DURATION.clone()))
+        .expect("read_without_ahead_duration must be registered");
+    REGISTRY
+        .register(Box::new(READ_AHEAD_OPERATIONS.clone()))
+        .expect("read_ahead_operations must be registered");
+    REGISTRY
+        .register(Box::new(READ_AHEAD_BYTES.clone()))
+        .expect("read_ahead_bytes must be registered");
+    REGISTRY
+        .register(Box::new(READ_AHEAD_WASTED_BYTES.clone()))
+        .expect("read_ahead_wasted_bytes must be registered");
+    REGISTRY
+        .register(Box::new(READ_AHEAD_ACTIVE_TASKS.clone()))
+        .expect("read_ahead_active_tasks must be registered");
+    REGISTRY
+        .register(Box::new(READ_AHEAD_OPERATION_DURATION.clone()))
+        .expect("read_ahead_operation_duration must be registered");
 }
 
 const JOB_NAME: &str = "uniffle-worker";
