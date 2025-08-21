@@ -90,11 +90,32 @@ jobs:
         id: component
         run: echo "name=${{ matrix.component }}" >> $GITHUB_OUTPUT
 
-      - name: Upload
+      - name: Find binaries
+        id: find_binaries
+        shell: bash
+        run: |
+          if [ -f "target-docker/release/riffle-server" ]; then
+            echo "server_exists=true" >> $GITHUB_OUTPUT
+          fi
+          if [ -f "target-docker/release/riffle-ctl" ]; then
+            echo "ctl_exists=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload riffle-server
+        if: steps.find_binaries.outputs.server_exists == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.component.outputs.name }}-${{ matrix.name }}-${{ steps.vars.outputs.name }}
-          path: ${{ matrix.artifact_path }}
+          name: riffle-server-${{ matrix.name }}-${{ steps.vars.outputs.name }}
+          path: target-docker/release/riffle-server
+          if-no-files-found: warn
+      
+      - name: Upload riffle-ctl
+        if: steps.find_binaries.outputs.ctl_exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: riffle-ctl-${{ matrix.name }}-${{ steps.vars.outputs.name }}
+          path: target-docker/release/riffle-ctl
+          if-no-files-found: warn
 
       - name: Upload each binary to release
         if: startsWith(github.ref, 'refs/tags/')
