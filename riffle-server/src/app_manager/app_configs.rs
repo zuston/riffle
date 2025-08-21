@@ -5,10 +5,12 @@ use crate::client_configs::{
 use crate::grpc::protobuf::uniffle::RemoteStorage;
 use std::collections::HashMap;
 use std::fmt;
+use std::fmt::{Display, Formatter};
+use strum_macros::Display;
 
 pub const MAX_CONCURRENCY_PER_PARTITION_TO_WRITE: i32 = 20;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Display)]
 pub enum DataDistribution {
     NORMAL,
     #[allow(non_camel_case_types)]
@@ -53,6 +55,16 @@ impl Default for AppConfigOptions {
             read_ahead_enable: false,
             client_configs: Default::default(),
         }
+    }
+}
+
+impl Display for AppConfigOptions {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "data_distribution={}, sendfile_enable={}, read_ahead_enable={}",
+            &self.data_distribution, self.sendfile_enable, self.read_ahead_enable
+        )
     }
 }
 

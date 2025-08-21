@@ -1,5 +1,10 @@
 use crate::config::ReadAheadConfig;
 use crate::error::WorkerError;
+use crate::metric::{
+    READ_AHEAD_ACTIVE_TASKS, READ_AHEAD_BYTES, READ_AHEAD_HITS, READ_AHEAD_MISSES,
+    READ_AHEAD_OPERATIONS, READ_AHEAD_OPERATION_DURATION, READ_AHEAD_WASTED_BYTES,
+    READ_WITHOUT_AHEAD_DURATION, READ_WITH_AHEAD_HIT_DURATION, READ_WITH_AHEAD_MISS_DURATION,
+};
 use crate::store::local::layers::{Handler, Layer};
 use crate::store::local::options::{CreateOptions, WriteOptions};
 use crate::store::local::read_options::{ReadOptions, ReadRange};
@@ -73,6 +78,8 @@ impl LocalIO for ReadAheadLayerWrapper {
         path: &str,
         options: ReadOptions,
     ) -> anyhow::Result<DataBytes, WorkerError> {
+        let timer = Instant::now();
+
         if let ReadRange::RANGE(off, len) = options.read_range {
             if options.sequential {
                 let abs_path = format!("{}/{}", &self.root, path);
@@ -82,16 +89,53 @@ impl LocalIO for ReadAheadLayerWrapper {
                         self.ahead_batch_size,
                         self.ahead_batch_number,
                     ) {
-                        Ok(task) => Some(task),
+                        Ok(task) => {
+                            READ_AHEAD_ACTIVE_TASKS.inc();
+                            Some(task)
+                        }
                         Err(_) => None,
                     }
                 });
+
+                let mut hit = false;
                 if let Some(task) = load_task.value() {
-                    task.load(off, len).await?;
+                    hit = task.load(off, len).await?;
+                }
+
+                let result = self.handler.read(&path, options).await;
+                // only record non-raw io duration
+                if let Ok(data) = &result {
+                    match data {
+                        DataBytes::RawIO(_) => {
+                            // ignore
+                        }
+                        _ => {
+                            let duration = timer.elapsed().as_secs_f64();
+                            if hit {
+                                READ_AHEAD_HITS.inc();
+                                READ_WITH_AHEAD_HIT_DURATION.observe(duration);
+                            } else {
+                                READ_AHEAD_MISSES.inc();
+                                READ_WITH_AHEAD_MISS_DURATION.observe(duration);
+                            }
+                        }
+                    }
+                }
+                return result;
+            }
+        }
+
+        let result = self.handler.read(&path, options).await;
+        if let Ok(data) = &result {
+            match data {
+                DataBytes::RawIO(_) => {}
+                _ => {
+                    let duration = timer.elapsed().as_secs_f64();
+                    READ_WITHOUT_AHEAD_DURATION.observe(duration);
                 }
             }
         }
-        self.handler.read(&path, options).await
+        result
     }
 
     async fn delete(&self, path: &str) -> anyhow::Result<(), WorkerError> {
@@ -108,9 +152,13 @@ impl LocalIO for ReadAheadLayerWrapper {
                 deletion_keys.push(k.clone());
             }
         }
+        let deleted_count = deletion_keys.len();
         for deletion_key in deletion_keys {
             self.load_tasks.remove(&deletion_key);
         }
+
+        READ_AHEAD_ACTIVE_TASKS.sub(deleted_count as i64);
+
         info!(
             "Deletion cache with prefix:{} cost {} ms",
             normalize_path,
@@ -164,12 +212,17 @@ impl ReadAheadTask {
     }
 
     async fn do_read_ahead(&self, inner: &Inner, off: u64, len: u64) {
+        let _timer = READ_AHEAD_OPERATION_DURATION.start_timer();
+
         debug!(
             "Read ahead: {} with offset: {}, length: {}",
             inner.absolute_path, off, len
         );
+
+        READ_AHEAD_OPERATIONS.inc();
+        READ_AHEAD_BYTES.inc_by(len);
+
         if let Err(e) = read_ahead(&inner.file, off as i64, len as i64) {
-            // ignore failure
             warn!(
                 "Errors on reading ahead: {} with offset: {}, length: {}",
                 &inner.absolute_path, off, len
