@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - "master"
-      - "upload2"
     tags:
       - "v*.*.*"
   pull_request:
