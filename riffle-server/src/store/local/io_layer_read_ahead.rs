@@ -78,64 +78,66 @@ impl LocalIO for ReadAheadLayerWrapper {
         path: &str,
         options: ReadOptions,
     ) -> anyhow::Result<DataBytes, WorkerError> {
-        let timer = Instant::now();
-
-        if let ReadRange::RANGE(off, len) = options.read_range {
-            if options.sequential {
-                let abs_path = format!("{}/{}", &self.root, path);
-                let load_task = self.load_tasks.entry(path.to_owned()).or_insert_with(|| {
-                    match ReadAheadTask::new(
-                        &abs_path,
-                        self.ahead_batch_size,
-                        self.ahead_batch_number,
-                    ) {
-                        Ok(task) => {
-                            READ_AHEAD_ACTIVE_TASKS.inc();
-                            Some(task)
+        match options.read_range {
+            ReadRange::ALL => self.handler.read(&path, options).await,
+            ReadRange::RANGE(off, len) => {
+                let timer = Instant::now();
+                if options.sequential {
+                    let abs_path = format!("{}/{}", &self.root, path);
+                    let load_task = self.load_tasks.entry(path.to_owned()).or_insert_with(|| {
+                        match ReadAheadTask::new(
+                            &abs_path,
+                            self.ahead_batch_size,
+                            self.ahead_batch_number,
+                        ) {
+                            Ok(task) => {
+                                READ_AHEAD_ACTIVE_TASKS.inc();
+                                Some(task)
+                            }
+                            Err(_) => None,
                         }
-                        Err(_) => None,
+                    });
+
+                    let mut hit = false;
+                    if let Some(task) = load_task.value() {
+                        hit = task.load(off, len).await?;
                     }
-                });
 
-                let mut hit = false;
-                if let Some(task) = load_task.value() {
-                    hit = task.load(off, len).await?;
-                }
-
-                let result = self.handler.read(&path, options).await;
-                // only record non-raw io duration
-                if let Ok(data) = &result {
-                    match data {
-                        DataBytes::RawIO(_) => {
-                            // ignore
-                        }
-                        _ => {
-                            let duration = timer.elapsed().as_secs_f64();
-                            if hit {
-                                READ_AHEAD_HITS.inc();
-                                READ_WITH_AHEAD_HIT_DURATION.observe(duration);
-                            } else {
-                                READ_AHEAD_MISSES.inc();
-                                READ_WITH_AHEAD_MISS_DURATION.observe(duration);
+                    let result = self.handler.read(&path, options).await;
+                    // only record non-raw io duration
+                    if let Ok(data) = &result {
+                        match data {
+                            DataBytes::RawIO(_) => {
+                                // ignore
+                            }
+                            _ => {
+                                let duration = timer.elapsed().as_secs_f64();
+                                if hit {
+                                    READ_AHEAD_HITS.inc();
+                                    READ_WITH_AHEAD_HIT_DURATION.observe(duration);
+                                } else {
+                                    READ_AHEAD_MISSES.inc();
+                                    READ_WITH_AHEAD_MISS_DURATION.observe(duration);
+                                }
                             }
                         }
                     }
+                    result
+                } else {
+                    let result = self.handler.read(&path, options).await;
+                    if let Ok(data) = &result {
+                        match data {
+                            DataBytes::RawIO(_) => {}
+                            _ => {
+                                let duration = timer.elapsed().as_secs_f64();
+                                READ_WITHOUT_AHEAD_DURATION.observe(duration);
+                            }
+                        }
+                    }
+                    result
                 }
-                return result;
             }
         }
-
-        let result = self.handler.read(&path, options).await;
-        if let Ok(data) = &result {
-            match data {
-                DataBytes::RawIO(_) => {}
-                _ => {
-                    let duration = timer.elapsed().as_secs_f64();
-                    READ_WITHOUT_AHEAD_DURATION.observe(duration);
-                }
-            }
-        }
-        result
     }
 
     async fn delete(&self, path: &str) -> anyhow::Result<(), WorkerError> {
