@@ -114,7 +114,7 @@ pub struct HybridStore {
 
     app_manager: OnceCell<AppManagerRef>,
 
-    huge_partition_memory_spill_to_hdfs_threshold_size: u64,
+    huge_partition_memory_spill_to_hdfs_threshold_size: Option<u64>,
 
     // Only for test
     sensitive_watermark_spill_tag: OnceCell<()>,
@@ -163,14 +163,13 @@ impl HybridStore {
                 Some(v) => Some(ReadableSize::from_str(&v.clone()).unwrap().as_bytes()),
                 _ => None,
             };
-        let huge_partition_memory_spill_to_hdfs_threshold_size = ReadableSize::from_str(
-            &hybrid_conf
-                .huge_partition_memory_spill_to_hdfs_threshold_size
-                .clone(),
-        )
-        .unwrap()
-        .as_bytes();
-
+        let huge_partition_spill_threshold = &hybrid_conf
+            .huge_partition_memory_spill_to_hdfs_threshold_size
+            .as_ref()
+            .map(|x| ReadableSize::from_str(&x).unwrap().as_bytes());
+        if huge_partition_spill_threshold.is_none() {
+            info!("Huge partition spill to HDFS has been disabled.");
+        }
         let async_watermark_spill_enable = hybrid_conf.async_watermark_spill_trigger_enable;
 
         let store = HybridStore {
@@ -190,7 +189,8 @@ impl HybridStore {
             event_bus,
             app_manager: OnceCell::new(),
             in_flight_bytes: Default::default(),
-            huge_partition_memory_spill_to_hdfs_threshold_size,
+            huge_partition_memory_spill_to_hdfs_threshold_size: huge_partition_spill_threshold
+                .clone(),
             in_flight_bytes_of_huge_partition: Default::default(),
             sensitive_watermark_spill_tag: Default::default(),
         };
@@ -348,44 +348,46 @@ impl HybridStore {
         };
 
         let mut reset = false;
-        // huge partition fallback to hdfs if size > threshold
-        let app_manager = self.app_manager.get();
-        if let Some(app_manager) = app_manager {
-            let app_id = &ctx.uid.app_id;
-            match app_manager.get_app(app_id) {
-                Some(app) => {
-                    let huge_partition_tag = app.is_huge_partition(&ctx.uid)?;
+        if let Some(huge_partition_spill_threshold) =
+            self.huge_partition_memory_spill_to_hdfs_threshold_size
+        {
+            // huge partition fallback to hdfs if size > threshold
+            let app_manager = self.app_manager.get();
+            if let Some(app_manager) = app_manager {
+                let app_id = &ctx.uid.app_id;
+                match app_manager.get_app(app_id) {
+                    Some(app) => {
+                        let huge_partition_tag = app.is_huge_partition(&ctx.uid)?;
 
-                    if spill_message.huge_partition_tag.get().is_none() && huge_partition_tag {
-                        spill_message.huge_partition_tag.set(true);
-                        self.in_flight_bytes_of_huge_partition
-                            .fetch_add(spill_size as u64, SeqCst);
-                        GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES_OF_HUGE_PARTITION.add(spill_size);
-                    }
-
-                    if huge_partition_tag
-                        && spill_size as u64
-                            > self.huge_partition_memory_spill_to_hdfs_threshold_size
-                    {
-                        candidate_store = cold;
-                        // REWRITE: expanded if-let-chain into nested ifs for clarity and correctness
-                        if let Some(stype) = spill_message.get_candidate_storage_type() {
-                            if stype == StorageType::HDFS
-                                && spill_message.get_retry_counter() > 1
-                                && warm.is_healthy().await?
-                                && self.config.huge_partition_fallback_enable
-                            {
-                                candidate_store = warm;
-                                info!(
-                                    "Fallback to warm due to flushing HDFS failure for {:?}",
-                                    &spill_message.ctx.uid
-                                );
-                            }
+                        if spill_message.huge_partition_tag.get().is_none() && huge_partition_tag {
+                            spill_message.huge_partition_tag.set(true);
+                            self.in_flight_bytes_of_huge_partition
+                                .fetch_add(spill_size as u64, SeqCst);
+                            GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES_OF_HUGE_PARTITION.add(spill_size);
                         }
-                        reset = true;
+
+                        if huge_partition_tag && spill_size as u64 > huge_partition_spill_threshold
+                        {
+                            candidate_store = cold;
+                            // REWRITE: expanded if-let-chain into nested ifs for clarity and correctness
+                            if let Some(stype) = spill_message.get_candidate_storage_type() {
+                                if stype == StorageType::HDFS
+                                    && spill_message.get_retry_counter() > 1
+                                    && warm.is_healthy().await?
+                                    && self.config.huge_partition_fallback_enable
+                                {
+                                    candidate_store = warm;
+                                    info!(
+                                        "Fallback to warm due to flushing HDFS failure for {:?}",
+                                        &spill_message.ctx.uid
+                                    );
+                                }
+                            }
+                            reset = true;
+                        }
                     }
+                    _ => return Err(WorkerError::APP_IS_NOT_FOUND),
                 }
-                _ => return Err(WorkerError::APP_IS_NOT_FOUND),
             }
         }
 
