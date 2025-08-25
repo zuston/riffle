@@ -226,7 +226,7 @@ mod tests {
         config.hybrid_store.memory_spill_low_watermark = 0.2;
         config
             .hybrid_store
-            .huge_partition_memory_spill_to_hdfs_threshold_size = "1B".to_string();
+            .huge_partition_memory_spill_to_hdfs_threshold_size = Some("1B".to_string());
         config.app_config.partition_limit_enable = true;
         config.app_config.partition_limit_threshold = "20B".to_string();
         config.app_config.partition_limit_memory_backpressure_ratio = 0.2;
@@ -442,7 +442,7 @@ mod tests {
         config.app_config.partition_limit_enable = true;
         config
             .hybrid_store
-            .huge_partition_memory_spill_to_hdfs_threshold_size = "1B".to_string();
+            .huge_partition_memory_spill_to_hdfs_threshold_size = Some("1B".to_string());
         config.hybrid_store.huge_partition_fallback_enable = true;
 
         let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();

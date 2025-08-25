@@ -300,8 +300,7 @@ pub struct HybridStoreConfig {
     pub memory_spill_to_localfile_concurrency: Option<i32>,
     pub memory_spill_to_hdfs_concurrency: Option<i32>,
 
-    #[serde(default = "as_default_huge_partition_memory_spill_to_hdfs_threshold_size")]
-    pub huge_partition_memory_spill_to_hdfs_threshold_size: String,
+    pub huge_partition_memory_spill_to_hdfs_threshold_size: Option<String>,
     #[serde(default = "as_default_huge_partition_fallback_enable")]
     pub huge_partition_fallback_enable: bool,
 
@@ -342,9 +341,6 @@ fn as_default_memory_spill_high_watermark() -> f32 {
 fn as_default_memory_spill_low_watermark() -> f32 {
     0.2
 }
-fn as_default_huge_partition_memory_spill_to_hdfs_threshold_size() -> String {
-    "64M".to_string()
-}
 
 impl HybridStoreConfig {
     pub fn new(
@@ -359,8 +355,7 @@ impl HybridStoreConfig {
             memory_spill_to_cold_threshold_size: None,
             memory_spill_to_localfile_concurrency: None,
             memory_spill_to_hdfs_concurrency: None,
-            huge_partition_memory_spill_to_hdfs_threshold_size:
-                as_default_huge_partition_memory_spill_to_hdfs_threshold_size(),
+            huge_partition_memory_spill_to_hdfs_threshold_size: None,
             huge_partition_fallback_enable: as_default_huge_partition_fallback_enable(),
             sensitive_watermark_spill_enable: as_default_sensitive_watermark_spill_enable(),
             async_watermark_spill_trigger_enable: as_default_async_watermark_spill_trigger_enable(),
@@ -379,8 +374,7 @@ impl Default for HybridStoreConfig {
             memory_spill_to_cold_threshold_size: None,
             memory_spill_to_localfile_concurrency: None,
             memory_spill_to_hdfs_concurrency: None,
-            huge_partition_memory_spill_to_hdfs_threshold_size:
-                as_default_huge_partition_memory_spill_to_hdfs_threshold_size(),
+            huge_partition_memory_spill_to_hdfs_threshold_size: None,
             huge_partition_fallback_enable: as_default_huge_partition_fallback_enable(),
             sensitive_watermark_spill_enable: as_default_sensitive_watermark_spill_enable(),
             async_watermark_spill_trigger_enable: as_default_async_watermark_spill_trigger_enable(),
