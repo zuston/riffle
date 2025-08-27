@@ -145,7 +145,7 @@ impl ReconfigurableConfManager {
                         let option = option.value();
                         option.update(&v);
                     }
-                    warn!("Updated [{}] from {:?} to {:?}", &k, &val_ref, &v);
+                    warn!("Updated [{}] from {} to {}", &k, *val_ref, v);
                     *val_ref = v;
                 }
             }
