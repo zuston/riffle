@@ -154,18 +154,22 @@ impl LocalIO for ReadAheadLayerWrapper {
                 deletion_keys.push(k.clone());
             }
         }
+
         let deleted_count = deletion_keys.len();
-        for deletion_key in deletion_keys {
-            self.load_tasks.remove(&deletion_key);
+        if deleted_count > 0 {
+            for deletion_key in deletion_keys {
+                self.load_tasks.remove(&deletion_key);
+            }
+
+            READ_AHEAD_ACTIVE_TASKS.sub(deleted_count as i64);
+
+            info!(
+                "Deleted {} load active tasks with prefix:{} cost {} ms",
+                deleted_count,
+                normalize_path,
+                timer.elapsed().as_millis()
+            );
         }
-
-        READ_AHEAD_ACTIVE_TASKS.sub(deleted_count as i64);
-
-        info!(
-            "Deletion cache with prefix:{} cost {} ms",
-            normalize_path,
-            timer.elapsed().as_millis()
-        );
 
         self.handler.delete(path).await
     }
