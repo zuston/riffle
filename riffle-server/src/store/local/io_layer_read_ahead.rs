@@ -84,19 +84,23 @@ impl LocalIO for ReadAheadLayerWrapper {
                 let timer = Instant::now();
                 if options.sequential {
                     let abs_path = format!("{}/{}", &self.root, path);
-                    let load_task = self.load_tasks.entry(path.to_owned()).or_insert_with(|| {
-                        match ReadAheadTask::new(
-                            &abs_path,
-                            self.ahead_batch_size,
-                            self.ahead_batch_number,
-                        ) {
-                            Ok(task) => {
-                                READ_AHEAD_ACTIVE_TASKS.inc();
-                                Some(task)
+                    let load_task = self
+                        .load_tasks
+                        .entry(path.to_owned())
+                        .or_insert_with(|| {
+                            match ReadAheadTask::new(
+                                &abs_path,
+                                self.ahead_batch_size,
+                                self.ahead_batch_number,
+                            ) {
+                                Ok(task) => {
+                                    READ_AHEAD_ACTIVE_TASKS.inc();
+                                    Some(task)
+                                }
+                                Err(_) => None,
                             }
-                            Err(_) => None,
-                        }
-                    }).clone();
+                        })
+                        .clone();
 
                     let mut hit = false;
                     if let Some(task) = load_task {
