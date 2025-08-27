@@ -120,7 +120,7 @@ impl ReadingViewContext {
             task_ids_filter: None,
             rpc_source,
             sendfile_enabled: false,
-            sequential: true,
+            sequential: false,
         }
     }
 
