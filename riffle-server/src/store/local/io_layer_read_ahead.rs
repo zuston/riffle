@@ -96,10 +96,10 @@ impl LocalIO for ReadAheadLayerWrapper {
                             }
                             Err(_) => None,
                         }
-                    });
+                    }).clone();
 
                     let mut hit = false;
-                    if let Some(task) = load_task.value() {
+                    if let Some(task) = load_task {
                         hit = task.load(off, len).await?;
                     }
 
