@@ -7,7 +7,7 @@ use crate::metric::{
 };
 use crate::runtime::RuntimeRef;
 use async_trait::async_trait;
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use log::info;
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
@@ -114,7 +114,7 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
             .inner
             .queue_recv
             .recv()
-            .instrument_await("receiving event")
+            .instrument_await("receiving event".long_running())
             .await
         {
             let concurrency_guarder = event_bus

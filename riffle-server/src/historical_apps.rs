@@ -5,7 +5,7 @@ use crate::util::{now_timestamp_as_millis, now_timestamp_as_sec};
 use crate::{config, util};
 use anyhow::Result;
 use async_trait::async_trait;
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use clap::builder::Str;
 use dashmap::DashMap;
 use log::{error, info};
@@ -71,7 +71,9 @@ impl HistoricalAppManager {
                 let interval = 60 * 30;
                 loop {
                     tokio::time::sleep(Duration::from_secs(interval))
-                        .instrument_await(format!("sleeping for {} sec...", interval))
+                        .instrument_await(
+                            format!("sleeping for {} sec...", interval).long_running(),
+                        )
                         .await;
                     if let Err(err) = app_manager.purge().await {
                         error!("Errors on purging historical app. err: {}", err);

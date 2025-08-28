@@ -27,7 +27,7 @@ use crate::constant::CPU_ARCH;
 use crate::http::{HTTPServer, Handler};
 use crate::runtime::manager::RuntimeManager;
 use crate::util::is_port_in_used;
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use std::sync::Mutex;
 
 impl ResponseError for WorkerError {
@@ -96,7 +96,7 @@ impl HTTPServer for PoemHTTPServer {
                 let _ = Server::new(TcpListener::bind(format!("0.0.0.0:{}", port)))
                     .name("uniffle-server-http-service")
                     .run(app)
-                    .instrument_await("listening")
+                    .instrument_await("listening".long_running())
                     .await;
             });
     }
