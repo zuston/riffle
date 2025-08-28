@@ -1,5 +1,6 @@
 use crate::app_manager::request_context::PurgeDataContext;
 use crate::store::DataBytes;
+use std::fmt::{Display, Formatter};
 
 /// If the append is false, the offset should be None.
 /// Otherwise, if the offset is None, it indicates using buffer io.
@@ -42,6 +43,18 @@ impl WriteOptions {
 
     pub fn is_direct_io(&self) -> bool {
         self.offset.is_some()
+    }
+}
+
+impl Display for WriteOptions {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "append: {}, data_len: {}, offset: {:?}",
+            self.append,
+            self.data.len(),
+            self.offset
+        )
     }
 }
 

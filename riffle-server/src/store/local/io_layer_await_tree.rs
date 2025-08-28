@@ -53,9 +53,13 @@ impl LocalIO for AwaitTreeLayerWrapper {
     }
 
     async fn write(&self, path: &str, options: WriteOptions) -> anyhow::Result<(), WorkerError> {
+        let await_log = format!(
+            "Writing to file: {}/{} with options: {}",
+            &self.root, path, &options
+        );
         self.handler
             .write(path, options)
-            .instrument_await(format!("Writing to file: {}/{}", &self.root, path))
+            .instrument_await(await_log)
             .await
             .with_context(|| format!("failed to write to file: {}/{}", &self.root, path))?;
         Ok(())
@@ -66,10 +70,14 @@ impl LocalIO for AwaitTreeLayerWrapper {
         path: &str,
         options: ReadOptions,
     ) -> anyhow::Result<DataBytes, WorkerError> {
+        let await_log = format!(
+            "Reading file: {}/{} with options: {:?}",
+            &self.root, path, &options
+        );
         let data = self
             .handler
             .read(path, options)
-            .instrument_await(format!("Reading from file: {}/{}", &self.root, path))
+            .instrument_await(await_log)
             .await
             .with_context(|| format!("failed to read from file: {}/{}", &self.root, path))?;
         Ok(data)
