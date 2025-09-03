@@ -1,3 +1,4 @@
+use crate::util;
 use clap::builder::Str;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
@@ -23,6 +24,16 @@ pub static READ_AHEAD_ENABLED_OPTION: Lazy<ClientConfigOption<bool>> = Lazy::new
         .with_description("This indicates whether the localfile read ahead is enabled")
 });
 
+pub static READ_AHEAD_BATCH_SIZE: Lazy<ClientConfigOption<String>> = Lazy::new(|| {
+    ClientConfigOption::key("spark.rss.riffle.readAheadBatchSize")
+        .with_description("Read ahead batch size for client per-read")
+});
+
+pub static READ_AHEAD_BATCH_NUMBER: Lazy<ClientConfigOption<usize>> = Lazy::new(|| {
+    ClientConfigOption::key("spark.rss.riffle.readAheadBatchNumber")
+        .with_description("Read ahead batch number for client per-read")
+});
+
 #[derive(Debug, Clone, Default)]
 pub struct ClientRssConf {
     properties: HashMap<String, String>,
@@ -41,6 +52,10 @@ impl ClientRssConf {
             None => option.default.as_ref().cloned(),
             Some(s) => s.parse::<T>().ok(),
         }
+    }
+
+    pub fn get_byte_size(&self, option: &ClientConfigOption<String>) -> Option<u64> {
+        self.get(option).map(|s| util::parse_raw_to_bytesize(&s))
     }
 }
 
@@ -73,6 +88,26 @@ impl<T: Clone + Send + Sync + 'static> ClientConfigOption<T> {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn test_byte_size() {
+        let mut props = HashMap::new();
+        props.insert(
+            "spark.rss.riffle.readAheadBatchSize".to_string(),
+            "14M".to_string(),
+        );
+        let conf = ClientRssConf { properties: props };
+        assert_eq!(
+            bytesize::MB * 14,
+            conf.get_byte_size(&READ_AHEAD_BATCH_SIZE).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_no_default_value() {
+        let conf = ClientRssConf::default();
+        assert_eq!(None, conf.get(&READ_AHEAD_BATCH_SIZE));
+    }
 
     #[test]
     fn test_sendfile_enabled_option_default() {
