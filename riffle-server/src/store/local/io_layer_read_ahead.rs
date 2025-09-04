@@ -2,8 +2,9 @@ use crate::config::ReadAheadConfig;
 use crate::error::WorkerError;
 use crate::metric::{
     READ_AHEAD_ACTIVE_TASKS, READ_AHEAD_BYTES, READ_AHEAD_HITS, READ_AHEAD_MISSES,
-    READ_AHEAD_OPERATIONS, READ_AHEAD_OPERATION_DURATION, READ_AHEAD_WASTED_BYTES,
-    READ_WITHOUT_AHEAD_DURATION, READ_WITH_AHEAD_HIT_DURATION, READ_WITH_AHEAD_MISS_DURATION,
+    READ_AHEAD_OPERATIONS, READ_AHEAD_OPERATION_DURATION, READ_AHEAD_OPERATION_FAILURE_COUNT,
+    READ_AHEAD_WASTED_BYTES, READ_WITHOUT_AHEAD_DURATION, READ_WITH_AHEAD_DURATION,
+    READ_WITH_AHEAD_HIT_DURATION, READ_WITH_AHEAD_MISS_DURATION,
 };
 use crate::store::local::layers::{Handler, Layer};
 use crate::store::local::options::{CreateOptions, WriteOptions};
@@ -102,27 +103,25 @@ impl LocalIO for ReadAheadLayerWrapper {
                         })
                         .clone();
 
-                    let mut hit = false;
+                    let mut read_ahead_op_triggered = false;
                     if let Some(task) = load_task {
-                        hit = task.load(off, len).await?;
+                        read_ahead_op_triggered = task.load(off, len).await?;
                     }
 
                     let result = self.handler.read(&path, options).await;
+
+                    let duration = timer.elapsed().as_secs_f64();
+                    READ_WITH_AHEAD_DURATION.observe(duration);
+
                     // only record non-raw io duration
                     if let Ok(data) = &result {
-                        match data {
-                            DataBytes::RawIO(_) => {
-                                // ignore
-                            }
-                            _ => {
-                                let duration = timer.elapsed().as_secs_f64();
-                                if hit {
-                                    READ_AHEAD_HITS.inc();
-                                    READ_WITH_AHEAD_HIT_DURATION.observe(duration);
-                                } else {
-                                    READ_AHEAD_MISSES.inc();
-                                    READ_WITH_AHEAD_MISS_DURATION.observe(duration);
-                                }
+                        if !matches!(data, DataBytes::RawIO(_)) {
+                            if read_ahead_op_triggered {
+                                READ_AHEAD_MISSES.inc();
+                                READ_WITH_AHEAD_MISS_DURATION.observe(duration);
+                            } else {
+                                READ_AHEAD_HITS.inc();
+                                READ_WITH_AHEAD_HIT_DURATION.observe(duration);
                             }
                         }
                     }
@@ -237,9 +236,11 @@ impl ReadAheadTask {
                 "Errors on reading ahead: {} with offset: {}, length: {}",
                 &inner.absolute_path, off, len
             );
+            READ_AHEAD_OPERATION_FAILURE_COUNT.inc();
         }
     }
 
+    // the return value shows whether the load operation happens
     async fn load(&self, off: u64, len: u64) -> anyhow::Result<bool> {
         let mut inner = self.inner.lock().await;
         if !inner.is_initialized && off == 0 {
