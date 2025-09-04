@@ -8,7 +8,7 @@ use crate::metric::{
 };
 use crate::store::local::layers::{Handler, Layer};
 use crate::store::local::options::{CreateOptions, WriteOptions};
-use crate::store::local::read_options::{ReadOptions, ReadRange};
+use crate::store::local::read_options::{AheadOptions, ReadOptions, ReadRange};
 use crate::store::local::{FileStat, LocalIO};
 use crate::store::DataBytes;
 use crate::system_libc::read_ahead;
@@ -64,6 +64,18 @@ struct ReadAheadLayerWrapper {
 unsafe impl Send for ReadAheadLayerWrapper {}
 unsafe impl Sync for ReadAheadLayerWrapper {}
 
+impl ReadAheadLayerWrapper {
+    fn is_sequential(ahead_options: &Option<AheadOptions>) -> bool {
+        let mut seq = false;
+        if let Some(ahead_options) = ahead_options {
+            if ahead_options.sequential {
+                seq = true;
+            }
+        };
+        seq
+    }
+}
+
 #[async_trait]
 impl LocalIO for ReadAheadLayerWrapper {
     async fn create(&self, path: &str, options: CreateOptions) -> anyhow::Result<(), WorkerError> {
@@ -83,17 +95,24 @@ impl LocalIO for ReadAheadLayerWrapper {
             ReadRange::ALL => self.handler.read(&path, options).await,
             ReadRange::RANGE(off, len) => {
                 let timer = Instant::now();
-                if options.sequential {
+                let mut sequential = Self::is_sequential(&options.ahead_options);
+                if sequential {
+                    let ahead_options = options.ahead_options.as_ref().unwrap();
                     let abs_path = format!("{}/{}", &self.root, path);
+
+                    // if there is no user side specifying, fallback to system default setting.
+                    let batch_number = ahead_options
+                        .read_batch_number
+                        .unwrap_or(self.ahead_batch_number);
+                    let batch_size = ahead_options
+                        .read_batch_size
+                        .unwrap_or(self.ahead_batch_size);
+
                     let load_task = self
                         .load_tasks
                         .entry(path.to_owned())
                         .or_insert_with(|| {
-                            match ReadAheadTask::new(
-                                &abs_path,
-                                self.ahead_batch_size,
-                                self.ahead_batch_number,
-                            ) {
+                            match ReadAheadTask::new(&abs_path, batch_size, batch_number) {
                                 Ok(task) => {
                                     READ_AHEAD_ACTIVE_TASKS.inc();
                                     Some(task)

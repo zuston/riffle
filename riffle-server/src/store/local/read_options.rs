@@ -19,7 +19,15 @@
 pub struct ReadOptions {
     pub io_mode: IoMode,
     pub read_range: ReadRange,
+    // for the read ahead layer
+    pub ahead_options: Option<AheadOptions>,
+}
+
+#[derive(Clone, Debug)]
+pub struct AheadOptions {
     pub sequential: bool,
+    pub read_batch_number: Option<usize>,
+    pub read_batch_size: Option<usize>,
 }
 
 #[allow(non_camel_case_types)]
@@ -43,71 +51,56 @@ impl Default for ReadOptions {
         Self {
             io_mode: IoMode::BUFFER_IO,
             read_range: ReadRange::ALL,
-            sequential: false,
+            ahead_options: None,
         }
     }
 }
 
 impl ReadOptions {
-    pub fn new(io_mode: IoMode, range: ReadRange, is_sequential: bool) -> Self {
-        Self {
-            io_mode,
-            read_range: range,
-            sequential: is_sequential,
-        }
-    }
-
-    pub fn with_sequential(self) -> Self {
-        Self {
-            io_mode: self.io_mode,
-            read_range: self.read_range,
+    pub fn with_sequential(mut self) -> Self {
+        self.ahead_options = Some(AheadOptions {
             sequential: true,
-        }
+            read_batch_number: None,
+            read_batch_size: None,
+        });
+        self
     }
 
-    pub fn with_read_all(self) -> Self {
-        Self {
-            io_mode: IoMode::BUFFER_IO,
-            read_range: ReadRange::ALL,
-            sequential: false,
-        }
+    pub fn with_ahead_options(mut self, options: AheadOptions) -> Self {
+        self.ahead_options = Some(options);
+        self
     }
 
-    pub fn with_read_range(self, range: ReadRange) -> Self {
-        Self {
-            io_mode: self.io_mode,
-            read_range: range,
-            sequential: self.sequential,
-        }
+    pub fn with_read_all(mut self) -> Self {
+        self.io_mode = IoMode::BUFFER_IO;
+        self.read_range = ReadRange::ALL;
+        self
     }
 
-    pub fn with_buffer_io(self) -> Self {
-        Self {
-            io_mode: IoMode::BUFFER_IO,
-            read_range: self.read_range,
-            sequential: self.sequential,
-        }
+    pub fn with_read_range(mut self, range: ReadRange) -> Self {
+        self.read_range = range;
+        self
     }
 
-    pub fn with_direct_io(self) -> Self {
-        Self {
-            io_mode: IoMode::DIRECT_IO,
-            read_range: self.read_range,
-            sequential: self.sequential,
-        }
+    pub fn with_buffer_io(mut self) -> Self {
+        self.io_mode = IoMode::BUFFER_IO;
+        self
     }
 
-    pub fn with_sendfile(self) -> Self {
-        Self {
-            io_mode: IoMode::SENDFILE,
-            read_range: self.read_range,
-            sequential: self.sequential,
-        }
+    pub fn with_direct_io(mut self) -> Self {
+        self.io_mode = IoMode::DIRECT_IO;
+        self
+    }
+
+    pub fn with_sendfile(mut self) -> Self {
+        self.io_mode = IoMode::SENDFILE;
+        self
     }
 }
 
 #[cfg(test)]
 mod test {
+    use crate::store::local::read_options::AheadOptions;
 
     #[test]
     fn test_read_options() {
@@ -117,42 +110,50 @@ mod test {
         let default_opts = ReadOptions::default();
         assert!(matches!(default_opts.io_mode, IoMode::BUFFER_IO));
         assert!(matches!(default_opts.read_range, ReadRange::ALL));
-        assert_eq!(default_opts.sequential, false);
+        assert_eq!(default_opts.ahead_options.is_some(), false);
 
         // Custom ReadOptions
-        let opts = ReadOptions::new(IoMode::DIRECT_IO, ReadRange::RANGE(10, 20), true);
+        let opts = ReadOptions {
+            io_mode: IoMode::DIRECT_IO,
+            read_range: ReadRange::RANGE(10, 20),
+            ahead_options: Some(AheadOptions {
+                sequential: true,
+                read_batch_number: None,
+                read_batch_size: None,
+            }),
+        };
         assert!(matches!(opts.io_mode, IoMode::DIRECT_IO));
         assert!(matches!(opts.read_range, ReadRange::RANGE(10, 20)));
-        assert_eq!(opts.sequential, true);
+        assert_eq!(opts.ahead_options.is_some(), true);
 
         // with_read_all
         let opts2 = opts.clone().with_read_all();
         assert!(matches!(opts2.io_mode, IoMode::BUFFER_IO));
         assert!(matches!(opts2.read_range, ReadRange::ALL));
-        assert_eq!(opts2.sequential, false);
+        assert_eq!(opts2.ahead_options.is_some(), false);
 
         // with_read_range
         let opts3 = opts2.clone().with_read_range(ReadRange::RANGE(100, 200));
         assert!(matches!(opts3.read_range, ReadRange::RANGE(100, 200)));
         assert!(matches!(opts3.io_mode, IoMode::BUFFER_IO));
-        assert_eq!(opts3.sequential, false);
+        assert_eq!(opts3.ahead_options.is_some(), false);
 
         // with_buffer_io
         let opts4 = opts3.clone().with_buffer_io();
         assert!(matches!(opts4.io_mode, IoMode::BUFFER_IO));
         assert!(matches!(opts4.read_range, ReadRange::RANGE(100, 200)));
-        assert_eq!(opts4.sequential, false);
+        assert_eq!(opts4.ahead_options.is_some(), false);
 
         // with_direct_io
         let opts5 = opts4.clone().with_direct_io();
         assert!(matches!(opts5.io_mode, IoMode::DIRECT_IO));
         assert!(matches!(opts5.read_range, ReadRange::RANGE(100, 200)));
-        assert_eq!(opts5.sequential, false);
+        assert_eq!(opts5.ahead_options.is_some(), false);
 
         // with_sendfile
         let opts6 = opts5.clone().with_sendfile();
         assert!(matches!(opts6.io_mode, IoMode::SENDFILE));
         assert!(matches!(opts6.read_range, ReadRange::RANGE(100, 200)));
-        assert_eq!(opts6.sequential, false);
+        assert_eq!(opts6.ahead_options.is_some(), false);
     }
 }
