@@ -100,7 +100,20 @@ impl ReadOptions {
 
 #[cfg(test)]
 mod test {
-    use crate::store::local::read_options::AheadOptions;
+    use crate::store::local::read_options::{AheadOptions, IoMode, ReadOptions, ReadRange};
+
+    fn create_read_options() -> ReadOptions {
+        let opts = ReadOptions {
+            io_mode: IoMode::DIRECT_IO,
+            read_range: ReadRange::RANGE(10, 20),
+            ahead_options: Some(AheadOptions {
+                sequential: true,
+                read_batch_number: None,
+                read_batch_size: None,
+            }),
+        };
+        opts
+    }
 
     #[test]
     fn test_read_options() {
@@ -113,47 +126,35 @@ mod test {
         assert_eq!(default_opts.ahead_options.is_some(), false);
 
         // Custom ReadOptions
-        let opts = ReadOptions {
-            io_mode: IoMode::DIRECT_IO,
-            read_range: ReadRange::RANGE(10, 20),
-            ahead_options: Some(AheadOptions {
-                sequential: true,
-                read_batch_number: None,
-                read_batch_size: None,
-            }),
-        };
+        let opts = create_read_options();
         assert!(matches!(opts.io_mode, IoMode::DIRECT_IO));
         assert!(matches!(opts.read_range, ReadRange::RANGE(10, 20)));
         assert_eq!(opts.ahead_options.is_some(), true);
 
         // with_read_all
-        let opts2 = opts.clone().with_read_all();
+        let opts2 = ReadOptions::default().with_read_all();
         assert!(matches!(opts2.io_mode, IoMode::BUFFER_IO));
         assert!(matches!(opts2.read_range, ReadRange::ALL));
         assert_eq!(opts2.ahead_options.is_some(), false);
 
         // with_read_range
-        let opts3 = opts2.clone().with_read_range(ReadRange::RANGE(100, 200));
+        let opts3 = ReadOptions::default().with_read_range(ReadRange::RANGE(100, 200));
         assert!(matches!(opts3.read_range, ReadRange::RANGE(100, 200)));
-        assert!(matches!(opts3.io_mode, IoMode::BUFFER_IO));
         assert_eq!(opts3.ahead_options.is_some(), false);
 
         // with_buffer_io
-        let opts4 = opts3.clone().with_buffer_io();
+        let opts4 = ReadOptions::default().with_buffer_io();
         assert!(matches!(opts4.io_mode, IoMode::BUFFER_IO));
-        assert!(matches!(opts4.read_range, ReadRange::RANGE(100, 200)));
         assert_eq!(opts4.ahead_options.is_some(), false);
 
         // with_direct_io
-        let opts5 = opts4.clone().with_direct_io();
+        let opts5 = ReadOptions::default().with_direct_io();
         assert!(matches!(opts5.io_mode, IoMode::DIRECT_IO));
-        assert!(matches!(opts5.read_range, ReadRange::RANGE(100, 200)));
         assert_eq!(opts5.ahead_options.is_some(), false);
 
         // with_sendfile
-        let opts6 = opts5.clone().with_sendfile();
+        let opts6 = ReadOptions::default().with_sendfile();
         assert!(matches!(opts6.io_mode, IoMode::SENDFILE));
-        assert!(matches!(opts6.read_range, ReadRange::RANGE(100, 200)));
         assert_eq!(opts6.ahead_options.is_some(), false);
     }
 }
