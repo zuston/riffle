@@ -704,6 +704,12 @@ pub static READ_AHEAD_MISSES: Lazy<IntCounter> = Lazy::new(|| {
 });
 
 // Read-ahead performance metrics
+pub static READ_WITH_AHEAD_DURATION: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new("read_with_ahead_duration_seconds", "Duration of reads")
+        .buckets(Vec::from(DEFAULT_BUCKETS));
+    Histogram::with_opts(opts).unwrap()
+});
+
 pub static READ_WITH_AHEAD_HIT_DURATION: Lazy<Histogram> = Lazy::new(|| {
     let opts = HistogramOpts::new(
         "read_with_ahead_hit_duration_seconds",
@@ -766,6 +772,14 @@ pub static READ_AHEAD_OPERATION_DURATION: Lazy<Histogram> = Lazy::new(|| {
     )
     .buckets(Vec::from(DEFAULT_BUCKETS));
     Histogram::with_opts(opts).unwrap()
+});
+
+pub static READ_AHEAD_OPERATION_FAILURE_COUNT: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new(
+        "read_ahead_operation_failure_count",
+        "Total number of read-ahead operations failed",
+    )
+    .expect("")
 });
 
 // total timeout tickets
@@ -1142,6 +1156,9 @@ fn register_custom_metrics() {
         .register(Box::new(READ_AHEAD_MISSES.clone()))
         .expect("read_ahead_misses must be registered");
     REGISTRY
+        .register(Box::new(READ_WITH_AHEAD_DURATION.clone()))
+        .expect("read_with_ahead_duration must be registered");
+    REGISTRY
         .register(Box::new(READ_WITH_AHEAD_HIT_DURATION.clone()))
         .expect("read_with_ahead_hit_duration must be registered");
     REGISTRY
@@ -1165,6 +1182,9 @@ fn register_custom_metrics() {
     REGISTRY
         .register(Box::new(READ_AHEAD_OPERATION_DURATION.clone()))
         .expect("read_ahead_operation_duration must be registered");
+    REGISTRY
+        .register(Box::new(READ_AHEAD_OPERATION_FAILURE_COUNT.clone()))
+        .expect("read_ahead_operation_failure_count must be registered");
 }
 
 const JOB_NAME: &str = "uniffle-worker";
