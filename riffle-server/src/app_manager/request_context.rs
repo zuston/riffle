@@ -103,7 +103,11 @@ pub struct ReadingViewContext {
     pub task_ids_filter: Option<Treemap>,
     pub rpc_source: RpcType,
     pub sendfile_enabled: bool,
+
+    // for the localfile read_ahead layer
     pub sequential: bool,
+    pub read_ahead_batch_number: Option<usize>,
+    pub read_ahead_batch_size: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,6 +125,8 @@ impl ReadingViewContext {
             rpc_source,
             sendfile_enabled: false,
             sequential: false,
+            read_ahead_batch_number: None,
+            read_ahead_batch_size: None,
         }
     }
 
@@ -135,8 +141,14 @@ impl ReadingViewContext {
         self
     }
 
-    pub fn with_sequential(mut self) -> Self {
+    pub fn with_sequential(
+        mut self,
+        batch_number: Option<usize>,
+        batch_size: Option<usize>,
+    ) -> Self {
         self.sequential = true;
+        self.read_ahead_batch_number = batch_number;
+        self.read_ahead_batch_size = batch_size;
         self
     }
 }

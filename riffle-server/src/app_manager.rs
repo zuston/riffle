@@ -421,6 +421,8 @@ pub(crate) mod test {
             sendfile_enable: false,
             // activate read ahead
             read_ahead_enable: true,
+            read_ahead_batch_number: None,
+            read_ahead_batch_size: None,
             client_configs: Default::default(),
         };
         app_manager_ref

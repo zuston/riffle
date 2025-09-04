@@ -191,6 +191,8 @@ pub async fn shuffle_testing(config: &Config, app_ref: AppManagerRef) -> anyhow:
             rpc_source: RpcType::GRPC,
             sendfile_enabled: false,
             sequential: false,
+            read_ahead_batch_number: None,
+            read_ahead_batch_size: None,
         })
         .await?;
     let mut total_partition_len = 0;
@@ -204,6 +206,8 @@ pub async fn shuffle_testing(config: &Config, app_ref: AppManagerRef) -> anyhow:
             rpc_source: RpcType::GRPC,
             sendfile_enabled: false,
             sequential: false,
+            read_ahead_batch_number: None,
+            read_ahead_batch_size: None,
         })
         .await?;
     let xdata = response.from_local();

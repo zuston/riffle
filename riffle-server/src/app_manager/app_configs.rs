@@ -1,6 +1,8 @@
+use crate::app_manager::request_context::PurgeDataContext;
 use crate::client_configs::{
     ClientConfigOption, ClientRssConf, HDFS_CLIENT_EAGER_LOADING_ENABLED_OPTION,
-    READ_AHEAD_ENABLED_OPTION, SENDFILE_ENABLED_OPTION,
+    READ_AHEAD_BATCH_NUMBER, READ_AHEAD_BATCH_SIZE, READ_AHEAD_ENABLED_OPTION,
+    SENDFILE_ENABLED_OPTION,
 };
 use crate::grpc::protobuf::uniffle::RemoteStorage;
 use std::collections::HashMap;
@@ -24,6 +26,8 @@ pub struct AppConfigOptions {
     pub remote_storage_config_option: Option<RemoteStorageConfig>,
     pub sendfile_enable: bool,
     pub read_ahead_enable: bool,
+    pub read_ahead_batch_number: Option<usize>,
+    pub read_ahead_batch_size: Option<usize>,
     pub client_configs: ClientRssConf,
 }
 
@@ -40,6 +44,10 @@ impl AppConfigOptions {
             remote_storage_config_option,
             sendfile_enable: rss_config.get(&SENDFILE_ENABLED_OPTION).unwrap_or(false),
             read_ahead_enable: rss_config.get(&READ_AHEAD_ENABLED_OPTION).unwrap_or(false),
+            read_ahead_batch_number: rss_config.get(&READ_AHEAD_BATCH_NUMBER),
+            read_ahead_batch_size: rss_config
+                .get_byte_size(&READ_AHEAD_BATCH_SIZE)
+                .map(|x| x as usize),
             client_configs: rss_config,
         }
     }
@@ -53,6 +61,8 @@ impl Default for AppConfigOptions {
             remote_storage_config_option: None,
             sendfile_enable: false,
             read_ahead_enable: false,
+            read_ahead_batch_number: None,
+            read_ahead_batch_size: None,
             client_configs: Default::default(),
         }
     }

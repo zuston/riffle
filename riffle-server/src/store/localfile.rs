@@ -55,7 +55,7 @@ use crate::runtime::manager::RuntimeManager;
 use crate::store::index_codec::{IndexCodec, INDEX_BLOCK_SIZE};
 use crate::store::local::delegator::LocalDiskDelegator;
 use crate::store::local::options::{CreateOptions, WriteOptions};
-use crate::store::local::read_options::{ReadOptions, ReadRange};
+use crate::store::local::read_options::{AheadOptions, ReadOptions, ReadRange};
 use crate::store::local::{LocalDiskStorage, LocalIO, LocalfileStoreStat};
 use crate::store::spill::SpillWritingViewContext;
 use crate::util;
@@ -474,9 +474,10 @@ impl Store for LocalFileStore {
                 }
 
                 // Setting up the read options for downstream to determinize io mode ...
-                let read_options: ReadOptions =
+                let read_options =
                     ReadOptions::default().with_read_range(ReadRange::RANGE(offset, len));
-                let read_options = if self.direct_io_enable && self.direct_io_read_enable {
+
+                let mut read_options = if self.direct_io_enable && self.direct_io_read_enable {
                     read_options.with_direct_io()
                 } else if (self.read_io_sendfile_enable
                     && rpc_source == RpcType::URPC
@@ -486,11 +487,15 @@ impl Store for LocalFileStore {
                 } else {
                     read_options.with_buffer_io()
                 };
-                let read_options = if ctx.sequential {
-                    read_options.with_sequential()
-                } else {
-                    read_options
-                };
+
+                if ctx.sequential {
+                    let ahead = AheadOptions {
+                        sequential: true,
+                        read_batch_number: ctx.read_ahead_batch_number,
+                        read_batch_size: ctx.read_ahead_batch_size,
+                    };
+                    read_options = read_options.with_ahead_options(ahead);
+                }
 
                 let future_read = local_disk.read(&data_file_path, read_options);
                 let data = future_read
