@@ -112,6 +112,7 @@ pub struct ReadingViewContext {
 
     // next read segments
     pub localfile_next_read_segments: Vec<ReadSegment>,
+    pub task_id: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,6 +133,7 @@ impl ReadingViewContext {
             read_ahead_batch_number: None,
             read_ahead_batch_size: None,
             localfile_next_read_segments: vec![],
+            task_id: 0,
         }
     }
 
@@ -159,6 +161,11 @@ impl ReadingViewContext {
 
     pub fn with_localfile_next_read_segments(mut self, segments: Vec<ReadSegment>) -> Self {
         self.localfile_next_read_segments = segments;
+        self
+    }
+
+    pub fn with_task_id(mut self, task_id: i64) -> Self {
+        self.task_id = task_id;
         self
     }
 }

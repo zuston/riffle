@@ -6,12 +6,14 @@ use crate::metric::{
     READ_AHEAD_WASTED_BYTES, READ_WITHOUT_AHEAD_DURATION, READ_WITH_AHEAD_DURATION,
     READ_WITH_AHEAD_HIT_DURATION, READ_WITH_AHEAD_MISS_DURATION,
 };
+use crate::runtime::RuntimeRef;
 use crate::store::local::layers::{Handler, Layer};
 use crate::store::local::options::{CreateOptions, WriteOptions};
 use crate::store::local::read_options::{AheadOptions, ReadOptions, ReadRange};
 use crate::store::local::{FileStat, LocalIO};
 use crate::store::DataBytes;
 use crate::system_libc::read_ahead;
+use crate::urpc::command::ReadSegment;
 use crate::util;
 use async_trait::async_trait;
 use clap::builder::Str;
@@ -20,19 +22,24 @@ use libc::abs;
 use log::{debug, info, warn};
 use parking_lot::Mutex;
 use std::fs::File;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::Semaphore;
 use tokio::time::Instant;
 
 pub struct ReadAheadLayer {
     root: String,
     options: ReadAheadConfig,
+    rt: RuntimeRef,
 }
 
 impl ReadAheadLayer {
-    pub fn new(root: &str, options: &ReadAheadConfig) -> Self {
+    pub fn new(root: &str, options: &ReadAheadConfig, runtime_ref: RuntimeRef) -> Self {
         Self {
             root: root.to_owned(),
             options: options.clone(),
+            rt: runtime_ref,
         }
     }
 }
@@ -43,9 +50,12 @@ impl Layer for ReadAheadLayer {
         Arc::new(Box::new(ReadAheadLayerWrapper {
             handler,
             root: self.root.to_owned(),
-            load_tasks: Default::default(),
+            sequential_load_tasks: Default::default(),
+            read_plan_load_tasks: Default::default(),
+            read_plan_semaphore: Arc::new(Semaphore::new(options.read_plan_concurrency)),
             ahead_batch_size: util::parse_raw_to_bytesize(options.batch_size.as_str()) as usize,
             ahead_batch_number: options.batch_number,
+            read_plan_runtime: self.rt.clone(),
         }))
     }
 }
@@ -55,10 +65,15 @@ struct ReadAheadLayerWrapper {
     handler: Handler,
     root: String,
 
-    load_tasks: DashMap<String, Option<ReadAheadTask>>,
+    sequential_load_tasks: DashMap<String, Option<SequentialReadAheadTask>>,
 
     ahead_batch_size: usize,
     ahead_batch_number: usize,
+
+    // key: (path, spark_task_attempt_id), value: ahead_task
+    read_plan_load_tasks: DashMap<(String, i64), Option<ReadPlanReadAheadTask>>,
+    read_plan_semaphore: Arc<Semaphore>,
+    read_plan_runtime: RuntimeRef,
 }
 
 unsafe impl Send for ReadAheadLayerWrapper {}
@@ -73,6 +88,107 @@ impl ReadAheadLayerWrapper {
             }
         };
         seq
+    }
+
+    fn is_read_plan(ahead_options: &Option<AheadOptions>) -> bool {
+        let mut read_plan_mode = false;
+        if let Some(ahead_options) = ahead_options {
+            if !ahead_options.next_read_segments.is_empty() {
+                read_plan_mode = true;
+            }
+        }
+        read_plan_mode
+    }
+
+    async fn read_ahead_with_read_plan(
+        &self,
+        path: &str,
+        options: ReadOptions,
+    ) -> anyhow::Result<DataBytes, WorkerError> {
+        let timer = Instant::now();
+
+        let (off, len) = options.read_range.get_range();
+        let ahead_options = options.ahead_options.as_ref().unwrap();
+        let task_id = options.task_id;
+        let load_task = self
+            .read_plan_load_tasks
+            .entry((path.to_owned(), task_id))
+            .or_insert_with(|| {
+                match ReadPlanReadAheadTask::new(
+                    path,
+                    &self.read_plan_runtime,
+                    &self.read_plan_semaphore,
+                ) {
+                    Ok(task) => Some(task),
+                    Err(_) => None,
+                }
+            })
+            .clone();
+
+        if let Some(load_task) = load_task {
+            load_task.load(&ahead_options.next_read_segments, off);
+        }
+
+        let result = self.handler.read(&path, options).await;
+        result
+    }
+
+    async fn read_ahead_with_sequential_mode(
+        &self,
+        path: &str,
+        options: ReadOptions,
+    ) -> anyhow::Result<DataBytes, WorkerError> {
+        let timer = Instant::now();
+
+        let (off, len) = options.read_range.get_range();
+        let ahead_options = options.ahead_options.as_ref().unwrap();
+        let abs_path = format!("{}/{}", &self.root, path);
+
+        // if there is no user side specifying, fallback to system default setting.
+        let batch_number = ahead_options
+            .read_batch_number
+            .unwrap_or(self.ahead_batch_number);
+        let batch_size = ahead_options
+            .read_batch_size
+            .unwrap_or(self.ahead_batch_size);
+
+        let load_task = self
+            .sequential_load_tasks
+            .entry(path.to_owned())
+            .or_insert_with(|| {
+                match SequentialReadAheadTask::new(&abs_path, batch_size, batch_number) {
+                    Ok(task) => {
+                        READ_AHEAD_ACTIVE_TASKS.inc();
+                        Some(task)
+                    }
+                    Err(_) => None,
+                }
+            })
+            .clone();
+
+        let mut read_ahead_op_triggered = false;
+        if let Some(task) = load_task {
+            read_ahead_op_triggered = task.load(off, len).await?;
+        }
+
+        let result = self.handler.read(&path, options).await;
+
+        let duration = timer.elapsed().as_secs_f64();
+        READ_WITH_AHEAD_DURATION.observe(duration);
+
+        // only record non-raw io duration
+        if let Ok(data) = &result {
+            if !matches!(data, DataBytes::RawIO(_)) {
+                if read_ahead_op_triggered {
+                    READ_AHEAD_MISSES.inc();
+                    READ_WITH_AHEAD_MISS_DURATION.observe(duration);
+                } else {
+                    READ_AHEAD_HITS.inc();
+                    READ_WITH_AHEAD_HIT_DURATION.observe(duration);
+                }
+            }
+        }
+        result
     }
 }
 
@@ -94,69 +210,25 @@ impl LocalIO for ReadAheadLayerWrapper {
         match options.read_range {
             ReadRange::ALL => self.handler.read(&path, options).await,
             ReadRange::RANGE(off, len) => {
-                let timer = Instant::now();
-                let mut sequential = Self::is_sequential(&options.ahead_options);
-                if sequential {
-                    let ahead_options = options.ahead_options.as_ref().unwrap();
-                    let abs_path = format!("{}/{}", &self.root, path);
-
-                    // if there is no user side specifying, fallback to system default setting.
-                    let batch_number = ahead_options
-                        .read_batch_number
-                        .unwrap_or(self.ahead_batch_number);
-                    let batch_size = ahead_options
-                        .read_batch_size
-                        .unwrap_or(self.ahead_batch_size);
-
-                    let load_task = self
-                        .load_tasks
-                        .entry(path.to_owned())
-                        .or_insert_with(|| {
-                            match ReadAheadTask::new(&abs_path, batch_size, batch_number) {
-                                Ok(task) => {
-                                    READ_AHEAD_ACTIVE_TASKS.inc();
-                                    Some(task)
-                                }
-                                Err(_) => None,
-                            }
-                        })
-                        .clone();
-
-                    let mut read_ahead_op_triggered = false;
-                    if let Some(task) = load_task {
-                        read_ahead_op_triggered = task.load(off, len).await?;
-                    }
-
-                    let result = self.handler.read(&path, options).await;
-
-                    let duration = timer.elapsed().as_secs_f64();
-                    READ_WITH_AHEAD_DURATION.observe(duration);
-
-                    // only record non-raw io duration
-                    if let Ok(data) = &result {
-                        if !matches!(data, DataBytes::RawIO(_)) {
-                            if read_ahead_op_triggered {
-                                READ_AHEAD_MISSES.inc();
-                                READ_WITH_AHEAD_MISS_DURATION.observe(duration);
-                            } else {
-                                READ_AHEAD_HITS.inc();
-                                READ_WITH_AHEAD_HIT_DURATION.observe(duration);
-                            }
-                        }
-                    }
-                    result
+                if Self::is_sequential(&options.ahead_options) {
+                    self.read_ahead_with_sequential_mode(path, options).await
                 } else {
-                    let result = self.handler.read(&path, options).await;
-                    if let Ok(data) = &result {
-                        match data {
-                            DataBytes::RawIO(_) => {}
-                            _ => {
-                                let duration = timer.elapsed().as_secs_f64();
-                                READ_WITHOUT_AHEAD_DURATION.observe(duration);
+                    if Self::is_read_plan(&options.ahead_options) {
+                        self.read_ahead_with_read_plan(path, options).await
+                    } else {
+                        let timer = Instant::now();
+                        let result = self.handler.read(&path, options).await;
+                        if let Ok(data) = &result {
+                            match data {
+                                DataBytes::RawIO(_) => {}
+                                _ => {
+                                    let duration = timer.elapsed().as_secs_f64();
+                                    READ_WITHOUT_AHEAD_DURATION.observe(duration);
+                                }
                             }
                         }
+                        result
                     }
-                    result
                 }
             }
         }
@@ -170,7 +242,7 @@ impl LocalIO for ReadAheadLayerWrapper {
             path.to_owned()
         };
         let mut deletion_keys = vec![];
-        let view = self.load_tasks.clone().into_read_only();
+        let view = self.sequential_load_tasks.clone().into_read_only();
         for (k, v) in view.iter() {
             if k.starts_with(normalize_path.as_str()) {
                 deletion_keys.push(k.clone());
@@ -180,7 +252,7 @@ impl LocalIO for ReadAheadLayerWrapper {
         let deleted_count = deletion_keys.len();
         if deleted_count > 0 {
             for deletion_key in deletion_keys {
-                self.load_tasks.remove(&deletion_key);
+                self.sequential_load_tasks.remove(&deletion_key);
             }
 
             READ_AHEAD_ACTIVE_TASKS.sub(deleted_count as i64);
@@ -202,7 +274,82 @@ impl LocalIO for ReadAheadLayerWrapper {
 }
 
 #[derive(Clone)]
-struct ReadAheadTask {
+struct ReadPlanReadAheadTask {
+    file: Arc<Mutex<File>>,
+    read_offset: Arc<AtomicU64>,
+    sender: Arc<tokio::sync::mpsc::UnboundedSender<ReadSegment>>,
+    path: Arc<String>,
+}
+
+impl ReadPlanReadAheadTask {
+    fn new(abs_path: &str, rt: &RuntimeRef, semphore: &Arc<Semaphore>) -> anyhow::Result<Self> {
+        let (send, recv) = tokio::sync::mpsc::unbounded_channel();
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .append(true)
+            .open(abs_path)?;
+        let task = Self {
+            file: Arc::new(Mutex::new(file)),
+            read_offset: Arc::new(Default::default()),
+            sender: Arc::new(send),
+            path: Arc::new(abs_path.to_string()),
+        };
+        Self::loop_load(rt.clone(), task.clone(), recv, semphore.clone());
+        Ok(task)
+    }
+
+    fn loop_load(
+        rt: RuntimeRef,
+        task: ReadPlanReadAheadTask,
+        mut recv: UnboundedReceiver<ReadSegment>,
+        limit: Arc<Semaphore>,
+    ) {
+        rt.spawn(async move {
+            let limit = limit;
+            while let Some(segment) = recv.recv().await {
+                let off = segment.offset;
+                let len = segment.length;
+
+                if off < task.read_offset.load(Ordering::Relaxed) as i64 {
+                    continue;
+                }
+                let _limit = limit.acquire().await.unwrap();
+                let file = task.file.lock();
+                do_read_ahead(&file, task.path.as_str(), off as u64, len as u64);
+            }
+        });
+    }
+
+    fn load(&self, next_segments: &Vec<ReadSegment>, now_read_off: u64) -> anyhow::Result<()> {
+        self.read_offset.store(now_read_off, Ordering::SeqCst);
+        for segment in next_segments {
+            self.sender.send(segment.clone())?;
+        }
+        Ok(())
+    }
+}
+
+fn do_read_ahead(file: &File, path: &str, off: u64, len: u64) {
+    let _timer = READ_AHEAD_OPERATION_DURATION.start_timer();
+
+    debug!("Read ahead: {} with offset: {}, length: {}", path, off, len);
+
+    READ_AHEAD_OPERATIONS.inc();
+    READ_AHEAD_BYTES.inc_by(len);
+
+    if let Err(e) = read_ahead(file, off as i64, len as i64) {
+        warn!(
+            "Errors on reading ahead: {} with offset: {}, length: {}",
+            path, off, len
+        );
+        READ_AHEAD_OPERATION_FAILURE_COUNT.inc();
+    }
+}
+
+#[derive(Clone)]
+struct SequentialReadAheadTask {
     inner: Arc<tokio::sync::Mutex<Inner>>,
 }
 
@@ -218,7 +365,7 @@ struct Inner {
     batch_number: usize,
 }
 
-impl ReadAheadTask {
+impl SequentialReadAheadTask {
     fn new(abs_path: &str, batch_size: usize, batch_number: usize) -> anyhow::Result<Self> {
         let file = File::options()
             .read(true)
@@ -239,32 +386,12 @@ impl ReadAheadTask {
         })
     }
 
-    async fn do_read_ahead(&self, inner: &Inner, off: u64, len: u64) {
-        let _timer = READ_AHEAD_OPERATION_DURATION.start_timer();
-
-        debug!(
-            "Read ahead: {} with offset: {}, length: {}",
-            inner.absolute_path, off, len
-        );
-
-        READ_AHEAD_OPERATIONS.inc();
-        READ_AHEAD_BYTES.inc_by(len);
-
-        if let Err(e) = read_ahead(&inner.file, off as i64, len as i64) {
-            warn!(
-                "Errors on reading ahead: {} with offset: {}, length: {}",
-                &inner.absolute_path, off, len
-            );
-            READ_AHEAD_OPERATION_FAILURE_COUNT.inc();
-        }
-    }
-
     // the return value shows whether the load operation happens
     async fn load(&self, off: u64, len: u64) -> anyhow::Result<bool> {
         let mut inner = self.inner.lock().await;
         if !inner.is_initialized && off == 0 {
             let load_len = (inner.batch_number * inner.batch_size) as u64;
-            self.do_read_ahead(&inner, 0, load_len).await;
+            do_read_ahead(&inner.file, inner.absolute_path.as_str(), 0, load_len);
             inner.is_initialized = true;
             inner.load_length = load_len;
             return Ok(true);
@@ -274,12 +401,12 @@ impl ReadAheadTask {
         let next_load_bytes = 2 * inner.batch_size as u64;
         if diff > 0 && diff < next_load_bytes {
             let load_len = next_load_bytes;
-            self.do_read_ahead(
-                &inner,
+            do_read_ahead(
+                &inner.file,
+                inner.absolute_path.as_str(),
                 inner.load_start_offset + inner.load_length,
                 load_len,
-            )
-            .await;
+            );
             inner.load_length += load_len;
             return Ok(true);
         }
@@ -292,6 +419,7 @@ impl ReadAheadTask {
 mod tests {
     use super::*;
     use crate::error::WorkerError;
+    use crate::runtime::manager::create_runtime;
     use crate::store::local::read_options::{ReadOptions, ReadRange};
     use crate::store::local::FileStat;
     use crate::store::local::{CreateOptions, LocalIO, WriteOptions};
@@ -322,15 +450,18 @@ mod tests {
         let root = path.parent().unwrap().to_str().unwrap().to_string();
         let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
 
+        let runtime = create_runtime(1, "");
         let option = ReadAheadConfig::default();
-        let layer = ReadAheadLayer::new(root.as_str(), &option);
         let inner_handler: Arc<Box<dyn LocalIO>> = Arc::new(Box::new(MockHandler::new()));
         let wrapped = ReadAheadLayerWrapper {
             handler: inner_handler,
             root: root.to_owned(),
-            load_tasks: Default::default(),
+            sequential_load_tasks: Default::default(),
+            read_plan_load_tasks: Default::default(),
+            read_plan_semaphore: Arc::new(Semaphore::new(10)),
             ahead_batch_size: util::parse_raw_to_bytesize(option.batch_size.as_str()) as usize,
             ahead_batch_number: option.batch_number,
+            read_plan_runtime: runtime,
         };
 
         // 1st read ahead
@@ -341,7 +472,7 @@ mod tests {
         assert!(result.is_ok());
 
         wrapped.delete(root.as_str()).await.unwrap();
-        assert_eq!(0, wrapped.load_tasks.len());
+        assert_eq!(0, wrapped.sequential_load_tasks.len());
     }
 
     struct MockHandler;

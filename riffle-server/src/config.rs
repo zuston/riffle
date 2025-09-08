@@ -142,11 +142,17 @@ pub struct LocalfileStoreConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ReadAheadConfig {
-    // todo: add more options
     #[serde(default = "as_default_read_ahead_batch_size")]
     pub batch_size: String,
     #[serde(default = "as_default_read_ahead_batch_number")]
     pub batch_number: usize,
+
+    #[serde(default = "as_default_read_plan_concurrency")]
+    pub read_plan_concurrency: usize,
+}
+
+fn as_default_read_plan_concurrency() -> usize {
+    100
 }
 
 impl Default for ReadAheadConfig {
@@ -154,6 +160,7 @@ impl Default for ReadAheadConfig {
         Self {
             batch_size: as_default_read_ahead_batch_size(),
             batch_number: as_default_read_ahead_batch_number(),
+            read_plan_concurrency: as_default_read_plan_concurrency(),
         }
     }
 }

@@ -342,6 +342,7 @@ impl Frame {
                 length: get_i64(src)?,
             });
         }
+        let task_id = get_i64(src)?;
 
         Ok(GetLocalDataRequestV3Command {
             request_id,
@@ -355,6 +356,7 @@ impl Frame {
             timestamp,
             storage_id,
             next_read_segments: segments,
+            task_id,
         })
     }
 

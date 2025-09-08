@@ -15,12 +15,24 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use crate::app_manager::request_context::PurgeDataContext;
+use crate::urpc::command::ReadSegment;
+
 #[derive(Clone, Debug)]
 pub struct ReadOptions {
     pub io_mode: IoMode,
     pub read_range: ReadRange,
     // for the read ahead layer
     pub ahead_options: Option<AheadOptions>,
+    // align with the spark's task attempt id
+    pub task_id: i64,
+}
+
+impl ReadOptions {
+    pub fn get_ahead(&self) -> AheadOptions {
+        let ahead = self.ahead_options.as_ref().unwrap();
+        ahead.clone()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -28,6 +40,8 @@ pub struct AheadOptions {
     pub sequential: bool,
     pub read_batch_number: Option<usize>,
     pub read_batch_size: Option<usize>,
+
+    pub next_read_segments: Vec<ReadSegment>,
 }
 
 #[allow(non_camel_case_types)]
@@ -36,6 +50,16 @@ pub enum ReadRange {
     ALL,
     // offset, length
     RANGE(u64, u64),
+}
+
+impl ReadRange {
+    pub fn get_range(&self) -> (u64, u64) {
+        if let ReadRange::RANGE(offset, length) = self {
+            (*offset, *length)
+        } else {
+            panic!("Expected RANGE, but got ALL");
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -52,6 +76,7 @@ impl Default for ReadOptions {
             io_mode: IoMode::BUFFER_IO,
             read_range: ReadRange::ALL,
             ahead_options: None,
+            task_id: 0,
         }
     }
 }
@@ -62,6 +87,7 @@ impl ReadOptions {
             sequential: true,
             read_batch_number: None,
             read_batch_size: None,
+            next_read_segments: vec![],
         });
         self
     }
@@ -96,6 +122,11 @@ impl ReadOptions {
         self.io_mode = IoMode::SENDFILE;
         self
     }
+
+    pub fn with_task_id(mut self, task_id: i64) -> Self {
+        self.task_id = task_id;
+        self
+    }
 }
 
 #[cfg(test)]
@@ -110,7 +141,9 @@ mod test {
                 sequential: true,
                 read_batch_number: None,
                 read_batch_size: None,
+                next_read_segments: vec![],
             }),
+            task_id: 0,
         };
         opts
     }

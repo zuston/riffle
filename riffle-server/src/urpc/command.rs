@@ -184,6 +184,7 @@ pub struct GetLocalDataRequestV3Command {
     pub(crate) timestamp: i64,
     pub(crate) storage_id: i32,
     pub(crate) next_read_segments: Vec<ReadSegment>,
+    pub(crate) task_id: i64,
 }
 
 #[derive(Debug, Default, Clone)]

@@ -51,7 +51,11 @@ impl DiskReadBenchAction {
         ));
         if read_ahead_enable {
             let options = ReadAheadConfig::default();
-            builder = builder.layer(ReadAheadLayer::new(dir.as_str(), &options));
+            builder = builder.layer(ReadAheadLayer::new(
+                dir.as_str(),
+                &options,
+                write_runtime.clone(),
+            ));
             info!("Read ahead layer is enabled.");
         }
         let handler = Arc::new(builder.build());

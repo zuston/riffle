@@ -487,15 +487,16 @@ impl Store for LocalFileStore {
                 } else {
                     read_options.with_buffer_io()
                 };
-
-                if ctx.sequential {
+                if ctx.sequential || !ctx.localfile_next_read_segments.is_empty() {
                     let ahead = AheadOptions {
-                        sequential: true,
+                        sequential: ctx.sequential,
                         read_batch_number: ctx.read_ahead_batch_number,
                         read_batch_size: ctx.read_ahead_batch_size,
+                        next_read_segments: ctx.localfile_next_read_segments.clone(),
                     };
                     read_options = read_options.with_ahead_options(ahead);
                 }
+                let read_options = read_options.with_task_id(ctx.task_id);
 
                 let future_read = local_disk.read(&data_file_path, read_options);
                 let data = future_read
