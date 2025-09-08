@@ -1,9 +1,11 @@
 use crate::config::ReadAheadConfig;
 use crate::error::WorkerError;
 use crate::metric::{
-    READ_AHEAD_ACTIVE_TASKS, READ_AHEAD_BYTES, READ_AHEAD_HITS, READ_AHEAD_MISSES,
+    READ_AHEAD_ACTIVE_TASKS, READ_AHEAD_ACTIVE_TASKS_OF_READ_PLAN,
+    READ_AHEAD_ACTIVE_TASKS_OF_SEQUENTIAL, READ_AHEAD_BYTES, READ_AHEAD_HITS, READ_AHEAD_MISSES,
     READ_AHEAD_OPERATIONS, READ_AHEAD_OPERATION_DURATION, READ_AHEAD_OPERATION_FAILURE_COUNT,
     READ_AHEAD_WASTED_BYTES, READ_WITHOUT_AHEAD_DURATION, READ_WITH_AHEAD_DURATION,
+    READ_WITH_AHEAD_DURATION_OF_READ_PLAN, READ_WITH_AHEAD_DURATION_OF_SEQUENTIAL,
     READ_WITH_AHEAD_HIT_DURATION, READ_WITH_AHEAD_MISS_DURATION,
 };
 use crate::runtime::RuntimeRef;
@@ -121,7 +123,11 @@ impl ReadAheadLayerWrapper {
                     &self.read_plan_runtime,
                     &self.read_plan_semaphore,
                 ) {
-                    Ok(task) => Some(task),
+                    Ok(task) => {
+                        READ_AHEAD_ACTIVE_TASKS.inc();
+                        READ_AHEAD_ACTIVE_TASKS_OF_READ_PLAN.inc();
+                        Some(task)
+                    }
                     Err(_) => None,
                 }
             })
@@ -132,6 +138,11 @@ impl ReadAheadLayerWrapper {
         }
 
         let result = self.handler.read(&path, options).await;
+
+        let elapsed = timer.elapsed().as_secs_f64();
+        READ_WITH_AHEAD_DURATION.observe(elapsed);
+        READ_WITH_AHEAD_DURATION_OF_READ_PLAN.observe(elapsed);
+
         result
     }
 
@@ -161,6 +172,7 @@ impl ReadAheadLayerWrapper {
                 match SequentialReadAheadTask::new(&abs_path, batch_size, batch_number) {
                     Ok(task) => {
                         READ_AHEAD_ACTIVE_TASKS.inc();
+                        READ_AHEAD_ACTIVE_TASKS_OF_SEQUENTIAL.inc();
                         Some(task)
                     }
                     Err(_) => None,
@@ -177,6 +189,7 @@ impl ReadAheadLayerWrapper {
 
         let duration = timer.elapsed().as_secs_f64();
         READ_WITH_AHEAD_DURATION.observe(duration);
+        READ_WITH_AHEAD_DURATION_OF_SEQUENTIAL.observe(duration);
 
         // only record non-raw io duration
         if let Ok(data) = &result {
@@ -272,10 +285,12 @@ impl LocalIO for ReadAheadLayerWrapper {
         let (seq_deletion_millis, seq_deletion_tasks) =
             Self::delete_with_prefix(&self.sequential_load_tasks, prefix.as_str(), |k| k);
         let (millis, tasks) = if seq_deletion_tasks <= 0 {
+            READ_AHEAD_ACTIVE_TASKS_OF_READ_PLAN.dec();
             Self::delete_with_prefix(&self.read_plan_load_tasks, prefix.as_str(), |(left, _)| {
                 left
             })
         } else {
+            READ_AHEAD_ACTIVE_TASKS_OF_SEQUENTIAL.dec();
             (seq_deletion_millis, seq_deletion_tasks)
         };
 
