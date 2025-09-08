@@ -56,6 +56,7 @@ impl Layer for ReadAheadLayer {
             ahead_batch_size: util::parse_raw_to_bytesize(options.batch_size.as_str()) as usize,
             ahead_batch_number: options.batch_number,
             read_plan_runtime: self.rt.clone(),
+            read_plan_enabled: options.read_plan_enable,
         }))
     }
 }
@@ -74,6 +75,7 @@ struct ReadAheadLayerWrapper {
     read_plan_load_tasks: DashMap<(String, i64), Option<ReadPlanReadAheadTask>>,
     read_plan_semaphore: Arc<Semaphore>,
     read_plan_runtime: RuntimeRef,
+    read_plan_enabled: bool,
 }
 
 unsafe impl Send for ReadAheadLayerWrapper {}
@@ -239,7 +241,7 @@ impl LocalIO for ReadAheadLayerWrapper {
                 if Self::is_sequential(&options.ahead_options) {
                     self.read_ahead_with_sequential_mode(path, options).await
                 } else {
-                    if Self::is_read_plan(&options.ahead_options) {
+                    if self.read_plan_enabled && Self::is_read_plan(&options.ahead_options) {
                         self.read_ahead_with_read_plan(path, options).await
                     } else {
                         let timer = Instant::now();
@@ -479,6 +481,7 @@ mod tests {
             ahead_batch_size: util::parse_raw_to_bytesize(option.batch_size.as_str()) as usize,
             ahead_batch_number: option.batch_number,
             read_plan_runtime: runtime,
+            read_plan_enabled: false,
         };
 
         // 1st read ahead

@@ -147,6 +147,8 @@ pub struct ReadAheadConfig {
     #[serde(default = "as_default_read_ahead_batch_number")]
     pub batch_number: usize,
 
+    #[serde(default = "bool::default")]
+    pub read_plan_enable: bool,
     #[serde(default = "as_default_read_plan_concurrency")]
     pub read_plan_concurrency: usize,
 }
@@ -160,6 +162,7 @@ impl Default for ReadAheadConfig {
         Self {
             batch_size: as_default_read_ahead_batch_size(),
             batch_number: as_default_read_ahead_batch_number(),
+            read_plan_enable: false,
             read_plan_concurrency: as_default_read_plan_concurrency(),
         }
     }
