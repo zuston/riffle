@@ -190,6 +190,32 @@ impl ReadAheadLayerWrapper {
         }
         result
     }
+
+    fn delete_with_prefix<K>(
+        map: &DashMap<K, Option<impl Clone>>,
+        prefix: &str,
+        key_to_str: impl Fn(&K) -> &str,
+    ) -> (u128, usize)
+    where
+        K: Clone + Eq + std::hash::Hash,
+    {
+        let timer = Instant::now();
+        let mut deletion_keys = vec![];
+        let view = map.clone().into_read_only();
+        for (k, _) in view.iter() {
+            if key_to_str(k).starts_with(prefix) {
+                deletion_keys.push(k.clone());
+            }
+        }
+        let deleted_count = deletion_keys.len();
+        if deleted_count > 0 {
+            for deletion_key in deletion_keys {
+                map.remove(&deletion_key);
+            }
+            READ_AHEAD_ACTIVE_TASKS.sub(deleted_count as i64);
+        }
+        (timer.elapsed().as_millis(), deleted_count)
+    }
 }
 
 #[async_trait]
@@ -235,35 +261,26 @@ impl LocalIO for ReadAheadLayerWrapper {
     }
 
     async fn delete(&self, path: &str) -> anyhow::Result<(), WorkerError> {
-        let timer = Instant::now();
-        let normalize_path = if !path.ends_with("/") {
+        let prefix = if !path.ends_with("/") {
             format!("{}/", path)
         } else {
             path.to_owned()
         };
-        let mut deletion_keys = vec![];
-        let view = self.sequential_load_tasks.clone().into_read_only();
-        for (k, v) in view.iter() {
-            if k.starts_with(normalize_path.as_str()) {
-                deletion_keys.push(k.clone());
-            }
-        }
 
-        let deleted_count = deletion_keys.len();
-        if deleted_count > 0 {
-            for deletion_key in deletion_keys {
-                self.sequential_load_tasks.remove(&deletion_key);
-            }
+        let (seq_deletion_millis, seq_deletion_tasks) =
+            Self::delete_with_prefix(&self.sequential_load_tasks, prefix.as_str(), |k| k);
+        let (millis, tasks) = if seq_deletion_tasks <= 0 {
+            Self::delete_with_prefix(&self.read_plan_load_tasks, prefix.as_str(), |(left, _)| {
+                left
+            })
+        } else {
+            (seq_deletion_millis, seq_deletion_tasks)
+        };
 
-            READ_AHEAD_ACTIVE_TASKS.sub(deleted_count as i64);
-
-            info!(
-                "Deleted {} load active tasks with prefix:{} cost {} ms",
-                deleted_count,
-                normalize_path,
-                timer.elapsed().as_millis()
-            );
-        }
+        info!(
+            "Deleted ahead cache for prefix: {} that costs {} millis",
+            prefix, millis
+        );
 
         self.handler.delete(path).await
     }
