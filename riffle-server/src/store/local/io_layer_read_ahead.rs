@@ -311,6 +311,7 @@ impl LocalIO for ReadAheadLayerWrapper {
 struct ReadPlanReadAheadTask {
     file: Arc<Mutex<File>>,
     read_offset: Arc<AtomicU64>,
+    plan_offset: Arc<AtomicU64>,
     sender: Arc<tokio::sync::mpsc::UnboundedSender<ReadSegment>>,
     path: Arc<String>,
 }
@@ -327,6 +328,7 @@ impl ReadPlanReadAheadTask {
         let task = Self {
             file: Arc::new(Mutex::new(file)),
             read_offset: Arc::new(Default::default()),
+            plan_offset: Arc::new(Default::default()),
             sender: Arc::new(send),
             path: Arc::new(abs_path.to_string()),
         };
@@ -358,9 +360,19 @@ impl ReadPlanReadAheadTask {
 
     fn load(&self, next_segments: &Vec<ReadSegment>, now_read_off: u64) -> anyhow::Result<()> {
         self.read_offset.store(now_read_off, Ordering::SeqCst);
-        for segment in next_segments {
-            self.sender.send(segment.clone())?;
+
+        // for plan offset
+        let now_plan_offset = self.plan_offset.load(Ordering::SeqCst);
+        let mut max = now_plan_offset;
+        for next_segment in next_segments {
+            let off = next_segment.offset as u64;
+            if off > now_plan_offset {
+                self.sender.send(next_segment.clone())?;
+                max = off;
+            }
         }
+        self.plan_offset.store(max, Ordering::SeqCst);
+
         Ok(())
     }
 }
