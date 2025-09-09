@@ -1,3 +1,5 @@
+mod processor;
+
 use crate::config::ReadAheadConfig;
 use crate::error::WorkerError;
 use crate::metric::{
@@ -8,7 +10,9 @@ use crate::metric::{
     READ_WITH_AHEAD_DURATION_OF_READ_PLAN, READ_WITH_AHEAD_DURATION_OF_SEQUENTIAL,
     READ_WITH_AHEAD_HIT_DURATION, READ_WITH_AHEAD_MISS_DURATION,
 };
+use crate::runtime::manager::RuntimeManager;
 use crate::runtime::RuntimeRef;
+use crate::store::local::io_layer_read_ahead::processor::ReadPlanReadAheadTaskProcessor;
 use crate::store::local::layers::{Handler, Layer};
 use crate::store::local::options::{CreateOptions, WriteOptions};
 use crate::store::local::read_options::{AheadOptions, ReadOptions, ReadRange};
@@ -20,6 +24,7 @@ use crate::util;
 use async_trait::async_trait;
 use clap::builder::Str;
 use dashmap::DashMap;
+use futures::channel::oneshot::channel;
 use libc::abs;
 use log::{debug, info, warn};
 use parking_lot::Mutex;
@@ -33,15 +38,15 @@ use tokio::time::Instant;
 pub struct ReadAheadLayer {
     root: String,
     options: ReadAheadConfig,
-    rt: RuntimeRef,
+    runtime_manager: RuntimeManager,
 }
 
 impl ReadAheadLayer {
-    pub fn new(root: &str, options: &ReadAheadConfig, runtime_ref: RuntimeRef) -> Self {
+    pub fn new(root: &str, options: &ReadAheadConfig, runtime_manager: RuntimeManager) -> Self {
         Self {
             root: root.to_owned(),
             options: options.clone(),
-            rt: runtime_ref,
+            runtime_manager,
         }
     }
 }
@@ -54,11 +59,14 @@ impl Layer for ReadAheadLayer {
             root: self.root.to_owned(),
             sequential_load_tasks: Default::default(),
             read_plan_load_tasks: Default::default(),
-            read_plan_semaphore: Arc::new(Semaphore::new(options.read_plan_concurrency)),
             ahead_batch_size: util::parse_raw_to_bytesize(options.batch_size.as_str()) as usize,
             ahead_batch_number: options.batch_number,
-            read_plan_runtime: self.rt.clone(),
+            read_plan_task_id_inc: Default::default(),
             read_plan_enabled: options.read_plan_enable,
+            read_plan_load_processor: ReadPlanReadAheadTaskProcessor::new(
+                &self.runtime_manager,
+                Arc::new(Semaphore::new(options.read_plan_concurrency)),
+            ),
         }))
     }
 }
@@ -74,9 +82,9 @@ struct ReadAheadLayerWrapper {
     ahead_batch_number: usize,
 
     // key: (path, spark_task_attempt_id), value: ahead_task
+    read_plan_task_id_inc: Arc<AtomicU64>,
+    read_plan_load_processor: ReadPlanReadAheadTaskProcessor,
     read_plan_load_tasks: DashMap<(String, i64), Option<ReadPlanReadAheadTask>>,
-    read_plan_semaphore: Arc<Semaphore>,
-    read_plan_runtime: RuntimeRef,
     read_plan_enabled: bool,
 }
 
@@ -118,11 +126,9 @@ impl ReadAheadLayerWrapper {
             .read_plan_load_tasks
             .entry((path.to_owned(), task_id))
             .or_insert_with(|| {
-                match ReadPlanReadAheadTask::new(
-                    path,
-                    &self.read_plan_runtime,
-                    &self.read_plan_semaphore,
-                ) {
+                let uid = self.read_plan_task_id_inc.fetch_add(1, Ordering::SeqCst);
+                let processor = &self.read_plan_load_processor;
+                match ReadPlanReadAheadTask::new(path, uid, processor) {
                     Ok(task) => {
                         READ_AHEAD_ACTIVE_TASKS.inc();
                         READ_AHEAD_ACTIVE_TASKS_OF_READ_PLAN.inc();
@@ -134,7 +140,9 @@ impl ReadAheadLayerWrapper {
             .clone();
 
         if let Some(load_task) = load_task {
-            load_task.load(&ahead_options.next_read_segments, off);
+            load_task
+                .load(&ahead_options.next_read_segments, off)
+                .await?;
         }
 
         let result = self.handler.read(&path, options).await;
@@ -309,16 +317,30 @@ impl LocalIO for ReadAheadLayerWrapper {
 
 #[derive(Clone)]
 struct ReadPlanReadAheadTask {
+    uid: u64,
     file: Arc<Mutex<File>>,
     read_offset: Arc<AtomicU64>,
     plan_offset: Arc<AtomicU64>,
-    sender: Arc<tokio::sync::mpsc::UnboundedSender<ReadSegment>>,
+    sender: Arc<async_channel::Sender<ReadSegment>>,
+    recv: Arc<async_channel::Receiver<ReadSegment>>,
     path: Arc<String>,
+
+    processor: ReadPlanReadAheadTaskProcessor,
+}
+
+impl Drop for ReadPlanReadAheadTask {
+    fn drop(&mut self) {
+        self.processor.remove_task(self.uid);
+    }
 }
 
 impl ReadPlanReadAheadTask {
-    fn new(abs_path: &str, rt: &RuntimeRef, semphore: &Arc<Semaphore>) -> anyhow::Result<Self> {
-        let (send, recv) = tokio::sync::mpsc::unbounded_channel();
+    fn new(
+        abs_path: &str,
+        uid: u64,
+        processor: &ReadPlanReadAheadTaskProcessor,
+    ) -> anyhow::Result<Self> {
+        let (send, recv) = async_channel::unbounded();
         let file = File::options()
             .read(true)
             .write(true)
@@ -326,39 +348,36 @@ impl ReadPlanReadAheadTask {
             .append(true)
             .open(abs_path)?;
         let task = Self {
+            uid,
             file: Arc::new(Mutex::new(file)),
             read_offset: Arc::new(Default::default()),
             plan_offset: Arc::new(Default::default()),
             sender: Arc::new(send),
+            recv: Arc::new(recv),
             path: Arc::new(abs_path.to_string()),
+            processor: processor.clone(),
         };
-        Self::loop_load(rt.clone(), task.clone(), recv, semphore.clone());
+        processor.add_task(&task);
         Ok(task)
     }
 
-    fn loop_load(
-        rt: RuntimeRef,
-        task: ReadPlanReadAheadTask,
-        mut recv: UnboundedReceiver<ReadSegment>,
-        limit: Arc<Semaphore>,
-    ) {
-        rt.spawn(async move {
-            let limit = limit;
-            while let Some(segment) = recv.recv().await {
-                let off = segment.offset;
-                let len = segment.length;
+    fn do_load(&self, segment: ReadSegment) -> anyhow::Result<()> {
+        let off = segment.offset;
+        let len = segment.length;
 
-                if off < task.read_offset.load(Ordering::Relaxed) as i64 {
-                    continue;
-                }
-                let _limit = limit.acquire().await.unwrap();
-                let file = task.file.lock();
-                do_read_ahead(&file, task.path.as_str(), off as u64, len as u64);
-            }
-        });
+        if off < self.read_offset.load(Ordering::Relaxed) as i64 {
+            return Ok(());
+        }
+        let file = self.file.lock();
+        do_read_ahead(&file, self.path.as_str(), off as u64, len as u64);
+        Ok(())
     }
 
-    fn load(&self, next_segments: &Vec<ReadSegment>, now_read_off: u64) -> anyhow::Result<()> {
+    async fn load(
+        &self,
+        next_segments: &Vec<ReadSegment>,
+        now_read_off: u64,
+    ) -> anyhow::Result<()> {
         self.read_offset.store(now_read_off, Ordering::SeqCst);
 
         // for plan offset
@@ -367,7 +386,7 @@ impl ReadPlanReadAheadTask {
         for next_segment in next_segments {
             let off = next_segment.offset as u64;
             if off > now_plan_offset {
-                self.sender.send(next_segment.clone())?;
+                self.sender.send(next_segment.clone()).await?;
                 max = off;
             }
         }
@@ -496,7 +515,7 @@ mod tests {
         let root = path.parent().unwrap().to_str().unwrap().to_string();
         let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
 
-        let runtime = create_runtime(1, "");
+        let rm = RuntimeManager::default();
         let option = ReadAheadConfig::default();
         let inner_handler: Arc<Box<dyn LocalIO>> = Arc::new(Box::new(MockHandler::new()));
         let wrapped = ReadAheadLayerWrapper {
@@ -504,11 +523,14 @@ mod tests {
             root: root.to_owned(),
             sequential_load_tasks: Default::default(),
             read_plan_load_tasks: Default::default(),
-            read_plan_semaphore: Arc::new(Semaphore::new(10)),
             ahead_batch_size: util::parse_raw_to_bytesize(option.batch_size.as_str()) as usize,
             ahead_batch_number: option.batch_number,
-            read_plan_runtime: runtime,
+            read_plan_task_id_inc: Arc::new(Default::default()),
             read_plan_enabled: false,
+            read_plan_load_processor: ReadPlanReadAheadTaskProcessor::new(
+                &rm,
+                Arc::new(Semaphore::new(1)),
+            ),
         };
 
         // 1st read ahead

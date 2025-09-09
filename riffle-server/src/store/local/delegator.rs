@@ -107,11 +107,8 @@ impl LocalDiskDelegator {
             );
         }
         if let Some(options) = config.read_ahead_options.as_ref() {
-            operator_builder = operator_builder.layer(ReadAheadLayer::new(
-                root,
-                options,
-                runtime_manager.localfile_write_runtime.clone(),
-            ));
+            operator_builder =
+                operator_builder.layer(ReadAheadLayer::new(root, options, runtime_manager.clone()));
             info!("Read ahead layer is enabled for disk: {}.", root);
         }
         let io_handler = operator_builder
