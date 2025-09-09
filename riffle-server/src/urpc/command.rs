@@ -537,35 +537,59 @@ impl GetLocalDataIndexRequestCommand {
         } else {
             RpcVersion::V1
         };
-        // todo: return the v1/v2 version response by the option
 
         let mut len = 0;
-        let command = match app
+        let result = app
             .list_index(ctx)
             .instrument_await(format!("listing localfile index for app:{}", &app_id))
-            .await
-        {
-            Err(err) => GetLocalDataIndexV2ResponseCommand {
-                request_id,
-                status_code: StatusCode::INTERNAL_ERROR.into(),
-                ret_msg: format!("Errors on listing local index. err: {:#?}", err),
-                data_index: Default::default(),
-                storage_ids: vec![],
-            },
-            Ok(index) => {
-                let Local(result) = index;
-                len = result.index_data.len();
-                GetLocalDataIndexV2ResponseCommand {
-                    request_id,
-                    status_code: StatusCode::SUCCESS.into(),
-                    ret_msg: "".to_string(),
-                    data_index: result,
-                    // todo: haven't support multi disk for one partition.
-                    storage_ids: vec![0],
-                }
+            .await;
+        let frame = match rpc_version {
+            RpcVersion::V1 => {
+                let command = match result {
+                    Ok(index) => {
+                        let Local(result) = index;
+                        len = result.index_data.len();
+                        GetLocalDataIndexResponseCommand {
+                            request_id,
+                            status_code: StatusCode::SUCCESS.into(),
+                            ret_msg: "".to_string(),
+                            data_index: result,
+                        }
+                    }
+                    Err(e) => GetLocalDataIndexResponseCommand {
+                        request_id,
+                        status_code: StatusCode::INTERNAL_ERROR.into(),
+                        ret_msg: format!("Errors on listing local index. err: {:#?}", e),
+                        data_index: Default::default(),
+                    },
+                };
+                Frame::GetLocalDataIndexResponse(command)
+            }
+            _ => {
+                let command = match result {
+                    Ok(index) => {
+                        let Local(result) = index;
+                        len = result.index_data.len();
+                        GetLocalDataIndexV2ResponseCommand {
+                            request_id,
+                            status_code: StatusCode::SUCCESS.into(),
+                            ret_msg: "".to_string(),
+                            data_index: result,
+                            // todo: haven't support multi disk for one partition.
+                            storage_ids: vec![0],
+                        }
+                    }
+                    Err(e) => GetLocalDataIndexV2ResponseCommand {
+                        request_id,
+                        status_code: StatusCode::INTERNAL_ERROR.into(),
+                        ret_msg: format!("Errors on listing local index. err: {:#?}", e),
+                        data_index: Default::default(),
+                        storage_ids: vec![],
+                    },
+                };
+                Frame::GetLocalDataIndexV2Response(command)
             }
         };
-        let frame = Frame::GetLocalDataIndexV2Response(command);
         conn.write_frame(&frame).await?;
         info!(
             "[get_local_index] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
