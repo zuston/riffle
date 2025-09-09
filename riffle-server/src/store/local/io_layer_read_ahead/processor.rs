@@ -1,6 +1,7 @@
 use crate::runtime::manager::RuntimeManager;
 use crate::runtime::RuntimeRef;
 use crate::store::local::io_layer_read_ahead::ReadPlanReadAheadTask;
+use await_tree::InstrumentAwait;
 use dashmap::DashMap;
 use log::error;
 use std::ops::Deref;
@@ -8,6 +9,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
+/// This processor is to use a shareable thread pool to do the load operations
+/// by the limited concurrency.
 #[derive(Clone)]
 pub struct ReadPlanReadAheadTaskProcessor {
     // key: uid
@@ -35,7 +38,7 @@ impl ReadPlanReadAheadTaskProcessor {
         let process_runtime = runtime_manager.localfile_write_runtime.clone();
 
         let (send, recv) = async_channel::unbounded();
-        dispatch_runtime.spawn(async move {
+        dispatch_runtime.spawn_with_await_tree("read-plan-read-ahead-tasks-dispatch", async move {
             loop {
                 let mut tasks = vec![];
                 let view = processor.tasks.deref().clone().into_read_only();
@@ -47,17 +50,27 @@ impl ReadPlanReadAheadTaskProcessor {
                     let tid = task.uid;
                     if let Ok(segment) = task.recv.try_recv() {
                         let permit = semphore.clone().acquire_owned().await;
-                        send.send((segment, task, permit, tid)).await;
+                        send.send((segment, task, permit, tid))
+                            .instrument_await("sending to the queue...")
+                            .await;
                     }
                 }
-                tokio::time::sleep(Duration::from_millis(1)).await;
+                tokio::time::sleep(Duration::from_millis(1))
+                    .instrument_await("sleeping...")
+                    .await;
             }
         });
 
-        process_runtime.spawn(async move {
-            while let Ok((segment, task, permit, uid)) = recv.recv().await {
+        process_runtime.spawn_with_await_tree("read-plan-read-ahead-tasks-processor", async move {
+            while let Ok((segment, task, permit, uid)) =
+                recv.recv().instrument_await("recv from the queue...").await
+            {
                 let _permit = permit;
-                if let Err(e) = task.do_load(segment) {
+                if let Err(e) = task
+                    .do_load(segment)
+                    .instrument_await("loading for the read ahead...")
+                    .await
+                {
                     error!("Errors on read ahead for task_id: {}. err: {}", uid, e);
                 }
             }

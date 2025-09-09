@@ -372,7 +372,7 @@ impl ReadPlanReadAheadTask {
         Ok(task)
     }
 
-    fn do_load(&self, segment: ReadSegment) -> anyhow::Result<()> {
+    async fn do_load(&self, segment: ReadSegment) -> anyhow::Result<()> {
         let off = segment.offset;
         let len = segment.length;
 
