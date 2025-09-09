@@ -9,8 +9,14 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
-/// This processor is to use a shareable thread pool to do the load operations
-/// by the limited concurrency.
+/// This processor manages background read-ahead tasks keyed by uid, and uses a two-stage model:
+/// a dispatcher runtime that polls for new segments and enqueues them, and a processor runtime
+/// that consumes the queue and performs the actual I/O operations.
+///
+/// A `Semaphore` is used to limit concurrency, ensuring that only a limited number of tasks
+/// proceed concurrently. Tasks are stored in a `DashMap` for efficient concurrent access.
+/// `Arc` is used to allow safe sharing of the processor and its tasks across asynchronous tasks.
+///
 #[derive(Clone)]
 pub struct ReadPlanReadAheadTaskProcessor {
     // key: uid
