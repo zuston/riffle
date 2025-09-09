@@ -180,18 +180,17 @@ impl Frame {
                 // write the data length
                 write_buf.put_i64(data_file_len);
 
-                stream.write_all(&write_buf.split()).await?;
-
-                // write the all bytes
-                let data = index_bytes.freeze();
-                stream.write_all(&data).await?;
-
                 // write the storage ids
                 write_buf.put_i32(resp.storage_ids.len() as i32);
                 for storage_id in &resp.storage_ids {
                     write_buf.put_i32(*storage_id as i32);
                 }
+
                 stream.write_all(&write_buf.split()).await?;
+
+                // write the all bytes
+                let data = index_bytes.freeze();
+                stream.write_all(&data).await?;
 
                 Ok(())
             }
