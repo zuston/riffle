@@ -770,7 +770,9 @@ impl Config {
 
 #[cfg(test)]
 mod test {
-    use crate::config::{as_default_app_heartbeat_timeout_min, Config, RuntimeConfig, StorageType};
+    use crate::config::{
+        as_default_app_heartbeat_timeout_min, Config, RpcVersion, RuntimeConfig, StorageType,
+    };
     use crate::readable_size::ReadableSize;
     use std::str::FromStr;
 
@@ -799,6 +801,9 @@ mod test {
         let toml_str = r#"
         store_type = "MEMORY_LOCALFILE"
         coordinator_quorum = ["xxxxxxx"]
+
+        [urpc_config]
+        get_index_rpc_version = "V2"
 
         [memory_store]
         capacity = "1024M"
@@ -832,6 +837,11 @@ mod test {
         assert_eq!(
             decoded.runtime_config.read_thread_num,
             RuntimeConfig::default().read_thread_num
+        );
+
+        assert_eq!(
+            RpcVersion::V2,
+            decoded.urpc_config.as_ref().unwrap().get_index_rpc_version
         );
 
         // check the app config
