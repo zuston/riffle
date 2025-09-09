@@ -164,7 +164,7 @@ impl Frame {
                 let data_file_len = resp.data_index.data_file_len;
 
                 // header
-                write_buf.put_i32(msg_bytes.len() as i32 + 8 + 4 + 4 + 8);
+                write_buf.put_i32(msg_bytes.len() as i32 + 8 + 4 + 4 + 8 + 4 * resp.storage_ids.len() as i32);
                 write_buf.put_u8(MessageType::GetLocalDataIndexV2Response as u8);
                 write_buf.put_i32(index_bytes.len() as i32);
 
