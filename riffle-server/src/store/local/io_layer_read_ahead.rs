@@ -320,8 +320,8 @@ impl LocalIO for ReadAheadLayerWrapper {
         };
 
         info!(
-            "Deleted ahead cache for prefix: {} that costs {} millis",
-            prefix, millis
+            "Deleted ahead cache for prefix: {} with {} load_tasks that costs {} millis",
+            prefix, tasks, millis
         );
 
         self.handler.delete(path).await
