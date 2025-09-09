@@ -5,9 +5,9 @@ use crate::store::{Block, DataBytes};
 use crate::system_libc::send_file_full;
 use crate::urpc::command::{
     GetLocalDataIndexRequestCommand, GetLocalDataIndexResponseCommand,
-    GetLocalDataIndexV2ResponseCommand, GetLocalDataRequestCommand, GetLocalDataRequestV3Command,
-    GetLocalDataResponseCommand, GetMemoryDataRequestCommand, GetMemoryDataResponseCommand,
-    ReadSegment, RpcResponseCommand, SendDataRequestCommand,
+    GetLocalDataIndexV2ResponseCommand, GetLocalDataRequestCommand, GetLocalDataRequestV2Command,
+    GetLocalDataRequestV3Command, GetLocalDataResponseCommand, GetMemoryDataRequestCommand,
+    GetMemoryDataResponseCommand, ReadSegment, RpcResponseCommand, SendDataRequestCommand,
 };
 use anyhow::{Error, Result};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -54,6 +54,7 @@ pub enum MessageType {
     GetLocalDataIndexV2Response = 23,
 
     GetLocalData = 5,
+    GetLocalDataV2 = 24,
     GetLocalDataV3 = 25,
     GetLocalDataResponse = 15,
 
@@ -82,6 +83,9 @@ pub enum Frame {
 
     #[strum(serialize = "GetLocalData")]
     GetLocalData(GetLocalDataRequestCommand),
+
+    #[strum(serialize = "GetLocalDataV2")]
+    GetLocalDataV2(GetLocalDataRequestV2Command),
 
     #[strum(serialize = "GetLocalDataV3")]
     GetLocalDataV3(GetLocalDataRequestV3Command),
@@ -315,10 +319,42 @@ impl Frame {
         Ok(())
     }
 
+    fn parse_to_get_localfile_data_v2_command(
+        src: &mut Cursor<&[u8]>,
+    ) -> Result<GetLocalDataRequestV2Command> {
+        debug!("Gotten the localfile data v2 request");
+
+        let request_id = get_i64(src)?;
+        let app_id = get_string(src)?;
+        let shuffle_id = get_i32(src)?;
+        let partition_id = get_i32(src)?;
+        let partition_num_per_range = get_i32(src)?;
+        let partition_num = get_i32(src)?;
+        let offset = get_i64(src)?;
+        let length = get_i32(src)?;
+        let timestamp = get_i64(src)?;
+
+        // for the v2 version
+        let storage_id = get_i32(src)?;
+
+        Ok(GetLocalDataRequestV2Command {
+            request_id,
+            app_id,
+            shuffle_id,
+            partition_id,
+            partition_num_per_range,
+            partition_num,
+            offset,
+            length,
+            timestamp,
+            storage_id,
+        })
+    }
+
     fn parse_to_get_localfile_data_v3_command(
         src: &mut Cursor<&[u8]>,
     ) -> Result<GetLocalDataRequestV3Command> {
-        debug!("Gotten the localfile data V2 request");
+        debug!("Gotten the localfile data v3 request");
 
         let request_id = get_i64(src)?;
         let app_id = get_string(src)?;
@@ -515,6 +551,10 @@ impl Frame {
             MessageType::GetLocalData => {
                 let command = Frame::parse_to_get_localfile_data_command(src)?;
                 return Ok(Frame::GetLocalData(command));
+            }
+            MessageType::GetLocalDataV2 => {
+                let command = Frame::parse_to_get_localfile_data_v2_command(src)?;
+                return Ok(Frame::GetLocalDataV2(command));
             }
             MessageType::GetLocalDataV3 => {
                 let command = Frame::parse_to_get_localfile_data_v3_command(src)?;

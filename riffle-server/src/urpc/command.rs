@@ -27,6 +27,7 @@ pub enum Command {
     GetMem(GetMemoryDataRequestCommand),
     GetLocalIndex(GetLocalDataIndexRequestCommand),
     GetLocalData(GetLocalDataRequestCommand),
+    GetLocalDataV2(GetLocalDataRequestV2Command),
     GetLocalDataV3(GetLocalDataRequestV3Command),
 }
 
@@ -37,6 +38,7 @@ impl Command {
             Frame::GetMemoryData(req) => Ok(Command::GetMem(req)),
             Frame::GetLocalDataIndex(req) => Ok(Command::GetLocalIndex(req)),
             Frame::GetLocalData(req) => Ok(Command::GetLocalData(req)),
+            Frame::GetLocalDataV2(req) => Ok(Command::GetLocalDataV2(req)),
             Frame::GetLocalDataV3(req) => Ok(Command::GetLocalDataV3(req)),
             _ => todo!(),
         }
@@ -53,6 +55,7 @@ impl Command {
             Command::GetMem(req) => req.apply(app_manager_ref, conn, shutdown).await?,
             Command::GetLocalIndex(req) => req.apply(app_manager_ref, conn, shutdown).await?,
             Command::GetLocalData(req) => req.apply(app_manager_ref, conn, shutdown).await?,
+            Command::GetLocalDataV2(req) => req.apply(app_manager_ref, conn, shutdown).await?,
             Command::GetLocalDataV3(req) => req.apply(app_manager_ref, conn, shutdown).await?,
             _ => {}
         }
@@ -173,6 +176,20 @@ pub struct GetLocalDataRequestCommand {
 }
 
 #[derive(Debug, Default)]
+pub struct GetLocalDataRequestV2Command {
+    pub(crate) request_id: i64,
+    pub(crate) app_id: String,
+    pub(crate) shuffle_id: i32,
+    pub(crate) partition_id: i32,
+    pub(crate) partition_num_per_range: i32,
+    pub(crate) partition_num: i32,
+    pub(crate) offset: i64,
+    pub(crate) length: i32,
+    pub(crate) timestamp: i64,
+    pub(crate) storage_id: i32,
+}
+
+#[derive(Debug, Default)]
 pub struct GetLocalDataRequestV3Command {
     pub(crate) request_id: i64,
     pub(crate) app_id: String,
@@ -192,6 +209,93 @@ pub struct GetLocalDataRequestV3Command {
 pub struct ReadSegment {
     pub offset: i64,
     pub length: i64,
+}
+
+impl GetLocalDataRequestV2Command {
+    pub(crate) async fn apply(
+        &self,
+        app_manager_ref: AppManagerRef,
+        conn: &mut Connection,
+        shutdown: &mut Shutdown,
+    ) -> Result<()> {
+        let timer = Instant::now();
+
+        let request_id = self.request_id;
+        let app_id = self.app_id.as_str();
+        let shuffle_id = self.shuffle_id;
+        let partition_id = self.partition_id;
+        let offset = self.offset;
+        let length = self.length;
+        let application_id = ApplicationId::from(app_id);
+        // ignore the storage id.
+        let storage_id = self.storage_id;
+
+        let app = app_manager_ref.get_app(&application_id);
+        if app.is_none() {
+            let command = GetLocalDataResponseCommand {
+                request_id,
+                status_code: StatusCode::NO_REGISTER.into(),
+                ret_msg: "No such app in server side".to_string(),
+                data: Default::default(),
+            };
+            let frame = Frame::GetLocalDataResponse(command);
+            conn.write_frame(&frame)
+                .instrument_await("No such app and then fast return")
+                .await?;
+            return Ok(());
+        }
+
+        let app = app.unwrap();
+        let uid = PartitionUId::new(&application_id, shuffle_id, partition_id);
+        let ctx = ReadingViewContext::new(
+            uid,
+            ReadingOptions::FILE_OFFSET_AND_LEN(offset, length as i64),
+            RpcType::URPC,
+        );
+        let mut len = 0;
+        let command = match app
+            .select(ctx)
+            .instrument_await(format!("getting local shuffle data for app:{}", &app_id))
+            .await
+        {
+            Err(e) => GetLocalDataResponseCommand {
+                request_id,
+                status_code: StatusCode::INTERNAL_ERROR.into(),
+                ret_msg: format!("Errors on getting file data. err: {:#?}", e),
+                data: Default::default(),
+            },
+            Ok(result) => {
+                if let ResponseData::Local(data) = result {
+                    len = data.data.len();
+                    GetLocalDataResponseCommand {
+                        request_id,
+                        status_code: StatusCode::SUCCESS.into(),
+                        ret_msg: "".to_string(),
+                        data: data.data,
+                    }
+                } else {
+                    GetLocalDataResponseCommand {
+                        request_id,
+                        status_code: StatusCode::INTERNAL_ERROR.into(),
+                        ret_msg: "Incorrect local data type.".to_string(),
+                        data: Default::default(),
+                    }
+                }
+            }
+        };
+
+        let frame = Frame::GetLocalDataResponse(command);
+        conn.write_frame(&frame).await?;
+        info!(
+            "[get_local_data_v2] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
+            timer.elapsed().as_millis(),
+            len,
+            app_id,
+            shuffle_id,
+            partition_id,
+        );
+        Ok(())
+    }
 }
 
 impl GetLocalDataRequestV3Command {
@@ -271,7 +375,7 @@ impl GetLocalDataRequestV3Command {
         let frame = Frame::GetLocalDataResponse(command);
         conn.write_frame(&frame).await?;
         info!(
-            "[get_local_data] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
+            "[get_local_data_v3] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
             timer.elapsed().as_millis(),
             len,
             app_id,
