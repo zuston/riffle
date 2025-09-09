@@ -331,12 +331,6 @@ struct ReadPlanReadAheadTask {
     processor: ReadPlanReadAheadTaskProcessor,
 }
 
-impl Drop for ReadPlanReadAheadTask {
-    fn drop(&mut self) {
-        self.processor.remove_task(self.uid);
-    }
-}
-
 impl ReadPlanReadAheadTask {
     fn new(
         abs_path: &str,
@@ -627,12 +621,14 @@ mod tests {
             .block_on(layer.read(relative_file_name.as_str(), options));
         assert!(result.is_ok());
         assert_eq!(1, layer.read_plan_load_tasks.len());
+        assert_eq!(1, layer.read_plan_load_processor.task_size());
 
         runtime_manager
             .default_runtime
             .block_on(layer.delete(sub_dirs.as_str()))
             .unwrap();
         assert_eq!(0, layer.read_plan_load_tasks.len());
+        // assert_eq!(0, layer.read_plan_load_processor.task_size());
     }
 
     struct MockHandler;

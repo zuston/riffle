@@ -71,4 +71,12 @@ impl ReadPlanReadAheadTaskProcessor {
     pub fn remove_task(&self, task_id: u64) {
         self.tasks.remove(&task_id);
     }
+
+    pub fn get_task(&self, uid: u64) -> Option<ReadPlanReadAheadTask> {
+        self.tasks.get(&uid).map(|task| task.clone())
+    }
+
+    pub fn task_size(&self) -> usize {
+        self.tasks.len()
+    }
 }
