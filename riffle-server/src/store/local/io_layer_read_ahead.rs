@@ -217,13 +217,17 @@ impl ReadAheadLayerWrapper {
         result
     }
 
-    fn delete_with_prefix<K>(
-        map: &DashMap<K, Option<impl Clone>>,
+    fn delete_with_prefix<K, V, F, G>(
+        map: &DashMap<K, Option<V>>,
         prefix: &str,
-        key_to_str: impl Fn(&K) -> &str,
+        key_to_str: F,
+        on_deleted: G,
     ) -> (u128, usize)
     where
         K: Clone + Eq + std::hash::Hash,
+        V: Clone,
+        F: Fn(&K) -> &str,
+        G: Fn(&V),
     {
         let timer = Instant::now();
         let mut deletion_keys = vec![];
@@ -236,7 +240,11 @@ impl ReadAheadLayerWrapper {
         let deleted_count = deletion_keys.len();
         if deleted_count > 0 {
             for deletion_key in deletion_keys {
-                map.remove(&deletion_key);
+                if let Some((_, v)) = map.remove(&deletion_key) {
+                    if let Some(v) = v {
+                        on_deleted(&v);
+                    }
+                }
             }
             READ_AHEAD_ACTIVE_TASKS.sub(deleted_count as i64);
         }
@@ -294,12 +302,18 @@ impl LocalIO for ReadAheadLayerWrapper {
         };
 
         let (seq_deletion_millis, seq_deletion_tasks) =
-            Self::delete_with_prefix(&self.sequential_load_tasks, prefix.as_str(), |k| k);
+            Self::delete_with_prefix(&self.sequential_load_tasks, prefix.as_str(), |k| k, |_| {});
         let (millis, tasks) = if seq_deletion_tasks <= 0 {
             READ_AHEAD_ACTIVE_TASKS_OF_READ_PLAN.dec();
-            Self::delete_with_prefix(&self.read_plan_load_tasks, prefix.as_str(), |(left, _)| {
-                left
-            })
+            Self::delete_with_prefix(
+                &self.read_plan_load_tasks,
+                prefix.as_str(),
+                |(left, _)| left,
+                |v| {
+                    let uid = v.uid;
+                    self.read_plan_load_processor.remove_task(uid);
+                },
+            )
         } else {
             READ_AHEAD_ACTIVE_TASKS_OF_SEQUENTIAL.dec();
             (seq_deletion_millis, seq_deletion_tasks)
@@ -628,7 +642,7 @@ mod tests {
             .block_on(layer.delete(sub_dirs.as_str()))
             .unwrap();
         assert_eq!(0, layer.read_plan_load_tasks.len());
-        // assert_eq!(0, layer.read_plan_load_processor.task_size());
+        assert_eq!(0, layer.read_plan_load_processor.task_size());
     }
 
     struct MockHandler;
