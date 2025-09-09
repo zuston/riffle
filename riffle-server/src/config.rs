@@ -460,6 +460,26 @@ pub struct Config {
 
     #[serde(default = "as_default_conf_reload_enable")]
     pub conf_reload_enable: bool,
+
+    pub urpc_config: Option<UrpcConfig>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct UrpcConfig {
+    pub get_index_rpc_version: RpcVersion,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum RpcVersion {
+    V1,
+    V2,
+    V3,
+}
+
+impl Default for RpcVersion {
+    fn default() -> Self {
+        RpcVersion::V1
+    }
 }
 
 fn as_default_conf_reload_enable() -> bool {

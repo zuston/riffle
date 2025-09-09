@@ -4,6 +4,7 @@ use crate::app_manager::request_context::{
     ReadingIndexViewContext, ReadingOptions, ReadingViewContext, RpcType, WritingViewContext,
 };
 use crate::app_manager::AppManagerRef;
+use crate::config::RpcVersion;
 use crate::constant::StatusCode;
 use crate::metric::URPC_SEND_DATA_TRANSPORT_TIME;
 use crate::store::ResponseDataIndex::Local;
@@ -425,6 +426,14 @@ impl GetLocalDataIndexRequestCommand {
         let application_id = ApplicationId::from(app_id);
         let uid = PartitionUId::new(&application_id, shuffle_id, partition_id);
         let ctx = ReadingIndexViewContext { partition_id: uid };
+
+        let config = app_manager_ref.get_config();
+        let rpc_version = if let Some(c) = &config.urpc_config {
+            c.get_index_rpc_version.clone()
+        } else {
+            RpcVersion::V1
+        };
+        // todo: return the v1/v2 version response by the option
 
         let mut len = 0;
         let command = match app

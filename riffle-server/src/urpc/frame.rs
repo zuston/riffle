@@ -50,8 +50,8 @@ pub enum MessageType {
     GetMemoryDataResponse = 16,
 
     GetLocalDataIndex = 4,
-    GetLocalDataIndexV2 = 23,
     GetLocalDataIndexResponse = 14,
+    GetLocalDataIndexV2Response = 23,
 
     GetLocalData = 5,
     GetLocalDataV3 = 25,
@@ -161,7 +161,7 @@ impl Frame {
 
                 // header
                 write_buf.put_i32(msg_bytes.len() as i32 + 8 + 4 + 4 + 8);
-                write_buf.put_u8(MessageType::GetLocalDataIndexResponse as u8);
+                write_buf.put_u8(MessageType::GetLocalDataIndexV2Response as u8);
                 write_buf.put_i32(index_bytes.len() as i32);
 
                 // partial content with general response info
@@ -523,9 +523,6 @@ impl Frame {
             MessageType::GetLocalDataIndex => {
                 let command = Frame::parse_to_get_localfile_index_command(src)?;
                 return Ok(Frame::GetLocalDataIndex(command));
-            }
-            MessageType::GetLocalDataIndexV2 => {
-                let command = Frame::parse_to_get_localfile_index_command(src)?;
             }
             MessageType::GetMemoryData => {
                 let command = Frame::parse_to_get_memory_data_command(src)?;
