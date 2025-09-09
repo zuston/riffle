@@ -121,6 +121,7 @@ impl ReadAheadLayerWrapper {
     ) -> anyhow::Result<DataBytes, WorkerError> {
         let timer = Instant::now();
 
+        let abs_path = format!("{}/{}", &self.root, path);
         let (off, len) = options.read_range.get_range();
         let ahead_options = options.ahead_options.as_ref().unwrap();
         let task_id = options.task_id;
@@ -130,7 +131,7 @@ impl ReadAheadLayerWrapper {
             .or_insert_with(|| {
                 let uid = self.read_plan_task_id_inc.fetch_add(1, Ordering::SeqCst);
                 let processor = &self.read_plan_load_processor;
-                match ReadPlanReadAheadTask::new(path, uid, processor) {
+                match ReadPlanReadAheadTask::new(abs_path.as_str(), uid, processor) {
                     Ok(task) => {
                         READ_AHEAD_ACTIVE_TASKS.inc();
                         READ_AHEAD_ACTIVE_TASKS_OF_READ_PLAN.inc();
@@ -499,30 +500,26 @@ mod tests {
     use std::io::Write;
     use std::path::Path;
     use std::sync::Arc;
-    use tempfile::NamedTempFile;
+    use tempfile::{NamedTempFile, TempDir};
 
     fn init_logger() -> Result<(), SetLoggerError> {
         env_logger::builder().is_test(true).try_init()
     }
 
     #[cfg(target_os = "macos")]
-    #[tokio::test]
-    async fn test_read_ahead() {
+    #[test]
+    fn test_read_ahead() {
         let _logger = init_logger();
 
         // Prepare temp file path and content
-        let mut temp_file = NamedTempFile::new().expect("create temp file");
-        let content = b"hello riffle read ahead";
-        temp_file.write_all(content).unwrap();
-        let temp_path = temp_file.path().to_str().unwrap().to_string();
-        let path = Path::new(&temp_path);
-        let root = path.parent().unwrap().to_str().unwrap().to_string();
-        let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
+        let temp_dir = TempDir::new().expect("create temp dir");
+        let (root, sub_dirs, file_name) = create_sub_dirs(&temp_dir, "hello riffle read ahead");
+        let relative_file_name = format!("{}/{}", &sub_dirs, file_name);
 
-        let rm = RuntimeManager::default();
+        let runtime_manager = RuntimeManager::default();
         let option = ReadAheadConfig::default();
         let inner_handler: Arc<Box<dyn LocalIO>> = Arc::new(Box::new(MockHandler::new()));
-        let wrapped = ReadAheadLayerWrapper {
+        let layer = ReadAheadLayerWrapper {
             handler: inner_handler,
             root: root.to_owned(),
             sequential_load_tasks: Default::default(),
@@ -532,7 +529,7 @@ mod tests {
             read_plan_task_id_inc: Arc::new(Default::default()),
             read_plan_enabled: false,
             read_plan_load_processor: ReadPlanReadAheadTaskProcessor::new(
-                &rm,
+                &runtime_manager,
                 Arc::new(Semaphore::new(1)),
             ),
         };
@@ -540,12 +537,102 @@ mod tests {
         // 1st read ahead
         let options = ReadOptions::default()
             .with_buffer_io()
-            .with_read_range(ReadRange::RANGE(0, 5));
-        let result = wrapped.read(file_name.as_str(), options).await;
+            .with_read_range(ReadRange::RANGE(0, 5))
+            .with_ahead_options(AheadOptions {
+                sequential: true,
+                read_batch_number: None,
+                read_batch_size: None,
+                next_read_segments: vec![],
+            });
+        let result = runtime_manager
+            .default_runtime
+            .block_on(layer.read(relative_file_name.as_str(), options));
         assert!(result.is_ok());
+        assert_eq!(1, layer.sequential_load_tasks.len());
 
-        wrapped.delete(root.as_str()).await.unwrap();
-        assert_eq!(0, wrapped.sequential_load_tasks.len());
+        runtime_manager
+            .default_runtime
+            .block_on(layer.delete(sub_dirs.as_str()))
+            .unwrap();
+        assert_eq!(0, layer.sequential_load_tasks.len());
+    }
+
+    // (root, sub_dirs, file_name)
+    fn create_sub_dirs(temp_dir: &TempDir, content: &str) -> (String, String, String) {
+        let root = temp_dir.path().to_str().unwrap().to_string();
+        let sub_dir_path = temp_dir.path().join("a").join("b").join("c");
+        std::fs::create_dir_all(&sub_dir_path).unwrap();
+        let file_name = "a.data".to_string();
+        let file_path = sub_dir_path.join(&file_name);
+        let mut file = File::create(&file_path).unwrap();
+        use std::io::Write;
+        file.write_all(content.as_bytes()).unwrap();
+        let sub_dirs = sub_dir_path
+            .strip_prefix(&root)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        (root, sub_dirs, file_name)
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_read_ahead_with_read_plan() {
+        let _logger = init_logger();
+
+        // Prepare temp file path and content
+        let temp_dir = TempDir::new().expect("create temp dir");
+        let (root, sub_dirs, file_name) = create_sub_dirs(&temp_dir, "hello riffle read ahead");
+        let relative_file_name = format!("{}/{}", &sub_dirs, file_name);
+
+        let runtime_manager = RuntimeManager::default();
+        let option = ReadAheadConfig::default();
+        let inner_handler: Arc<Box<dyn LocalIO>> = Arc::new(Box::new(MockHandler::new()));
+        let layer = ReadAheadLayerWrapper {
+            handler: inner_handler,
+            root: root.to_owned(),
+            sequential_load_tasks: Default::default(),
+            read_plan_load_tasks: Default::default(),
+            ahead_batch_size: util::parse_raw_to_bytesize(option.batch_size.as_str()) as usize,
+            ahead_batch_number: option.batch_number,
+            read_plan_task_id_inc: Arc::new(Default::default()),
+            read_plan_enabled: true,
+            read_plan_load_processor: ReadPlanReadAheadTaskProcessor::new(
+                &runtime_manager,
+                Arc::new(Semaphore::new(1)),
+            ),
+        };
+
+        let options = ReadOptions::default()
+            .with_buffer_io()
+            .with_read_range(ReadRange::RANGE(0, 5))
+            .with_ahead_options(AheadOptions {
+                sequential: false,
+                read_batch_number: None,
+                read_batch_size: None,
+                next_read_segments: vec![
+                    ReadSegment {
+                        offset: 1,
+                        length: 1,
+                    },
+                    ReadSegment {
+                        offset: 2,
+                        length: 1,
+                    },
+                ],
+            });
+        let result = runtime_manager
+            .default_runtime
+            .block_on(layer.read(relative_file_name.as_str(), options));
+        assert!(result.is_ok());
+        assert_eq!(1, layer.read_plan_load_tasks.len());
+
+        runtime_manager
+            .default_runtime
+            .block_on(layer.delete(sub_dirs.as_str()))
+            .unwrap();
+        assert_eq!(0, layer.read_plan_load_tasks.len());
     }
 
     struct MockHandler;

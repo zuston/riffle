@@ -19,20 +19,23 @@ impl ReadPlanReadAheadTaskProcessor {
         let processor = Self {
             tasks: Arc::new(Default::default()),
         };
-        Self::loop_process(&processor, runtime_manager, &semphore);
+        Self::loop_process(&processor, &semphore, runtime_manager);
         processor
     }
 
     fn loop_process(
         processor: &ReadPlanReadAheadTaskProcessor,
-        runtime_manager: &RuntimeManager,
         semphore: &Arc<Semaphore>,
+        runtime_manager: &RuntimeManager,
     ) {
         let processor = processor.clone();
         let semphore = semphore.clone();
-        let external_rt = runtime_manager.dispatch_runtime.clone();
-        let internal_rt = runtime_manager.localfile_write_runtime.clone();
-        external_rt.clone().spawn(async move {
+
+        let dispatch_runtime = runtime_manager.dispatch_runtime.clone();
+        let process_runtime = runtime_manager.localfile_write_runtime.clone();
+
+        let (send, recv) = async_channel::unbounded();
+        dispatch_runtime.spawn(async move {
             loop {
                 let mut tasks = vec![];
                 let view = processor.tasks.deref().clone().into_read_only();
@@ -44,15 +47,19 @@ impl ReadPlanReadAheadTaskProcessor {
                     let tid = task.uid;
                     if let Ok(segment) = task.recv.try_recv() {
                         let permit = semphore.clone().acquire_owned().await;
-                        internal_rt.spawn(async move {
-                            let _permit = permit;
-                            if let Err(e) = task.do_load(segment) {
-                                error!("Errors on read ahead for task_id: {}. err: {}", tid, e);
-                            }
-                        });
+                        send.send((segment, task, permit, tid)).await;
                     }
                 }
                 tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        });
+
+        process_runtime.spawn(async move {
+            while let Ok((segment, task, permit, uid)) = recv.recv().await {
+                let _permit = permit;
+                if let Err(e) = task.do_load(segment) {
+                    error!("Errors on read ahead for task_id: {}. err: {}", uid, e);
+                }
             }
         });
     }
