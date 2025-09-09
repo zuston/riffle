@@ -808,6 +808,24 @@ pub static READ_AHEAD_OPERATION_DURATION: Lazy<Histogram> = Lazy::new(|| {
     Histogram::with_opts(opts).unwrap()
 });
 
+pub static READ_AHEAD_OPERATION_DURATION_OF_SEQUENTIAL: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "read_ahead_operation_of_sequential_duration_seconds",
+        "Duration of read-ahead operations",
+    )
+    .buckets(Vec::from(DEFAULT_BUCKETS));
+    Histogram::with_opts(opts).unwrap()
+});
+
+pub static READ_AHEAD_OPERATION_DURATION_OF_READ_PLAN: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "read_ahead_operation_of_read_plan_duration_seconds",
+        "Duration of read-ahead operations",
+    )
+    .buckets(Vec::from(DEFAULT_BUCKETS));
+    Histogram::with_opts(opts).unwrap()
+});
+
 pub static READ_AHEAD_OPERATION_FAILURE_COUNT: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new(
         "read_ahead_operation_failure_count",
@@ -1227,6 +1245,14 @@ fn register_custom_metrics() {
         .expect("read_ahead_active_tasks_of_read_plan must be registered");
     REGISTRY
         .register(Box::new(READ_AHEAD_OPERATION_DURATION.clone()))
+        .expect("read_ahead_operation_duration must be registered");
+    REGISTRY
+        .register(Box::new(
+            READ_AHEAD_OPERATION_DURATION_OF_SEQUENTIAL.clone(),
+        ))
+        .expect("read_ahead_operation_duration must be registered");
+    REGISTRY
+        .register(Box::new(READ_AHEAD_OPERATION_DURATION_OF_READ_PLAN.clone()))
         .expect("read_ahead_operation_duration must be registered");
     REGISTRY
         .register(Box::new(READ_AHEAD_OPERATION_FAILURE_COUNT.clone()))

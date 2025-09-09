@@ -5,10 +5,12 @@ use crate::error::WorkerError;
 use crate::metric::{
     READ_AHEAD_ACTIVE_TASKS, READ_AHEAD_ACTIVE_TASKS_OF_READ_PLAN,
     READ_AHEAD_ACTIVE_TASKS_OF_SEQUENTIAL, READ_AHEAD_BYTES, READ_AHEAD_HITS, READ_AHEAD_MISSES,
-    READ_AHEAD_OPERATIONS, READ_AHEAD_OPERATION_DURATION, READ_AHEAD_OPERATION_FAILURE_COUNT,
-    READ_AHEAD_WASTED_BYTES, READ_WITHOUT_AHEAD_DURATION, READ_WITH_AHEAD_DURATION,
-    READ_WITH_AHEAD_DURATION_OF_READ_PLAN, READ_WITH_AHEAD_DURATION_OF_SEQUENTIAL,
-    READ_WITH_AHEAD_HIT_DURATION, READ_WITH_AHEAD_MISS_DURATION,
+    READ_AHEAD_OPERATIONS, READ_AHEAD_OPERATION_DURATION,
+    READ_AHEAD_OPERATION_DURATION_OF_READ_PLAN, READ_AHEAD_OPERATION_DURATION_OF_SEQUENTIAL,
+    READ_AHEAD_OPERATION_FAILURE_COUNT, READ_AHEAD_WASTED_BYTES, READ_WITHOUT_AHEAD_DURATION,
+    READ_WITH_AHEAD_DURATION, READ_WITH_AHEAD_DURATION_OF_READ_PLAN,
+    READ_WITH_AHEAD_DURATION_OF_SEQUENTIAL, READ_WITH_AHEAD_HIT_DURATION,
+    READ_WITH_AHEAD_MISS_DURATION,
 };
 use crate::runtime::manager::RuntimeManager;
 use crate::runtime::RuntimeRef;
@@ -368,6 +370,7 @@ impl ReadPlanReadAheadTask {
         if off < self.read_offset.load(Ordering::Relaxed) as i64 {
             return Ok(());
         }
+        let _timer = READ_AHEAD_OPERATION_DURATION_OF_SEQUENTIAL.start_timer();
         let file = self.file.lock();
         do_read_ahead(&file, self.path.as_str(), off as u64, len as u64);
         Ok(())
@@ -465,6 +468,7 @@ impl SequentialReadAheadTask {
         let diff = inner.load_length - off;
         let next_load_bytes = 2 * inner.batch_size as u64;
         if diff > 0 && diff < next_load_bytes {
+            let _timer = READ_AHEAD_OPERATION_DURATION_OF_READ_PLAN.start_timer();
             let load_len = next_load_bytes;
             do_read_ahead(
                 &inner.file,
