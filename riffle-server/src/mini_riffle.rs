@@ -193,6 +193,8 @@ pub async fn shuffle_testing(config: &Config, app_ref: AppManagerRef) -> anyhow:
             sequential: false,
             read_ahead_batch_number: None,
             read_ahead_batch_size: None,
+            localfile_next_read_segments: vec![],
+            task_id: 0,
         })
         .await?;
     let mut total_partition_len = 0;
@@ -208,6 +210,8 @@ pub async fn shuffle_testing(config: &Config, app_ref: AppManagerRef) -> anyhow:
             sequential: false,
             read_ahead_batch_number: None,
             read_ahead_batch_size: None,
+            localfile_next_read_segments: vec![],
+            task_id: 0,
         })
         .await?;
     let xdata = response.from_local();

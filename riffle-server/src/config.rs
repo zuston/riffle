@@ -142,11 +142,19 @@ pub struct LocalfileStoreConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ReadAheadConfig {
-    // todo: add more options
     #[serde(default = "as_default_read_ahead_batch_size")]
     pub batch_size: String,
     #[serde(default = "as_default_read_ahead_batch_number")]
     pub batch_number: usize,
+
+    #[serde(default = "bool::default")]
+    pub read_plan_enable: bool,
+    #[serde(default = "as_default_read_plan_concurrency")]
+    pub read_plan_concurrency: usize,
+}
+
+fn as_default_read_plan_concurrency() -> usize {
+    100
 }
 
 impl Default for ReadAheadConfig {
@@ -154,6 +162,8 @@ impl Default for ReadAheadConfig {
         Self {
             batch_size: as_default_read_ahead_batch_size(),
             batch_number: as_default_read_ahead_batch_number(),
+            read_plan_enable: false,
+            read_plan_concurrency: as_default_read_plan_concurrency(),
         }
     }
 }
@@ -450,6 +460,26 @@ pub struct Config {
 
     #[serde(default = "as_default_conf_reload_enable")]
     pub conf_reload_enable: bool,
+
+    pub urpc_config: Option<UrpcConfig>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct UrpcConfig {
+    pub get_index_rpc_version: RpcVersion,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum RpcVersion {
+    V1,
+    V2,
+    V3,
+}
+
+impl Default for RpcVersion {
+    fn default() -> Self {
+        RpcVersion::V1
+    }
 }
 
 fn as_default_conf_reload_enable() -> bool {
@@ -740,7 +770,9 @@ impl Config {
 
 #[cfg(test)]
 mod test {
-    use crate::config::{as_default_app_heartbeat_timeout_min, Config, RuntimeConfig, StorageType};
+    use crate::config::{
+        as_default_app_heartbeat_timeout_min, Config, RpcVersion, RuntimeConfig, StorageType,
+    };
     use crate::readable_size::ReadableSize;
     use std::str::FromStr;
 
@@ -769,6 +801,9 @@ mod test {
         let toml_str = r#"
         store_type = "MEMORY_LOCALFILE"
         coordinator_quorum = ["xxxxxxx"]
+
+        [urpc_config]
+        get_index_rpc_version = "V2"
 
         [memory_store]
         capacity = "1024M"
@@ -802,6 +837,11 @@ mod test {
         assert_eq!(
             decoded.runtime_config.read_thread_num,
             RuntimeConfig::default().read_thread_num
+        );
+
+        assert_eq!(
+            RpcVersion::V2,
+            decoded.urpc_config.as_ref().unwrap().get_index_rpc_version
         );
 
         // check the app config

@@ -4,9 +4,10 @@ use crate::store::ResponseData::Mem;
 use crate::store::{Block, DataBytes};
 use crate::system_libc::send_file_full;
 use crate::urpc::command::{
-    GetLocalDataIndexRequestCommand, GetLocalDataIndexResponseCommand, GetLocalDataRequestCommand,
-    GetLocalDataResponseCommand, GetMemoryDataRequestCommand, GetMemoryDataResponseCommand,
-    RpcResponseCommand, SendDataRequestCommand,
+    GetLocalDataIndexRequestCommand, GetLocalDataIndexResponseCommand,
+    GetLocalDataIndexV2ResponseCommand, GetLocalDataRequestCommand, GetLocalDataRequestV2Command,
+    GetLocalDataRequestV3Command, GetLocalDataResponseCommand, GetMemoryDataRequestCommand,
+    GetMemoryDataResponseCommand, ReadSegment, RpcResponseCommand, SendDataRequestCommand,
 };
 use anyhow::{Error, Result};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -50,8 +51,11 @@ pub enum MessageType {
 
     GetLocalDataIndex = 4,
     GetLocalDataIndexResponse = 14,
+    GetLocalDataIndexV2Response = 23,
 
     GetLocalData = 5,
+    GetLocalDataV2 = 24,
+    GetLocalDataV3 = 25,
     GetLocalDataResponse = 15,
 
     RpcResponse = 0,
@@ -74,8 +78,18 @@ pub enum Frame {
     #[strum(serialize = "GetLocalDataIndexResponse")]
     GetLocalDataIndexResponse(GetLocalDataIndexResponseCommand),
 
+    #[strum(serialize = "GetLocalDataIndexResponseV2")]
+    GetLocalDataIndexV2Response(GetLocalDataIndexV2ResponseCommand),
+
     #[strum(serialize = "GetLocalData")]
     GetLocalData(GetLocalDataRequestCommand),
+
+    #[strum(serialize = "GetLocalDataV2")]
+    GetLocalDataV2(GetLocalDataRequestV2Command),
+
+    #[strum(serialize = "GetLocalDataV3")]
+    GetLocalDataV3(GetLocalDataRequestV3Command),
+
     #[strum(serialize = "GetLocalDataResponse")]
     GetLocalDataResponse(GetLocalDataResponseCommand),
 
@@ -136,6 +150,48 @@ impl Frame {
                         })?;
                     }
                 }
+
+                Ok(())
+            }
+            Frame::GetLocalDataIndexV2Response(resp) => {
+                let request_id = resp.request_id;
+                let status_code = resp.status_code;
+
+                let msg = &resp.ret_msg;
+                let msg_bytes = msg.as_bytes();
+
+                let index_bytes = &resp.data_index.index_data;
+                let data_file_len = resp.data_index.data_file_len;
+
+                // header
+                // compared with the v1 version, add the extra [4 + 4 * storage_ids.len()]
+                write_buf.put_i32(
+                    msg_bytes.len() as i32 + 8 + 4 + 4 + 8 + 4 + 4 * resp.storage_ids.len() as i32,
+                );
+                write_buf.put_u8(MessageType::GetLocalDataIndexV2Response as u8);
+                write_buf.put_i32(index_bytes.len() as i32);
+
+                // partial content with general response info
+                write_buf.put_i64(request_id);
+                write_buf.put_i32(status_code);
+
+                write_buf.put_i32(msg_bytes.len() as i32);
+                write_buf.put(msg_bytes);
+
+                // write the data length
+                write_buf.put_i64(data_file_len);
+
+                // write the storage ids
+                write_buf.put_i32(resp.storage_ids.len() as i32);
+                for storage_id in &resp.storage_ids {
+                    write_buf.put_i32(*storage_id as i32);
+                }
+
+                stream.write_all(&write_buf.split()).await?;
+
+                // write the all bytes
+                let data = index_bytes.freeze();
+                stream.write_all(&data).await?;
 
                 Ok(())
             }
@@ -263,6 +319,83 @@ impl Frame {
         skip(src, (msg_len + body_len) as usize)?;
 
         Ok(())
+    }
+
+    fn parse_to_get_localfile_data_v2_command(
+        src: &mut Cursor<&[u8]>,
+    ) -> Result<GetLocalDataRequestV2Command> {
+        debug!("Gotten the localfile data v2 request");
+
+        let request_id = get_i64(src)?;
+        let app_id = get_string(src)?;
+        let shuffle_id = get_i32(src)?;
+        let partition_id = get_i32(src)?;
+        let partition_num_per_range = get_i32(src)?;
+        let partition_num = get_i32(src)?;
+        let offset = get_i64(src)?;
+        let length = get_i32(src)?;
+        let timestamp = get_i64(src)?;
+
+        // for the v2 version
+        let storage_id = get_i32(src)?;
+
+        Ok(GetLocalDataRequestV2Command {
+            request_id,
+            app_id,
+            shuffle_id,
+            partition_id,
+            partition_num_per_range,
+            partition_num,
+            offset,
+            length,
+            timestamp,
+            storage_id,
+        })
+    }
+
+    fn parse_to_get_localfile_data_v3_command(
+        src: &mut Cursor<&[u8]>,
+    ) -> Result<GetLocalDataRequestV3Command> {
+        debug!("Gotten the localfile data v3 request");
+
+        let request_id = get_i64(src)?;
+        let app_id = get_string(src)?;
+        let shuffle_id = get_i32(src)?;
+        let partition_id = get_i32(src)?;
+        let partition_num_per_range = get_i32(src)?;
+        let partition_num = get_i32(src)?;
+        let offset = get_i64(src)?;
+        let length = get_i32(src)?;
+        let timestamp = get_i64(src)?;
+
+        // for the v2 version
+        let storage_id = get_i32(src)?;
+
+        // for the v3 version.
+        let segment_len = get_i32(src)?;
+        let mut segments = Vec::with_capacity(segment_len as usize);
+        for _ in 0..segment_len {
+            segments.push(ReadSegment {
+                offset: get_i64(src)?,
+                length: get_i64(src)?,
+            });
+        }
+        let task_id = get_i64(src)?;
+
+        Ok(GetLocalDataRequestV3Command {
+            request_id,
+            app_id,
+            shuffle_id,
+            partition_id,
+            partition_num_per_range,
+            partition_num,
+            offset,
+            length,
+            timestamp,
+            storage_id,
+            next_read_segments: segments,
+            task_id,
+        })
     }
 
     fn parse_to_get_localfile_data_command(
@@ -420,6 +553,14 @@ impl Frame {
             MessageType::GetLocalData => {
                 let command = Frame::parse_to_get_localfile_data_command(src)?;
                 return Ok(Frame::GetLocalData(command));
+            }
+            MessageType::GetLocalDataV2 => {
+                let command = Frame::parse_to_get_localfile_data_v2_command(src)?;
+                return Ok(Frame::GetLocalDataV2(command));
+            }
+            MessageType::GetLocalDataV3 => {
+                let command = Frame::parse_to_get_localfile_data_v3_command(src)?;
+                return Ok(Frame::GetLocalDataV3(command));
             }
             MessageType::GetLocalDataIndex => {
                 let command = Frame::parse_to_get_localfile_index_command(src)?;

@@ -319,6 +319,10 @@ impl AppManager {
     pub fn runtime_manager(&self) -> RuntimeManager {
         self.runtime_manager.clone()
     }
+
+    pub fn get_config(&self) -> &Config {
+        &self.config
+    }
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@ use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::purge_event::PurgeReason;
 use crate::id_layout::IdLayout;
 use crate::store::Block;
+use crate::urpc::command::ReadSegment;
 use croaring::Treemap;
 use std::collections::HashMap;
 use std::ops::Deref;
@@ -108,6 +109,10 @@ pub struct ReadingViewContext {
     pub sequential: bool,
     pub read_ahead_batch_number: Option<usize>,
     pub read_ahead_batch_size: Option<usize>,
+
+    // next read segments
+    pub localfile_next_read_segments: Vec<ReadSegment>,
+    pub task_id: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,6 +132,8 @@ impl ReadingViewContext {
             sequential: false,
             read_ahead_batch_number: None,
             read_ahead_batch_size: None,
+            localfile_next_read_segments: vec![],
+            task_id: 0,
         }
     }
 
@@ -149,6 +156,16 @@ impl ReadingViewContext {
         self.sequential = true;
         self.read_ahead_batch_number = batch_number;
         self.read_ahead_batch_size = batch_size;
+        self
+    }
+
+    pub fn with_localfile_next_read_segments(mut self, segments: Vec<ReadSegment>) -> Self {
+        self.localfile_next_read_segments = segments;
+        self
+    }
+
+    pub fn with_task_id(mut self, task_id: i64) -> Self {
+        self.task_id = task_id;
         self
     }
 }

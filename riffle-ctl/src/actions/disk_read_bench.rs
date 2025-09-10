@@ -4,7 +4,7 @@ use crate::Commands::DiskAppendBench;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::info;
 use riffle_server::config::{IoLimiterConfig, ReadAheadConfig};
-use riffle_server::runtime::manager::create_runtime;
+use riffle_server::runtime::manager::{create_runtime, RuntimeManager};
 use riffle_server::runtime::RuntimeRef;
 use riffle_server::store::local::io_layer_read_ahead::ReadAheadLayer;
 use riffle_server::store::local::layers::Handler;
@@ -51,7 +51,11 @@ impl DiskReadBenchAction {
         ));
         if read_ahead_enable {
             let options = ReadAheadConfig::default();
-            builder = builder.layer(ReadAheadLayer::new(dir.as_str(), &options));
+            builder = builder.layer(ReadAheadLayer::new(
+                dir.as_str(),
+                &options,
+                RuntimeManager::default(),
+            ));
             info!("Read ahead layer is enabled.");
         }
         let handler = Arc::new(builder.build());
