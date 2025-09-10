@@ -125,19 +125,20 @@ impl ReadAheadLayerWrapper {
         let (off, len) = options.read_range.get_range();
         let ahead_options = options.ahead_options.as_ref().unwrap();
         let task_id = options.task_id;
+
         let load_task = self
             .read_plan_load_tasks
             .entry((path.to_owned(), task_id))
             .or_insert_with(|| {
+                // add metrics
+                TOTAL_READ_AHEAD_ACTIVE_TASKS.inc();
+                READ_AHEAD_ACTIVE_TASKS.inc();
+                READ_AHEAD_ACTIVE_TASKS_OF_READ_PLAN.inc();
+
                 let uid = self.read_plan_task_id_inc.fetch_add(1, Ordering::SeqCst);
                 let processor = &self.read_plan_load_processor;
                 match ReadPlanReadAheadTask::new(abs_path.as_str(), uid, processor) {
-                    Ok(task) => {
-                        TOTAL_READ_AHEAD_ACTIVE_TASKS.inc();
-                        READ_AHEAD_ACTIVE_TASKS.inc();
-                        READ_AHEAD_ACTIVE_TASKS_OF_READ_PLAN.inc();
-                        Some(task)
-                    }
+                    Ok(task) => Some(task),
                     Err(e) => {
                         error!("Errors on initializing read-plan task. err: {}", e);
                         None
