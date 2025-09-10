@@ -387,7 +387,7 @@ impl ReadPlanReadAheadTask {
         if off < self.read_offset.load(Ordering::Relaxed) as i64 {
             return Ok(());
         }
-        let _timer = READ_AHEAD_OPERATION_DURATION_OF_SEQUENTIAL.start_timer();
+        let _timer = READ_AHEAD_OPERATION_DURATION_OF_READ_PLAN.start_timer();
         let file = self.file.lock();
         do_read_ahead(&file, self.path.as_str(), off as u64, len as u64);
         Ok(())
@@ -485,7 +485,7 @@ impl SequentialReadAheadTask {
         let diff = inner.load_length - off;
         let next_load_bytes = 2 * inner.batch_size as u64;
         if diff > 0 && diff < next_load_bytes {
-            let _timer = READ_AHEAD_OPERATION_DURATION_OF_READ_PLAN.start_timer();
+            let _timer = READ_AHEAD_OPERATION_DURATION_OF_SEQUENTIAL.start_timer();
             let load_len = next_load_bytes;
             do_read_ahead(
                 &inner.file,
