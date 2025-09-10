@@ -377,6 +377,8 @@ mod tests {
     use std::io::Write;
     use std::path::Path;
     use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
     use tempfile::{NamedTempFile, TempDir};
 
     fn init_logger() -> Result<(), SetLoggerError> {
@@ -483,7 +485,7 @@ mod tests {
 
         let options = ReadOptions::default()
             .with_buffer_io()
-            .with_read_range(ReadRange::RANGE(0, 5))
+            .with_read_range(ReadRange::RANGE(0, 1))
             .with_ahead_options(AheadOptions {
                 sequential: false,
                 read_batch_number: None,
@@ -499,12 +501,27 @@ mod tests {
                     },
                 ],
             });
+
+        // first time to read
         let result = runtime_manager
             .default_runtime
-            .block_on(layer.read(relative_file_name.as_str(), options));
+            .block_on(layer.read(relative_file_name.as_str(), options.clone()));
         assert!(result.is_ok());
         assert_eq!(1, layer.read_plan_load_tasks.len());
         assert_eq!(1, layer.read_plan_load_processor.task_size());
+
+        // second time to read, to check the read plan load logic correctness.
+        thread::sleep(Duration::from_secs(1));
+        let result = runtime_manager
+            .default_runtime
+            .block_on(layer.read(relative_file_name.as_str(), options.clone()));
+        assert!(result.is_ok());
+        assert_eq!(1, layer.read_plan_load_tasks.len());
+        assert_eq!(1, layer.read_plan_load_processor.task_size());
+        let binding = layer.read_plan_load_tasks.clone().into_read_only();
+        let task = binding.iter().next().unwrap().1.as_ref().unwrap();
+        assert_eq!(2, task.get_hit_count());
+        assert_eq!(0, task.get_missed_count());
 
         runtime_manager
             .default_runtime
