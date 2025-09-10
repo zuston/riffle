@@ -119,6 +119,7 @@ impl ReadAheadLayerWrapper {
         path: &str,
         options: ReadOptions,
     ) -> anyhow::Result<DataBytes, WorkerError> {
+        info!("Ahead options: {:?}", &options.ahead_options);
         let timer = Instant::now();
 
         let abs_path = format!("{}/{}", &self.root, path);
