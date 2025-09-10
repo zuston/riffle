@@ -339,7 +339,8 @@ impl GetLocalDataRequestV3Command {
             ReadingOptions::FILE_OFFSET_AND_LEN(offset, length as i64),
             RpcType::URPC,
         )
-        .with_localfile_next_read_segments(self.next_read_segments.clone());
+        .with_localfile_next_read_segments(self.next_read_segments.clone())
+        .with_task_id(self.task_id);
         let mut len = 0;
         let command = match app
             .select(ctx)
