@@ -775,6 +775,14 @@ pub static READ_AHEAD_WASTED_BYTES: Lazy<IntCounter> = Lazy::new(|| {
     .expect("metric should be created")
 });
 
+pub static TOTAL_READ_AHEAD_ACTIVE_TASKS: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new(
+        "total_read_ahead_active_tasks",
+        "Total number of active read-ahead tasks",
+    )
+    .expect("metric should be created")
+});
+
 pub static READ_AHEAD_ACTIVE_TASKS: Lazy<IntGauge> = Lazy::new(|| {
     IntGauge::new(
         "read_ahead_active_tasks",
@@ -1234,6 +1242,9 @@ fn register_custom_metrics() {
     REGISTRY
         .register(Box::new(READ_AHEAD_WASTED_BYTES.clone()))
         .expect("read_ahead_wasted_bytes must be registered");
+    REGISTRY
+        .register(Box::new(TOTAL_READ_AHEAD_ACTIVE_TASKS.clone()))
+        .expect("total_read_ahead_active_tasks must be registered");
     REGISTRY
         .register(Box::new(READ_AHEAD_ACTIVE_TASKS.clone()))
         .expect("read_ahead_active_tasks must be registered");

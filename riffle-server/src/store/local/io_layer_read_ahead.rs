@@ -10,7 +10,7 @@ use crate::metric::{
     READ_AHEAD_OPERATION_FAILURE_COUNT, READ_AHEAD_WASTED_BYTES, READ_WITHOUT_AHEAD_DURATION,
     READ_WITH_AHEAD_DURATION, READ_WITH_AHEAD_DURATION_OF_READ_PLAN,
     READ_WITH_AHEAD_DURATION_OF_SEQUENTIAL, READ_WITH_AHEAD_HIT_DURATION,
-    READ_WITH_AHEAD_MISS_DURATION,
+    READ_WITH_AHEAD_MISS_DURATION, TOTAL_READ_AHEAD_ACTIVE_TASKS,
 };
 use crate::runtime::manager::RuntimeManager;
 use crate::runtime::RuntimeRef;
@@ -28,7 +28,7 @@ use clap::builder::Str;
 use dashmap::DashMap;
 use futures::channel::oneshot::channel;
 use libc::abs;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use parking_lot::Mutex;
 use std::fs::File;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -133,11 +133,15 @@ impl ReadAheadLayerWrapper {
                 let processor = &self.read_plan_load_processor;
                 match ReadPlanReadAheadTask::new(abs_path.as_str(), uid, processor) {
                     Ok(task) => {
+                        TOTAL_READ_AHEAD_ACTIVE_TASKS.inc();
                         READ_AHEAD_ACTIVE_TASKS.inc();
                         READ_AHEAD_ACTIVE_TASKS_OF_READ_PLAN.inc();
                         Some(task)
                     }
-                    Err(_) => None,
+                    Err(e) => {
+                        error!("Errors on initializing read-plan task. err: {}", e);
+                        None
+                    }
                 }
             })
             .clone();
@@ -182,6 +186,7 @@ impl ReadAheadLayerWrapper {
             .or_insert_with(|| {
                 match SequentialReadAheadTask::new(&abs_path, batch_size, batch_number) {
                     Ok(task) => {
+                        TOTAL_READ_AHEAD_ACTIVE_TASKS.inc();
                         READ_AHEAD_ACTIVE_TASKS.inc();
                         READ_AHEAD_ACTIVE_TASKS_OF_SEQUENTIAL.inc();
                         Some(task)
@@ -304,8 +309,7 @@ impl LocalIO for ReadAheadLayerWrapper {
         let (seq_deletion_millis, seq_deletion_tasks) =
             Self::delete_with_prefix(&self.sequential_load_tasks, prefix.as_str(), |k| k, |_| {});
         let (millis, tasks) = if seq_deletion_tasks <= 0 {
-            READ_AHEAD_ACTIVE_TASKS_OF_READ_PLAN.dec();
-            Self::delete_with_prefix(
+            let (millis, tasks) = Self::delete_with_prefix(
                 &self.read_plan_load_tasks,
                 prefix.as_str(),
                 |(left, _)| left,
@@ -313,9 +317,13 @@ impl LocalIO for ReadAheadLayerWrapper {
                     let uid = v.uid;
                     self.read_plan_load_processor.remove_task(uid);
                 },
-            )
+            );
+            if tasks > 0 {
+                READ_AHEAD_ACTIVE_TASKS_OF_READ_PLAN.sub(tasks as i64);
+            }
+            (millis, tasks)
         } else {
-            READ_AHEAD_ACTIVE_TASKS_OF_SEQUENTIAL.dec();
+            READ_AHEAD_ACTIVE_TASKS_OF_SEQUENTIAL.sub(seq_deletion_tasks as i64);
             (seq_deletion_millis, seq_deletion_tasks)
         };
 
