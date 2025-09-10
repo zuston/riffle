@@ -1,4 +1,6 @@
 mod processor;
+mod read_plan_tasks;
+mod sequential_tasks;
 
 use crate::config::ReadAheadConfig;
 use crate::error::WorkerError;
@@ -15,6 +17,8 @@ use crate::metric::{
 use crate::runtime::manager::RuntimeManager;
 use crate::runtime::RuntimeRef;
 use crate::store::local::io_layer_read_ahead::processor::ReadPlanReadAheadTaskProcessor;
+use crate::store::local::io_layer_read_ahead::read_plan_tasks::ReadPlanReadAheadTask;
+use crate::store::local::io_layer_read_ahead::sequential_tasks::SequentialReadAheadTask;
 use crate::store::local::layers::{Handler, Layer};
 use crate::store::local::options::{CreateOptions, WriteOptions};
 use crate::store::local::read_options::{AheadOptions, ReadOptions, ReadRange};
@@ -342,82 +346,6 @@ impl LocalIO for ReadAheadLayerWrapper {
     }
 }
 
-#[derive(Clone)]
-struct ReadPlanReadAheadTask {
-    uid: u64,
-    file: Arc<Mutex<File>>,
-    read_offset: Arc<AtomicU64>,
-    plan_offset: Arc<AtomicU64>,
-    sender: Arc<async_channel::Sender<ReadSegment>>,
-    recv: Arc<async_channel::Receiver<ReadSegment>>,
-    path: Arc<String>,
-
-    processor: ReadPlanReadAheadTaskProcessor,
-}
-
-impl ReadPlanReadAheadTask {
-    fn new(
-        abs_path: &str,
-        uid: u64,
-        processor: &ReadPlanReadAheadTaskProcessor,
-    ) -> anyhow::Result<Self> {
-        let (send, recv) = async_channel::unbounded();
-        let file = File::options()
-            .read(true)
-            .write(true)
-            .create(true)
-            .append(true)
-            .open(abs_path)?;
-        let task = Self {
-            uid,
-            file: Arc::new(Mutex::new(file)),
-            read_offset: Arc::new(Default::default()),
-            plan_offset: Arc::new(Default::default()),
-            sender: Arc::new(send),
-            recv: Arc::new(recv),
-            path: Arc::new(abs_path.to_string()),
-            processor: processor.clone(),
-        };
-        processor.add_task(&task);
-        Ok(task)
-    }
-
-    async fn do_load(&self, segment: ReadSegment) -> anyhow::Result<()> {
-        let off = segment.offset;
-        let len = segment.length;
-
-        if off < self.read_offset.load(Ordering::Relaxed) as i64 {
-            return Ok(());
-        }
-        let _timer = READ_AHEAD_OPERATION_DURATION_OF_READ_PLAN.start_timer();
-        let file = self.file.lock();
-        do_read_ahead(&file, self.path.as_str(), off as u64, len as u64);
-        Ok(())
-    }
-
-    async fn load(
-        &self,
-        next_segments: &Vec<ReadSegment>,
-        now_read_off: u64,
-    ) -> anyhow::Result<()> {
-        self.read_offset.store(now_read_off, Ordering::SeqCst);
-
-        // for plan offset
-        let now_plan_offset = self.plan_offset.load(Ordering::SeqCst);
-        let mut max = now_plan_offset;
-        for next_segment in next_segments {
-            let off = next_segment.offset as u64;
-            if off > now_plan_offset {
-                self.sender.send(next_segment.clone()).await?;
-                max = off;
-            }
-        }
-        self.plan_offset.store(max, Ordering::SeqCst);
-
-        Ok(())
-    }
-}
-
 fn do_read_ahead(file: &File, path: &str, off: u64, len: u64) {
     let _timer = READ_AHEAD_OPERATION_DURATION.start_timer();
 
@@ -432,74 +360,6 @@ fn do_read_ahead(file: &File, path: &str, off: u64, len: u64) {
             path, off, len
         );
         READ_AHEAD_OPERATION_FAILURE_COUNT.inc();
-    }
-}
-
-#[derive(Clone)]
-struct SequentialReadAheadTask {
-    inner: Arc<tokio::sync::Mutex<Inner>>,
-}
-
-struct Inner {
-    absolute_path: String,
-    file: File,
-
-    is_initialized: bool,
-    load_start_offset: u64,
-    load_length: u64,
-
-    batch_size: usize,
-    batch_number: usize,
-}
-
-impl SequentialReadAheadTask {
-    fn new(abs_path: &str, batch_size: usize, batch_number: usize) -> anyhow::Result<Self> {
-        let file = File::options()
-            .read(true)
-            .write(true)
-            .create(true)
-            .append(true)
-            .open(abs_path)?;
-        Ok(Self {
-            inner: Arc::new(tokio::sync::Mutex::new(Inner {
-                absolute_path: abs_path.to_string(),
-                file,
-                is_initialized: false,
-                load_start_offset: 0,
-                load_length: 0,
-                batch_size,
-                batch_number,
-            })),
-        })
-    }
-
-    // the return value shows whether the load operation happens
-    async fn load(&self, off: u64, len: u64) -> anyhow::Result<bool> {
-        let mut inner = self.inner.lock().await;
-        if !inner.is_initialized && off == 0 {
-            let load_len = (inner.batch_number * inner.batch_size) as u64;
-            do_read_ahead(&inner.file, inner.absolute_path.as_str(), 0, load_len);
-            inner.is_initialized = true;
-            inner.load_length = load_len;
-            return Ok(true);
-        }
-
-        let diff = inner.load_length - off;
-        let next_load_bytes = 2 * inner.batch_size as u64;
-        if diff > 0 && diff < next_load_bytes {
-            let _timer = READ_AHEAD_OPERATION_DURATION_OF_SEQUENTIAL.start_timer();
-            let load_len = next_load_bytes;
-            do_read_ahead(
-                &inner.file,
-                inner.absolute_path.as_str(),
-                inner.load_start_offset + inner.load_length,
-                load_len,
-            );
-            inner.load_length += load_len;
-            return Ok(true);
-        }
-
-        Ok(false)
     }
 }
 
