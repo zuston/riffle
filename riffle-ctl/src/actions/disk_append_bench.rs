@@ -57,6 +57,7 @@ impl DiskAppendBenchAction {
             http_thread_num: 4,
             default_thread_num: 4,
             dispatch_thread_num: 4,
+            read_ahead_thread_number: 1,
         });
         let http = HttpMonitorService::init(&config, runtime_manager.clone());
 
