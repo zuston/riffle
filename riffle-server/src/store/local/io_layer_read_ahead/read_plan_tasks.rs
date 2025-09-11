@@ -1,4 +1,7 @@
-use crate::metric::READ_AHEAD_OPERATION_DURATION_OF_READ_PLAN;
+use crate::metric::{
+    READ_AHEAD_HITS_OF_READ_PLAN, READ_AHEAD_MISSES_OF_READ_PLAN,
+    READ_AHEAD_OPERATION_DURATION_OF_READ_PLAN,
+};
 use crate::store::local::io_layer_read_ahead::do_read_ahead;
 use crate::store::local::io_layer_read_ahead::processor::ReadPlanReadAheadTaskProcessor;
 use crate::urpc::command::ReadSegment;
@@ -65,6 +68,7 @@ impl ReadPlanReadAheadTask {
 
         if off < self.read_offset.load(Ordering::Relaxed) as i64 {
             self.missed_counter.fetch_add(1, Ordering::Relaxed);
+            READ_AHEAD_MISSES_OF_READ_PLAN.inc();
             return Ok(());
         }
         let _timer = READ_AHEAD_OPERATION_DURATION_OF_READ_PLAN.start_timer();
@@ -72,6 +76,7 @@ impl ReadPlanReadAheadTask {
         do_read_ahead(&file, self.path.as_str(), off as u64, len as u64);
         self.loaded_offset.store(off as u64, Ordering::Relaxed);
         self.hit_counter.fetch_add(1, Ordering::Relaxed);
+        READ_AHEAD_HITS_OF_READ_PLAN.inc();
         Ok(())
     }
 
