@@ -17,6 +17,7 @@
 
 use crate::config::RuntimeConfig;
 use crate::runtime::{Builder, RuntimeRef};
+use libc::creat;
 use std::future::Future;
 use std::sync::Arc;
 
@@ -34,6 +35,9 @@ pub struct RuntimeManager {
     // like the data purging/ heartbeat / metric push
     pub default_runtime: RuntimeRef,
     pub dispatch_runtime: RuntimeRef,
+
+    // read ahead runtime
+    pub read_ahead_runtime: RuntimeRef,
 }
 
 pub fn create_runtime(pool_size: usize, name: &str) -> RuntimeRef {
@@ -68,6 +72,10 @@ impl RuntimeManager {
             http_runtime: create_runtime(config.http_thread_num, "http_thread_pool"),
             default_runtime: create_runtime(config.default_thread_num, "default_thread_pool"),
             dispatch_runtime: create_runtime(config.dispatch_thread_num, "dispatch_thread_pool"),
+            read_ahead_runtime: create_runtime(
+                config.read_ahead_thread_number,
+                "read_ahead_thread_pool",
+            ),
         }
     }
 
