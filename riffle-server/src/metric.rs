@@ -703,6 +703,23 @@ pub static READ_AHEAD_MISSES: Lazy<IntCounter> = Lazy::new(|| {
         .expect("metric should be created")
 });
 
+// for the read ahead of read plan
+pub static READ_AHEAD_HITS_OF_READ_PLAN: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new(
+        "read_ahead_hits_of_read_plan",
+        "Number of read-ahead cache hits",
+    )
+    .expect("metric should be created")
+});
+
+pub static READ_AHEAD_MISSES_OF_READ_PLAN: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new(
+        "read_ahead_misses_of_read_plan",
+        "Number of read-ahead cache misses",
+    )
+    .expect("metric should be created")
+});
+
 // Read-ahead performance metrics
 pub static READ_WITH_AHEAD_DURATION: Lazy<Histogram> = Lazy::new(|| {
     let opts = HistogramOpts::new("read_with_ahead_duration_seconds", "Duration of reads")
@@ -1214,6 +1231,12 @@ fn register_custom_metrics() {
         .expect("read_ahead_hits must be registered");
     REGISTRY
         .register(Box::new(READ_AHEAD_MISSES.clone()))
+        .expect("read_ahead_misses must be registered");
+    REGISTRY
+        .register(Box::new(READ_AHEAD_MISSES_OF_READ_PLAN.clone()))
+        .expect("read_ahead_misses must be registered");
+    REGISTRY
+        .register(Box::new(READ_AHEAD_HITS_OF_READ_PLAN.clone()))
         .expect("read_ahead_misses must be registered");
     REGISTRY
         .register(Box::new(READ_WITH_AHEAD_DURATION.clone()))
