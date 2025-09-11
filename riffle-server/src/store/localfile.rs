@@ -24,8 +24,8 @@ use crate::config::{LocalfileStoreConfig, StorageType};
 use crate::error::WorkerError;
 use crate::metric::{
     GAUGE_LOCAL_DISK_SERVICE_USED, LCOALFILE_GET_DATA_RPC_LATENCY_HISTOGRAM_WITH_DATA_BYTES,
-    RPC_BATCH_BYTES_OPERATION, RPC_BATCH_DATA_BYTES_HISTOGRAM,
-    TOTAL_DETECTED_LOCALFILE_IN_CONSISTENCY, TOTAL_LOCALFILE_USED,
+    LOCALFILE_GET_DATA_RPC_SIZE_HISTOGRAM, RPC_BATCH_BYTES_OPERATION,
+    RPC_BATCH_DATA_BYTES_HISTOGRAM, TOTAL_DETECTED_LOCALFILE_IN_CONSISTENCY, TOTAL_LOCALFILE_USED,
 };
 use crate::store::ResponseDataIndex::Local;
 use crate::store::{
@@ -431,6 +431,9 @@ impl LocalFileStore {
         LCOALFILE_GET_DATA_RPC_LATENCY_HISTOGRAM_WITH_DATA_BYTES
             .with_label_values(&[bucket])
             .observe(latency);
+        LOCALFILE_GET_DATA_RPC_SIZE_HISTOGRAM
+            .with_label_values(&[bucket])
+            .observe(size as f64);
     }
 }
 
