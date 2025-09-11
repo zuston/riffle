@@ -280,24 +280,30 @@ impl LocalIO for ReadAheadLayerWrapper {
         match options.read_range {
             ReadRange::ALL => self.handler.read(&path, options).await,
             ReadRange::RANGE(off, len) => {
-                if Self::is_sequential(&options.ahead_options) {
-                    self.read_ahead_with_sequential_mode(path, options).await
-                } else {
-                    if self.read_plan_enabled && Self::is_read_plan(&options.ahead_options) {
-                        self.read_ahead_with_read_plan(path, options).await
-                    } else {
-                        let timer = Instant::now();
-                        let result = self.handler.read(&path, options).await;
-                        if let Ok(data) = &result {
-                            match data {
-                                DataBytes::RawIO(_) => {}
-                                _ => {
-                                    let duration = timer.elapsed().as_secs_f64();
-                                    READ_WITHOUT_AHEAD_DURATION.observe(duration);
+                match &options.ahead_options {
+                    // If this is none, it means read-ahead is disabled by client side
+                    None => self.handler.read(&path, options).await,
+                    Some(ahead_options) => {
+                        if ahead_options.sequential {
+                            self.read_ahead_with_sequential_mode(path, options).await
+                        } else if self.read_plan_enabled
+                            && !ahead_options.next_read_segments.is_empty()
+                        {
+                            self.read_ahead_with_read_plan(path, options).await
+                        } else {
+                            let timer = Instant::now();
+                            let result = self.handler.read(&path, options).await;
+                            if let Ok(data) = &result {
+                                match data {
+                                    DataBytes::RawIO(_) => {}
+                                    _ => {
+                                        let duration = timer.elapsed().as_secs_f64();
+                                        READ_WITHOUT_AHEAD_DURATION.observe(duration);
+                                    }
                                 }
                             }
+                            result
                         }
-                        result
                     }
                 }
             }

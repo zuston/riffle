@@ -503,7 +503,7 @@ impl Store for LocalFileStore {
                 } else {
                     read_options.with_buffer_io()
                 };
-                if ctx.sequential || !ctx.localfile_next_read_segments.is_empty() {
+                if ctx.read_ahead_client_enabled {
                     let ahead = AheadOptions {
                         sequential: ctx.sequential,
                         read_batch_number: ctx.read_ahead_batch_number,

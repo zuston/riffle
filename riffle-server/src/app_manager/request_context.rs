@@ -105,6 +105,9 @@ pub struct ReadingViewContext {
     pub rpc_source: RpcType,
     pub sendfile_enabled: bool,
 
+    // tag whether the read-ahead is enabled
+    pub read_ahead_client_enabled: bool,
+
     // for the localfile read_ahead layer
     pub sequential: bool,
     pub read_ahead_batch_number: Option<usize>,
@@ -129,6 +132,7 @@ impl ReadingViewContext {
             task_ids_filter: None,
             rpc_source,
             sendfile_enabled: false,
+            read_ahead_client_enabled: false,
             sequential: false,
             read_ahead_batch_number: None,
             read_ahead_batch_size: None,
@@ -166,6 +170,11 @@ impl ReadingViewContext {
 
     pub fn with_task_id(mut self, task_id: i64) -> Self {
         self.task_id = task_id;
+        self
+    }
+
+    pub fn with_read_ahead_client_enabled(mut self, enabled: bool) -> Self {
+        self.read_ahead_client_enabled = enabled;
         self
     }
 }
