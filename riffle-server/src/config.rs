@@ -267,6 +267,7 @@ pub struct RuntimeConfig {
     pub http_thread_num: usize,
     pub default_thread_num: usize,
     pub dispatch_thread_num: usize,
+    pub read_ahead_thread_number: usize,
 }
 
 impl Default for RuntimeConfig {
@@ -278,6 +279,7 @@ impl Default for RuntimeConfig {
             http_thread_num: 2,
             default_thread_num: 10,
             dispatch_thread_num: 100,
+            read_ahead_thread_number: 100,
         }
     }
 }

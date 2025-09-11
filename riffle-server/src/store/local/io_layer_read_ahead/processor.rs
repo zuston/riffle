@@ -41,7 +41,7 @@ impl ReadPlanReadAheadTaskProcessor {
         let semphore = semphore.clone();
 
         let dispatch_runtime = runtime_manager.dispatch_runtime.clone();
-        let process_runtime = runtime_manager.localfile_write_runtime.clone();
+        let process_runtime = runtime_manager.read_ahead_runtime.clone();
 
         let (send, recv) = async_channel::unbounded();
         dispatch_runtime.spawn_with_await_tree("read-plan-read-ahead-tasks-dispatch", async move {
