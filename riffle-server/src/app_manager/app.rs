@@ -248,6 +248,7 @@ impl App {
                 _ => {
                     // for the localfile getting, tag the sequential read
                     let partition_meta = self.get_partition_meta(&ctx.uid);
+                    let ctx = ctx.with_read_ahead_client_enabled(true);
                     if (partition_meta.is_sequential_read()) {
                         ctx.with_sequential(
                             self.app_config_options.read_ahead_batch_number,
