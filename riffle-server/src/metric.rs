@@ -610,6 +610,18 @@ pub static RPC_BATCH_DATA_BYTES_HISTOGRAM: Lazy<HistogramVec> = Lazy::new(|| {
     opts
 });
 
+pub static LCOALFILE_GET_DATA_RPC_LATENCY_HISTOGRAM_WITH_DATA_BYTES: Lazy<HistogramVec> =
+    Lazy::new(|| {
+        let histogram = register_histogram_vec!(
+            "localfile_get_data_rpc_latency_histogram",
+            "Latency of requests grouped by size bucket",
+            &["size"],
+            Vec::from(DEFAULT_BUCKETS) // latency buckets
+        )
+        .unwrap();
+        histogram
+    });
+
 pub static MEMORY_SPILL_IN_FLUSHING_BYTES_HISTOGRAM: Lazy<HistogramVec> = Lazy::new(|| {
     let opts = histogram_opts!(
         "memory_spill_in_flushing_bytes_histogram",
