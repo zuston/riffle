@@ -147,7 +147,7 @@ impl HealthService {
         // case2: once disk unhealthy, mark the service unhealthy
 
         if let Some(limit) = self.alive_app_number_limit {
-            let alive_app_number = self.app_manager_ref.get_alive_app_number();
+            let alive_app_number = self.app_manager_ref.get_app_count();
             if alive_app_number > limit {
                 return Ok(false);
             }
@@ -174,7 +174,7 @@ impl HealthService {
         // 1. exclude the value always 0
         // 2. ignore when app number is 0
         let used = self.app_manager_ref.store_memory_snapshot().await?.used();
-        let running_app_num = self.app_manager_ref.get_alive_app_number();
+        let running_app_num = self.app_manager_ref.get_app_count();
         let mut mem_stat = self.health_stat.memory_used_size_stat.lock();
         if mem_stat.is_marked_unhealthy {
             return Ok(false);
