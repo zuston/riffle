@@ -7,6 +7,7 @@ pub enum PurgeReason {
     SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(ApplicationId, i32),
     APP_LEVEL_EXPLICIT_UNREGISTER(ApplicationId),
     APP_LEVEL_HEARTBEAT_TIMEOUT(ApplicationId),
+    SERVICE_FORCE_KILL(ApplicationId),
 }
 
 impl PurgeReason {
@@ -15,6 +16,7 @@ impl PurgeReason {
             PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(x, y) => (x.to_owned(), Some(*y)),
             PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(x) => (x.to_owned(), None),
             PurgeReason::APP_LEVEL_HEARTBEAT_TIMEOUT(x) => (x.to_owned(), None),
+            PurgeReason::SERVICE_FORCE_KILL(x) => (x.to_owned(), None),
         }
     }
 
@@ -23,6 +25,7 @@ impl PurgeReason {
             PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(x, y) => x.to_owned(),
             PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(x) => x.to_owned(),
             PurgeReason::APP_LEVEL_HEARTBEAT_TIMEOUT(x) => x.to_owned(),
+            PurgeReason::SERVICE_FORCE_KILL(x) => x.to_owned(),
         }
     }
 }

@@ -197,7 +197,7 @@ impl AppManager {
                 {
                     let reason = event.reason;
                     info!("Purging data with reason: {}", &reason);
-                    if let Err(err) = app_manager_cloned.purge_app_data(&reason).await {
+                    if let Err(err) = app_manager_cloned.purge(&reason).await {
                         PURGE_FAILED_COUNTER.inc();
                         error!(
                             "Errors on purging data with reason: {}. err: {:?}",
@@ -234,7 +234,7 @@ impl AppManager {
         self.store.get_spill_event_num()
     }
 
-    async fn purge_app_data(&self, reason: &PurgeReason) -> Result<()> {
+    pub async fn purge(&self, reason: &PurgeReason) -> Result<()> {
         let (app_id, shuffle_id_option) = reason.extract();
         let app = self.get_app(&app_id).ok_or(anyhow!(format!(
             "App:{} don't exist when purging data, this should not happen",
@@ -264,8 +264,17 @@ impl AppManager {
         self.apps.get(app_id).map(|v| v.value().clone())
     }
 
-    pub fn get_alive_app_number(&self) -> usize {
+    pub fn get_app_count(&self) -> usize {
         self.apps.len()
+    }
+
+    pub fn get_apps(&self) -> Vec<Arc<App>> {
+        self.apps
+            .clone()
+            .into_read_only()
+            .iter()
+            .map(|x| x.1.clone())
+            .collect()
     }
 
     pub fn register(
@@ -311,6 +320,16 @@ impl AppManager {
         self.sender
             .send(PurgeEvent {
                 reason: PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(application_id),
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn kill_app(&self, app_id: &str) -> Result<()> {
+        let application_id = ApplicationId::from(app_id);
+        self.sender
+            .send(PurgeEvent {
+                reason: PurgeReason::SERVICE_FORCE_KILL(application_id),
             })
             .await?;
         Ok(())
@@ -655,9 +674,8 @@ pub(crate) mod test {
             // case3: purge
             runtime_manager
                 .wait(
-                    app_manager_ref.purge_app_data(&PurgeReason::APP_LEVEL_HEARTBEAT_TIMEOUT(
-                        app_id.to_owned(),
-                    )),
+                    app_manager_ref
+                        .purge(&PurgeReason::APP_LEVEL_HEARTBEAT_TIMEOUT(app_id.to_owned())),
                 )
                 .expect("");
 

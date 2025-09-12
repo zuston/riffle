@@ -34,7 +34,7 @@ enum Operation {
 }
 
 #[handler]
-fn admin_handler(req: &Request) -> poem::Result<String> {
+async fn admin_handler(req: &Request) -> poem::Result<String> {
     let params = req.params::<OperationParam>()?;
     let server_state_manager_ref = SERVER_STATE_MANAGER_REF.get();
     if server_state_manager_ref.is_none() {
@@ -46,7 +46,7 @@ fn admin_handler(req: &Request) -> poem::Result<String> {
             Operation::KILL => false,
             Operation::FORCE_KILL => true,
         };
-        server_state_manager_ref.shutdown(force);
+        server_state_manager_ref.shutdown(force).await?;
     } else if let Some(state) = params.update_state {
         server_state_manager_ref.as_state(state, TransitionReason::ADMIN_HTTP_API);
     }

@@ -1,3 +1,5 @@
+use crate::app_manager::application_identifier::ApplicationId;
+use crate::app_manager::purge_event::PurgeReason;
 use crate::app_manager::AppManagerRef;
 use crate::config::Config;
 use crate::grpc::protobuf::uniffle::ServerStatus;
@@ -11,6 +13,7 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use strum_macros::{Display, EnumString};
+use tokio::time::Instant;
 
 const INTERVAL: u64 = 60 * 10;
 
@@ -63,15 +66,50 @@ impl ServerStateManager {
         }
     }
 
-    pub fn shutdown(&self, force: bool) -> anyhow::Result<()> {
+    pub async fn shutdown(&self, force: bool) -> anyhow::Result<()> {
         if !force {
-            let alive_apps = self.app_manager_ref.get_alive_app_number();
-            if alive_apps > 0 {
-                return anyhow::bail!("Still {} apps", alive_apps);
+            let count = self.app_manager_ref.get_app_count();
+            if count > 0 {
+                return anyhow::bail!("Still {} apps", count);
             }
+            info!("Shutting down server...");
+            send_sigterm_to_self();
+            return Ok(());
         }
-        info!("Shutting down server...");
-        send_sigterm_to_self();
+
+        // force kill
+        let apps = self.app_manager_ref.get_apps();
+        for app in apps {
+            // best effort to do this.
+            let _ = self.app_manager_ref.kill_app(&app.app_id).await;
+        }
+
+        // wait all apps purged until timeout reached
+        let app_manager = self.app_manager_ref.clone();
+        tokio::spawn(async move {
+            let timer = Instant::now();
+            loop {
+                let app_cnt = app_manager.get_app_count();
+                if app_cnt <= 0 {
+                    info!("Shutting down server since apps have been purged");
+                    send_sigterm_to_self();
+                    return;
+                }
+                // 5 min
+                if timer.elapsed() > tokio::time::Duration::from_secs(5 * 60) {
+                    info!(
+                        "Shutting down server due to exceeding 5 minutes ({} apps remain)",
+                        app_cnt
+                    );
+                    send_sigterm_to_self();
+                    return;
+                }
+
+                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+            }
+        });
+
+        info!("Waiting all apps purged due to the force kill command.");
         Ok(())
     }
 
@@ -110,7 +148,7 @@ impl ServerStateManager {
         };
 
         if internal_state == ServerState::DECOMMISSIONING
-            && self.app_manager_ref.get_alive_app_number() <= 0
+            && self.app_manager_ref.get_app_count() <= 0
             && util::now_timestamp_as_sec() - self.state_time.load(SeqCst)
                 > self.kill_interval.load(SeqCst)
         {
