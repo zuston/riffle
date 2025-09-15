@@ -72,6 +72,7 @@ impl Layer for ReadAheadLayer {
             read_plan_load_processor: ReadPlanReadAheadTaskProcessor::new(
                 &self.runtime_manager,
                 Arc::new(Semaphore::new(options.read_plan_concurrency)),
+                self.root.as_str(),
             ),
         }))
     }
@@ -416,6 +417,7 @@ mod tests {
             read_plan_load_processor: ReadPlanReadAheadTaskProcessor::new(
                 &runtime_manager,
                 Arc::new(Semaphore::new(1)),
+                "d1",
             ),
         };
 
@@ -486,6 +488,7 @@ mod tests {
             read_plan_load_processor: ReadPlanReadAheadTaskProcessor::new(
                 &runtime_manager,
                 Arc::new(Semaphore::new(1)),
+                "d2",
             ),
         };
 
