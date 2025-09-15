@@ -24,11 +24,11 @@ pub struct ReadPlanReadAheadTaskProcessor {
 }
 
 impl ReadPlanReadAheadTaskProcessor {
-    pub fn new(runtime_manager: &RuntimeManager, semphore: Arc<Semaphore>) -> Self {
+    pub fn new(runtime_manager: &RuntimeManager, semphore: Arc<Semaphore>, root: &str) -> Self {
         let processor = Self {
             tasks: Arc::new(Default::default()),
         };
-        Self::loop_process(&processor, &semphore, runtime_manager);
+        Self::loop_process(&processor, &semphore, runtime_manager, root);
         processor
     }
 
@@ -36,6 +36,7 @@ impl ReadPlanReadAheadTaskProcessor {
         processor: &ReadPlanReadAheadTaskProcessor,
         semphore: &Arc<Semaphore>,
         runtime_manager: &RuntimeManager,
+        root: &str,
     ) {
         let processor = processor.clone();
         let semphore = semphore.clone();
@@ -43,8 +44,9 @@ impl ReadPlanReadAheadTaskProcessor {
         let dispatch_runtime = runtime_manager.dispatch_runtime.clone();
         let process_runtime = runtime_manager.read_ahead_runtime.clone();
 
+        let dispatch_log = format!("read-plan-read-ahead-tasks-dispatch [{}]", &root);
         let (send, recv) = async_channel::unbounded();
-        dispatch_runtime.spawn_with_await_tree("read-plan-read-ahead-tasks-dispatch", async move {
+        dispatch_runtime.spawn_with_await_tree(&dispatch_log, async move {
             loop {
                 let mut tasks = vec![];
                 let view = processor.tasks.deref().clone().into_read_only();
@@ -67,7 +69,8 @@ impl ReadPlanReadAheadTaskProcessor {
             }
         });
 
-        process_runtime.spawn_with_await_tree("read-plan-read-ahead-tasks-processor", async move {
+        let processor_log = format!("read-plan-read-ahead-tasks-processor [{}]", &root);
+        process_runtime.spawn_with_await_tree(&processor_log, async move {
             while let Ok((segment, task, permit, uid)) =
                 recv.recv().instrument_await("recv from the queue...").await
             {
