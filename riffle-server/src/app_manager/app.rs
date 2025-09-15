@@ -366,7 +366,7 @@ impl App {
                 if self.partition_limit_enable && partition_meta.is_huge_partition() {
                     let used = self.store.get_memory_buffer_size(&puid)?;
                     if used > partition_limit_threshold {
-                        info!("[{:?}] with huge partition (used/limited: {}/{}), it has been limited of writing speed",
+                        info!("[{}] with huge partition (used/limited: {}/{}), it has been limited of writing speed",
                             puid, used, partition_limit_threshold);
                         TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED.inc();
                         return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
