@@ -10,7 +10,6 @@ use crate::metric::{
     TOTAL_LOCAL_DISK_APPEND_OPERATION_BYTES_COUNTER, TOTAL_LOCAL_DISK_APPEND_OPERATION_COUNTER,
     TOTAL_LOCAL_DISK_READ_OPERATION_BYTES_COUNTER, TOTAL_LOCAL_DISK_READ_OPERATION_COUNTER,
 };
-use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::local::io_layer_await_tree::AwaitTreeLayer;
 use crate::store::local::io_layer_metrics::MetricsLayer;
@@ -29,6 +28,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
+use bytesize::ByteSize;
 use clap::error::ErrorKind::Io;
 use log::{error, warn};
 use once_cell::sync::OnceCell;
@@ -84,15 +84,15 @@ impl LocalDiskDelegator {
     ) -> LocalDiskDelegator {
         let high_watermark = config.disk_high_watermark;
         let low_watermark = config.disk_low_watermark;
-        let write_capacity = ReadableSize::from_str(&config.disk_write_buf_capacity).unwrap();
-        let read_capacity = ReadableSize::from_str(&config.disk_read_buf_capacity).unwrap();
+        let write_capacity = ByteSize::from_str(&config.disk_write_buf_capacity).unwrap();
+        let read_capacity = ByteSize::from_str(&config.disk_read_buf_capacity).unwrap();
 
         let underlying_io_handler = SyncLocalIO::new(
             &runtime_manager.read_runtime,
             &runtime_manager.localfile_write_runtime,
             root,
-            Some(write_capacity.as_bytes() as usize),
-            Some(read_capacity.as_bytes() as usize),
+            Some(write_capacity.as_u64() as usize),
+            Some(read_capacity.as_u64() as usize),
         );
 
         let mut operator_builder = OperatorBuilder::new(Arc::new(Box::new(underlying_io_handler)));

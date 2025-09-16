@@ -21,9 +21,9 @@ use crate::constant::CPU_ARCH;
 use crate::histogram;
 use crate::mem_allocator::ALLOCATOR;
 use crate::panic_hook::PANIC_TAG;
-use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
 use await_tree::InstrumentAwait;
+use bytesize::ByteSize;
 use log::{error, info};
 use once_cell::sync::Lazy;
 use prometheus::{
@@ -45,36 +45,36 @@ const SPILL_BATCH_SIZE_BUCKETS: &[f64] = &[
     1f64,
     128f64,
     512f64,
-    ReadableSize::kb(1).as_bytes() as f64,
-    ReadableSize::kb(10).as_bytes() as f64,
-    ReadableSize::kb(100).as_bytes() as f64,
-    ReadableSize::mb(1).as_bytes() as f64,
-    ReadableSize::mb(10).as_bytes() as f64,
-    ReadableSize::mb(100).as_bytes() as f64,
-    ReadableSize::gb(1).as_bytes() as f64,
-    ReadableSize::gb(10).as_bytes() as f64,
-    ReadableSize::gb(100).as_bytes() as f64,
+    ByteSize::kb(1).as_u64() as f64,
+    ByteSize::kb(10).as_u64() as f64,
+    ByteSize::kb(100).as_u64() as f64,
+    ByteSize::mb(1).as_u64() as f64,
+    ByteSize::mb(10).as_u64() as f64,
+    ByteSize::mb(100).as_u64() as f64,
+    ByteSize::gb(1).as_u64() as f64,
+    ByteSize::gb(10).as_u64() as f64,
+    ByteSize::gb(100).as_u64() as f64,
 ];
 
 const RPC_BATCH_BYTES_BUCKETS: &[f64] = &[
-    ReadableSize::kb(1).as_bytes() as f64,
-    ReadableSize::kb(10).as_bytes() as f64,
-    ReadableSize::kb(100).as_bytes() as f64,
-    ReadableSize::mb(1).as_bytes() as f64,
-    ReadableSize::mb(10).as_bytes() as f64,
-    ReadableSize::mb(20).as_bytes() as f64,
-    ReadableSize::mb(30).as_bytes() as f64,
-    ReadableSize::mb(40).as_bytes() as f64,
-    ReadableSize::mb(50).as_bytes() as f64,
-    ReadableSize::mb(100).as_bytes() as f64,
-    ReadableSize::mb(200).as_bytes() as f64,
-    ReadableSize::mb(400).as_bytes() as f64,
-    ReadableSize::mb(800).as_bytes() as f64,
-    ReadableSize::gb(1).as_bytes() as f64,
-    ReadableSize::gb(2).as_bytes() as f64,
-    ReadableSize::gb(4).as_bytes() as f64,
-    ReadableSize::gb(8).as_bytes() as f64,
-    ReadableSize::gb(10).as_bytes() as f64,
+    ByteSize::kb(1).as_u64() as f64,
+    ByteSize::kb(10).as_u64() as f64,
+    ByteSize::kb(100).as_u64() as f64,
+    ByteSize::mb(1).as_u64() as f64,
+    ByteSize::mb(10).as_u64() as f64,
+    ByteSize::mb(20).as_u64() as f64,
+    ByteSize::mb(30).as_u64() as f64,
+    ByteSize::mb(40).as_u64() as f64,
+    ByteSize::mb(50).as_u64() as f64,
+    ByteSize::mb(100).as_u64() as f64,
+    ByteSize::mb(200).as_u64() as f64,
+    ByteSize::mb(400).as_u64() as f64,
+    ByteSize::mb(800).as_u64() as f64,
+    ByteSize::gb(1).as_u64() as f64,
+    ByteSize::gb(2).as_u64() as f64,
+    ByteSize::gb(4).as_u64() as f64,
+    ByteSize::gb(8).as_u64() as f64,
+    ByteSize::gb(10).as_u64() as f64,
 ];
 
 #[allow(non_camel_case_types)]

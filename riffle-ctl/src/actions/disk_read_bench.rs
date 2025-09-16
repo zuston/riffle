@@ -76,7 +76,7 @@ impl DiskReadBenchAction {
 
         let action = Self {
             dir,
-            read_size: riffle_server::util::parse_raw_to_bytesize(&read_size),
+            read_size: riffle_server::util::to_bytes(&read_size),
             batch_number: batch_num as u64,
             concurrency,
             io_handler: handler,

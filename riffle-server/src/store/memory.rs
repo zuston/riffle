@@ -23,7 +23,6 @@ use crate::app_manager::request_context::{
 use crate::config::{MemoryStoreConfig, StorageType};
 use crate::error::WorkerError;
 use crate::metric::{RPC_BATCH_BYTES_OPERATION, RPC_BATCH_DATA_BYTES_HISTOGRAM, TOTAL_MEMORY_USED};
-use crate::readable_size::ReadableSize;
 use crate::store::{Block, RequireBufferResponse, ResponseData, ResponseDataIndex, Store};
 use crate::*;
 use async_trait::async_trait;
@@ -44,6 +43,7 @@ use crate::store::mem::ticket::TicketManager;
 use crate::store::spill::SpillWritingViewContext;
 use anyhow::anyhow;
 use anyhow::Result;
+use bytesize::ByteSize;
 use croaring::Treemap;
 use fastrace::trace;
 use fxhash::{FxBuildHasher, FxHasher};
@@ -85,8 +85,8 @@ impl MemoryStore {
     }
 
     pub fn from(conf: MemoryStoreConfig, runtime_manager: RuntimeManager) -> Self {
-        let capacity = ReadableSize::from_str(&conf.capacity).unwrap();
-        let budget = MemoryBudget::new(capacity.as_bytes() as i64);
+        let capacity = ByteSize::from_str(&conf.capacity).unwrap();
+        let budget = MemoryBudget::new(capacity.as_u64() as i64);
 
         let budget_clone = budget.clone();
         let release_allocated_func =
@@ -103,8 +103,8 @@ impl MemoryStore {
             state:
                 DashMapExtend::<PartitionUId, Arc<MemoryBuffer>, BuildHasherDefault<FxHasher>>::new(
                 ),
-            budget: MemoryBudget::new(capacity.as_bytes() as i64),
-            memory_capacity: capacity.as_bytes() as i64,
+            budget: MemoryBudget::new(capacity.as_u64() as i64),
+            memory_capacity: capacity.as_u64() as i64,
             ticket_manager,
             runtime_manager,
         }

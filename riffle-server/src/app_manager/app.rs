@@ -97,8 +97,7 @@ impl App {
             _ => {}
         }
 
-        let memory_capacity =
-            util::parse_raw_to_bytesize(&config.memory_store.as_ref().unwrap().capacity);
+        let memory_capacity = util::to_bytes(&config.memory_store.as_ref().unwrap().capacity);
 
         let partition_limit_enable = config.app_config.partition_limit_enable;
         let partition_limit_threshold: ConfigOption<ByteString> = reconf_manager

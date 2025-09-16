@@ -38,7 +38,6 @@ use crate::deadlock::detect_deadlock;
 use crate::mem_allocator::ALLOCATOR;
 use crate::metric::MetricService;
 use crate::panic_hook::set_panic_hook;
-use crate::readable_size::ReadableSize;
 use crate::rpc::DefaultRpcService;
 use crate::runtime::manager::RuntimeManager;
 use crate::server_state_manager::{ServerStateManager, SERVER_STATE_MANAGER_REF};
@@ -47,6 +46,7 @@ use crate::store::Store;
 use crate::tracing::FastraceWrapper;
 use crate::util::inject_into_env;
 use anyhow::Result;
+use bytesize::ByteSize;
 use clap::builder::Str;
 use clap::{Arg, Parser};
 use log::{info, LevelFilter};
@@ -84,7 +84,6 @@ pub mod block_id_manager;
 pub mod histogram;
 mod mem_allocator;
 mod metric;
-mod readable_size;
 pub mod rpc;
 pub mod runtime;
 pub mod semaphore_with_index;
@@ -268,8 +267,8 @@ fn setup_max_memory_allocation() {
     #[cfg(all(unix, feature = "allocator-analysis"))]
     {
         let _ = std::env::var(MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY).map(|v| {
-            let readable_size = ReadableSize::from_str(v.as_str()).unwrap();
-            ALLOCATOR.set_limit(readable_size.as_bytes() as usize)
+            let readable_size = ByteSize::from_str(v.as_str()).unwrap();
+            ALLOCATOR.set_limit(readable_size.as_u64() as usize)
         });
     }
 }

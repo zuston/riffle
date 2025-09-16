@@ -21,6 +21,7 @@ use std::env;
 
 use crate::config::Config;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
+use std::str::FromStr;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -100,8 +101,8 @@ pub fn find_available_port() -> Option<u16> {
         .and_then(|listener| listener.local_addr().ok().map(|addr| addr.port()))
 }
 
-pub fn parse_raw_to_bytesize(s: &str) -> u64 {
-    s.parse::<ByteSize>().unwrap().0
+pub fn to_bytes(s: &str) -> u64 {
+    ByteSize::from_str(s).unwrap().as_u64()
 }
 
 pub fn inject_into_env(kvs: Vec<(String, String)>) {

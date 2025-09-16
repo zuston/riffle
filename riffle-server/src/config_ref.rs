@@ -26,7 +26,7 @@ unsafe impl Sync for ByteString {}
 impl ByteString {
     pub fn new(raw_val: &str) -> Self {
         Self {
-            parsed_val: util::parse_raw_to_bytesize(raw_val),
+            parsed_val: util::to_bytes(raw_val),
         }
     }
 

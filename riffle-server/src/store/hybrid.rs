@@ -28,7 +28,6 @@ use crate::metric::{
     MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM, TOTAL_MEMORY_SPILL_BYTES, TOTAL_MEMORY_SPILL_TO_HDFS,
     TOTAL_MEMORY_SPILL_TO_LOCALFILE,
 };
-use crate::readable_size::ReadableSize;
 #[cfg(feature = "hdfs")]
 use crate::store::hdfs::HdfsStore;
 use crate::store::localfile::LocalFileStore;
@@ -46,6 +45,7 @@ use std::collections::VecDeque;
 use std::ops::Deref;
 
 use await_tree::InstrumentAwait;
+use bytesize::ByteSize;
 use fastrace::future::FutureExt;
 use once_cell::sync::OnceCell;
 use std::str::FromStr;
@@ -155,18 +155,18 @@ impl HybridStore {
         let hybrid_conf = config.hybrid_store;
         let memory_spill_to_cold_threshold_size =
             match &hybrid_conf.memory_spill_to_cold_threshold_size {
-                Some(v) => Some(ReadableSize::from_str(&v.clone()).unwrap().as_bytes()),
+                Some(v) => Some(ByteSize::from_str(&v.clone()).unwrap().as_u64()),
                 _ => None,
             };
         let memory_spill_buffer_max_threshold =
             match &hybrid_conf.memory_single_buffer_max_spill_size {
-                Some(v) => Some(ReadableSize::from_str(&v.clone()).unwrap().as_bytes()),
+                Some(v) => Some(ByteSize::from_str(&v.clone()).unwrap().as_u64()),
                 _ => None,
             };
         let huge_partition_spill_threshold = &hybrid_conf
             .huge_partition_memory_spill_to_hdfs_threshold_size
             .as_ref()
-            .map(|x| ReadableSize::from_str(&x).unwrap().as_bytes());
+            .map(|x| ByteSize::from_str(&x).unwrap().as_u64());
         if huge_partition_spill_threshold.is_none() {
             info!("Huge partition spill to HDFS has been disabled.");
         }

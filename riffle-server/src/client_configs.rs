@@ -55,7 +55,7 @@ impl ClientRssConf {
     }
 
     pub fn get_byte_size(&self, option: &ClientConfigOption<String>) -> Option<u64> {
-        self.get(option).map(|s| util::parse_raw_to_bytesize(&s))
+        self.get(option).map(|s| util::to_bytes(&s))
     }
 }
 

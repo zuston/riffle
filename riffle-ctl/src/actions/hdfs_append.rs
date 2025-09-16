@@ -16,8 +16,8 @@ pub struct HdfsAppendAction {
 
 impl HdfsAppendAction {
     pub fn new(absolute_path: &str, total_size: &str, batch_size: &str) -> Self {
-        let total_size = util::parse_raw_to_bytesize(total_size);
-        let batch_size = util::parse_raw_to_bytesize(batch_size);
+        let total_size = util::to_bytes(total_size);
+        let batch_size = util::to_bytes(batch_size);
 
         let path = Path::new(absolute_path);
         let file_name = path.file_name().unwrap().to_str().unwrap().to_string();

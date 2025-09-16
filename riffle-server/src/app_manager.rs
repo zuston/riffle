@@ -33,7 +33,6 @@ use crate::metric::{
     TOTAL_RECEIVED_DATA, TOTAL_REQUIRE_BUFFER_FAILED,
 };
 
-use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::hybrid::HybridStore;
 use crate::store::{Block, RequireBufferResponse, ResponseData, ResponseDataIndex, Store};
