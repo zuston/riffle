@@ -828,6 +828,14 @@ mod test {
         [metrics]
         push_gateway_endpoint = "http://localhost:5000"
         labels = { l1 = "k1", l2 = "k2" }
+
+        [runtime_config]
+        read_thread_num = 512
+        localfile_write_thread_num = 60
+        hdfs_write_thread_num = 40
+        http_thread_num = 2
+        default_thread_num = 4
+        dispatch_thread_num = 4
         "#;
 
         let decoded: Config = toml::from_str(toml_str).unwrap();
@@ -837,19 +845,21 @@ mod test {
         assert_eq!(1024 * 1024 * 1024, capacity.as_bytes());
 
         assert_eq!(
-            decoded.runtime_config.read_thread_num,
-            RuntimeConfig::default().read_thread_num
-        );
-
-        assert_eq!(
             RpcVersion::V2,
             decoded.urpc_config.as_ref().unwrap().get_index_rpc_version
         );
 
-        // check the app config
+        // check the app config.
         assert_eq!(
             decoded.app_config.app_heartbeat_timeout_min,
             as_default_app_heartbeat_timeout_min(),
+        );
+
+        // check the runtime config
+        // the read_ahead_thread_number is missing, it will be as the default value
+        assert_eq!(
+            decoded.runtime_config.read_ahead_thread_number,
+            RuntimeConfig::default().read_ahead_thread_number,
         );
 
         // check kerberos config
