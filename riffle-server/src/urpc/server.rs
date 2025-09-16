@@ -51,20 +51,17 @@ impl Listener {
                 connection: Connection::new(socket),
                 shutdown: Shutdown::new(self.notify_shutdown.subscribe()),
                 _shutdown_complete: self.shutdown_complete_tx.clone(),
+                remote_addr: addr.to_string(),
             };
 
-            let await_registry = AWAIT_TREE_REGISTRY.clone();
-            let await_root = await_registry
-                .register(format!("urpc connection with remote client: {}", addr))
-                .await;
-            tokio::spawn(await_root.instrument(async move {
+            tokio::spawn(async move {
                 URPC_CONNECTION_NUMBER.inc();
                 if let Err(error) = handler.run(app_manager).await {
                     error!("Errors on handling the request. {:#?}", error);
                 }
                 drop(permit);
                 URPC_CONNECTION_NUMBER.dec();
-            }));
+            });
         }
     }
 
@@ -98,6 +95,7 @@ impl Listener {
 struct Handler {
     connection: Connection,
     shutdown: Shutdown,
+    remote_addr: String,
     _shutdown_complete: mpsc::Sender<()>,
 }
 
@@ -105,6 +103,7 @@ impl Handler {
     /// when the shutdown signal is received, the connection is processed
     /// util it reaches a safe state, at which point it is terminated
     async fn run(&mut self, app_manager_ref: AppManagerRef) -> Result<(), WorkerError> {
+        let await_registry = AWAIT_TREE_REGISTRY.clone();
         while !self.shutdown.is_shutdown() {
             let maybe_frame = tokio::select! {
                 res = self.connection.read_frame() => res?,
@@ -125,13 +124,18 @@ impl Handler {
             let timer = URPC_REQUEST_PROCESSING_LATENCY
                 .with_label_values(&[&format!("{}", &frame)])
                 .start_timer();
-            Command::from_frame(frame)?
-                .apply(
+            let await_root = await_registry
+                .register(format!(
+                    "urpc connection with remote client: {}",
+                    &self.remote_addr
+                ))
+                .await;
+            await_root
+                .instrument(Command::from_frame(frame)?.apply(
                     app_manager_ref.clone(),
                     &mut self.connection,
                     &mut self.shutdown,
-                )
-                .instrument_await("handling the complete request")
+                ))
                 .await?;
         }
         Ok(())
