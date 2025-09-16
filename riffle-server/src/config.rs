@@ -842,7 +842,7 @@ mod test {
         println!("{:#?}", decoded);
 
         let capacity = ByteSize::from_str(&decoded.memory_store.unwrap().capacity).unwrap();
-        assert_eq!(1024 * 1024 * 1024, capacity.as_u64());
+        assert_eq!(ByteSize::from_str("1024M").unwrap(), capacity);
 
         assert_eq!(
             RpcVersion::V2,
