@@ -14,7 +14,7 @@ impl LogService {
             RotationConfig::Daily => Rotation::Daily,
             RotationConfig::Never => Rotation::Never,
         };
-        let max_file_size = util::parse_raw_to_bytesize(&log.max_file_size);
+        let max_file_size = util::to_bytes(&log.max_file_size);
         let (rolling_writer, _guard) = RollingFileBuilder::new(&log.path)
             .rotation(rotation)
             .filename_prefix(LOG_FILE_NAME_PREFIX)

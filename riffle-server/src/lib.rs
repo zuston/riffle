@@ -32,7 +32,6 @@ pub mod http;
 pub mod log_service;
 pub mod mem_allocator;
 pub mod metric;
-pub mod readable_size;
 pub mod rpc;
 pub mod runtime;
 pub mod signal;

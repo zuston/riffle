@@ -775,7 +775,7 @@ mod test {
     use crate::config::{
         as_default_app_heartbeat_timeout_min, Config, RpcVersion, RuntimeConfig, StorageType,
     };
-    use crate::readable_size::ReadableSize;
+    use bytesize::ByteSize;
     use std::str::FromStr;
 
     #[test]
@@ -841,8 +841,8 @@ mod test {
         let decoded: Config = toml::from_str(toml_str).unwrap();
         println!("{:#?}", decoded);
 
-        let capacity = ReadableSize::from_str(&decoded.memory_store.unwrap().capacity).unwrap();
-        assert_eq!(1024 * 1024 * 1024, capacity.as_bytes());
+        let capacity = ByteSize::from_str(&decoded.memory_store.unwrap().capacity).unwrap();
+        assert_eq!(1024 * 1024 * 1024, capacity.as_u64());
 
         assert_eq!(
             RpcVersion::V2,

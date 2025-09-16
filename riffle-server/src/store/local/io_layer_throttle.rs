@@ -149,7 +149,7 @@ impl ThrottleLayer {
 
 impl Layer for ThrottleLayer {
     fn wrap(&self, handler: Handler) -> Handler {
-        let capacity = util::parse_raw_to_bytesize(&self.config.capacity) as usize;
+        let capacity = util::to_bytes(&self.config.capacity) as usize;
         Arc::new(Box::new(ThrottleLayerWrapper {
             limiter: ThroughputBasedRateLimiter::new(capacity),
             handler,

@@ -51,7 +51,6 @@ use crate::app_manager::partition_identifier::PartitionUId;
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::composed_bytes::ComposedBytes;
 use crate::dashmap_extension::DashMapExtend;
-use crate::readable_size::ReadableSize;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::index_codec::{IndexCodec, INDEX_BLOCK_SIZE};
 use crate::store::local::delegator::LocalDiskDelegator;

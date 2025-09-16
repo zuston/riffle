@@ -54,8 +54,8 @@ impl DiskProfiler {
             riffle_server::runtime::manager::create_runtime(max_concurrency, "profiler pool");
         Self {
             dir,
-            min_block_size: util::parse_raw_to_bytesize(min_block_size.as_str()) as usize,
-            max_block_size: util::parse_raw_to_bytesize(max_block_size.as_str()) as usize,
+            min_block_size: util::to_bytes(min_block_size.as_str()) as usize,
+            max_block_size: util::to_bytes(max_block_size.as_str()) as usize,
             min_concurrency,
             max_concurrency,
             test_duration: Duration::from_secs(test_duration_secs),

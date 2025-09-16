@@ -75,7 +75,7 @@ impl HealthService {
         conf: &HealthServiceConfig,
     ) -> Self {
         let memory_allocated_threshold = match &conf.memory_allocated_threshold {
-            Some(threshold) => Some(util::parse_raw_to_bytesize(&threshold)),
+            Some(threshold) => Some(util::to_bytes(&threshold)),
             _ => None,
         };
         if let Some(val) = &memory_allocated_threshold {

@@ -71,7 +71,7 @@ impl DiskAppendBenchAction {
         Self {
             dir,
             concurrency,
-            write_size: util::parse_raw_to_bytesize(write_size.as_str()),
+            write_size: util::to_bytes(write_size.as_str()),
             batch_number,
             disk_throughput,
             throttle_enabled,
