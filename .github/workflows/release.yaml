@@ -15,6 +15,7 @@ jobs:
     name: Build and Upload
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - name: macos-arm64
@@ -23,24 +24,24 @@ jobs:
             artifact_path: target/release/riffle-ctl
             docker_compose: ""
             component: riffle-ctl
-          - name: linux-arm64-anolisos8
-            os: ubuntu-22.04-arm
-            build_command: docker compose -f dev/anolisos8/arm64/docker-compose.yml up
-            artifact_path: target-docker/release/riffle-server
-            docker_compose: dev/anolisos8/arm64/docker-compose.yml
-            component: riffle-server
+#          - name: linux-arm64-anolisos8
+#            os: ubuntu-22.04-arm
+#            build_command: docker compose -f dev/anolisos8/arm64/docker-compose.yml up
+#            artifact_path: target-docker/release/riffle-server
+#            docker_compose: dev/anolisos8/arm64/docker-compose.yml
+#            component: riffle-server
           - name: linux-amd64-centos7
             os: ubuntu-22.04
             build_command: docker compose -f dev/centos7/amd64/docker-compose.yml up
             artifact_path: target-docker/release/riffle-server target-docker/release/riffle-ctl
             docker_compose: dev/centos7/amd64/docker-compose.yml
             component: riffle-server
-          - name: linux-amd64-anolisos8
-            os: ubuntu-22.04
-            build_command: docker compose -f dev/anolisos8/amd64/docker-compose.yml up
-            artifact_path: target-docker/release/riffle-server
-            docker_compose: dev/anolisos8/amd64/docker-compose.yml
-            component: riffle-server
+#          - name: linux-amd64-anolisos8
+#            os: ubuntu-22.04
+#            build_command: docker compose -f dev/anolisos8/amd64/docker-compose.yml up
+#            artifact_path: target-docker/release/riffle-server
+#            docker_compose: dev/anolisos8/amd64/docker-compose.yml
+#            component: riffle-server
 
     steps:
       - name: Remove unnecessary files (Linux only)
