@@ -69,7 +69,7 @@ async fn do_kill(ip: &str, http_port: usize, force: bool) -> Result<()> {
 /// the returned value is the tag to indicate whether to continue wait
 async fn block_wait(ip: &str, http_port: usize) -> Result<bool> {
     let url = format!("http://{}:{}/admin?get_state", ip, http_port);
-    let resp = reqwest::get(url).await?;
+    let resp = reqwest::get(&url).await?;
     if resp.status().is_success() {
         let result = resp.text().await?;
         match ServerState::from_str(&result.to_ascii_uppercase()).ok() {
