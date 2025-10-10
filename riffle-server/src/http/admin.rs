@@ -26,6 +26,14 @@ impl Handler for AdminHandler {
     }
 }
 
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone, PartialEq, Deserialize, EnumString, Display)]
+enum Operation {
+    KILL,
+    GET_STATE,
+    UPDATE_STATE,
+}
+
 #[handler]
 async fn admin_handler(req: &Request) -> poem::Result<String> {
     let query = req.uri().query().unwrap_or("");
@@ -44,17 +52,19 @@ async fn admin_handler(req: &Request) -> poem::Result<String> {
         let key = parts.next().unwrap();
         let value_opt = parts.next();
 
-        match key {
-            "kill" => {
+        let operation = Operation::from_str(&key.to_ascii_uppercase())
+            .map_err(|_| anyhow!("Invalid operation"))?;
+        match operation {
+            Operation::KILL => {
                 let force = value_opt.is_some() && value_opt.unwrap() == "force";
                 server_state_manager_ref.shutdown(force).await?;
                 found_operation = true;
             }
-            "get_state" => {
+            Operation::GET_STATE => {
                 found_operation = true;
                 return Ok(server_state_manager_ref.get_state().to_string());
             }
-            "update_state" => {
+            Operation::UPDATE_STATE => {
                 if let Some(raw_state) = value_opt {
                     if let Some(state) = ServerState::from_str(&raw_state.to_ascii_uppercase()).ok()
                     {
@@ -66,9 +76,6 @@ async fn admin_handler(req: &Request) -> poem::Result<String> {
                 } else {
                     return Err(poem::Error::from_status(StatusCode::BAD_REQUEST));
                 }
-            }
-            _ => {
-                return Ok("Invalid admin operation".to_string());
             }
         }
     }
@@ -125,5 +132,9 @@ mod tests {
         // case3: illegal update_state request
         let resp = cli.get("/admin?update_state=unknown").send().await;
         resp.assert_status(StatusCode::BAD_REQUEST);
+
+        // case4: illegal operation
+        let resp = cli.get("/admin?unknown").send().await;
+        resp.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
     }
 }
