@@ -30,6 +30,12 @@ pub enum ServerState {
     HEALTHY,
 }
 
+impl Default for ServerState {
+    fn default() -> Self {
+        ServerState::ACTIVE
+    }
+}
+
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq, Deserialize, EnumString, Display)]
 pub enum TransitionReason {
@@ -127,7 +133,7 @@ impl ServerStateManager {
         self.state_time.store(util::now_timestamp_as_sec(), SeqCst);
     }
 
-    fn get_state(&self) -> ServerState {
+    pub fn get_state(&self) -> ServerState {
         self.state.read().clone()
     }
 
