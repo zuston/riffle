@@ -2,9 +2,12 @@ use crate::actions::Action;
 use anyhow::Result;
 use async_trait::async_trait;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use log::info;
+use riffle_server::server_state_manager::ServerState;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead};
+use std::str::FromStr;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct KillTarget {
@@ -21,20 +24,37 @@ impl BatchActionItem for KillTarget {
 pub struct KillAction {
     force: bool,
     instance: Option<String>,
+
+    // params for blocking wait to riffle-server exit.
+    // but this is only valid for single instance rather than batch mode
+    interval_secs: u64,
+    timeout_secs: u64,
 }
 
 impl KillAction {
-    pub fn new(force: bool, instance: Option<String>) -> Self {
-        Self { force, instance }
+    pub fn new(
+        force: bool,
+        instance: Option<String>,
+        interval_secs: u64,
+        timeout_secs: u64,
+    ) -> Self {
+        Self {
+            force,
+            instance,
+            interval_secs,
+            timeout_secs,
+        }
     }
 }
 
-async fn kill_request(ip: &str, http_port: usize, force: bool) -> Result<()> {
-    let operation_name = if force { "FORCE_KILL" } else { "KILL" };
+async fn do_kill(ip: &str, http_port: usize, force: bool) -> Result<()> {
     let url = format!(
-        "http://{}:{}/admin?operation={}",
-        ip, http_port, operation_name
+        "http://{}:{}/admin?kill{}",
+        ip,
+        http_port,
+        if force { "=force" } else { "" },
     );
+    info!("Executing http request with url: {}", &url);
     let resp = reqwest::get(url).await?;
     if !resp.status().is_success() {
         Err(anyhow::anyhow!(
@@ -46,27 +66,68 @@ async fn kill_request(ip: &str, http_port: usize, force: bool) -> Result<()> {
     }
 }
 
+/// the returned value is the tag to indicate whether to continue wait
+async fn block_wait(ip: &str, http_port: usize) -> Result<bool> {
+    let url = format!("http://{}:{}/admin?get_state", ip, http_port);
+    let resp = reqwest::get(&url).await?;
+    if resp.status().is_success() {
+        let result = resp.text().await?;
+        match ServerState::from_str(&result.to_ascii_uppercase()).ok() {
+            None => Ok(true),
+            Some(state) => {
+                if state == ServerState::DECOMMISSIONED {
+                    info!("now target status is DECOMMISSIONED");
+                    Ok(false)
+                } else {
+                    Ok(true)
+                }
+            }
+        }
+    } else {
+        info!("unreachable request with url: {}", &url);
+        Ok(false)
+    }
+}
+
 #[async_trait::async_trait]
 impl Action for KillAction {
     async fn act(&self) -> Result<()> {
         if self.instance.is_none() {
+            // batch mode
             let items = read_batch_items::<KillTarget>()?;
             let force = self.force;
+
             run_batch_action("Kill", items, |item| {
-                let value = force.clone();
-                async move { kill_request(item.ip.as_str(), item.http_port as usize, value).await }
+                let value = force;
+                async move { do_kill(item.ip.as_str(), item.http_port as usize, value).await }
             })
             .await?;
+
             return Ok(());
         } else {
+            // single instance mode
             let url = self.instance.clone().unwrap();
-            let splits: Vec<_> = url.split(":").collect();
+            let splits: Vec<_> = url.split(':').collect();
             if splits.len() != 2 {
                 panic!("Illegal [id:http_port]={:?}", self.instance);
             }
             let ip = splits.get(0).unwrap();
             let http_port = splits.get(1).unwrap().parse::<usize>().unwrap();
-            kill_request(ip, http_port, self.force).await?;
+
+            do_kill(ip, http_port, self.force).await?;
+
+            if self.interval_secs > 0 && self.timeout_secs > 0 {
+                use tokio::time::{sleep, Duration, Instant};
+                let start = Instant::now();
+                while start.elapsed().as_secs() < self.timeout_secs {
+                    if block_wait(ip, http_port).await? {
+                        sleep(Duration::from_secs(self.interval_secs)).await;
+                    } else {
+                        info!("the kill operation with blocking wait has been finished that costs {} secs", start.elapsed().as_secs());
+                        break;
+                    }
+                }
+            }
         }
         Ok(())
     }

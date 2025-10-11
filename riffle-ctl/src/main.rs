@@ -1,5 +1,6 @@
 #![allow(dead_code, unused)]
 #![feature(impl_trait_in_assoc_type)]
+extern crate core;
 
 mod actions;
 mod meta;
@@ -121,6 +122,14 @@ enum Commands {
         force: bool,
         #[arg(short, long)]
         instance: Option<String>,
+
+        /// Interval between kill attempts (seconds). 0 means disabled.
+        #[arg(long, default_value = "0")]
+        interval_secs: u64,
+
+        /// Total timeout for periodic kill (seconds). 0 means no timeout (single kill).
+        #[arg(long, default_value = "0")]
+        timeout_secs: u64,
     },
     #[command(about = "Hdfs append test")]
     HdfsAppend {
@@ -229,7 +238,17 @@ fn main() -> anyhow::Result<()> {
         }
 
         Commands::Update { instance, status } => Box::new(NodeUpdateAction::new(instance, status)),
-        Commands::Kill { force, instance } => Box::new(KillAction::new(force, instance)),
+        Commands::Kill {
+            force,
+            instance,
+            interval_secs,
+            timeout_secs,
+        } => Box::new(KillAction::new(
+            force,
+            instance,
+            interval_secs,
+            timeout_secs,
+        )),
         Commands::HdfsAppend {
             file_path,
             total_size,
