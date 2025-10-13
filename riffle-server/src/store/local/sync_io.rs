@@ -24,7 +24,6 @@ use parking_lot::Mutex;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Error, Read, Seek, SeekFrom, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
