@@ -60,7 +60,7 @@ use crate::block_id_manager::{get_block_id_manager, BlockIdManager};
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::config_ref::{ByteString, ConfRef, ConfigOption};
 use crate::constant::ALL_LABEL;
-use crate::dashmap_extension::DashMapExtend;
+use crate::ddashmap::DDashMap;
 use crate::grpc::protobuf::uniffle::{BlockIdLayout, RemoteStorage};
 use crate::historical_apps::HistoricalAppManager;
 use crate::id_layout::IdLayout;
@@ -90,7 +90,7 @@ pub type AppManagerRef = Arc<AppManager>;
 
 pub struct AppManager {
     // key: app_id
-    pub(crate) apps: DashMapExtend<ApplicationId, Arc<App>, BuildHasherDefault<FxHasher>>,
+    pub(crate) apps: DDashMap<ApplicationId, Arc<App>>,
     receiver: async_channel::Receiver<PurgeEvent>,
     sender: async_channel::Sender<PurgeEvent>,
     store: Arc<HybridStore>,
@@ -118,7 +118,7 @@ impl AppManager {
             };
 
         let manager = AppManager {
-            apps: DashMapExtend::<ApplicationId, Arc<App>, BuildHasherDefault<FxHasher>>::new(),
+            apps: DDashMap::default(),
             receiver,
             sender,
             store: storage.clone(),

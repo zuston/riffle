@@ -60,7 +60,7 @@ pub mod panic_hook;
 pub mod server_state_manager;
 
 pub mod config_ref;
-mod dashmap_extension;
+mod ddashmap;
 pub mod mini_riffle;
 mod raw_io;
 mod system_libc;

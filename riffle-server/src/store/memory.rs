@@ -34,7 +34,7 @@ use std::hash::BuildHasherDefault;
 use std::str::FromStr;
 
 use crate::app_manager::partition_identifier::PartitionUId;
-use crate::dashmap_extension::DashMapExtend;
+use crate::ddashmap::DDashMap;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::mem::budget::MemoryBudget;
 use crate::store::mem::buffer::MemoryBuffer;
@@ -52,7 +52,7 @@ use std::sync::Arc;
 
 pub struct MemoryStore {
     memory_capacity: i64,
-    state: DashMapExtend<PartitionUId, Arc<MemoryBuffer>, BuildHasherDefault<FxHasher>>,
+    state: DDashMap<PartitionUId, Arc<MemoryBuffer>>,
     budget: MemoryBudget,
     runtime_manager: RuntimeManager,
     ticket_manager: TicketManager,
@@ -75,9 +75,7 @@ impl MemoryStore {
             TicketManager::new(5 * 60, 10, release_allocated_func, runtime_manager.clone());
         MemoryStore {
             budget,
-            state:
-                DashMapExtend::<PartitionUId, Arc<MemoryBuffer>, BuildHasherDefault<FxHasher>>::new(
-                ),
+            state: DDashMap::default(),
             memory_capacity: max_memory_size,
             ticket_manager,
             runtime_manager,
@@ -100,9 +98,7 @@ impl MemoryStore {
         );
 
         MemoryStore {
-            state:
-                DashMapExtend::<PartitionUId, Arc<MemoryBuffer>, BuildHasherDefault<FxHasher>>::new(
-                ),
+            state: DDashMap::default(),
             budget: MemoryBudget::new(capacity.as_u64() as i64),
             memory_capacity: capacity.as_u64() as i64,
             ticket_manager,

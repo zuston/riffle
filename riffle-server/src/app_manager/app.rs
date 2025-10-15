@@ -12,7 +12,7 @@ use crate::config::Config;
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::config_ref::{ByteString, ConfigOption};
 use crate::constant::ALL_LABEL;
-use crate::dashmap_extension::DashMapExtend;
+use crate::ddashmap::DDashMap;
 use crate::error::WorkerError;
 use crate::metric::{
     BLOCK_ID_NUMBER, GAUGE_HUGE_PARTITION_NUMBER, GAUGE_PARTITION_NUMBER, RESIDENT_BYTES,
@@ -62,7 +62,7 @@ pub struct App {
     block_id_manager: Arc<Box<dyn BlockIdManager>>,
 
     // key: (shuffle_id, partition_id)
-    partition_meta_infos: DashMapExtend<(i32, i32), PartitionMeta, BuildHasherDefault<FxHasher>>,
+    partition_meta_infos: DDashMap<(i32, i32), PartitionMeta>,
 
     // partition split
     partition_split_enable: bool,
@@ -143,11 +143,7 @@ impl App {
             partition_limit_enable,
             partition_limit_threshold,
             partition_limit_mem_backpressure_ratio,
-            partition_meta_infos: DashMapExtend::<
-                (i32, i32),
-                PartitionMeta,
-                BuildHasherDefault<FxHasher>,
-            >::new(),
+            partition_meta_infos: DDashMap::default(),
             total_received_data_size: Default::default(),
             total_resident_data_size: Default::default(),
             huge_partition_number: Default::default(),
