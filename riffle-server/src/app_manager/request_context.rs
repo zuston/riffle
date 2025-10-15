@@ -103,10 +103,17 @@ pub struct ReadingViewContext {
     pub reading_options: ReadingOptions,
     pub task_ids_filter: Option<Treemap>,
     pub rpc_source: RpcType,
+
+    // whether sendfile zero copy is enabled.
+    // this is only valid when the rpc_type is urpc
     pub sendfile_enabled: bool,
 
     // tag whether the read-ahead is enabled
     pub read_ahead_client_enabled: bool,
+
+    // the huge partition direct io enabled
+    pub huge_partition_direct_io_enabled: bool,
+    pub is_huge_partition: bool,
 
     // for the localfile read_ahead layer
     pub sequential: bool,
@@ -133,6 +140,8 @@ impl ReadingViewContext {
             rpc_source,
             sendfile_enabled: false,
             read_ahead_client_enabled: false,
+            huge_partition_direct_io_enabled: false,
+            is_huge_partition: false,
             sequential: false,
             read_ahead_batch_number: None,
             read_ahead_batch_size: None,
@@ -175,6 +184,16 @@ impl ReadingViewContext {
 
     pub fn with_read_ahead_client_enabled(mut self, enabled: bool) -> Self {
         self.read_ahead_client_enabled = enabled;
+        self
+    }
+
+    pub fn with_huge_partition_direct_io_enabled(mut self, enabled: bool) -> Self {
+        self.huge_partition_direct_io_enabled = enabled;
+        self
+    }
+
+    pub fn with_is_huge_partition(mut self, enabled: bool) -> Self {
+        self.is_huge_partition = enabled;
         self
     }
 }

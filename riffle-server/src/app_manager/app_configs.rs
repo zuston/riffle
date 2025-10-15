@@ -1,8 +1,8 @@
 use crate::app_manager::request_context::PurgeDataContext;
 use crate::client_configs::{
     ClientConfigOption, ClientRssConf, HDFS_CLIENT_EAGER_LOADING_ENABLED_OPTION,
-    READ_AHEAD_BATCH_NUMBER, READ_AHEAD_BATCH_SIZE, READ_AHEAD_ENABLED_OPTION,
-    SENDFILE_ENABLED_OPTION,
+    HUGE_PARTITION_READ_DIRECT_IO_ENABLED, READ_AHEAD_BATCH_NUMBER, READ_AHEAD_BATCH_SIZE,
+    READ_AHEAD_ENABLED_OPTION, SENDFILE_ENABLED_OPTION,
 };
 use crate::grpc::protobuf::uniffle::RemoteStorage;
 use std::collections::HashMap;
@@ -28,6 +28,7 @@ pub struct AppConfigOptions {
     pub read_ahead_enable: bool,
     pub read_ahead_batch_number: Option<usize>,
     pub read_ahead_batch_size: Option<usize>,
+    pub huge_partition_direct_io_enable: bool,
     pub client_configs: ClientRssConf,
 }
 
@@ -48,6 +49,9 @@ impl AppConfigOptions {
             read_ahead_batch_size: rss_config
                 .get_byte_size(&READ_AHEAD_BATCH_SIZE)
                 .map(|x| x as usize),
+            huge_partition_direct_io_enable: rss_config
+                .get(&HUGE_PARTITION_READ_DIRECT_IO_ENABLED)
+                .unwrap_or(false),
             client_configs: rss_config,
         }
     }
@@ -63,6 +67,7 @@ impl Default for AppConfigOptions {
             read_ahead_enable: false,
             read_ahead_batch_number: None,
             read_ahead_batch_size: None,
+            huge_partition_direct_io_enable: false,
             client_configs: Default::default(),
         }
     }

@@ -449,6 +449,11 @@ impl Store for LocalFileStore {
         let uid = ctx.uid;
         let rpc_source = ctx.rpc_source;
         let client_sendfile_enabled = ctx.sendfile_enabled;
+
+        // for the huge partition localfile reading type
+        let client_huge_partition_direct_io_enabled = ctx.huge_partition_direct_io_enabled;
+        let is_huge_partition = ctx.is_huge_partition;
+
         let (offset, len) = match ctx.reading_options {
             FILE_OFFSET_AND_LEN(offset, len) => (offset as u64, len as u64),
             _ => (0, 0),
@@ -481,10 +486,13 @@ impl Store for LocalFileStore {
                 }
 
                 // Setting up the read options for downstream to determinize io mode ...
-                let read_options =
+                let mut read_options =
                     ReadOptions::default().with_read_range(ReadRange::RANGE(offset, len));
 
-                let mut read_options = if self.direct_io_enable && self.direct_io_read_enable {
+                let mut read_options = if self.direct_io_enable
+                    && (self.direct_io_read_enable
+                        || (is_huge_partition && client_huge_partition_direct_io_enabled))
+                {
                     read_options.with_direct_io()
                 } else if (self.read_io_sendfile_enable
                     && rpc_source == RpcType::URPC
@@ -494,6 +502,7 @@ impl Store for LocalFileStore {
                 } else {
                     read_options.with_buffer_io()
                 };
+
                 if ctx.read_ahead_client_enabled {
                     let ahead = AheadOptions {
                         sequential: ctx.sequential,

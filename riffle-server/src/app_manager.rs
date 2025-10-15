@@ -445,6 +445,7 @@ pub(crate) mod test {
             read_ahead_enable: true,
             read_ahead_batch_number: None,
             read_ahead_batch_size: None,
+            huge_partition_direct_io_enable: false,
             client_configs: Default::default(),
         };
         app_manager_ref

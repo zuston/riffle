@@ -221,14 +221,20 @@ impl App {
         Ok(len as i32)
     }
 
-    pub async fn select(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
+    pub async fn select(&self, mut ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
         self.heartbeat()?;
 
-        let ctx = if (self.app_config_options.sendfile_enable) {
-            ctx.with_sendfile_enabled()
-        } else {
-            ctx
+        if (self.app_config_options.sendfile_enable) {
+            ctx = ctx.with_sendfile_enabled()
         };
+
+        if self.app_config_options.huge_partition_direct_io_enable {
+            ctx = ctx.with_huge_partition_direct_io_enabled(true);
+            let meta = self.get_partition_meta(&ctx.uid);
+            if meta.is_huge_partition() {
+                ctx = ctx.with_is_huge_partition(true);
+            }
+        }
 
         let ctx = if self.app_config_options.read_ahead_enable {
             // This is a workaround — we can infer sequential reads when the taskId filter bitmap is enabled.

@@ -34,6 +34,13 @@ pub static READ_AHEAD_BATCH_NUMBER: Lazy<ClientConfigOption<usize>> = Lazy::new(
         .with_description("Read ahead batch number for client per-read")
 });
 
+pub static HUGE_PARTITION_READ_DIRECT_IO_ENABLED: Lazy<ClientConfigOption<bool>> =
+    Lazy::new(|| {
+        ClientConfigOption::key("spark.rss.riffle.hugePartitionDirectIOEnabled")
+            .default_value(false)
+            .with_description("This indicated whether the huge partition uses the direct IO")
+    });
+
 #[derive(Debug, Clone, Default)]
 pub struct ClientRssConf {
     properties: HashMap<String, String>,
