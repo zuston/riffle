@@ -46,6 +46,7 @@ use crate::app_manager::request_context::{
 };
 use crate::app_manager::SHUFFLE_SERVER_ID;
 use crate::client_configs::HDFS_CLIENT_EAGER_LOADING_ENABLED_OPTION;
+use crate::ddashmap::DDashMap;
 use crate::error::WorkerError::Other;
 use crate::kerberos::KerberosTask;
 use crate::lazy_initializer::LazyInit;
@@ -95,7 +96,7 @@ pub struct HdfsStore {
     pub(crate) app_remote_clients: DashMap<ApplicationId, Arc<LazyInit<Box<dyn HdfsClient>>>>,
 
     // key: data_file_path.
-    partition_file_locks: DashMap<String, PartitionFileLockHandler>,
+    partition_file_locks: DDashMap<String, PartitionFileLockHandler>,
 
     // key: data_file_path with the concurrency index
     partition_cached_meta: DashMap<String, WritingHandler>,
@@ -123,7 +124,7 @@ impl HdfsStore {
         }
 
         HdfsStore {
-            partition_file_locks: DashMap::new(),
+            partition_file_locks: DDashMap::default(),
 
             concurrency_access_limiter: Semaphore::new(conf.max_concurrency),
             partition_cached_meta: Default::default(),
