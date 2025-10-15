@@ -90,11 +90,7 @@ dispatch_thread_num = 10
 
 ## Build
 
-`cargo build --release --features hdfs,jemalloc,logforth`
-
-Riffle currently treats all compiler warnings as error, with some dead-code warning excluded. When you are developing
-and really want to ignore the warnings for now, you can use `cargo --config 'build.rustflags=["-W", "warnings"]' build`
-to restore the default behavior. However, before submit your pr, you should fix all the warnings.
+`cargo build --release`
 
 ## Run
 
@@ -113,7 +109,6 @@ cargo build --features hdfs --release
 # configure the kerberos
 KRB5_CONFIG=/etc/krb5.conf KRB5CCNAME=/tmp/krb5cc_2002 LOG=info ./riffle-server
 ```
-
 
 <details>
 
