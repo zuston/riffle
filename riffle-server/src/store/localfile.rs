@@ -33,6 +33,7 @@ use crate::store::{
     ResponseData, ResponseDataIndex, Store,
 };
 use std::cmp::min;
+use std::default::Default;
 use std::fs;
 use std::hash::BuildHasherDefault;
 use std::ops::Deref;
@@ -50,7 +51,7 @@ use log::{debug, error, info, warn};
 use crate::app_manager::partition_identifier::PartitionUId;
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::composed_bytes::ComposedBytes;
-use crate::dashmap_extension::DashMapExtend;
+use crate::ddashmap::DDashMap;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::index_codec::{IndexCodec, INDEX_BLOCK_SIZE};
 use crate::store::local::delegator::LocalDiskDelegator;
@@ -90,8 +91,7 @@ pub struct LocalFileStore {
     local_disks: Vec<LocalDiskDelegator>,
     min_number_of_available_disks: i32,
     runtime_manager: RuntimeManager,
-    partition_coordinators:
-        DashMapExtend<String, Arc<PartitionCoordinator>, BuildHasherDefault<FxHasher>>,
+    partition_coordinators: DDashMap<String, Arc<PartitionCoordinator>>,
 
     direct_io_enable: bool,
     direct_io_read_enable: bool,
@@ -121,11 +121,7 @@ impl LocalFileStore {
             local_disks: local_disk_instances,
             min_number_of_available_disks: 1,
             runtime_manager,
-            partition_coordinators: DashMapExtend::<
-                String,
-                Arc<PartitionCoordinator>,
-                BuildHasherDefault<FxHasher>,
-            >::new(),
+            partition_coordinators: DDashMap::default(),
             direct_io_enable: config.direct_io_enable,
             direct_io_read_enable: config.direct_io_read_enable,
             direct_io_append_enable: config.direct_io_append_enable,
@@ -180,11 +176,7 @@ impl LocalFileStore {
             local_disks: local_disk_instances,
             min_number_of_available_disks,
             runtime_manager,
-            partition_coordinators: DashMapExtend::<
-                String,
-                Arc<PartitionCoordinator>,
-                BuildHasherDefault<FxHasher>,
-            >::new(),
+            partition_coordinators: DDashMap::default(),
             direct_io_enable: localfile_config.direct_io_enable,
             direct_io_read_enable: localfile_config.direct_io_read_enable,
             direct_io_append_enable: localfile_config.direct_io_append_enable,
