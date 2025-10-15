@@ -34,7 +34,7 @@ name = "riffle_server"
 path = "src/lib.rs"
 
 [features]
-default = ["logforth", "hdfs"]
+default = ["logforth", "hdfs", "memory-prof"]
 
 # whether to use jemalloc as the global allocator or not
 jemalloc = [
