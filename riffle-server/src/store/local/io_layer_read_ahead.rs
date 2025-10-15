@@ -257,7 +257,6 @@ impl ReadAheadLayerWrapper {
                     }
                 }
             }
-            READ_AHEAD_ACTIVE_TASKS.sub(deleted_count as i64);
         }
         (timer.elapsed().as_millis(), deleted_count)
     }
@@ -318,31 +317,34 @@ impl LocalIO for ReadAheadLayerWrapper {
             path.to_owned()
         };
 
-        let (seq_deletion_millis, seq_deletion_tasks) =
+        // 1. delete the cache of sequential loading
+        let (seq_millis, seq_tasks) =
             Self::delete_with_prefix(&self.sequential_load_tasks, prefix.as_str(), |k| k, |_| {});
-        let (millis, tasks) = if seq_deletion_tasks <= 0 {
-            let (millis, tasks) = Self::delete_with_prefix(
-                &self.read_plan_load_tasks,
-                prefix.as_str(),
-                |(left, _)| left,
-                |v| {
-                    let uid = v.uid;
-                    self.read_plan_load_processor.remove_task(uid);
-                },
-            );
-            if tasks > 0 {
-                READ_AHEAD_ACTIVE_TASKS_OF_READ_PLAN.sub(tasks as i64);
-            }
-            (millis, tasks)
-        } else {
-            READ_AHEAD_ACTIVE_TASKS_OF_SEQUENTIAL.sub(seq_deletion_tasks as i64);
-            (seq_deletion_millis, seq_deletion_tasks)
-        };
+        if seq_tasks > 0 {
+            READ_AHEAD_ACTIVE_TASKS_OF_SEQUENTIAL.sub(seq_tasks as i64);
+        }
 
-        info!(
-            "Deleted ahead cache for prefix: {} with {} load_tasks that costs {} millis",
-            prefix, tasks, millis
+        // 2. delete the cache of read plans
+        let (plan_millis, plan_tasks) = Self::delete_with_prefix(
+            &self.read_plan_load_tasks,
+            prefix.as_str(),
+            |(left, _)| left,
+            |v| {
+                let uid = v.uid;
+                self.read_plan_load_processor.remove_task(uid);
+            },
         );
+        if plan_tasks > 0 {
+            READ_AHEAD_ACTIVE_TASKS_OF_READ_PLAN.sub(plan_tasks as i64);
+        }
+
+        let (tasks, millis) = (seq_tasks + plan_tasks, seq_millis + plan_millis);
+        if tasks > 0 {
+            info!(
+                "Deleted ahead cache for prefix: {} with {} load_tasks that costs {} millis",
+                prefix, tasks, millis
+            );
+        }
 
         self.handler.delete(path).await
     }
