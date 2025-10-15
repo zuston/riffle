@@ -2,6 +2,7 @@ use crate::config::StorageType::{HDFS, LOCALFILE};
 use crate::config::{Config, StorageType};
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::config_ref::StaticConfRef;
+use crate::ddashmap::DDashMap;
 use crate::event_bus::{Event, EventBus, Subscriber};
 use crate::runtime::manager::RuntimeManager;
 use crate::store::spill::SpillMessage;
@@ -48,7 +49,7 @@ const MAX_CONCURRENCY: usize = 1000000;
 
 pub struct HierarchyEventBus<T> {
     parent: EventBus<T>,
-    pub(crate) children: DashMap<StorageType, EventBus<T>>,
+    pub(crate) children: DDashMap<StorageType, EventBus<T>>,
 }
 
 impl HierarchyEventBus<SpillMessage> {
@@ -98,7 +99,7 @@ impl HierarchyEventBus<SpillMessage> {
             hdfs_concurrency,
         );
 
-        let children = DashMap::new();
+        let children = DDashMap::with_capacity(2);
         children.insert(LOCALFILE, child_localfile);
         children.insert(HDFS, child_hdfs);
 
