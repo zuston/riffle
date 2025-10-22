@@ -624,12 +624,18 @@ impl Store for HdfsStore {
         let client = LazyInit::new({
             let root = remote_storage_conf.root.clone();
             let configs = remote_storage_conf.configs.clone();
-            move || match get_hdfs_client(root.as_str(), configs) {
-                Ok(client) => Some(client),
-                Err(e) => {
-                    error!("Errors on getting hdfs client. error: {}", e);
-                    None
-                }
+            let app_id = app_id.clone();
+            info!("registering app: {} with root: {}", &app_id, &root);
+            move || {
+                let client = match get_hdfs_client(root.as_str(), configs) {
+                    Ok(client) => Some(client),
+                    Err(e) => {
+                        error!("Errors on getting hdfs client. error: {}", e);
+                        None
+                    }
+                };
+                info!("Hdfs client has been initialized for app: {}", &app_id);
+                client
             }
         });
 
@@ -639,12 +645,7 @@ impl Store for HdfsStore {
             .get(&HDFS_CLIENT_EAGER_LOADING_ENABLED_OPTION)
             .unwrap_or(false)
         {
-            info!(
-                "registering app: {}. conf as follows \n{}",
-                &app_id, remote_storage_conf
-            );
             client.get_or_init();
-            info!("Hdfs client has been initialized for app: {}", &app_id);
         }
 
         self.app_remote_clients
