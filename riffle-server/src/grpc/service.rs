@@ -701,6 +701,7 @@ impl ShuffleServer for DefaultShuffleServer {
         let raw_app_id = &req.app_id;
         let app_id = ApplicationId::from(raw_app_id.as_str());
         let shuffle_id = req.shuffle_id;
+        // let partition_stats = req.partition_stats;
 
         let app = self.app_manager_ref.get_app(&app_id);
         if app.is_none() {
@@ -962,6 +963,7 @@ mod tests {
                     block_ids: vec![20],
                 },
             ],
+            partition_stats: vec![],
         };
 
         let result = DefaultShuffleServer::unpack_block_ids(req).unwrap();
