@@ -167,43 +167,37 @@ impl DefaultShuffleServer {
         }
     }
 
-    fn unpack_shuffle_result(
+    fn unpack_to_shuffle_result(
         req: ReportShuffleResultRequest,
     ) -> anyhow::Result<ReportShuffleResultContext> {
         let app_id = req.app_id.as_str();
         let shuffle_id = req.shuffle_id;
 
         let mut block_ids = HashMap::new();
-        if req.partition_to_block_ids.len() > 0 {
-            let partition_to_block_ids = req.partition_to_block_ids;
-            for partition_to_block_id in partition_to_block_ids {
-                block_ids.insert(
-                    partition_to_block_id.partition_id,
-                    partition_to_block_id.block_ids,
-                );
-            }
+        for partition_to_block_id in req.partition_to_block_ids {
+            block_ids.insert(
+                partition_to_block_id.partition_id,
+                partition_to_block_id.block_ids,
+            );
         }
 
         let mut record_numbers = HashMap::new();
         let mut client_task_attempt_id = -1i64;
-        if req.partition_stats.len() > 0 {
-            let partition_stats = req.partition_stats;
-            for partition_stat in partition_stats {
-                let pid = partition_stat.partition_id;
-                // 1. assume only having one record_number for one partition in this request
-                // 2. assume the task_attempt_ids are all same for the same request
-                let len = partition_stat.task_attempt_id_to_records.len();
-                if len != 1 {
-                    return Err(anyhow::anyhow!(
-                        "Unexcepted {} task_attempt_id_to_records for app: {}",
-                        len,
-                        app_id
-                    ));
-                }
-                let record = partition_stat.task_attempt_id_to_records.first().unwrap();
-                client_task_attempt_id = record.task_attempt_id;
-                record_numbers.insert(pid, record.record_number);
+        for partition_stat in req.partition_stats {
+            let pid = partition_stat.partition_id;
+            // 1. assume only having one record_number for one partition in this request
+            // 2. assume the task_attempt_ids are all same for the same request
+            let len = partition_stat.task_attempt_id_to_records.len();
+            if len != 1 {
+                return Err(anyhow::anyhow!(
+                    "Unexcepted {} task_attempt_id_to_records for app: {}",
+                    len,
+                    app_id
+                ));
             }
+            let record = partition_stat.task_attempt_id_to_records.first().unwrap();
+            client_task_attempt_id = record.task_attempt_id;
+            record_numbers.insert(pid, record.record_number);
         }
 
         Ok(ReportShuffleResultContext::new(
@@ -212,20 +206,6 @@ impl DefaultShuffleServer {
             block_ids,
             record_numbers,
         ))
-    }
-
-    fn unpack_block_ids(req: ReportShuffleResultRequest) -> anyhow::Result<HashMap<i32, Vec<i64>>> {
-        let mut block_ids = HashMap::new();
-        if req.partition_to_block_ids.len() > 0 {
-            let partition_to_block_ids = req.partition_to_block_ids;
-            for partition_to_block_id in partition_to_block_ids {
-                block_ids.insert(
-                    partition_to_block_id.partition_id,
-                    partition_to_block_id.block_ids,
-                );
-            }
-        }
-        Ok(block_ids)
     }
 }
 
@@ -754,7 +734,7 @@ impl ShuffleServer for DefaultShuffleServer {
             }));
         }
         let app = app.unwrap();
-        match Self::unpack_shuffle_result(req) {
+        match Self::unpack_to_shuffle_result(req) {
             Ok(ctx) => match app.report_shuffle_result(ctx).await {
                 Err(e) => Ok(Response::new(ReportShuffleResultResponse {
                     status: StatusCode::INTERNAL_ERROR.into(),
@@ -984,15 +964,16 @@ impl ShuffleServer for DefaultShuffleServer {
 #[cfg(test)]
 mod tests {
     use crate::grpc::protobuf::uniffle::{
-        CombinedShuffleData, PartitionToBlockIds, ReportShuffleResultRequest,
-        SendShuffleDataRequest, ShuffleData,
+        CombinedShuffleData, PartitionStats, PartitionToBlockIds, ReportShuffleResultRequest,
+        SendShuffleDataRequest, ShuffleData, TaskAttemptIdToRecords,
     };
     use crate::grpc::service::DefaultShuffleServer;
     use crate::store::PartitionedData;
     use bytes::Bytes;
 
     #[test]
-    fn test_extract_block_ids() {
+    fn test_unpack_shuffle_result() {
+        let task_id = 1000;
         let mut req = ReportShuffleResultRequest {
             app_id: "app".to_string(),
             shuffle_id: 1,
@@ -1008,12 +989,34 @@ mod tests {
                     block_ids: vec![20],
                 },
             ],
-            partition_stats: vec![],
+            partition_stats: vec![
+                PartitionStats {
+                    partition_id: 1,
+                    task_attempt_id_to_records: vec![TaskAttemptIdToRecords {
+                        task_attempt_id: task_id,
+                        record_number: 100,
+                    }],
+                },
+                PartitionStats {
+                    partition_id: 2,
+                    task_attempt_id_to_records: vec![TaskAttemptIdToRecords {
+                        task_attempt_id: task_id,
+                        record_number: 200,
+                    }],
+                },
+            ],
         };
+        let shuffle_result = DefaultShuffleServer::unpack_to_shuffle_result(req).unwrap();
 
-        let result = DefaultShuffleServer::unpack_block_ids(req).unwrap();
-        assert_eq!(result.get(&1), Some(&vec![10, 11]));
-        assert_eq!(result.get(&2), Some(&vec![20]));
+        // validate block_ids
+        let block_ids = shuffle_result.block_ids;
+        assert_eq!(block_ids.get(&1), Some(&vec![10, 11]));
+        assert_eq!(block_ids.get(&2), Some(&vec![20]));
+
+        // validation record numbers
+        let record_numbers = shuffle_result.record_numbers;
+        assert_eq!(100, *record_numbers.get(&1).unwrap());
+        assert_eq!(200, *record_numbers.get(&2).unwrap());
     }
 
     fn build_combined_data() -> SendShuffleDataRequest {
