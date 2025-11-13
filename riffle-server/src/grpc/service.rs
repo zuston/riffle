@@ -169,55 +169,12 @@ impl DefaultShuffleServer {
 
     fn unpack_block_ids(req: ReportShuffleResultRequest) -> anyhow::Result<HashMap<i32, Vec<i64>>> {
         let mut block_ids = HashMap::new();
-
-        // for legacy layout
         if req.partition_to_block_ids.len() > 0 {
             let partition_to_block_ids = req.partition_to_block_ids;
             for partition_to_block_id in partition_to_block_ids {
                 block_ids.insert(
                     partition_to_block_id.partition_id,
                     partition_to_block_id.block_ids,
-                );
-            }
-        } else {
-            // for new layout
-            let partition_ids = &req.partition_ids;
-            let block_id_counts = &req.block_id_counts;
-            let flat_block_ids = &req.block_ids;
-
-            if partition_ids.len() != block_id_counts.len() {
-                anyhow::bail!(
-                    "partition_ids.len() ({}) != block_id_counts.len() ({})",
-                    partition_ids.len(),
-                    block_id_counts.len()
-                );
-            }
-
-            let mut offset = 0;
-            for (i, &count) in block_id_counts.iter().enumerate() {
-                let count = count as usize;
-                let end = offset + count;
-                if end > flat_block_ids.len() {
-                    anyhow::bail!(
-                        "block_ids out of range: offset {} + count {} > total {}",
-                        offset,
-                        count,
-                        flat_block_ids.len()
-                    );
-                }
-
-                let pid = partition_ids[i];
-                let blocks = flat_block_ids[offset..end].to_vec();
-
-                block_ids.insert(pid, blocks);
-                offset = end;
-            }
-
-            if offset != flat_block_ids.len() {
-                anyhow::bail!(
-                    "block_ids contains extra data: used {} of {}",
-                    offset,
-                    flat_block_ids.len()
                 );
             }
         }
@@ -989,7 +946,7 @@ mod tests {
     use bytes::Bytes;
 
     #[test]
-    fn test_extract_block_ids_legacy() {
+    fn test_extract_block_ids() {
         let mut req = ReportShuffleResultRequest {
             app_id: "app".to_string(),
             shuffle_id: 1,
@@ -1005,49 +962,11 @@ mod tests {
                     block_ids: vec![20],
                 },
             ],
-            partition_ids: vec![],
-            block_ids: vec![],
-            block_id_counts: vec![],
         };
 
         let result = DefaultShuffleServer::unpack_block_ids(req).unwrap();
         assert_eq!(result.get(&1), Some(&vec![10, 11]));
         assert_eq!(result.get(&2), Some(&vec![20]));
-    }
-
-    #[test]
-    fn test_extract_block_ids_flat() {
-        let req = ReportShuffleResultRequest {
-            app_id: "app".to_string(),
-            shuffle_id: 1,
-            task_attempt_id: 123,
-            bitmap_num: 0,
-            partition_to_block_ids: vec![],
-            partition_ids: vec![1, 2],
-            block_ids: vec![100, 101, 102, 200],
-            block_id_counts: vec![3, 1],
-        };
-
-        let result = DefaultShuffleServer::unpack_block_ids(req).unwrap();
-        assert_eq!(result.get(&1), Some(&vec![100, 101, 102]));
-        assert_eq!(result.get(&2), Some(&vec![200]));
-    }
-
-    #[test]
-    fn test_extract_block_ids_flat_invalid_lengths() {
-        let req = ReportShuffleResultRequest {
-            app_id: "app".to_string(),
-            shuffle_id: 1,
-            task_attempt_id: 123,
-            bitmap_num: 0,
-            partition_to_block_ids: vec![],
-            partition_ids: vec![1],
-            block_ids: vec![100, 101],
-            block_id_counts: vec![3], // Too large
-        };
-
-        let result = DefaultShuffleServer::unpack_block_ids(req);
-        assert!(result.is_err());
     }
 
     fn build_combined_data() -> SendShuffleDataRequest {

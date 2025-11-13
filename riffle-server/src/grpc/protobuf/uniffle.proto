@@ -126,14 +126,7 @@ message ReportShuffleResultRequest {
   int32 shuffleId = 2;
   int64 taskAttemptId = 3;
   int32 bitmapNum = 4;
-
-  // legacy layout
   repeated PartitionToBlockIds partitionToBlockIds = 5;
-
-  // new layout
-  repeated int32 partitionIds = 6;
-  repeated int64 blockIds = 7;
-  repeated int32 blockIdCounts = 8;
 }
 
 message PartitionToBlockIds {
