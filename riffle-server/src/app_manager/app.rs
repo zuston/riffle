@@ -3,9 +3,9 @@ use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::partition_meta::PartitionMeta;
 use crate::app_manager::purge_event::PurgeReason;
 use crate::app_manager::request_context::{
-    GetMultiBlockIdsContext, PurgeDataContext, ReadingIndexViewContext, ReadingOptions,
-    ReadingViewContext, RegisterAppContext, ReleaseTicketContext, ReportMultiBlockIdsContext,
-    RequireBufferContext, WritingViewContext,
+    GetShuffleResultContext, PurgeDataContext, ReadingIndexViewContext, ReadingOptions,
+    ReadingViewContext, RegisterAppContext, ReleaseTicketContext, ReportShuffleResultContext,
+    RequireBufferContext, ShuffleResult, WritingViewContext,
 };
 use crate::block_id_manager::{get_block_id_manager, BlockIdManager};
 use crate::config::Config;
@@ -21,6 +21,7 @@ use crate::metric::{
     TOTAL_READ_DATA_FROM_MEMORY, TOTAL_READ_INDEX_FROM_LOCALFILE, TOTAL_RECEIVED_DATA,
     TOTAL_REQUIRE_BUFFER_FAILED,
 };
+use crate::partition_stats::PartitionStatsManager;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::hybrid::HybridStore;
 use crate::store::{RequireBufferResponse, ResponseData, ResponseDataIndex, Store};
@@ -60,6 +61,8 @@ pub struct App {
 
     // key: shuffle_id, val: shuffle's all block_ids bitmap
     block_id_manager: Arc<Box<dyn BlockIdManager>>,
+
+    partition_stats_manager: Arc<PartitionStatsManager>,
 
     // key: (shuffle_id, partition_id)
     partition_meta_infos: DDashMap<(i32, i32), PartitionMeta>,
@@ -153,6 +156,7 @@ impl App {
             partition_split_threshold,
             reconf_manager: reconf_manager.clone(),
             partition_split_triggered: AtomicBool::new(false),
+            partition_stats_manager: Arc::new(PartitionStatsManager::new()),
         }
     }
 
@@ -398,18 +402,33 @@ impl App {
             })
     }
 
-    pub async fn get_multi_block_ids(&self, ctx: GetMultiBlockIdsContext) -> anyhow::Result<Bytes> {
+    pub async fn get_shuffle_result(
+        &self,
+        ctx: GetShuffleResultContext,
+    ) -> anyhow::Result<ShuffleResult> {
         self.heartbeat()?;
-        self.block_id_manager.get_multi_block_ids(ctx).await
+        let partition_stats = self.partition_stats_manager.get(&ctx)?;
+        let serialized_block_ids = self.block_id_manager.get_multi_block_ids(ctx).await?;
+
+        Ok(ShuffleResult {
+            serialized_block_ids,
+            partition_stats,
+        })
     }
 
-    pub async fn report_multi_block_ids(
+    pub async fn report_shuffle_result(
         &self,
-        ctx: ReportMultiBlockIdsContext,
+        ctx: ReportShuffleResultContext,
     ) -> anyhow::Result<()> {
         self.heartbeat()?;
+
+        // report partition records
+        self.partition_stats_manager.report(&ctx)?;
+
+        // report block_ids
         let number = self.block_id_manager.report_multi_block_ids(ctx).await?;
         BLOCK_ID_NUMBER.add(number as i64);
+
         Ok(())
     }
 
@@ -438,6 +457,8 @@ impl App {
             // shuffle level bitmap deletion
             let purged_number = self.block_id_manager.purge_block_ids(shuffle_id).await?;
             BLOCK_ID_NUMBER.sub(purged_number as i64);
+
+            self.partition_stats_manager.purge(shuffle_id);
 
             let mut deletion_keys = vec![];
             let view = self.partition_meta_infos.clone().into_read_only();

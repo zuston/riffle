@@ -2,8 +2,10 @@ use crate::app_manager::app_configs::AppConfigOptions;
 use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::purge_event::PurgeReason;
 use crate::id_layout::IdLayout;
+use crate::partition_stats::{PartitionStats, TaskAttemptIdToRecordRef};
 use crate::store::Block;
 use crate::urpc::command::ReadSegment;
+use bytes::Bytes;
 use croaring::Treemap;
 use std::collections::HashMap;
 use std::ops::Deref;
@@ -30,35 +32,41 @@ impl Deref for PurgeDataContext {
 }
 
 #[derive(Debug, Clone)]
-pub struct ReportBlocksContext {
-    pub(crate) uid: PartitionUId,
-    pub(crate) blocks: Vec<i64>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ReportMultiBlockIdsContext {
+pub struct ReportShuffleResultContext {
     pub shuffle_id: i32,
+    // the uniq id from client side.
+    pub task_attempt_id: i64,
     pub block_ids: HashMap<i32, Vec<i64>>,
+    // partition_id -> record_number
+    pub record_numbers: HashMap<i32, i64>,
 }
-impl ReportMultiBlockIdsContext {
-    pub fn new(shuffle_id: i32, block_ids: HashMap<i32, Vec<i64>>) -> ReportMultiBlockIdsContext {
+impl ReportShuffleResultContext {
+    pub fn new(
+        shuffle_id: i32,
+        task_attempt_id: i64,
+        block_ids: HashMap<i32, Vec<i64>>,
+        partition_record_numbers: HashMap<i32, i64>,
+    ) -> ReportShuffleResultContext {
         Self {
             shuffle_id,
+            task_attempt_id,
             block_ids,
+            record_numbers: partition_record_numbers,
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct GetMultiBlockIdsContext {
+pub struct GetShuffleResultContext {
     pub shuffle_id: i32,
     pub partition_ids: Vec<i32>,
     pub layout: IdLayout,
 }
 
 #[derive(Debug, Clone)]
-pub struct GetBlocksContext {
-    pub(crate) uid: PartitionUId,
+pub struct ShuffleResult {
+    pub serialized_block_ids: Bytes,
+    pub partition_stats: Vec<PartitionStats>,
 }
 
 #[derive(Debug, Clone)]

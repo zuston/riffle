@@ -350,7 +350,7 @@ pub(crate) mod test {
     use crate::app_manager::application_identifier::ApplicationId;
     use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::request_context::{
-        GetMultiBlockIdsContext, ReadingOptions, ReadingViewContext, ReportMultiBlockIdsContext,
+        GetShuffleResultContext, ReadingOptions, ReadingViewContext, ReportShuffleResultContext,
         RequireBufferContext, RpcType, WritingViewContext,
     };
     use crate::app_manager::{AppManager, PurgeReason};
@@ -549,7 +549,7 @@ pub(crate) mod test {
         let app_manager_ref =
             AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
         app_manager_ref
-            .register(app_id.clone().into(), 1, Default::default())
+            .register(app_id.into(), 1, Default::default())
             .unwrap();
     }
 
@@ -726,26 +726,28 @@ pub(crate) mod test {
         let block_id_2 = DEFAULT_BLOCK_ID_LAYOUT.get_block_id(2, 10, 3);
         let block_id_3 = DEFAULT_BLOCK_ID_LAYOUT.get_block_id(2, 20, 3);
         runtime_manager
-            .wait(app.report_multi_block_ids(ReportMultiBlockIdsContext {
+            .wait(app.report_shuffle_result(ReportShuffleResultContext {
                 shuffle_id: 1,
+                task_attempt_id: 0,
                 block_ids: {
                     let mut hashmap = HashMap::new();
                     hashmap.insert(10, vec![block_id_1.clone(), block_id_2.clone()]);
                     hashmap.insert(20, vec![block_id_3.clone()]);
                     hashmap
                 },
+                record_numbers: Default::default(),
             }))
             .expect("TODO: panic message");
 
         // case1: fetch partition=10
         let data = runtime_manager
-            .wait(app.get_multi_block_ids(GetMultiBlockIdsContext {
+            .wait(app.get_shuffle_result(GetShuffleResultContext {
                 shuffle_id: 1,
                 partition_ids: vec![10],
                 layout: to_layout(None),
             }))
             .expect("");
-        let deserialized = Treemap::deserialize::<JvmLegacy>(&data);
+        let deserialized = Treemap::deserialize::<JvmLegacy>(&data.serialized_block_ids);
         assert_eq!(
             deserialized,
             Treemap::from_iter(vec![block_id_1 as u64, block_id_2 as u64])
@@ -753,13 +755,13 @@ pub(crate) mod test {
 
         // case2: fetch partition=20
         let data = runtime_manager
-            .wait(app.get_multi_block_ids(GetMultiBlockIdsContext {
+            .wait(app.get_shuffle_result(GetShuffleResultContext {
                 shuffle_id: 1,
                 partition_ids: vec![20],
                 layout: to_layout(None),
             }))
             .expect("");
-        let deserialized = Treemap::deserialize::<JvmLegacy>(&data);
+        let deserialized = Treemap::deserialize::<JvmLegacy>(&data.serialized_block_ids);
         assert_eq!(deserialized, Treemap::from_iter(vec![block_id_3 as u64]));
     }
 

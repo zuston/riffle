@@ -109,6 +109,8 @@ pub mod panic_hook;
 
 pub mod ddashmap;
 
+pub mod partition_stats;
+
 const MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY: &str = "MAX_MEMORY_ALLOCATION_LIMIT_SIZE";
 
 #[derive(Parser, Debug)]

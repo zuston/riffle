@@ -19,8 +19,8 @@ use crate::app_manager::app_configs::{AppConfigOptions, DataDistribution, Remote
 use crate::app_manager::application_identifier::ApplicationId;
 use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::request_context::{
-    GetMultiBlockIdsContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
-    ReportMultiBlockIdsContext, RequireBufferContext, RpcType, WritingViewContext,
+    GetShuffleResultContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
+    ReportShuffleResultContext, RequireBufferContext, RpcType, WritingViewContext,
 };
 use crate::app_manager::AppManagerRef;
 use crate::client_configs::ClientRssConf;
@@ -39,7 +39,7 @@ use crate::grpc::protobuf::uniffle::{
     RequireBufferResponse, SendShuffleDataRequest, SendShuffleDataResponse, ShuffleCommitRequest,
     ShuffleCommitResponse, ShuffleData, ShuffleRegisterRequest, ShuffleRegisterResponse,
     ShuffleUnregisterByAppIdRequest, ShuffleUnregisterByAppIdResponse, ShuffleUnregisterRequest,
-    ShuffleUnregisterResponse,
+    ShuffleUnregisterResponse, TaskAttemptIdToRecords,
 };
 use crate::id_layout::to_layout;
 use crate::metric::{
@@ -167,18 +167,45 @@ impl DefaultShuffleServer {
         }
     }
 
-    fn unpack_block_ids(req: ReportShuffleResultRequest) -> anyhow::Result<HashMap<i32, Vec<i64>>> {
+    fn unpack_to_shuffle_result(
+        req: ReportShuffleResultRequest,
+    ) -> anyhow::Result<ReportShuffleResultContext> {
+        let app_id = req.app_id.as_str();
+        let shuffle_id = req.shuffle_id;
+
         let mut block_ids = HashMap::new();
-        if req.partition_to_block_ids.len() > 0 {
-            let partition_to_block_ids = req.partition_to_block_ids;
-            for partition_to_block_id in partition_to_block_ids {
-                block_ids.insert(
-                    partition_to_block_id.partition_id,
-                    partition_to_block_id.block_ids,
-                );
-            }
+        for partition_to_block_id in req.partition_to_block_ids {
+            block_ids.insert(
+                partition_to_block_id.partition_id,
+                partition_to_block_id.block_ids,
+            );
         }
-        Ok(block_ids)
+
+        let mut record_numbers = HashMap::new();
+        let mut client_task_attempt_id = -1i64;
+        for partition_stat in req.partition_stats {
+            let pid = partition_stat.partition_id;
+            // 1. assume only having one record_number for one partition in this request
+            // 2. assume the task_attempt_ids are all same for the same request
+            let len = partition_stat.task_attempt_id_to_records.len();
+            if len != 1 {
+                return Err(anyhow::anyhow!(
+                    "Unexcepted {} task_attempt_id_to_records for app: {}",
+                    len,
+                    app_id
+                ));
+            }
+            let record = partition_stat.task_attempt_id_to_records.first().unwrap();
+            client_task_attempt_id = record.task_attempt_id;
+            record_numbers.insert(pid, record.record_number);
+        }
+
+        Ok(ReportShuffleResultContext::new(
+            shuffle_id,
+            client_task_attempt_id,
+            block_ids,
+            record_numbers,
+        ))
     }
 }
 
@@ -698,10 +725,7 @@ impl ShuffleServer for DefaultShuffleServer {
         request: Request<ReportShuffleResultRequest>,
     ) -> Result<Response<ReportShuffleResultResponse>, Status> {
         let req = request.into_inner();
-        let raw_app_id = &req.app_id;
-        let app_id = ApplicationId::from(raw_app_id.as_str());
-        let shuffle_id = req.shuffle_id;
-
+        let app_id = ApplicationId::from(req.app_id.as_str());
         let app = self.app_manager_ref.get_app(&app_id);
         if app.is_none() {
             return Ok(Response::new(ReportShuffleResultResponse {
@@ -710,22 +734,17 @@ impl ShuffleServer for DefaultShuffleServer {
             }));
         }
         let app = app.unwrap();
-        match DefaultShuffleServer::unpack_block_ids(req) {
-            Ok(block_ids) => {
-                match app
-                    .report_multi_block_ids(ReportMultiBlockIdsContext::new(shuffle_id, block_ids))
-                    .await
-                {
-                    Err(e) => Ok(Response::new(ReportShuffleResultResponse {
-                        status: StatusCode::INTERNAL_ERROR.into(),
-                        ret_msg: e.to_string(),
-                    })),
-                    _ => Ok(Response::new(ReportShuffleResultResponse {
-                        status: StatusCode::SUCCESS.into(),
-                        ret_msg: "".to_string(),
-                    })),
-                }
-            }
+        match Self::unpack_to_shuffle_result(req) {
+            Ok(ctx) => match app.report_shuffle_result(ctx).await {
+                Err(e) => Ok(Response::new(ReportShuffleResultResponse {
+                    status: StatusCode::INTERNAL_ERROR.into(),
+                    ret_msg: e.to_string(),
+                })),
+                _ => Ok(Response::new(ReportShuffleResultResponse {
+                    status: StatusCode::SUCCESS.into(),
+                    ret_msg: "".to_string(),
+                })),
+            },
             Err(e) => Ok(Response::new(ReportShuffleResultResponse {
                 status: StatusCode::INTERNAL_ERROR.into(),
                 ret_msg: e.to_string(),
@@ -752,21 +771,21 @@ impl ShuffleServer for DefaultShuffleServer {
                 serialized_bitmap: Default::default(),
             }));
         }
-        let ctx = GetMultiBlockIdsContext {
+        let ctx = GetShuffleResultContext {
             shuffle_id,
             partition_ids: vec![partition_id],
             layout: to_layout(layout),
         };
-        let block_ids_result = app
+        let shuffle_result = app
             .unwrap()
-            .get_multi_block_ids(ctx)
+            .get_shuffle_result(ctx)
             .instrument_await(format!(
                 "getting the block_id bitmap for app[{}]/shuffle_id[{}]/partition[{}]",
                 &raw_app_id, shuffle_id, partition_id
             ))
             .await;
-        if block_ids_result.is_err() {
-            let err_msg = block_ids_result.err();
+        if shuffle_result.is_err() {
+            let err_msg = shuffle_result.err();
             error!(
                 "Errors on getting shuffle block ids for app:[{}], error: {:?}",
                 &raw_app_id, err_msg
@@ -781,7 +800,7 @@ impl ShuffleServer for DefaultShuffleServer {
         Ok(Response::new(GetShuffleResultResponse {
             status: StatusCode::SUCCESS.into(),
             ret_msg: "".to_string(),
-            serialized_bitmap: block_ids_result.unwrap(),
+            serialized_bitmap: shuffle_result.unwrap().serialized_block_ids,
         }))
     }
 
@@ -807,16 +826,17 @@ impl ShuffleServer for DefaultShuffleServer {
                 status: StatusCode::NO_REGISTER.into(),
                 ret_msg: "No such app in this shuffle server".to_string(),
                 serialized_bitmap: Default::default(),
+                partition_stats: vec![],
             }));
         }
         let app = app.unwrap();
-        let ctx = GetMultiBlockIdsContext {
+        let ctx = GetShuffleResultContext {
             shuffle_id,
             partition_ids: partitions,
             layout: to_layout(layout),
         };
         match app
-            .get_multi_block_ids(ctx)
+            .get_shuffle_result(ctx)
             .instrument_await(format!(
                 "getting the block_id bitmap for app[{}]/shuffle_id[{}]",
                 &raw_app_id, shuffle_id
@@ -832,12 +852,18 @@ impl ShuffleServer for DefaultShuffleServer {
                     status: StatusCode::INTERNAL_ERROR.into(),
                     ret_msg: format!("{:?}", &e),
                     serialized_bitmap: Default::default(),
+                    partition_stats: vec![],
                 }))
             }
-            Ok(data) => Ok(Response::new(GetShuffleResultForMultiPartResponse {
+            Ok(shuffle_result) => Ok(Response::new(GetShuffleResultForMultiPartResponse {
                 status: 0,
                 ret_msg: "".to_string(),
-                serialized_bitmap: data,
+                serialized_bitmap: shuffle_result.serialized_block_ids,
+                partition_stats: shuffle_result
+                    .partition_stats
+                    .into_iter()
+                    .map(|x| x.into())
+                    .collect(),
             })),
         }
     }
@@ -938,15 +964,16 @@ impl ShuffleServer for DefaultShuffleServer {
 #[cfg(test)]
 mod tests {
     use crate::grpc::protobuf::uniffle::{
-        CombinedShuffleData, PartitionToBlockIds, ReportShuffleResultRequest,
-        SendShuffleDataRequest, ShuffleData,
+        CombinedShuffleData, PartitionStats, PartitionToBlockIds, ReportShuffleResultRequest,
+        SendShuffleDataRequest, ShuffleData, TaskAttemptIdToRecords,
     };
     use crate::grpc::service::DefaultShuffleServer;
     use crate::store::PartitionedData;
     use bytes::Bytes;
 
     #[test]
-    fn test_extract_block_ids() {
+    fn test_unpack_shuffle_result() {
+        let task_id = 1000;
         let mut req = ReportShuffleResultRequest {
             app_id: "app".to_string(),
             shuffle_id: 1,
@@ -962,11 +989,34 @@ mod tests {
                     block_ids: vec![20],
                 },
             ],
+            partition_stats: vec![
+                PartitionStats {
+                    partition_id: 1,
+                    task_attempt_id_to_records: vec![TaskAttemptIdToRecords {
+                        task_attempt_id: task_id,
+                        record_number: 100,
+                    }],
+                },
+                PartitionStats {
+                    partition_id: 2,
+                    task_attempt_id_to_records: vec![TaskAttemptIdToRecords {
+                        task_attempt_id: task_id,
+                        record_number: 200,
+                    }],
+                },
+            ],
         };
+        let shuffle_result = DefaultShuffleServer::unpack_to_shuffle_result(req).unwrap();
 
-        let result = DefaultShuffleServer::unpack_block_ids(req).unwrap();
-        assert_eq!(result.get(&1), Some(&vec![10, 11]));
-        assert_eq!(result.get(&2), Some(&vec![20]));
+        // validate block_ids
+        let block_ids = shuffle_result.block_ids;
+        assert_eq!(block_ids.get(&1), Some(&vec![10, 11]));
+        assert_eq!(block_ids.get(&2), Some(&vec![20]));
+
+        // validation record numbers
+        let record_numbers = shuffle_result.record_numbers;
+        assert_eq!(100, *record_numbers.get(&1).unwrap());
+        assert_eq!(200, *record_numbers.get(&2).unwrap());
     }
 
     fn build_combined_data() -> SendShuffleDataRequest {
