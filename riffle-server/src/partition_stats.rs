@@ -116,6 +116,58 @@ mod test {
     use std::collections::HashMap;
 
     #[test]
+    fn test_multi_tasks_report() -> anyhow::Result<()> {
+        let manager = PartitionStatsManager::new();
+        let shuffle_id = 1999;
+        let partitions = 1000;
+        let records_number_per_partition = 10;
+
+        let mut records = HashMap::new();
+        for partition in 0..partitions {
+            records.insert(partition, records_number_per_partition);
+        }
+
+        // report 1 from task 10
+        let task_attempt_id = 10;
+        let report_ctx = ReportShuffleResultContext::new(
+            shuffle_id,
+            task_attempt_id,
+            Default::default(),
+            records.clone(),
+        );
+        manager.report(&report_ctx)?;
+
+        // report 2 from task 20
+        let task_attempt_id = 20;
+        let report_ctx = ReportShuffleResultContext::new(
+            shuffle_id,
+            task_attempt_id,
+            Default::default(),
+            records,
+        );
+        manager.report(&report_ctx)?;
+
+        // get the partition=1 with task 10/20
+        let ctx = GetShuffleResultContext {
+            shuffle_id,
+            partition_ids: vec![1],
+            layout: to_layout(None),
+        };
+        let result = manager.get(&ctx)?;
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].records.len(), 2);
+
+        let mut sorted = result[0]
+            .records
+            .iter()
+            .map(|x| x.task_attempt_id)
+            .collect::<Vec<_>>();
+        assert_eq!(vec!(10, 20), sorted);
+
+        Ok(())
+    }
+
+    #[test]
     fn test_full() -> anyhow::Result<()> {
         let manager = PartitionStatsManager::new();
         let shuffle_id = 1999;

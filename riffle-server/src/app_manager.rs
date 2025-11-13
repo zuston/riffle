@@ -549,7 +549,7 @@ pub(crate) mod test {
         let app_manager_ref =
             AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
         app_manager_ref
-            .register(app_id.clone().into(), 1, Default::default())
+            .register(app_id.into(), 1, Default::default())
             .unwrap();
     }
 
