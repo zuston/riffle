@@ -1,4 +1,4 @@
-use crate::app_manager::request_context::{GetMultiBlockIdsContext, ReportMultiBlockIdsContext};
+use crate::app_manager::request_context::{GetShuffleResultContext, ReportShuffleResultContext};
 use crate::block_id_manager::BlockIdManagerType::DEFAULT;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -15,8 +15,8 @@ use std::sync::Arc;
 /// The block id manager is used by the every app, so the app id will not be scoped here.
 #[async_trait]
 pub trait BlockIdManager: Send + Sync {
-    async fn get_multi_block_ids(&self, ctx: GetMultiBlockIdsContext) -> Result<Bytes>;
-    async fn report_multi_block_ids(&self, ctx: ReportMultiBlockIdsContext) -> Result<u64>;
+    async fn get_multi_block_ids(&self, ctx: GetShuffleResultContext) -> Result<Bytes>;
+    async fn report_multi_block_ids(&self, ctx: ReportShuffleResultContext) -> Result<u64>;
     async fn purge_block_ids(&self, shuffle_id: i32) -> Result<u64>;
     fn get_blocks_number(&self) -> Result<u64>;
 }
@@ -47,7 +47,7 @@ pub struct PartitionedBlockIdManager {
 
 #[async_trait]
 impl BlockIdManager for PartitionedBlockIdManager {
-    async fn get_multi_block_ids(&self, ctx: GetMultiBlockIdsContext) -> Result<Bytes> {
+    async fn get_multi_block_ids(&self, ctx: GetShuffleResultContext) -> Result<Bytes> {
         let shuffle_id = &ctx.shuffle_id;
         let block_id_layout = &ctx.layout;
         let partitions: HashSet<&i32> = HashSet::from_iter(&ctx.partition_ids);
@@ -68,7 +68,7 @@ impl BlockIdManager for PartitionedBlockIdManager {
         Ok(Bytes::from(retrieved.serialize::<JvmLegacy>()))
     }
 
-    async fn report_multi_block_ids(&self, ctx: ReportMultiBlockIdsContext) -> Result<u64> {
+    async fn report_multi_block_ids(&self, ctx: ReportShuffleResultContext) -> Result<u64> {
         let shuffle_id = &ctx.shuffle_id;
         let treemap = self
             .block_id_bitmap
@@ -113,7 +113,7 @@ struct DefaultBlockIdManager {
 
 #[async_trait]
 impl BlockIdManager for DefaultBlockIdManager {
-    async fn get_multi_block_ids(&self, ctx: GetMultiBlockIdsContext) -> Result<Bytes> {
+    async fn get_multi_block_ids(&self, ctx: GetShuffleResultContext) -> Result<Bytes> {
         let shuffle_id = ctx.shuffle_id;
         let partition_ids = ctx.partition_ids;
 
@@ -142,7 +142,7 @@ impl BlockIdManager for DefaultBlockIdManager {
         Ok(Bytes::from(treemap.serialize::<JvmLegacy>()))
     }
 
-    async fn report_multi_block_ids(&self, ctx: ReportMultiBlockIdsContext) -> Result<u64> {
+    async fn report_multi_block_ids(&self, ctx: ReportShuffleResultContext) -> Result<u64> {
         let shuffle_id = ctx.shuffle_id;
         let partitioned_block_ids = ctx.block_ids;
         let mut number = 0;
@@ -188,7 +188,7 @@ impl BlockIdManager for DefaultBlockIdManager {
 #[cfg(test)]
 mod tests {
     use crate::app_manager::request_context::{
-        GetMultiBlockIdsContext, ReportMultiBlockIdsContext,
+        GetShuffleResultContext, ReportShuffleResultContext,
     };
     use crate::block_id_manager::{get_block_id_manager, BlockIdManager, BlockIdManagerType};
     use crate::id_layout::{to_layout, DEFAULT_BLOCK_ID_LAYOUT};
@@ -212,9 +212,11 @@ mod tests {
 
         // report
         manager
-            .report_multi_block_ids(ReportMultiBlockIdsContext {
+            .report_multi_block_ids(ReportShuffleResultContext {
                 shuffle_id,
+                task_attempt_id: 0,
                 block_ids: partitioned_block_ids.clone(),
+                record_numbers: Default::default(),
             })
             .await?;
         assert_eq!(100 * 20, manager.get_blocks_number()?);
@@ -222,7 +224,7 @@ mod tests {
         // get by one partition
         for partition_id in 0..100 {
             let gotten = manager
-                .get_multi_block_ids(GetMultiBlockIdsContext {
+                .get_multi_block_ids(GetShuffleResultContext {
                     shuffle_id,
                     partition_ids: vec![partition_id],
                     layout: to_layout(None),
@@ -242,7 +244,7 @@ mod tests {
         // get by multi partition
         let partition_ids = vec![1, 2, 3, 4];
         let gotten = manager
-            .get_multi_block_ids(GetMultiBlockIdsContext {
+            .get_multi_block_ids(GetShuffleResultContext {
                 shuffle_id,
                 partition_ids: partition_ids.clone(),
                 layout: to_layout(None),
