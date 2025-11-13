@@ -170,9 +170,6 @@ pub async fn shuffle_testing(config: &Config, app_ref: AppManagerRef) -> anyhow:
                     partition_id: idx,
                     block_ids: vec![block_id],
                 }],
-                partition_ids: vec![],
-                block_ids: vec![],
-                block_id_counts: vec![],
             })
             .await?;
     }
