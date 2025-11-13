@@ -113,7 +113,6 @@ mod test {
     };
     use crate::id_layout::to_layout;
     use crate::partition_stats::PartitionStatsManager;
-    use libc::mem_entry_name_port_t;
     use std::collections::HashMap;
 
     #[test]
