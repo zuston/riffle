@@ -62,7 +62,7 @@ pub struct App {
     // key: shuffle_id, val: shuffle's all block_ids bitmap
     block_id_manager: Arc<Box<dyn BlockIdManager>>,
 
-    partition_stats_manager: Arc<PartitionStatsManager>,
+    partition_stats_manager: PartitionStatsManager,
 
     // key: (shuffle_id, partition_id)
     partition_meta_infos: DDashMap<(i32, i32), PartitionMeta>,
@@ -156,7 +156,7 @@ impl App {
             partition_split_threshold,
             reconf_manager: reconf_manager.clone(),
             partition_split_triggered: AtomicBool::new(false),
-            partition_stats_manager: Arc::new(PartitionStatsManager::new()),
+            partition_stats_manager: PartitionStatsManager::new(),
         }
     }
 
@@ -423,7 +423,7 @@ impl App {
         self.heartbeat()?;
 
         // report partition records
-        self.partition_stats_manager.report(&ctx)?;
+        self.partition_stats_manager.add(&ctx)?;
 
         // report block_ids
         let number = self.block_id_manager.report_multi_block_ids(ctx).await?;
