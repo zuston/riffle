@@ -2,7 +2,7 @@ use crate::app_manager::app_configs::AppConfigOptions;
 use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::purge_event::PurgeReason;
 use crate::id_layout::IdLayout;
-use crate::partition_stats::{PartitionStats, TaskAttemptIdToRecordRef};
+use crate::partition_stats::{PartitionStats, TaskToRecordStatRef};
 use crate::store::Block;
 use crate::urpc::command::ReadSegment;
 use bytes::Bytes;
