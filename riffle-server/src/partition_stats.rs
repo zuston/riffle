@@ -8,7 +8,7 @@ use std::sync::Arc;
 /// The PartitionStatsManager will be initialized by the every app, there is no need to include app_id here.
 pub struct PartitionStatsManager {
     // (shuffle_id, partition_id) -> task_attempt_id -> partition_stats
-    stats: DDashMap<(i32, i32), Arc<DDashMap<i64, TaskAttemptIdToRecordRef>>>,
+    stats: DDashMap<(i32, i32), Arc<DDashMap<i64, TaskToRecordStatRef>>>,
 }
 
 impl PartitionStatsManager {
@@ -30,7 +30,7 @@ impl PartitionStatsManager {
                 .compute_if_absent((shuffle_id, *pid), || Default::default());
             task_id_to_stats.insert(
                 task_attempt_id,
-                Arc::new(TaskAttemptIdToRecord {
+                Arc::new(TaskToRecordStat {
                     task_attempt_id,
                     record_number: *record.1,
                 }),
@@ -74,14 +74,14 @@ impl PartitionStatsManager {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct TaskAttemptIdToRecord {
+pub struct TaskToRecordStat {
     task_attempt_id: i64,
     record_number: i64,
 }
 
-pub type TaskAttemptIdToRecordRef = Arc<TaskAttemptIdToRecord>;
+pub type TaskToRecordStatRef = Arc<TaskToRecordStat>;
 
-impl Into<crate::grpc::protobuf::uniffle::TaskAttemptIdToRecords> for &TaskAttemptIdToRecordRef {
+impl Into<crate::grpc::protobuf::uniffle::TaskAttemptIdToRecords> for &TaskToRecordStatRef {
     fn into(self) -> crate::grpc::protobuf::uniffle::TaskAttemptIdToRecords {
         crate::grpc::protobuf::uniffle::TaskAttemptIdToRecords {
             task_attempt_id: self.task_attempt_id,
@@ -93,7 +93,7 @@ impl Into<crate::grpc::protobuf::uniffle::TaskAttemptIdToRecords> for &TaskAttem
 #[derive(Debug, Default, Clone)]
 pub struct PartitionStats {
     partition_id: i32,
-    records: Vec<TaskAttemptIdToRecordRef>,
+    records: Vec<TaskToRecordStatRef>,
 }
 
 impl Into<crate::grpc::protobuf::uniffle::PartitionStats> for PartitionStats {
