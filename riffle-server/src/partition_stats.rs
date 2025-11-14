@@ -5,10 +5,10 @@ use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
 
-/// The PartitionStatsManager will be initialized by the every app, so the app id will not be scoped here.
+/// The PartitionStatsManager will be initialized by the every app, there is no need to include app_id here.
 pub struct PartitionStatsManager {
-    // shuffle_id -> partition_id -> task_attempt_id -> record_number
-    stats: DDashMap<(i32, i32), Arc<RwLock<Vec<TaskAttemptIdToRecordRef>>>>,
+    // (shuffle_id, partition_id) -> task_attempt_id -> partition_stats
+    stats: DDashMap<(i32, i32), Arc<DDashMap<i64, TaskAttemptIdToRecordRef>>>,
 }
 
 impl PartitionStatsManager {
@@ -18,21 +18,23 @@ impl PartitionStatsManager {
         }
     }
 
-    pub fn report(&self, ctx: &ReportShuffleResultContext) -> anyhow::Result<()> {
+    pub fn add(&self, ctx: &ReportShuffleResultContext) -> anyhow::Result<()> {
         let shuffle_id = ctx.shuffle_id;
         let task_attempt_id = ctx.task_attempt_id;
         let records = &ctx.record_numbers;
 
         for record in records {
             let pid = record.0;
-            let entry = self
+            let task_id_to_stats = self
                 .stats
-                .compute_if_absent((shuffle_id, *pid), || Arc::new(RwLock::new(Vec::new())));
-            let mut w = entry.write();
-            w.push(Arc::new(TaskAttemptIdToRecord {
+                .compute_if_absent((shuffle_id, *pid), || Default::default());
+            task_id_to_stats.insert(
                 task_attempt_id,
-                record_number: *record.1,
-            }))
+                Arc::new(TaskAttemptIdToRecord {
+                    task_attempt_id,
+                    record_number: *record.1,
+                }),
+            );
         }
         Ok(())
     }
@@ -41,22 +43,19 @@ impl PartitionStatsManager {
         let shuffle_id = ctx.shuffle_id;
         let partition_ids = &ctx.partition_ids;
 
-        let mut entries = Vec::with_capacity(partition_ids.len());
+        let mut all_partition_stats = Vec::with_capacity(partition_ids.len());
         for pid in partition_ids {
             let entry = self
                 .stats
                 .compute_if_absent((shuffle_id, *pid), || Default::default());
-            let r = entry.read();
-            let records = r.deref().clone();
-            if !records.is_empty() {
-                entries.push(PartitionStats {
+            if !entry.is_empty() {
+                all_partition_stats.push(PartitionStats {
                     partition_id: *pid,
-                    records,
+                    records: entry.iter().map(|x| x.clone()).collect(),
                 });
             }
         }
-
-        Ok(entries)
+        Ok(all_partition_stats)
     }
 
     pub fn purge(&self, shuffle_id: i32) {
@@ -116,6 +115,46 @@ mod test {
     use std::collections::HashMap;
 
     #[test]
+    fn test_duplicate_task_ids() -> anyhow::Result<()> {
+        let manager = PartitionStatsManager::new();
+        let shuffle_id = 1999;
+        let partitions = 1000;
+        let records_number_per_partition = 10;
+
+        let mut records = HashMap::new();
+        for partition in 0..partitions {
+            records.insert(partition, records_number_per_partition);
+        }
+
+        // add 1
+        let task_attempt_id = 10;
+        let report_ctx = ReportShuffleResultContext::new(
+            shuffle_id,
+            task_attempt_id,
+            Default::default(),
+            records.clone(),
+        );
+        manager.add(&report_ctx);
+
+        // add 2 again
+        manager.add(&report_ctx);
+
+        // will only get 1 task_attempt_id's records
+        let ctx = GetShuffleResultContext {
+            shuffle_id,
+            partition_ids: vec![1],
+            layout: to_layout(None),
+        };
+        let result = manager.get(&ctx)?;
+        assert_eq!(1, result.len());
+        assert_eq!(1, result[0].partition_id);
+        assert_eq!(1, result[0].records.len());
+        assert_eq!(task_attempt_id, result[0].records[0].task_attempt_id);
+
+        Ok(())
+    }
+
+    #[test]
     fn test_multi_tasks_report() -> anyhow::Result<()> {
         let manager = PartitionStatsManager::new();
         let shuffle_id = 1999;
@@ -135,7 +174,7 @@ mod test {
             Default::default(),
             records.clone(),
         );
-        manager.report(&report_ctx)?;
+        manager.add(&report_ctx)?;
 
         // report 2 from task 20
         let task_attempt_id = 20;
@@ -145,7 +184,7 @@ mod test {
             Default::default(),
             records,
         );
-        manager.report(&report_ctx)?;
+        manager.add(&report_ctx)?;
 
         // get the partition=1 with task 10/20
         let ctx = GetShuffleResultContext {
@@ -186,7 +225,7 @@ mod test {
             Default::default(),
             records,
         );
-        manager.report(&report_ctx)?;
+        manager.add(&report_ctx)?;
 
         // get all
         let ctx = GetShuffleResultContext {
