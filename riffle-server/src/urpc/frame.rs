@@ -7,7 +7,8 @@ use crate::urpc::command::{
     GetLocalDataIndexRequestCommand, GetLocalDataIndexResponseCommand,
     GetLocalDataIndexV2ResponseCommand, GetLocalDataRequestCommand, GetLocalDataRequestV2Command,
     GetLocalDataRequestV3Command, GetLocalDataResponseCommand, GetMemoryDataRequestCommand,
-    GetMemoryDataResponseCommand, ReadSegment, RpcResponseCommand, SendDataRequestCommand,
+    GetMemoryDataResponseCommand, GetMemoryDataResponseV2Command, ReadSegment, RpcResponseCommand,
+    SendDataRequestCommand,
 };
 use anyhow::{Error, Result};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -72,6 +73,9 @@ pub enum Frame {
     GetMemoryData(GetMemoryDataRequestCommand),
     #[strum(serialize = "GetMemoryDataResponse")]
     GetMemoryDataResponse(GetMemoryDataResponseCommand),
+
+    #[strum(serialize = "GetMemoryDataV2Response")]
+    GetMemoryDataV2Response(GetMemoryDataResponseV2Command),
 
     #[strum(serialize = "GetLocalDataIndex")]
     GetLocalDataIndex(GetLocalDataIndexRequestCommand),
@@ -259,6 +263,59 @@ impl Frame {
 
                 write_buf.put_i32(msg_bytes.len() as i32);
                 write_buf.put(msg_bytes);
+
+                // write segment
+                write_buf.put_i32(segments.len() as i32);
+                for segment in segments {
+                    write_buf.put_i64(segment.block_id);
+                    write_buf.put_i32(segment.offset as i32);
+                    write_buf.put_i32(segment.length);
+                    write_buf.put_i32(segment.uncompress_length);
+                    write_buf.put_i64(segment.crc);
+                    write_buf.put_i64(segment.task_attempt_id);
+                }
+                stream.write_all(&write_buf.split()).await?;
+
+                // data_bytes
+                for composed_byte in data_bytes_wrapper.always_composed().iter() {
+                    stream.write_all(&composed_byte).await?;
+                }
+                Ok(())
+            }
+            Frame::GetMemoryDataV2Response(resp) => {
+                let request_id = resp.request_id;
+                let status_code = resp.status_code;
+
+                let msg = &resp.ret_msg;
+                let msg_bytes = msg.as_bytes();
+
+                let read_result_data = &resp.data;
+                let mem_data = match read_result_data {
+                    Mem(mem_data) => mem_data,
+                    _ => panic!("This should not happen that the result data is not mem type."),
+                };
+
+                let data_bytes_wrapper = &mem_data.data;
+                let data_bytes_len = data_bytes_wrapper.len() as i32;
+
+                let segments = &mem_data.shuffle_data_block_segments;
+                let segments_encode_len = (4 + segments.len() * (3 * 8 + 3 * 4)) as i32;
+
+                // header
+                // compared with v1, only includes the extra bytes to store is_end flag
+                write_buf.put_i32(msg_bytes.len() as i32 + 8 + 4 + 4 + segments_encode_len + 1);
+                write_buf.put_u8(MessageType::GetMemoryDataResponse as u8);
+                write_buf.put_i32(data_bytes_len);
+
+                // partial content with general response info
+                write_buf.put_i64(request_id);
+                write_buf.put_i32(status_code);
+
+                write_buf.put_i32(msg_bytes.len() as i32);
+                write_buf.put(msg_bytes);
+
+                // add is_end flag
+                write_buf.put_u8(mem_data.is_end as u8);
 
                 // write segment
                 write_buf.put_i32(segments.len() as i32);
