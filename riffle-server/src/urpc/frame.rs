@@ -49,6 +49,7 @@ pub enum MessageType {
     SendShuffleData = 3,
     GetMemoryData = 6,
     GetMemoryDataResponse = 16,
+    GetMemoryDataV2Response = 26,
 
     GetLocalDataIndex = 4,
     GetLocalDataIndexResponse = 14,
@@ -304,7 +305,7 @@ impl Frame {
                 // header
                 // compared with v1, only includes the extra bytes to store is_end flag
                 write_buf.put_i32(msg_bytes.len() as i32 + 8 + 4 + 4 + segments_encode_len + 1);
-                write_buf.put_u8(MessageType::GetMemoryDataResponse as u8);
+                write_buf.put_u8(MessageType::GetMemoryDataV2Response as u8);
                 write_buf.put_i32(data_bytes_len);
 
                 // partial content with general response info
@@ -313,9 +314,6 @@ impl Frame {
 
                 write_buf.put_i32(msg_bytes.len() as i32);
                 write_buf.put(msg_bytes);
-
-                // add is_end flag
-                write_buf.put_u8(mem_data.is_end as u8);
 
                 // write segment
                 write_buf.put_i32(segments.len() as i32);
@@ -333,6 +331,10 @@ impl Frame {
                 for composed_byte in data_bytes_wrapper.always_composed().iter() {
                     stream.write_all(&composed_byte).await?;
                 }
+
+                // add is_end flag
+                write_buf.put_u8(mem_data.is_end as u8);
+
                 Ok(())
             }
             Frame::RpcResponse(resp) => {
