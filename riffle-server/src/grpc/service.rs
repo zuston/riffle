@@ -651,6 +651,7 @@ impl ShuffleServer for DefaultShuffleServer {
                 data: Default::default(),
                 status: StatusCode::NO_REGISTER.into(),
                 ret_msg: "No such app in this shuffle server".to_string(),
+                is_end: false,
             }));
         }
 
@@ -686,6 +687,7 @@ impl ShuffleServer for DefaultShuffleServer {
                 data: Default::default(),
                 status: StatusCode::INTERNAL_ERROR.into(),
                 ret_msg: format!("{:?}", error_msg),
+                is_end: false,
             }));
         }
 
@@ -705,6 +707,7 @@ impl ShuffleServer for DefaultShuffleServer {
             data: bytes,
             status: StatusCode::SUCCESS.into(),
             ret_msg: "".to_string(),
+            is_end: data.is_end,
         }))
     }
 
