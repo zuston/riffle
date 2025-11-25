@@ -325,10 +325,10 @@ impl Frame {
                     write_buf.put_i64(segment.crc);
                     write_buf.put_i64(segment.task_attempt_id);
                 }
-                stream.write_all(&write_buf.split()).await?;
-
                 // add is_end flag
                 write_buf.put_u8(mem_data.is_end as u8);
+
+                stream.write_all(&write_buf.split()).await?;
 
                 // data_bytes
                 for composed_byte in data_bytes_wrapper.always_composed().iter() {
