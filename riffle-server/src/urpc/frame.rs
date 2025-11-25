@@ -327,13 +327,13 @@ impl Frame {
                 }
                 stream.write_all(&write_buf.split()).await?;
 
+                // add is_end flag
+                write_buf.put_u8(mem_data.is_end as u8);
+
                 // data_bytes
                 for composed_byte in data_bytes_wrapper.always_composed().iter() {
                     stream.write_all(&composed_byte).await?;
                 }
-
-                // add is_end flag
-                write_buf.put_u8(mem_data.is_end as u8);
 
                 Ok(())
             }
