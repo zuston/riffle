@@ -122,30 +122,63 @@ impl GetMemoryDataRequestCommand {
             _ => ctx,
         };
 
-        let mut len = 0;
-        let response = match app.select(ctx).await {
-            Err(e) => GetMemoryDataResponseCommand {
-                request_id,
-                status_code: StatusCode::INTERNAL_ERROR.into(),
-                ret_msg: format!("Errors on getting memory data. err: {:#?}", e),
-                data: ResponseData::Mem(Default::default()),
-            },
-            Ok(res) => {
-                len = res.len();
-                GetMemoryDataResponseCommand {
-                    request_id,
-                    status_code: StatusCode::SUCCESS.into(),
-                    ret_msg: "".to_string(),
-                    data: res,
-                }
-            }
+        let result = app.select(ctx).await;
+        let mut read_length = 0;
+
+        let rpc_version = if let Some(config) = &app_manager_ref.get_config().urpc_config {
+            config.get_memory_rpc_version.clone()
+        } else {
+            RpcVersion::V1
         };
-        let frame = Frame::GetMemoryDataResponse(response);
-        conn.write_frame(&frame).await?;
+        match rpc_version {
+            RpcVersion::V1 => {
+                let response = match result {
+                    Err(e) => GetMemoryDataResponseCommand {
+                        request_id,
+                        status_code: StatusCode::INTERNAL_ERROR.into(),
+                        ret_msg: format!("Errors on getting memory data. err: {:#?}", e),
+                        data: ResponseData::Mem(Default::default()),
+                    },
+                    Ok(res) => {
+                        read_length = res.len();
+                        GetMemoryDataResponseCommand {
+                            request_id,
+                            status_code: StatusCode::SUCCESS.into(),
+                            ret_msg: "".to_string(),
+                            data: res,
+                        }
+                    }
+                };
+                let frame = Frame::GetMemoryDataResponse(response);
+                conn.write_frame(&frame).await?;
+            }
+            _ => {
+                let response = match result {
+                    Err(e) => GetMemoryDataResponseV2Command {
+                        request_id,
+                        status_code: StatusCode::INTERNAL_ERROR.into(),
+                        ret_msg: format!("Errors on getting memory data. err: {:#?}", e),
+                        data: ResponseData::Mem(Default::default()),
+                    },
+                    Ok(res) => {
+                        read_length = res.len();
+                        GetMemoryDataResponseV2Command {
+                            request_id,
+                            status_code: StatusCode::SUCCESS.into(),
+                            ret_msg: "".to_string(),
+                            data: res,
+                        }
+                    }
+                };
+                let frame = Frame::GetMemoryDataV2Response(response);
+                conn.write_frame(&frame).await?;
+            }
+        }
+
         info!(
             "[get_memory_data] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
             timer.elapsed().as_millis(),
-            len,
+            read_length,
             app_id,
             shuffle_id,
             partition_id
@@ -606,6 +639,14 @@ impl GetLocalDataIndexRequestCommand {
 
 #[derive(Debug)]
 pub struct GetMemoryDataResponseCommand {
+    pub(crate) request_id: i64,
+    pub(crate) status_code: i32,
+    pub(crate) ret_msg: String,
+    pub(crate) data: ResponseData,
+}
+
+#[derive(Debug)]
+pub struct GetMemoryDataResponseV2Command {
     pub(crate) request_id: i64,
     pub(crate) status_code: i32,
     pub(crate) ret_msg: String,

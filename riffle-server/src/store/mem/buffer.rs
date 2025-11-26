@@ -51,21 +51,6 @@ impl BufferSpillResult {
 }
 
 #[derive(Debug)]
-pub struct BufferReadResult {
-    read_len: u64,
-    blocks: Vec<Block>,
-}
-
-impl BufferReadResult {
-    pub fn read_len(&self) -> u64 {
-        self.read_len
-    }
-    pub fn blocks(&self) -> &Vec<Block> {
-        &self.blocks
-    }
-}
-
-#[derive(Debug)]
 pub struct BufferInternal {
     total_size: i64,
     staging_size: i64,
@@ -127,7 +112,7 @@ impl MemoryBuffer {
     pub fn get_v2(
         &self,
         last_block_id: i64,
-        batch_len: i64,
+        read_bytes_limit_len: i64,
         task_ids: Option<Treemap>,
     ) -> Result<PartitionedMemoryData> {
         /// read sequence
@@ -156,7 +141,7 @@ impl MemoryBuffer {
                             if !flight_found {
                                 continue;
                             }
-                            if read_len >= batch_len {
+                            if read_len >= read_bytes_limit_len {
                                 break;
                             }
                             if let Some(ref expected_task_id) = task_ids {
@@ -181,7 +166,7 @@ impl MemoryBuffer {
                         if !flight_found {
                             continue;
                         }
-                        if read_len >= batch_len {
+                        if read_len >= read_bytes_limit_len {
                             break;
                         }
                         if let Some(ref expected_task_id) = task_ids {
@@ -217,94 +202,19 @@ impl MemoryBuffer {
             });
             offset += block.length as i64;
         }
+        let total_bytes = offset as usize;
 
-        let composed_bytes = ComposedBytes::from(block_bytes, offset as usize);
+        // Note: is_end is computed as total_bytes < read_bytes_limit_len. This works in general,
+        // but it can incorrectly be false in the edge case where total_bytes == read_bytes_limit_len
+        // and the buffer has no more blocks left. In that situation, buffer is actually fully read,
+        // so the client code may need to perform an additional empty-check to handle this case.
+        let is_end = total_bytes < read_bytes_limit_len as usize;
+
+        let composed_bytes = ComposedBytes::from(block_bytes, total_bytes);
         Ok(PartitionedMemoryData {
             shuffle_data_block_segments: segments,
             data: DataBytes::Composed(composed_bytes),
-        })
-    }
-
-    pub fn get(
-        &self,
-        last_block_id: i64,
-        batch_len: i64,
-        task_ids: Option<Treemap>,
-    ) -> Result<BufferReadResult> {
-        /// read sequence
-        /// 1. from flight (expect: last_block_id not found or last_block_id == 0)
-        /// 2. from staging
-        let buffer = self.buffer.lock();
-
-        let mut read_result = vec![];
-        let mut read_len = 0i64;
-        let mut flight_found = false;
-
-        let mut exit = false;
-        while !exit {
-            exit = true;
-            {
-                if last_block_id == INVALID_BLOCK_ID {
-                    flight_found = true;
-                }
-                for (_, batch_block) in buffer.flight.iter() {
-                    for blocks in batch_block.iter() {
-                        for block in blocks {
-                            if !flight_found && block.block_id == last_block_id {
-                                flight_found = true;
-                                continue;
-                            }
-                            if !flight_found {
-                                continue;
-                            }
-                            if read_len >= batch_len {
-                                break;
-                            }
-                            if let Some(ref expected_task_id) = task_ids {
-                                if !expected_task_id.contains(block.task_attempt_id as u64) {
-                                    continue;
-                                }
-                            }
-                            read_len += block.length as i64;
-                            read_result.push(block.clone());
-                        }
-                    }
-                }
-            }
-
-            {
-                for blocks in buffer.staging.iter() {
-                    for block in blocks {
-                        if !flight_found && block.block_id == last_block_id {
-                            flight_found = true;
-                            continue;
-                        }
-                        if !flight_found {
-                            continue;
-                        }
-                        if read_len >= batch_len {
-                            break;
-                        }
-                        if let Some(ref expected_task_id) = task_ids {
-                            if !expected_task_id.contains(block.task_attempt_id as u64) {
-                                continue;
-                            }
-                        }
-                        read_len += block.length as i64;
-                        read_result.push(block.clone());
-                    }
-                }
-            }
-
-            if !flight_found {
-                flight_found = true;
-                exit = false;
-            }
-        }
-
-        Ok(BufferReadResult {
-            read_len: read_len as u64,
-            blocks: read_result,
+            is_end,
         })
     }
 
@@ -458,28 +368,56 @@ mod test {
         assert_eq!(10 * 10, buffer.staging_size()?);
 
         /// case5: read from the flight. expected blockId: 0 -> 9
-        let read_result = buffer.get(-1, 10 * 10, None)?;
-        assert_eq!(10 * 10, read_result.read_len);
-        assert_eq!(10, read_result.blocks.len());
-        assert_eq!(9, read_result.blocks.last().unwrap().block_id);
+        let read_result = buffer.get_v2(-1, 10 * 10, None)?;
+        assert_eq!(10 * 10, read_result.data.len());
+        assert_eq!(10, read_result.shuffle_data_block_segments.len());
+        assert_eq!(
+            9,
+            read_result
+                .shuffle_data_block_segments
+                .last()
+                .unwrap()
+                .block_id
+        );
 
         /// case6: read from flight again. expected blockId: 10 -> 19
-        let read_result = buffer.get(9, 10 * 10, None)?;
-        assert_eq!(10 * 10, read_result.read_len);
-        assert_eq!(10, read_result.blocks.len());
-        assert_eq!(19, read_result.blocks.last().unwrap().block_id);
+        let read_result = buffer.get_v2(9, 10 * 10, None)?;
+        assert_eq!(10 * 10, read_result.data.len());
+        assert_eq!(10, read_result.shuffle_data_block_segments.len());
+        assert_eq!(
+            19,
+            read_result
+                .shuffle_data_block_segments
+                .last()
+                .unwrap()
+                .block_id
+        );
 
         /// case7: read from staging. expected blockId: 20 -> 29
-        let read_result = buffer.get(19, 10 * 10, None)?;
-        assert_eq!(10 * 10, read_result.read_len);
-        assert_eq!(10, read_result.blocks.len());
-        assert_eq!(29, read_result.blocks.last().unwrap().block_id);
+        let read_result = buffer.get_v2(19, 10 * 10, None)?;
+        assert_eq!(10 * 10, read_result.data.len());
+        assert_eq!(10, read_result.shuffle_data_block_segments.len());
+        assert_eq!(
+            29,
+            read_result
+                .shuffle_data_block_segments
+                .last()
+                .unwrap()
+                .block_id
+        );
 
         /// case8: blockId not found, and then read from the flight -> staging.
-        let read_result = buffer.get(100, 10 * 10, None)?;
-        assert_eq!(10 * 10, read_result.read_len);
-        assert_eq!(10, read_result.blocks.len());
-        assert_eq!(9, read_result.blocks.last().unwrap().block_id);
+        let read_result = buffer.get_v2(100, 10 * 10, None)?;
+        assert_eq!(10 * 10, read_result.data.len());
+        assert_eq!(10, read_result.shuffle_data_block_segments.len());
+        assert_eq!(
+            9,
+            read_result
+                .shuffle_data_block_segments
+                .last()
+                .unwrap()
+                .block_id
+        );
 
         /// case9: remove the spill result after flushed
         let flight_id = spill_result.flight_id;
@@ -561,5 +499,60 @@ mod test {
 
         let data = list.remove(0);
         list.push(LinkedList::new());
+    }
+
+    #[test]
+    fn test_get_v2_is_end_with_only_staging() -> anyhow::Result<()> {
+        let buffer = MemoryBuffer::new();
+        // 0 -> 10 blocks with total 100 bytes
+        let cnt = 10;
+        let block_len = 10;
+        buffer.direct_push(create_blocks(0, cnt, block_len))?;
+
+        // case1: read all
+        let result = buffer.get_v2(-1, (cnt * block_len) as i64 + 1, None)?;
+        assert_eq!(result.shuffle_data_block_segments.len(), cnt as usize);
+        assert_eq!(result.data.len(), (cnt * block_len) as usize);
+        assert_eq!(result.is_end, true); // no more data
+
+        // case2: read partial data without reaching to end
+        let result = buffer.get_v2(-1, (cnt * block_len / 2) as i64 - 1, None)?;
+        assert_eq!(result.shuffle_data_block_segments.len(), (cnt / 2) as usize);
+        assert_eq!(result.data.len(), (cnt * block_len / 2) as usize);
+        assert_eq!(result.is_end, false);
+
+        // case3: read partial data and reaches end
+        let result = buffer.get_v2(5, (cnt * block_len) as i64, None)?;
+        // blockIds [6, 7, 8, 9]
+        assert_eq!(result.shuffle_data_block_segments.len(), 4);
+        assert_eq!(result.data.len(), 4 * block_len as usize);
+        assert_eq!(result.is_end, true);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_v2_is_end_across_flight_and_staging() -> anyhow::Result<()> {
+        let buffer = MemoryBuffer::new();
+
+        // staging: 0..2
+        buffer.direct_push(create_blocks(0, 3, 5))?;
+
+        // spill: now flight has 0..2
+        buffer.spill()?;
+
+        // staging: 3..4
+        buffer.direct_push(create_blocks(3, 2, 5))?;
+
+        // first read: should return 0..2 from flight
+        let result1 = buffer.get_v2(-1, 15, None)?;
+        assert_eq!(result1.shuffle_data_block_segments.len(), 3);
+        assert_eq!(result1.is_end, false); // still staging blocks remaining
+
+        // second read: should return 3..4 from staging
+        let result2 = buffer.get_v2(2, 15, None)?;
+        assert_eq!(result2.shuffle_data_block_segments.len(), 2);
+        assert_eq!(result2.is_end, true); // no more data after staging
+        Ok(())
     }
 }
