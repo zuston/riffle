@@ -135,6 +135,7 @@ pub struct PartitionedLocalData {
 pub struct PartitionedMemoryData {
     pub shuffle_data_block_segments: Vec<DataSegment>,
     pub data: DataBytes,
+    pub is_end: bool,
 }
 
 #[derive(Debug)]
