@@ -1,3 +1,4 @@
+use crate::config::RpcVersion;
 use crate::util;
 use clap::builder::Str;
 use once_cell::sync::Lazy;
@@ -32,6 +33,12 @@ pub static READ_AHEAD_BATCH_SIZE: Lazy<ClientConfigOption<String>> = Lazy::new(|
 pub static READ_AHEAD_BATCH_NUMBER: Lazy<ClientConfigOption<usize>> = Lazy::new(|| {
     ClientConfigOption::key("spark.rss.riffle.readAheadBatchNumber")
         .with_description("Read ahead batch number for client per-read")
+});
+
+pub static GET_MEMORY_DATA_URPC_VERSION: Lazy<ClientConfigOption<RpcVersion>> = Lazy::new(|| {
+    ClientConfigOption::key("spark.rss.riffle.getMemoryDataUrpcVersion")
+        .default_value(RpcVersion::V1)
+        .with_description("the urpc version of getMemoryData")
 });
 
 #[derive(Debug, Clone, Default)]
@@ -88,6 +95,41 @@ impl<T: Clone + Send + Sync + 'static> ClientConfigOption<T> {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn test_get_memory_data_option() {
+        // case1: default rpc version is V1
+        let mut props = HashMap::new();
+        let conf = ClientRssConf { properties: props };
+        assert_eq!(
+            RpcVersion::V1,
+            conf.get(&GET_MEMORY_DATA_URPC_VERSION).unwrap()
+        );
+
+        // case2: implicit setting rpc version
+        let mut props = HashMap::new();
+        props.insert(
+            "spark.rss.riffle.getMemoryDataUrpcVersion".to_string(),
+            "V2".to_string(),
+        );
+        let conf = ClientRssConf { properties: props };
+        assert_eq!(
+            RpcVersion::V2,
+            conf.get(&GET_MEMORY_DATA_URPC_VERSION).unwrap()
+        );
+
+        // case3: fallback to v1 version when version is illegal
+        let mut props = HashMap::new();
+        props.insert(
+            "spark.rss.riffle.getMemoryDataUrpcVersion".to_string(),
+            "V12323".to_string(),
+        );
+        let conf = ClientRssConf { properties: props };
+        assert_eq!(
+            RpcVersion::V1,
+            conf.get(&GET_MEMORY_DATA_URPC_VERSION).unwrap()
+        );
+    }
 
     #[test]
     fn test_byte_size() {

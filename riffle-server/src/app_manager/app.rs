@@ -40,7 +40,7 @@ use std::sync::Arc;
 
 pub struct App {
     pub app_id: String,
-    app_config_options: AppConfigOptions,
+    pub app_config_options: AppConfigOptions,
     latest_heartbeat_time: AtomicU64,
     store: Arc<HybridStore>,
 
