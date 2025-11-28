@@ -50,10 +50,12 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Build Riffle Server
+      - name: Setup Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "."
+
+      - name: Build Riffle Server
         run: |
           cargo build --release --bin riffle-server
 
