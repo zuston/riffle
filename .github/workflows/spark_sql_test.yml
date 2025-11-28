@@ -26,4 +26,4 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Spark SQL Test
-        run: docker compose -f dev/test/docker-compose.yml up
+        run: docker compose -f dev/integration/docker-compose.yml up
