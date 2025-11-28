@@ -57,15 +57,28 @@ jobs:
           wget -q https://repo1.maven.org/maven2/org/apache/uniffle/rss-client-spark3-shaded/${UNIFFLE_VERSION}/rss-client-spark3-shaded-${UNIFFLE_VERSION}.jar -O /tmp/spark/jars/rss-client.jar
 
       - name: Download and setup Uniffle Coordinator
+        timeout-minutes: 15
         run: |
           cd /tmp
-          wget -q https://archive.apache.org/dist/uniffle/${UNIFFLE_VERSION}/apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz
+          echo "Starting download of Uniffle ${UNIFFLE_VERSION}..."
+          echo "URL: https://archive.apache.org/dist/uniffle/${UNIFFLE_VERSION}/apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz"
           
-          if [ ! -f apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz ]; then
-            echo "Using Docker for Uniffle Coordinator instead"
-            exit 0
+          # Download with timeout, progress, and retry
+          if wget --timeout=30 --tries=3 --progress=dot:giga \
+            https://archive.apache.org/dist/uniffle/${UNIFFLE_VERSION}/apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz \
+            -O apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz; then
+            echo ""
+            echo "Download completed successfully"
           fi
           
+          if [ ! -f apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz ]; then
+            echo "ERROR: Download failed, file not found"
+            exit 1
+          fi
+          
+          echo "Verifying downloaded file..."
+          ls -lh apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz
+          echo "Extracting Uniffle..."
           tar -xzf apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz
           mv apache-uniffle-${UNIFFLE_VERSION}-bin uniffle
           
@@ -80,6 +93,7 @@ jobs:
           rss.jetty.http.port=19995
           rss.coordinator.server.client-port=21000
           EOF
+          echo "Uniffle Coordinator setup completed"
 
       - name: Start Uniffle Coordinator
         if: always()
