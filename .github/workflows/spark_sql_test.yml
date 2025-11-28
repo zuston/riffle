@@ -60,12 +60,13 @@ jobs:
         timeout-minutes: 15
         run: |
           cd /tmp
+          UNIFFLE_URL="https://apache.org/dist/uniffle/${UNIFFLE_VERSION}/apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz"
           echo "Starting download of Uniffle ${UNIFFLE_VERSION}..."
-          echo "URL: https://archive.apache.org/dist/uniffle/${UNIFFLE_VERSION}/apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz"
+          echo "URL: ${UNIFFLE_URL}"
           
           # Download with timeout, progress, and retry
           if wget --timeout=30 --tries=3 --progress=dot:giga \
-            https://archive.apache.org/dist/uniffle/${UNIFFLE_VERSION}/apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz \
+            ${UNIFFLE_URL} \
             -O apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz; then
             echo ""
             echo "Download completed successfully"
@@ -227,7 +228,7 @@ jobs:
       - name: Download and setup Spark
         run: |
           cd /tmp
-          wget -q https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz
+          wget -q https://apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz
           tar -xzf spark-${SPARK_VERSION}-bin-hadoop3.tgz
           mv spark-${SPARK_VERSION}-bin-hadoop3 spark
           
