@@ -49,7 +49,65 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
+      
+      - name: Download Uniffle Spark Client
+        run: |
+          cd /tmp
+          wget -q https://repo1.maven.org/maven2/org/apache/uniffle/rss-client-spark3-shaded/${UNIFFLE_VERSION}/rss-client-spark3-shaded-${UNIFFLE_VERSION}.jar -O /tmp/spark/jars/rss-client.jar
 
+      - name: Download and setup Uniffle Coordinator
+        run: |
+          cd /tmp
+          wget -q https://archive.apache.org/dist/uniffle/${UNIFFLE_VERSION}/apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz
+          
+          if [ ! -f apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz ]; then
+            echo "Using Docker for Uniffle Coordinator instead"
+            exit 0
+          fi
+          
+          tar -xzf apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz
+          mv apache-uniffle-${UNIFFLE_VERSION}-bin uniffle
+          
+          # Create coordinator config
+          mkdir -p uniffle/conf
+          cat > uniffle/conf/coordinator.conf << 'EOF'
+          rss.coordinator.server.port=21000
+          rss.coordinator.server.heartbeat.timeout=30000
+          rss.coordinator.app.expired=60000
+          rss.coordinator.server.heartbeat.interval=10000
+          rss.rpc.server.port=19997
+          rss.jetty.http.port=19995
+          rss.coordinator.server.client-port=21000
+          EOF
+
+      - name: Start Uniffle Coordinator
+        if: always()
+        run: |
+          if [ -d "/tmp/uniffle" ]; then
+            cd /tmp/uniffle
+            export JAVA_HOME=$JAVA_HOME
+            # Check if coordinator is already running (from Docker)
+            if ! nc -z localhost 21000 2>/dev/null; then
+              nohup ./bin/start-coordinator.sh > /tmp/uniffle-coordinator/logs/coordinator.log 2>&1 &
+              echo $! > /tmp/uniffle-coordinator.pid
+              sleep 10
+            else
+              echo "Coordinator already running (likely from Docker)"
+            fi
+          fi
+        continue-on-error: true
+
+      - name: Wait for Coordinator to be ready
+        run: |
+          for i in {1..30}; do
+            if curl -f http://localhost:19995/api/status 2>/dev/null || nc -z localhost 21000 2>/dev/null; then
+              echo "Coordinator is ready"
+              break
+            fi
+            echo "Waiting for coordinator... ($i/30)"
+            sleep 2
+          done
+          
       - name: Setup Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
@@ -130,59 +188,6 @@ jobs:
           dispatch_thread_num = 5
           EOF
 
-      - name: Download and setup Uniffle Coordinator
-        run: |
-          cd /tmp
-          wget -q https://archive.apache.org/dist/uniffle/${UNIFFLE_VERSION}/apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz
-          
-          if [ ! -f apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz ]; then
-            echo "Using Docker for Uniffle Coordinator instead"
-            exit 0
-          fi
-          
-          tar -xzf apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz
-          mv apache-uniffle-${UNIFFLE_VERSION}-bin uniffle
-          
-          # Create coordinator config
-          mkdir -p uniffle/conf
-          cat > uniffle/conf/coordinator.conf << 'EOF'
-          rss.coordinator.server.port=21000
-          rss.coordinator.server.heartbeat.timeout=30000
-          rss.coordinator.app.expired=60000
-          rss.coordinator.server.heartbeat.interval=10000
-          rss.rpc.server.port=19997
-          rss.jetty.http.port=19995
-          rss.coordinator.server.client-port=21000
-          EOF
-
-      - name: Start Uniffle Coordinator
-        if: always()
-        run: |
-          if [ -d "/tmp/uniffle" ]; then
-            cd /tmp/uniffle
-            export JAVA_HOME=$JAVA_HOME
-            # Check if coordinator is already running (from Docker)
-            if ! nc -z localhost 21000 2>/dev/null; then
-              nohup ./bin/start-coordinator.sh > /tmp/uniffle-coordinator/logs/coordinator.log 2>&1 &
-              echo $! > /tmp/uniffle-coordinator.pid
-              sleep 10
-            else
-              echo "Coordinator already running (likely from Docker)"
-            fi
-          fi
-        continue-on-error: true
-
-      - name: Wait for Coordinator to be ready
-        run: |
-          for i in {1..30}; do
-            if curl -f http://localhost:19995/api/status 2>/dev/null || nc -z localhost 21000 2>/dev/null; then
-              echo "Coordinator is ready"
-              break
-            fi
-            echo "Waiting for coordinator... ($i/30)"
-            sleep 2
-          done
-
       - name: Start Riffle Server 1
         run: |
           cd /tmp/riffle-server-1
@@ -221,16 +226,7 @@ jobs:
           spark.executor.memory 2g
           spark.sql.shuffle.partitions 4
           EOF
-
-      - name: Download Uniffle Spark Client
-        run: |
-          cd /tmp
-          # Download uniffle spark client jar
-          wget -q https://repo1.maven.org/maven2/org/apache/uniffle/uniffle-client-spark3/${UNIFFLE_VERSION}/uniffle-client-spark3-${UNIFFLE_VERSION}.jar -O /tmp/spark/jars/uniffle-client-spark3-${UNIFFLE_VERSION}.jar || \
-          echo "Downloading from alternative source..."
-          # Alternative: build from source or use different version
-        continue-on-error: true
-
+  
       - name: Create Spark SQL test script
         run: |
           cat > /tmp/test_spark_sql.py << 'EOF'
