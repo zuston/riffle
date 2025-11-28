@@ -115,14 +115,31 @@ jobs:
 
       - name: Wait for Coordinator to be ready
         run: |
+          COORDINATOR_READY=false
           for i in {1..30}; do
             if curl -f http://localhost:19995/api/status 2>/dev/null || nc -z localhost 21000 2>/dev/null; then
               echo "Coordinator is ready"
+              COORDINATOR_READY=true
               break
             fi
             echo "Waiting for coordinator... ($i/30)"
             sleep 2
           done
+          
+          if [ "$COORDINATOR_READY" != "true" ]; then
+            echo "ERROR: Coordinator failed to start within timeout"
+            echo "=== Coordinator logs (last 20 lines) ==="
+            if [ -f /tmp/uniffle-coordinator/logs/coordinator.log ]; then
+              tail -20 /tmp/uniffle-coordinator/logs/coordinator.log || echo "Log file not found"
+            else
+              echo "Log file not found at /tmp/uniffle-coordinator/logs/coordinator.log"
+            fi
+            echo "=== Checking coordinator process ==="
+            ps aux | grep -i coordinator | grep -v grep || echo "No coordinator process found"
+            echo "=== Checking ports ==="
+            netstat -tuln | grep -E ":(19995|19997|21000)" || echo "No coordinator ports listening"
+            exit 1
+          fi
           
       - name: Setup Rust Cache
         uses: Swatinem/rust-cache@v2
