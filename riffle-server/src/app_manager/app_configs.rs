@@ -1,9 +1,10 @@
 use crate::app_manager::request_context::PurgeDataContext;
 use crate::client_configs::{
-    ClientConfigOption, ClientRssConf, HDFS_CLIENT_EAGER_LOADING_ENABLED_OPTION,
-    READ_AHEAD_BATCH_NUMBER, READ_AHEAD_BATCH_SIZE, READ_AHEAD_ENABLED_OPTION,
-    SENDFILE_ENABLED_OPTION,
+    ClientConfigOption, ClientRssConf, GET_MEMORY_DATA_URPC_VERSION,
+    HDFS_CLIENT_EAGER_LOADING_ENABLED_OPTION, READ_AHEAD_BATCH_NUMBER, READ_AHEAD_BATCH_SIZE,
+    READ_AHEAD_ENABLED_OPTION, SENDFILE_ENABLED_OPTION,
 };
+use crate::config::RpcVersion;
 use crate::grpc::protobuf::uniffle::RemoteStorage;
 use std::collections::HashMap;
 use std::fmt;
@@ -29,6 +30,9 @@ pub struct AppConfigOptions {
     pub read_ahead_batch_number: Option<usize>,
     pub read_ahead_batch_size: Option<usize>,
     pub client_configs: ClientRssConf,
+
+    // the urpc endpoint version
+    pub get_memory_data_urpc_version: RpcVersion,
 }
 
 impl AppConfigOptions {
@@ -48,6 +52,9 @@ impl AppConfigOptions {
             read_ahead_batch_size: rss_config
                 .get_byte_size(&READ_AHEAD_BATCH_SIZE)
                 .map(|x| x as usize),
+            get_memory_data_urpc_version: rss_config
+                .get(&GET_MEMORY_DATA_URPC_VERSION)
+                .unwrap_or(RpcVersion::V1),
             client_configs: rss_config,
         }
     }
@@ -64,6 +71,7 @@ impl Default for AppConfigOptions {
             read_ahead_batch_number: None,
             read_ahead_batch_size: None,
             client_configs: Default::default(),
+            get_memory_data_urpc_version: RpcVersion::V1,
         }
     }
 }

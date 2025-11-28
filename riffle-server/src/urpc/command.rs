@@ -125,11 +125,7 @@ impl GetMemoryDataRequestCommand {
         let result = app.select(ctx).await;
         let mut read_length = 0;
 
-        let rpc_version = if let Some(config) = &app_manager_ref.get_config().urpc_config {
-            config.get_memory_rpc_version.clone()
-        } else {
-            RpcVersion::V1
-        };
+        let rpc_version = &app.app_config_options.get_memory_data_urpc_version;
         match rpc_version {
             RpcVersion::V1 => {
                 let response = match result {
@@ -176,12 +172,13 @@ impl GetMemoryDataRequestCommand {
         }
 
         info!(
-            "[get_memory_data] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
+            "[get_memory_data][{:?}] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}.",
+            rpc_version,
             timer.elapsed().as_millis(),
             read_length,
             app_id,
             shuffle_id,
-            partition_id
+            partition_id,
         );
         Ok(())
     }

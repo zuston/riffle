@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::str::FromStr;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct MemoryStoreConfig {
@@ -469,8 +470,6 @@ pub struct Config {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct UrpcConfig {
     pub get_index_rpc_version: RpcVersion,
-    #[serde(default = "as_default_get_memory_rpc_version")]
-    pub get_memory_rpc_version: RpcVersion,
 }
 
 fn as_default_get_memory_rpc_version() -> RpcVersion {
@@ -487,6 +486,19 @@ pub enum RpcVersion {
 impl Default for RpcVersion {
     fn default() -> Self {
         RpcVersion::V1
+    }
+}
+
+impl FromStr for RpcVersion {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "V1" => Ok(RpcVersion::V1),
+            "V2" => Ok(RpcVersion::V2),
+            "V3" => Ok(RpcVersion::V3),
+            _ => Ok(RpcVersion::V1),
+        }
     }
 }
 

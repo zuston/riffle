@@ -446,6 +446,7 @@ pub(crate) mod test {
             read_ahead_batch_number: None,
             read_ahead_batch_size: None,
             client_configs: Default::default(),
+            get_memory_data_urpc_version: Default::default(),
         };
         app_manager_ref
             .register(raw_app_id.to_string(), shuffle_id, app_options)
