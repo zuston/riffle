@@ -67,9 +67,6 @@ RUN cd /opt && \
 ENV SPARK_HOME=/opt/spark
 ENV PATH="${SPARK_HOME}/bin:${PATH}"
 
-# install pyspark
-RUN pip3 install pyspark==${SPARK_VERSION}
-
 # install uniffle coordinator (must be before configuring it)
 ARG UNIFFLE_VERSION=0.10.0
 RUN cd /opt && \

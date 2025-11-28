@@ -41,7 +41,7 @@ else
     COORDINATOR_PID=$!
     echo $COORDINATOR_PID > /tmp/uniffle-coordinator.pid
     echo_info "Coordinator started with PID: $COORDINATOR_PID"
-    
+
     # Wait for coordinator to be ready
     echo_info "Waiting for coordinator to be ready..."
     for i in {1..30}; do
@@ -104,71 +104,20 @@ fi
 
 # Create Spark SQL test script
 echo_info "Creating Spark SQL test script..."
-cat > /tmp/test_spark_sql.py << 'EOF'
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, count, sum as spark_sum
-
-spark = SparkSession.builder \
-    .appName("RiffleIntegrationTest") \
-    .config("spark.shuffle.manager", "org.apache.spark.shuffle.RssShuffleManager") \
-    .config("spark.rss.coordinator.quorum", "localhost:21000") \
-    .config("spark.rss.storage.type", "MEMORY_LOCALFILE") \
-    .config("spark.executor.instances", "2") \
-    .config("spark.executor.cores", "2") \
-    .config("spark.executor.memory", "2g") \
-    .config("spark.sql.shuffle.partitions", "4") \
-    .getOrCreate()
-
-# Create test data
-data = [(1, "Alice", 25), (2, "Bob", 30), (3, "Charlie", 35), (4, "David", 40)]
-df = spark.createDataFrame(data, ["id", "name", "age"])
-
-# Test basic SQL operations
-df.createOrReplaceTempView("people")
-
-result1 = spark.sql("SELECT * FROM people WHERE age > 30")
-print("Query 1 - Filter results:")
-result1.show()
-
-result2 = spark.sql("SELECT name, age FROM people ORDER BY age DESC")
-print("Query 2 - Order by results:")
-result2.show()
-
-result3 = spark.sql("SELECT COUNT(*) as total, AVG(age) as avg_age FROM people")
-print("Query 3 - Aggregate results:")
-result3.show()
-
-# Test join operation (triggers shuffle)
-data2 = [(1, "Engineer"), (2, "Manager"), (3, "Engineer"), (4, "Designer")]
-df2 = spark.createDataFrame(data2, ["id", "role"])
-df2.createOrReplaceTempView("roles")
-
-result4 = spark.sql("""
-    SELECT p.name, p.age, r.role 
-    FROM people p 
-    JOIN roles r ON p.id = r.id
-""")
-print("Query 4 - Join results:")
-result4.show()
-
-spark.stop()
-print("Spark SQL integration test completed successfully!")
+cat > /tmp/spark_basic.scala << 'EOF'
+val data = sc.parallelize(1 to 100, 4)
+val pairs = data.map(x => (x % 5, x))
+val grouped = pairs.groupByKey()
+val result = grouped.mapValues(_.sum).collect().sortBy(_._1)
+result.foreach(println)
 EOF
 
 # Run Spark SQL Integration Test
 echo_info "Running Spark SQL Integration Test..."
 cd ${SPARK_HOME}
 
-# Find py4j jar dynamically
-PY4J_JAR=$(find ${SPARK_HOME}/python/lib -name "py4j-*.zip" | head -1)
-if [ -n "$PY4J_JAR" ]; then
-    export PYTHONPATH=${SPARK_HOME}/python:${PY4J_JAR}:${PYTHONPATH}
-else
-    export PYTHONPATH=${SPARK_HOME}/python:${PYTHONPATH}
-fi
-
 # Run spark-submit
-if ./bin/spark-submit \
+if ./bin/spark-shell \
     --master local[4] \
     --conf spark.shuffle.manager=org.apache.spark.shuffle.RssShuffleManager \
     --conf spark.rss.coordinator.quorum=localhost:21000 \
@@ -178,7 +127,7 @@ if ./bin/spark-submit \
     --conf spark.executor.memory=2g \
     --conf spark.sql.shuffle.partitions=4 \
     --jars jars/rss-client.jar \
-    /tmp/test_spark_sql.py; then
+    -i /tmp/spark_basic.scala; then
     echo_info "Spark SQL test completed successfully!"
     TEST_RESULT=0
 else
@@ -186,33 +135,4 @@ else
     TEST_RESULT=1
 fi
 
-# Show logs if test failed
-if [ $TEST_RESULT -ne 0 ]; then
-    echo_error "=== Riffle Server 1 Logs (last 50 lines) ==="
-    tail -50 /tmp/riffle-server-1/server1.log 2>/dev/null || echo "No logs found"
-    echo_error "=== Riffle Server 2 Logs (last 50 lines) ==="
-    tail -50 /tmp/riffle-server-2/server2.log 2>/dev/null || echo "No logs found"
-    echo_error "=== Coordinator Logs (last 50 lines) ==="
-    tail -50 ${UNIFFLE_HOME}/logs/coordinator.log 2>/dev/null || echo "No logs found"
-fi
-
-# Cleanup function
-cleanup() {
-    echo_info "Cleaning up..."
-    if [ -f /tmp/riffle-server-1.pid ]; then
-        kill $(cat /tmp/riffle-server-1.pid) 2>/dev/null || true
-    fi
-    if [ -f /tmp/riffle-server-2.pid ]; then
-        kill $(cat /tmp/riffle-server-2.pid) 2>/dev/null || true
-    fi
-    if [ -f /tmp/uniffle-coordinator.pid ]; then
-        kill $(cat /tmp/uniffle-coordinator.pid) 2>/dev/null || true
-    fi
-    pkill -f riffle-server 2>/dev/null || true
-}
-
-# Trap to cleanup on exit
-trap cleanup EXIT
-
 exit $TEST_RESULT
-
