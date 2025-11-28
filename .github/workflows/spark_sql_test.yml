@@ -52,6 +52,7 @@ jobs:
       
       - name: Download Uniffle Spark Client
         run: |
+          mkdir -p /tmp/spark/jars
           cd /tmp
           wget -q https://repo1.maven.org/maven2/org/apache/uniffle/rss-client-spark3-shaded/${UNIFFLE_VERSION}/rss-client-spark3-shaded-${UNIFFLE_VERSION}.jar -O /tmp/spark/jars/rss-client.jar
 
@@ -298,11 +299,7 @@ jobs:
             export PYTHONPATH=$SPARK_HOME/python:$PYTHONPATH
           fi
           
-          # Add uniffle client jar if available
-          JAR_OPTS=""
-          if [ -f jars/uniffle-client-spark3-${UNIFFLE_VERSION}.jar ]; then
-            JAR_OPTS="--jars jars/uniffle-client-spark3-${UNIFFLE_VERSION}.jar"
-          fi
+          JAR_OPTS="--jars jars/rss-client.jar"
           
           # Try spark-submit first, fallback to direct Python execution
           if ./bin/spark-submit \
