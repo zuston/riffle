@@ -101,15 +101,32 @@ jobs:
         run: |
           if [ -d "/tmp/uniffle" ]; then
             cd /tmp/uniffle
+            # Ensure log directory exists
+            mkdir -p logs
+            
             export JAVA_HOME=$JAVA_HOME
-            # Check if coordinator is already running (from Docker)
+            # Check if coordinator is already running
             if ! nc -z localhost 21000 2>/dev/null; then
-              nohup ./bin/start-coordinator.sh > /tmp/uniffle-coordinator/logs/coordinator.log 2>&1 &
-              echo $! > /tmp/uniffle-coordinator.pid
+              echo "Starting Uniffle Coordinator..."
+              nohup ./bin/start-coordinator.sh > logs/coordinator.log 2>&1 &
+              COORDINATOR_PID=$!
+              echo $COORDINATOR_PID > /tmp/uniffle-coordinator.pid
+              echo "Coordinator started with PID: $COORDINATOR_PID"
               sleep 10
+              
+              # Verify coordinator is still running
+              if ! kill -0 $COORDINATOR_PID 2>/dev/null; then
+                echo "ERROR: Coordinator process died immediately"
+                echo "=== Coordinator logs ==="
+                cat logs/coordinator.log 2>/dev/null || echo "No log file found"
+                exit 1
+              fi
             else
-              echo "Coordinator already running (likely from Docker)"
+              echo "Coordinator already running on port 21000"
             fi
+          else
+            echo "ERROR: /tmp/uniffle directory not found"
+            exit 1
           fi
         continue-on-error: true
 
@@ -129,10 +146,10 @@ jobs:
           if [ "$COORDINATOR_READY" != "true" ]; then
             echo "ERROR: Coordinator failed to start within timeout"
             echo "=== Coordinator logs (last 20 lines) ==="
-            if [ -f /tmp/uniffle-coordinator/logs/coordinator.log ]; then
-              tail -20 /tmp/uniffle-coordinator/logs/coordinator.log || echo "Log file not found"
+            if [ -f /tmp/uniffle/logs/coordinator.log ]; then
+              tail -20 /tmp/uniffle/logs/coordinator.log || echo "Log file not found"
             else
-              echo "Log file not found at /tmp/uniffle-coordinator/logs/coordinator.log"
+              echo "Log file not found at /tmp/uniffle/logs/coordinator.log"
             fi
             echo "=== Checking coordinator process ==="
             ps aux | grep -i coordinator | grep -v grep || echo "No coordinator process found"
@@ -154,7 +171,6 @@ jobs:
         run: |
           mkdir -p /tmp/riffle-server-1/data
           mkdir -p /tmp/riffle-server-2/data
-          mkdir -p /tmp/uniffle-coordinator/logs
           mkdir -p /tmp/spark/work
 
       - name: Create Riffle Server 1 config
@@ -245,7 +261,7 @@ jobs:
       - name: Download and setup Spark
         run: |
           cd /tmp
-          wget -q https://apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz
+          wget -q https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz
           tar -xzf spark-${SPARK_VERSION}-bin-hadoop3.tgz
           mv spark-${SPARK_VERSION}-bin-hadoop3 spark
           
