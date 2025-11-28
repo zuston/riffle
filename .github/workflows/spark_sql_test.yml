@@ -81,7 +81,7 @@ jobs:
           ls -lh apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz
           echo "Extracting Uniffle..."
           tar -xzf apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz
-          mv apache-uniffle-${UNIFFLE_VERSION}-bin-hadoop2.8 uniffle
+          mv apache-uniffle-${UNIFFLE_VERSION}-hadoop2.8 uniffle
           
           # Create coordinator config
           mkdir -p uniffle/conf
