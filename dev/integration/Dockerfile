@@ -71,12 +71,15 @@ ENV PATH="${SPARK_HOME}/bin:${PATH}"
 ARG UNIFFLE_VERSION=0.10.0
 RUN cd /opt && \
     wget -q https://archive.apache.org/dist/uniffle/${UNIFFLE_VERSION}/apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz && \
-    tar -xzf apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz --warning=no-unknown-keyword 2>&1 && \
-    EXTRACTED_DIR=$(ls -d *uniffle* 2>/dev/null | head -1) && \
-    if [ -n "$EXTRACTED_DIR" ]; then mv "$EXTRACTED_DIR" uniffle; fi && \
+    tar -zxvf apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz && mv apache-uniffle* uniffle && \
     rm -f apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz
 ENV UNIFFLE_HOME=/opt/uniffle
 ENV PATH="${UNIFFLE_HOME}/bin:${PATH}"
+
+RUN ls
+# configure uniffle coordinator (after UNIFFLE_HOME is set and uniffle is installed)
+RUN mkdir -p ${UNIFFLE_HOME}/conf
+COPY coordinator.conf ${UNIFFLE_HOME}/conf/coordinator.conf
 
 # download uniffle spark client
 RUN mkdir -p ${SPARK_HOME}/jars && \
@@ -94,10 +97,6 @@ COPY riffle.conf.2 ${RIFFLE_HOME}/conf/riffle.conf.2
 
 # configure spark to use riffle
 COPY spark-defaults.conf ${SPARK_HOME}/conf/spark-defaults.conf
-
-# configure uniffle coordinator (after UNIFFLE_HOME is set and uniffle is installed)
-RUN mkdir -p ${UNIFFLE_HOME}/conf
-COPY coordinator.conf ${UNIFFLE_HOME}/conf/coordinator.conf
 
 # copy endpoint script
 COPY endpoint.sh /usr/local/bin/endpoint.sh
