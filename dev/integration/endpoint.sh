@@ -118,7 +118,7 @@ cd ${SPARK_HOME}
 
 # Run spark-submit
 if ./bin/spark-shell \
-    --master local[4] \
+    --master local[1] \
     -i /tmp/spark_basic.scala; then
     echo_info "Spark SQL test completed successfully!"
     TEST_RESULT=0
