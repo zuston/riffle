@@ -8,6 +8,7 @@ use crate::app_manager::request_context::{
     RequireBufferContext, ShuffleResult, WritingViewContext,
 };
 use crate::block_id_manager::{get_block_id_manager, BlockIdManager};
+use crate::client_configs::STORAGE_CAPACITY_PARTITION_SPLIT_ENABLED;
 use crate::config::Config;
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::config_ref::{ByteString, ConfigOption};
@@ -348,6 +349,20 @@ impl App {
         let shuffle_id = &ctx.uid.shuffle_id;
 
         let mut partition_split_candidates = HashSet::new();
+
+        if self
+            .app_config_options
+            .client_configs
+            .get(&STORAGE_CAPACITY_PARTITION_SPLIT_ENABLED)
+            .unwrap_or(false)
+            && !self.store.is_healthy().await?
+        {
+            warn!(
+                "[{}] writing is limited due to the unhealthy storage",
+                &app_id.to_string()
+            );
+            return Err(WorkerError::WRITE_LIMITED_BY_STORAGE_STATE);
+        }
 
         if self.partition_limit_enable || self.partition_split_enable {
             let partition_limit_threshold = (self.memory_capacity as f64
