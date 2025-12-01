@@ -348,8 +348,6 @@ impl App {
         let app_id = &ctx.uid.app_id;
         let shuffle_id = &ctx.uid.shuffle_id;
 
-        let mut partition_split_candidates = HashSet::new();
-
         if self
             .app_config_options
             .client_configs
@@ -364,6 +362,7 @@ impl App {
             return Err(WorkerError::WRITE_LIMITED_BY_STORAGE_STATE);
         }
 
+        let mut partition_split_candidates = HashSet::new();
         if self.partition_limit_enable || self.partition_split_enable {
             let partition_limit_threshold = (self.memory_capacity as f64
                 * self.partition_limit_mem_backpressure_ratio.get())
