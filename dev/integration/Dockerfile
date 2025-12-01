@@ -71,12 +71,11 @@ ENV PATH="${SPARK_HOME}/bin:${PATH}"
 ARG UNIFFLE_VERSION=0.10.0
 RUN cd /opt && \
     wget -q https://archive.apache.org/dist/uniffle/${UNIFFLE_VERSION}/apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz && \
-    tar -zxvf apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz && mv apache-uniffle* uniffle && \
+    tar zxvf apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz && mv apache-uniffle-${UNIFFLE_VERSION}-hadoop2.8 uniffle && \
     rm -f apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz
 ENV UNIFFLE_HOME=/opt/uniffle
 ENV PATH="${UNIFFLE_HOME}/bin:${PATH}"
 
-RUN ls
 # configure uniffle coordinator (after UNIFFLE_HOME is set and uniffle is installed)
 RUN mkdir -p ${UNIFFLE_HOME}/conf
 COPY coordinator.conf ${UNIFFLE_HOME}/conf/coordinator.conf
