@@ -119,14 +119,6 @@ cd ${SPARK_HOME}
 # Run spark-submit
 if ./bin/spark-shell \
     --master local[4] \
-    --conf spark.shuffle.manager=org.apache.spark.shuffle.RssShuffleManager \
-    --conf spark.rss.coordinator.quorum=localhost:21000 \
-    --conf spark.rss.storage.type=MEMORY_LOCALFILE \
-    --conf spark.executor.instances=2 \
-    --conf spark.executor.cores=2 \
-    --conf spark.executor.memory=2g \
-    --conf spark.sql.shuffle.partitions=4 \
-    --jars jars/rss-client.jar \
     -i /tmp/spark_basic.scala; then
     echo_info "Spark SQL test completed successfully!"
     TEST_RESULT=0
