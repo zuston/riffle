@@ -71,7 +71,7 @@ ENV PATH="${SPARK_HOME}/bin:${PATH}"
 ARG UNIFFLE_VERSION=0.10.0
 RUN cd /opt && \
     wget -q https://archive.apache.org/dist/uniffle/${UNIFFLE_VERSION}/apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz && \
-    tar -xzf apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz --warning=no-unknown-keyword 2>&1 | grep -v "Ignoring unknown extended header keyword" || true && \
+    tar -xzf apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz --warning=no-unknown-keyword 2>&1 && \
     EXTRACTED_DIR=$(ls -d *uniffle* 2>/dev/null | head -1) && \
     if [ -n "$EXTRACTED_DIR" ]; then mv "$EXTRACTED_DIR" uniffle; fi && \
     rm -f apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz
