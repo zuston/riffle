@@ -109,7 +109,7 @@ ENV LD_LIBRARY_PATH=$HADOOP_HOME/lib/native:$LD_LIBRARY_PATH
 RUN echo "$HADOOP_HOME/lib/native" >> /etc/ld.so.conf.d/hadoop.conf && ldconfig
 
 # install pyspark to run tpcds benchmark
-RUN pip3 install pyspark spark_measure pandas tpcds_pyspark
+RUN pip3 install pyspark==${SPARK_VERSION} spark_measure pandas tpcds_pyspark
 RUN cd /opt && wget https://sparkdltrigger.web.cern.ch/sparkdltrigger/TPCDS/tpcds_10.zip && unzip tpcds_10.zip && rm tpcds_10.zip
 
 # copy sql_set files into the /tmp/sql_set directory
@@ -119,3 +119,6 @@ COPY sql_set /tmp/sql_set
 COPY endpoint.sh /usr/local/bin/endpoint.sh
 RUN chmod +x /usr/local/bin/endpoint.sh
 ENTRYPOINT ["/usr/local/bin/endpoint.sh"]
+
+# SPARK_HOME again to make sure it is set correctly
+ENV SPARK_HOME=/opt/spark

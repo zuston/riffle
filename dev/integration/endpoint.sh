@@ -123,9 +123,4 @@ fi
 
 # case2: with tpcds benchmark
 echo_info "Running TPCDS Benchmark..."
-if ./bin/spark-bin --master local[1] -i tpcds_pyspark_run.py -d /opt/tpcds_10 -o /tmp/tpcds_100_out.cvs; then
-    echo_info "TPCDS Benchmark completed successfully!"
-else
-    echo_error "TPCDS Benchmark failed!"
-    exit 1
-fi
+./tpcds_pyspark_run.py -d /opt/tpcds_10 
