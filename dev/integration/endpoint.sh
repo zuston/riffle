@@ -107,29 +107,37 @@ else
     echo_warn "Riffle Server 2 metrics not ready"
 fi
 
-# Create Spark SQL test script
-echo_info "Creating Spark SQL test script..."
-cat > /tmp/spark_basic.scala << 'EOF'
-val data = sc.parallelize(1 to 100, 4)
-val pairs = data.map(x => (x % 5, x))
-val grouped = pairs.groupByKey()
-val result = grouped.mapValues(_.sum).collect().sortBy(_._1)
-result.foreach(println)
-EOF
-
 # Run Spark SQL Integration Test
-echo_info "Running Spark SQL Integration Test..."
+echo_info "Running basic test..."
 cd ${SPARK_HOME}
 
-# Run spark-submit
+# case1: with sql_set sqls
 if ./bin/spark-shell \
     --master local[1] \
-    -i /tmp/spark_basic.scala; then
+    -i /tmp/sql_set/basic.scala; then
     echo_info "Spark SQL test completed successfully!"
-    TEST_RESULT=0
 else
     echo_error "Spark SQL test failed!"
-    TEST_RESULT=1
+    exit 1
 fi
 
-exit $TEST_RESULT
+# case2: run tpcds sqls
+echo_info "Merging all TPCDS SQLs into a single file..."
+MERGED_SQL="/tmp/tpcds_sqls.sql"
+echo "USE tpcds.sf1;" > "$MERGED_SQL"
+
+for sql_file in /tmp/sql_set/*.sql; do
+    cat "$sql_file" >> "$MERGED_SQL"
+    echo ";" >> "$MERGED_SQL"
+done
+
+echo_info "Running all TPCDS SQL..."
+start_time=$(date +%s)
+if ./bin/spark-sql --master local[1] -f "$MERGED_SQL"; then
+    end_time=$(date +%s)
+    duration=$((end_time - start_time))
+    echo_info "All SQL files executed in one session successfully (Time: ${duration}s)"
+else
+    echo_error "Execution of merged SQL file failed!"
+    exit 1
+fi
