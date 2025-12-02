@@ -120,7 +120,3 @@ else
     echo_error "Spark SQL test failed!"
     exit 1
 fi
-
-# case2: with tpcds benchmark
-echo_info "Running TPCDS Benchmark..."
-./tpcds_pyspark_run.py -d /opt/tpcds_10 

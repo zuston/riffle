@@ -108,17 +108,14 @@ RUN echo "export RUST_BACKTRACE=1" >> ~/.bashrc
 ENV LD_LIBRARY_PATH=$HADOOP_HOME/lib/native:$LD_LIBRARY_PATH
 RUN echo "$HADOOP_HOME/lib/native" >> /etc/ld.so.conf.d/hadoop.conf && ldconfig
 
-# install pyspark to run tpcds benchmark
-RUN pip3 install pyspark spark_measure pandas tpcds_pyspark
-RUN cd /opt && wget https://sparkdltrigger.web.cern.ch/sparkdltrigger/TPCDS/tpcds_10.zip && unzip tpcds_10.zip && rm tpcds_10.zip
-
 # copy sql_set files into the /tmp/sql_set directory
 COPY sql_set /tmp/sql_set
+
+# copy kyuubi tpcds gen jar into the SPARK_HOME jars
+RUN cd ${SPARK_HOME}/jars && \
+    wget https://repo1.maven.org/maven2/org/apache/kyuubi/kyuubi-spark-connector-tpcds_2.12/1.10.2/kyuubi-spark-connector-tpcds_2.12-1.10.2.jar
 
 # copy endpoint script
 COPY endpoint.sh /usr/local/bin/endpoint.sh
 RUN chmod +x /usr/local/bin/endpoint.sh
 ENTRYPOINT ["/usr/local/bin/endpoint.sh"]
-
-# SPARK_HOME again to make sure it is set correctly
-ENV SPARK_HOME=/opt/spark
