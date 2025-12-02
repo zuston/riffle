@@ -129,12 +129,11 @@ echo "USE tpcds.sf1;" > "$MERGED_SQL"
 for sql_file in /tmp/sql_set/*.sql; do
     cat "$sql_file" >> "$MERGED_SQL"
     echo ";" >> "$MERGED_SQL"
-    echo "\n" >> "$MERGED_SQL"
 done
 
 echo_info "Running all TPCDS SQL..."
 start_time=$(date +%s)
-if ./bin/spark-sql --master local[1] -f "$MERGED_SQL" > /dev/null 2>&1; then
+if ./bin/spark-sql --master local[1] -f "$MERGED_SQL"; then
     end_time=$(date +%s)
     duration=$((end_time - start_time))
     echo_info "All SQL files executed in one session successfully (Time: ${duration}s)"
