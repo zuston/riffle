@@ -108,12 +108,12 @@ RUN echo "export RUST_BACKTRACE=1" >> ~/.bashrc
 ENV LD_LIBRARY_PATH=$HADOOP_HOME/lib/native:$LD_LIBRARY_PATH
 RUN echo "$HADOOP_HOME/lib/native" >> /etc/ld.so.conf.d/hadoop.conf && ldconfig
 
-# copy sql_set files into the /tmp/sql_set directory
-COPY sql_set /tmp/sql_set
-
 # copy kyuubi tpcds gen jar into the SPARK_HOME jars
 RUN cd ${SPARK_HOME}/jars && \
     wget https://repo1.maven.org/maven2/org/apache/kyuubi/kyuubi-spark-connector-tpcds_2.12/1.10.2/kyuubi-spark-connector-tpcds_2.12-1.10.2.jar
+
+# copy sql_set files into the /tmp/sql_set directory
+COPY sql_set /tmp/sql_set
 
 # copy endpoint script
 COPY endpoint.sh /usr/local/bin/endpoint.sh
