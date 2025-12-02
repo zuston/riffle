@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use crate::app_manager::app::App;
     use crate::app_manager::application_identifier::ApplicationId;
     use crate::app_manager::partition_identifier::PartitionUId;
@@ -33,7 +33,7 @@ mod tests {
         assert_eq!("HDFS", format!("{:?}", store_type));
     }
 
-    fn create_multi_level_config(
+    pub fn create_multi_level_config(
         store_type: StorageType,
         grpc_port: i32,
         capacity: String,
@@ -60,7 +60,7 @@ mod tests {
         toml::from_str(toml_str.as_str()).unwrap()
     }
 
-    fn create_hybrid_store(
+    pub fn create_hybrid_store(
         config: &Config,
         warm: &MockStore,
         cold: Option<&MockStore>,
@@ -477,7 +477,7 @@ mod tests {
     }
 }
 
-mod mock {
+pub mod mock {
     use crate::app_manager::request_context::{
         PurgeDataContext, ReadingIndexViewContext, ReadingViewContext, RegisterAppContext,
         ReleaseTicketContext, RequireBufferContext, WritingViewContext,
@@ -496,7 +496,7 @@ mod mock {
     use std::time::Duration;
 
     #[derive(Clone)]
-    pub(crate) struct MockStore {
+    pub struct MockStore {
         pub(crate) inner: Arc<Inner>,
     }
 

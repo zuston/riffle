@@ -55,6 +55,9 @@ pub enum WorkerError {
     #[error("The memory usage is limited by huge partition mechanism")]
     MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION,
 
+    #[error("shuffle writing is limited due to the unhealthy storage state")]
+    WRITE_LIMITED_BY_STORAGE_STATE,
+
     #[error("Http request failed. {0}")]
     HTTP_SERVICE_ERROR(String),
 

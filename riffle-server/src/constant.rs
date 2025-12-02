@@ -13,6 +13,9 @@ pub enum StatusCode {
     ACCESS_DENIED = 8,
     INVALID_REQUEST = 9,
     NO_BUFFER_FOR_HUGE_PARTITION = 10,
+    // to indicate shuffle-writing not retry!
+    // todo: we should introduce the dedicated status code to indicate this
+    EXCEED_HUGE_PARTITION_HARD_LIMIT = 12,
 }
 
 impl Into<i32> for StatusCode {
