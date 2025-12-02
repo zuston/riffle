@@ -1,0 +1,28 @@
+store_type = "MEMORY_LOCALFILE"
+grpc_port = 21101
+http_port = 19999
+coordinator_quorum = ["localhost:21000"]
+tags = ["riffle2", "datanode", "GRPC", "ss_v5"]
+
+[memory_store]
+capacity = "2G"
+dashmap_shard_amount = 128
+
+[localfile_store]
+data_paths = ["/tmp/riffle-server-2/data"]
+healthy_check_min_disks = 0
+disk_max_concurrency = 2000
+
+[hybrid_store]
+memory_spill_high_watermark = 0.5
+memory_spill_low_watermark = 0.2
+memory_spill_max_concurrency = 1000
+
+[runtime_config]
+read_thread_num = 20
+write_thread_num = 50
+grpc_thread_num = 50
+http_thread_num = 5
+default_thread_num = 10
+dispatch_thread_num = 5
+
