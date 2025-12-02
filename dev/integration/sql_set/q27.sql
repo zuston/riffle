@@ -15,22 +15,25 @@
 -- limitations under the License.
 --
 
---q1.sql--
+--q27.sql--
 
- WITH customer_total_return AS
-   (SELECT sr_customer_sk AS ctr_customer_sk, sr_store_sk AS ctr_store_sk,
-           sum(sr_return_amt) AS ctr_total_return
-    FROM store_returns, date_dim
-    WHERE sr_returned_date_sk = d_date_sk AND d_year = 2000
-    GROUP BY sr_customer_sk, sr_store_sk)
- SELECT c_customer_id
-   FROM customer_total_return ctr1, store, customer
-   WHERE ctr1.ctr_total_return >
-    (SELECT avg(ctr_total_return)*1.2
-      FROM customer_total_return ctr2
-       WHERE ctr1.ctr_store_sk = ctr2.ctr_store_sk)
-   AND s_store_sk = ctr1.ctr_store_sk
-   AND s_state = 'TN'
-   AND ctr1.ctr_customer_sk = c_customer_sk
-   ORDER BY c_customer_id LIMIT 100
+ select i_item_id,
+        s_state, grouping(s_state) g_state,
+        avg(ss_quantity) agg1,
+        avg(ss_list_price) agg2,
+        avg(ss_coupon_amt) agg3,
+        avg(ss_sales_price) agg4
+ from store_sales, customer_demographics, date_dim, store, item
+ where ss_sold_date_sk = d_date_sk and
+       ss_item_sk = i_item_sk and
+       ss_store_sk = s_store_sk and
+       ss_cdemo_sk = cd_demo_sk and
+       cd_gender = 'M' and
+       cd_marital_status = 'S' and
+       cd_education_status = 'College' and
+       d_year = 2002 and
+       s_state in ('TN','TN', 'TN', 'TN', 'TN', 'TN')
+ group by rollup (i_item_id, s_state)
+ order by i_item_id, s_state
+ limit 100
             

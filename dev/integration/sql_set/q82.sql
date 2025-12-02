@@ -15,22 +15,18 @@
 -- limitations under the License.
 --
 
---q1.sql--
+--q82.sql--
 
- WITH customer_total_return AS
-   (SELECT sr_customer_sk AS ctr_customer_sk, sr_store_sk AS ctr_store_sk,
-           sum(sr_return_amt) AS ctr_total_return
-    FROM store_returns, date_dim
-    WHERE sr_returned_date_sk = d_date_sk AND d_year = 2000
-    GROUP BY sr_customer_sk, sr_store_sk)
- SELECT c_customer_id
-   FROM customer_total_return ctr1, store, customer
-   WHERE ctr1.ctr_total_return >
-    (SELECT avg(ctr_total_return)*1.2
-      FROM customer_total_return ctr2
-       WHERE ctr1.ctr_store_sk = ctr2.ctr_store_sk)
-   AND s_store_sk = ctr1.ctr_store_sk
-   AND s_state = 'TN'
-   AND ctr1.ctr_customer_sk = c_customer_sk
-   ORDER BY c_customer_id LIMIT 100
+ select i_item_id, i_item_desc, i_current_price
+ from item, inventory, date_dim, store_sales
+ where i_current_price between 62 and 62+30
+   and inv_item_sk = i_item_sk
+   and d_date_sk=inv_date_sk
+   and d_date between cast('2000-05-25' as date) and (cast('2000-05-25' as date) + interval '60' day)
+   and i_manufact_id in (129, 270, 821, 423)
+   and inv_quantity_on_hand between 100 and 500
+   and ss_item_sk = i_item_sk
+ group by i_item_id,i_item_desc,i_current_price
+ order by i_item_id
+ limit 100
             

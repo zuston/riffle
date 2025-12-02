@@ -15,22 +15,24 @@
 -- limitations under the License.
 --
 
---q1.sql--
+--q6.sql--
 
- WITH customer_total_return AS
-   (SELECT sr_customer_sk AS ctr_customer_sk, sr_store_sk AS ctr_store_sk,
-           sum(sr_return_amt) AS ctr_total_return
-    FROM store_returns, date_dim
-    WHERE sr_returned_date_sk = d_date_sk AND d_year = 2000
-    GROUP BY sr_customer_sk, sr_store_sk)
- SELECT c_customer_id
-   FROM customer_total_return ctr1, store, customer
-   WHERE ctr1.ctr_total_return >
-    (SELECT avg(ctr_total_return)*1.2
-      FROM customer_total_return ctr2
-       WHERE ctr1.ctr_store_sk = ctr2.ctr_store_sk)
-   AND s_store_sk = ctr1.ctr_store_sk
-   AND s_state = 'TN'
-   AND ctr1.ctr_customer_sk = c_customer_sk
-   ORDER BY c_customer_id LIMIT 100
+SELECT state, cnt FROM (
+ SELECT a.ca_state state, count(*) cnt
+ FROM
+    customer_address a, customer c, store_sales s, date_dim d, item i
+ WHERE a.ca_address_sk = c.c_current_addr_sk
+    AND c.c_customer_sk = s.ss_customer_sk
+    AND s.ss_sold_date_sk = d.d_date_sk
+    AND s.ss_item_sk = i.i_item_sk
+    AND d.d_month_seq =
+         (SELECT distinct (d_month_seq) FROM date_dim
+      WHERE d_year = 2001 AND d_moy = 1)
+    AND i.i_current_price > 1.2 *
+         (SELECT avg(j.i_current_price) FROM item j
+            WHERE j.i_category = i.i_category)
+ GROUP BY a.ca_state
+) x
+WHERE cnt >= 10
+ORDER BY cnt LIMIT 100
             
