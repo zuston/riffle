@@ -97,10 +97,6 @@ COPY riffle.conf.2 ${RIFFLE_HOME}/conf/riffle.conf.2
 # configure spark to use riffle
 COPY spark-defaults.conf ${SPARK_HOME}/conf/spark-defaults.conf
 
-# copy endpoint script
-COPY endpoint.sh /usr/local/bin/endpoint.sh
-RUN chmod +x /usr/local/bin/endpoint.sh
-
 # setup environment variables
 RUN echo "export SPARK_HOME=${SPARK_HOME}" >> ~/.bashrc && \
     echo "export UNIFFLE_HOME=${UNIFFLE_HOME}" >> ~/.bashrc && \
@@ -108,9 +104,6 @@ RUN echo "export SPARK_HOME=${SPARK_HOME}" >> ~/.bashrc && \
     echo "export PYTHONPATH=\${SPARK_HOME}/python:\${SPARK_HOME}/python/lib/py4j-*.zip:\${PYTHONPATH}" >> ~/.bashrc
 
 RUN echo "export RUST_BACKTRACE=1" >> ~/.bashrc
-
-# Set entrypoint (no WORKDIR needed as endpoint.sh handles paths)
-ENTRYPOINT ["/usr/local/bin/endpoint.sh"]
 
 ENV LD_LIBRARY_PATH=$HADOOP_HOME/lib/native:$LD_LIBRARY_PATH
 RUN echo "$HADOOP_HOME/lib/native" >> /etc/ld.so.conf.d/hadoop.conf && ldconfig
@@ -121,3 +114,8 @@ RUN cd /opt && wget https://sparkdltrigger.web.cern.ch/sparkdltrigger/TPCDS/tpcd
 
 # copy sql_set files into the /tmp/sql_set directory
 COPY sql_set /tmp/sql_set
+
+# copy endpoint script
+COPY endpoint.sh /usr/local/bin/endpoint.sh
+RUN chmod +x /usr/local/bin/endpoint.sh
+ENTRYPOINT ["/usr/local/bin/endpoint.sh"]
