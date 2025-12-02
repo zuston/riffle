@@ -925,6 +925,12 @@ impl ShuffleServer for DefaultShuffleServer {
                 "".to_string(),
                 vec![],
             ),
+            Err(WorkerError::WRITE_LIMITED_BY_STORAGE_STATE) => (
+                StatusCode::EXCEED_HUGE_PARTITION_HARD_LIMIT,
+                -1i64,
+                "".to_string(),
+                vec![],
+            ),
             Err(err) => (StatusCode::NO_BUFFER, -1i64, format!("{:?}", err), vec![]),
         };
 

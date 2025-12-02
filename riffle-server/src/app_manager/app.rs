@@ -8,6 +8,7 @@ use crate::app_manager::request_context::{
     RequireBufferContext, ShuffleResult, WritingViewContext,
 };
 use crate::block_id_manager::{get_block_id_manager, BlockIdManager};
+use crate::client_configs::STORAGE_CAPACITY_PARTITION_SPLIT_ENABLED;
 use crate::config::Config;
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::config_ref::{ByteString, ConfigOption};
@@ -347,8 +348,21 @@ impl App {
         let app_id = &ctx.uid.app_id;
         let shuffle_id = &ctx.uid.shuffle_id;
 
-        let mut partition_split_candidates = HashSet::new();
+        if self
+            .app_config_options
+            .client_configs
+            .get(&STORAGE_CAPACITY_PARTITION_SPLIT_ENABLED)
+            .unwrap_or(false)
+            && !self.store.is_healthy().await?
+        {
+            warn!(
+                "[{}] writing is limited due to the unhealthy storage",
+                &app_id.to_string()
+            );
+            return Err(WorkerError::WRITE_LIMITED_BY_STORAGE_STATE);
+        }
 
+        let mut partition_split_candidates = HashSet::new();
         if self.partition_limit_enable || self.partition_split_enable {
             let partition_limit_threshold = (self.memory_capacity as f64
                 * self.partition_limit_mem_backpressure_ratio.get())
@@ -495,5 +509,104 @@ impl App {
 
     pub fn total_resident_data_size(&self) -> u64 {
         self.total_resident_data_size.load(SeqCst)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app_manager::app::App;
+    use crate::app_manager::app_configs::{AppConfigOptions, DataDistribution};
+    use crate::app_manager::application_identifier::ApplicationId;
+    use crate::app_manager::partition_identifier::PartitionUId;
+    use crate::app_manager::request_context::RequireBufferContext;
+    use crate::client_configs::{ClientRssConf, STORAGE_CAPACITY_PARTITION_SPLIT_ENABLED};
+    use crate::config::StorageType;
+    use crate::config::StorageType::LOCALFILE;
+    use crate::config_reconfigure::ReconfigurableConfManager;
+    use crate::error::WorkerError;
+    use crate::runtime::manager::RuntimeManager;
+    use crate::runtime::{Builder, Runtime};
+    use crate::store::spill::spill_test::mock::MockStore;
+    use crate::store::spill::spill_test::tests::create_hybrid_store;
+    use libc::connect;
+    use log::info;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use tokio::runtime;
+
+    #[test]
+    fn partition_split_by_storage() -> anyhow::Result<()> {
+        let app_id = ApplicationId::YARN(1, 1, 1);
+
+        let mut hmap = HashMap::new();
+        hmap.insert(
+            "spark.rss.riffle.storageCapacityPartitionSplitEnabled".to_string(),
+            "true".to_string(),
+        );
+        let conf = ClientRssConf::from(hmap);
+        let options = AppConfigOptions::new(DataDistribution::NORMAL, 1, None, conf);
+
+        // server configs
+        let temp_dir = tempdir::TempDir::new("partition_split_by_storage").unwrap();
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        info!("init local file path: {}", &temp_path);
+
+        let mut config = crate::store::spill::spill_test::tests::create_multi_level_config(
+            StorageType::MEMORY_LOCALFILE,
+            1,
+            "1M".to_string(),
+            temp_path,
+        );
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
+
+        // mock storage
+        let healthy_tag = Arc::new(AtomicBool::new(true));
+        let warm = MockStore::new(LOCALFILE, &healthy_tag, None, None);
+        let hybrid_storage = create_hybrid_store(&config, &warm, None, &reconf_manager);
+
+        let runtime_manager = RuntimeManager::from(Default::default());
+        let app = App::from(
+            app_id.to_string(),
+            options,
+            hybrid_storage.clone(),
+            runtime_manager,
+            &config,
+            &reconf_manager,
+        );
+
+        let runtime = Builder::default()
+            .worker_threads(1)
+            .thread_name("test")
+            .enable_all()
+            .build()?;
+
+        // case1: legal
+        let ctx = RequireBufferContext {
+            uid: PartitionUId {
+                app_id: app_id.clone(),
+                shuffle_id: 1,
+                partition_id: 1,
+            },
+            size: 10,
+            partition_ids: vec![0, 1, 2],
+        };
+        runtime
+            .block_on(async { app.require_buffer(ctx.clone()).await })
+            .unwrap();
+
+        // case2: illegal
+        healthy_tag.store(false, Ordering::SeqCst);
+
+        match runtime.block_on(async { app.require_buffer(ctx.clone()).await }) {
+            Err(WorkerError::WRITE_LIMITED_BY_STORAGE_STATE) => {
+                // pass
+            }
+            _ => {
+                panic!("Should throw exception")
+            }
+        }
+
+        Ok(())
     }
 }
