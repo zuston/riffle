@@ -1,0 +1,12 @@
+version: "3"
+
+services:
+  spark-sql-test:
+    build:
+      context: .
+    volumes:
+      - ~/.cargo/git:/root/.cargo/git:rw
+      - ~/.cargo/registry:/root/.cargo/registry:rw
+      - ./../../:/riffle:rw
+      - ./../../target-docker:/riffle/target:rw
+    # endpoint.sh is set as ENTRYPOINT in Dockerfile, so no command needed
