@@ -111,3 +111,6 @@ RUN echo "export RUST_BACKTRACE=1" >> ~/.bashrc
 
 # Set entrypoint (no WORKDIR needed as endpoint.sh handles paths)
 ENTRYPOINT ["/usr/local/bin/endpoint.sh"]
+
+ENV LD_LIBRARY_PATH=$HADOOP_HOME/lib/native:$LD_LIBRARY_PATH
+RUN echo "$HADOOP_HOME/lib/native" >> /etc/ld.so.conf.d/hadoop.conf && ldconfig

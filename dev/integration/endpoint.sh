@@ -64,14 +64,16 @@ fi
 if [ ! -f /riffle/target/release/riffle-server ]; then
     echo_info "Building Riffle Server..."
     cd /riffle
-    cargo build --features hdrs,memory-prof --release
+    cargo build --release
 fi
+
+WORKER_IP=127.0.0.1
 
 # Start Riffle Server 1
 echo_info "Starting Riffle Server 1..."
 cd /tmp/riffle-server-1
 cp ${RIFFLE_HOME}/conf/riffle.conf.1 config.toml
-WORKER_IP=localhost RUST_LOG=info nohup /riffle/target/release/riffle-server --config config.toml > server1.log 2>&1 &
+RUST_LOG=info nohup /riffle/target/release/riffle-server --config config.toml > server1.log 2>&1 &
 RIFFLE_SERVER_1_PID=$!
 echo $RIFFLE_SERVER_1_PID > /tmp/riffle-server-1.pid
 echo_info "Riffle Server 1 started with PID: $RIFFLE_SERVER_1_PID"
@@ -81,7 +83,7 @@ sleep 5
 echo_info "Starting Riffle Server 2..."
 cd /tmp/riffle-server-2
 cp ${RIFFLE_HOME}/conf/riffle.conf.2 config.toml
-WORKER_IP=localhost RUST_LOG=info nohup /riffle/target/release/riffle-server --config config.toml > server2.log 2>&1 &
+RUST_LOG=info nohup /riffle/target/release/riffle-server --config config.toml > server2.log 2>&1 &
 RIFFLE_SERVER_2_PID=$!
 echo $RIFFLE_SERVER_2_PID > /tmp/riffle-server-2.pid
 echo_info "Riffle Server 2 started with PID: $RIFFLE_SERVER_2_PID"
@@ -94,6 +96,9 @@ if curl -f http://localhost:19998/metrics >/dev/null 2>&1; then
     echo_info "Riffle Server 1 is running"
 else
     echo_warn "Riffle Server 1 metrics not ready"
+    echo_warn "=== Riffle Server 1 log (last 40 lines) ==="
+    tail -40 /tmp/riffle-server-1/server1.log 2>/dev/null || echo_warn "No log file found"
+    exit 1
 fi
 
 if curl -f http://localhost:19999/metrics >/dev/null 2>&1; then
