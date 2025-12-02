@@ -108,7 +108,7 @@ else
 fi
 
 # Run Spark SQL Integration Test
-echo_info "Running Spark SQL Integration Test..."
+echo_info "Running basic test..."
 cd ${SPARK_HOME}
 
 # case1: with sql_set sqls
@@ -122,8 +122,8 @@ else
 fi
 
 # case2: run tpcds sqls
-echo_info "Merging all SQL files into a single file..."
-MERGED_SQL="/tmp/sql_set/all_sqls.sql"
+echo_info "Merging all TPCDS SQLs into a single file..."
+MERGED_SQL="/tmp/tpcds_sqls.sql"
 echo "USE tpcds.sf1;" > "$MERGED_SQL"
 
 for sql_file in /tmp/sql_set/*.sql; do
@@ -132,7 +132,7 @@ for sql_file in /tmp/sql_set/*.sql; do
     echo "\n" >> "$MERGED_SQL"
 done
 
-echo_info "Running all SQL files in one Spark session..."
+echo_info "Running all TPCDS SQL..."
 start_time=$(date +%s)
 if ./bin/spark-sql --master local[1] -f "$MERGED_SQL" > /dev/null 2>&1; then
     end_time=$(date +%s)
