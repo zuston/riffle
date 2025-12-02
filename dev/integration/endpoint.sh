@@ -121,18 +121,24 @@ else
     exit 1
 fi
 
-echo_info "Running all SQL files in /tmp/sql_set ..."
+# case2: run tpcds sqls
+echo_info "Merging all SQL files into a single file..."
+MERGED_SQL="/tmp/sql_set/all_sqls.sql"
+echo "USE tpcds.sf1;" > "$MERGED_SQL"
 
 for sql_file in /tmp/sql_set/*.sql; do
-    echo_info "Running SQL file: $sql_file"
-    if ./bin/spark-sql \
-        --master local[1] \
-        -f "$sql_file" > /dev/null 2>&1; then
-        echo_info "Completed: $sql_file"
-    else
-        echo_error "Failed: $sql_file"
-        exit 1
-    fi
+    cat "$sql_file" >> "$MERGED_SQL"
+    echo ";" >> "$MERGED_SQL"
+    echo "\n" >> "$MERGED_SQL"
 done
 
-echo_info "All SQL files executed successfully!"
+echo_info "Running all SQL files in one Spark session..."
+start_time=$(date +%s)
+if ./bin/spark-sql --master local[1] -f "$MERGED_SQL" > /dev/null 2>&1; then
+    end_time=$(date +%s)
+    duration=$((end_time - start_time))
+    echo_info "All SQL files executed in one session successfully (Time: ${duration}s)"
+else
+    echo_error "Execution of merged SQL file failed!"
+    exit 1
+fi
