@@ -120,3 +120,14 @@ else
     echo_error "Spark SQL test failed!"
     exit 1
 fi
+
+# case2: tpcds tests
+echo_info "Running TPC-DS q1.sql test..."
+if ./bin/spark-sql \
+    --master local[1] \
+    -f /tmp/sql_set/q1.sql; then
+    echo_info "TPC-DS q1.sql completed successfully!"
+else
+    echo_error "TPC-DS q1.sql failed!"
+    exit 1
+fi
