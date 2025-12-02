@@ -121,13 +121,18 @@ else
     exit 1
 fi
 
-# case2: tpcds tests
-echo_info "Running TPC-DS q1.sql test..."
-if ./bin/spark-sql \
-    --master local[1] \
-    -f /tmp/sql_set/q1.sql; then
-    echo_info "TPC-DS q1.sql completed successfully!"
-else
-    echo_error "TPC-DS q1.sql failed!"
-    exit 1
-fi
+echo_info "Running all SQL files in /tmp/sql_set ..."
+
+for sql_file in /tmp/sql_set/*.sql; do
+    echo_info "Running SQL file: $sql_file"
+    if ./bin/spark-sql \
+        --master local[1] \
+        -f "$sql_file" > /dev/null 2>&1; then
+        echo_info "Completed: $sql_file"
+    else
+        echo_error "Failed: $sql_file"
+        exit 1
+    fi
+done
+
+echo_info "All SQL files executed successfully!"
