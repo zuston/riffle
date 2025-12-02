@@ -107,29 +107,28 @@ else
     echo_warn "Riffle Server 2 metrics not ready"
 fi
 
-# Create Spark SQL test script
-echo_info "Creating Spark SQL test script..."
-cat > /tmp/spark_basic.scala << 'EOF'
-val data = sc.parallelize(1 to 100, 4)
-val pairs = data.map(x => (x % 5, x))
-val grouped = pairs.groupByKey()
-val result = grouped.mapValues(_.sum).collect().sortBy(_._1)
-result.foreach(println)
-EOF
-
 # Run Spark SQL Integration Test
 echo_info "Running Spark SQL Integration Test..."
 cd ${SPARK_HOME}
 
-# Run spark-submit
+# case1: with sql_set sqls
 if ./bin/spark-shell \
     --master local[1] \
-    -i /tmp/spark_basic.scala; then
+    -i /tmp/sql_set/basic.scala; then
     echo_info "Spark SQL test completed successfully!"
-    TEST_RESULT=0
 else
     echo_error "Spark SQL test failed!"
-    TEST_RESULT=1
+    exit 1
 fi
 
-exit $TEST_RESULT
+# case2: with tpcds benchmark
+echo_info "Running TPCDS Benchmark..."
+cd /opt/tpcds_10
+./tpcds_pyspark_run.py -d /opt/tpcds_10/data -o /opt/tpcds_10/results
+
+if ./bin/spark-bin --master local[1] -i tpcds_pyspark_run.py -d /opt/tpcds_10 -o /tmp/tpcds_100_out.cvs; then
+    echo_info "TPCDS Benchmark completed successfully!"
+else
+    echo_error "TPCDS Benchmark failed!"
+    exit 1
+fi

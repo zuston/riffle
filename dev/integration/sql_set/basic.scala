@@ -1,0 +1,5 @@
+val data = sc.parallelize(1 to 100, 4)
+val pairs = data.map(x => (x % 5, x))
+val grouped = pairs.groupByKey()
+val result = grouped.mapValues(_.sum).collect().sortBy(_._1)
+result.foreach(println)
