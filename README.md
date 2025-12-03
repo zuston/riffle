@@ -88,6 +88,32 @@ dispatch_thread_num = 10
  
 </details>
 
+## Quick Start with Docker
+
+The fastest way to get started with Riffle is using Docker Compose. This will set up a complete testing environment with Uniffle Coordinator, Riffle Servers, and Spark.
+
+```bash
+cd dev/integration
+docker-compose up riffle-dev
+
+# run Spark SQL with Riffle(Uniffle is enabled by default) and then you can open the spark web UI. 
+./bin/spark-sql --master local[1] -e "SELECT 1"
+
+# shutdown
+docker-compose down
+
+# Remove all volumes as well
+docker-compose down -v
+
+# or rebuild while starting
+docker-compose up --build riffle-dev
+```
+
+**Available Endpoints:**
+- Uniffle Coordinator Web UI: http://localhost:19995
+- Riffle Server 1 Metrics: http://localhost:19998/metrics
+- Riffle Server 2 Metrics: http://localhost:19999/metrics
+
 ## Build
 
 `cargo build --release`

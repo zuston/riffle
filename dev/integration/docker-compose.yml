@@ -1,12 +1,37 @@
 version: "3"
 
 services:
-  spark-sql-test:
+  # Service for running full tests (default)
+  riffle-test:
     build:
       context: .
+    container_name: riffle-test
     volumes:
       - ~/.cargo/git:/root/.cargo/git:rw
       - ~/.cargo/registry:/root/.cargo/registry:rw
       - ./../../:/riffle:rw
       - ./../../target-docker:/riffle/target:rw
     # endpoint.sh is set as ENTRYPOINT in Dockerfile, so no command needed
+    # This will run the tests by default
+
+  # Service for development - skip tests and enter bash
+  riffle-dev:
+    build:
+      context: .
+    container_name: riffle-dev
+    stdin_open: true  # equivalent to -i
+    tty: true         # equivalent to -t
+    volumes:
+      - ~/.cargo/git:/root/.cargo/git:rw
+      - ~/.cargo/registry:/root/.cargo/registry:rw
+      - ./../../:/riffle:rw
+      - ./../../target-docker:/riffle/target:rw
+    command: skip-tests  # Pass argument to skip tests and enter bash
+    ports:
+      - "19995:19995"  # Uniffle Coordinator Web UI
+      - "21000:21000"  # Uniffle Coordinator RPC
+      - "19998:19998"  # Riffle Server 1 (http port)
+      - "21100:21100"  # Riffle Server 1 (grpc port)
+      - "19999:19999"  # Riffle Server 2 (http port)
+      - "21101:21101"  # Riffle Server 2 (grpc port)
+      - "4040:4040"    # Spark UI (if needed)

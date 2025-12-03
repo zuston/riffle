@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Check if we should skip tests
+SKIP_TESTS=${1:-false}
+
 # Source environment variables
 source ~/.bashrc
 
@@ -105,6 +108,19 @@ if curl -f http://localhost:19999/metrics >/dev/null 2>&1; then
     echo_info "Riffle Server 2 is running"
 else
     echo_warn "Riffle Server 2 metrics not ready"
+fi
+
+# Check if we should skip tests
+if [ "$SKIP_TESTS" = "true" ] || [ "$SKIP_TESTS" = "skip-tests" ]; then
+    echo_info "==========================================="
+    echo_info "Tests skipped. All services are running:"
+    echo_info "  - Uniffle Coordinator: http://localhost:19995"
+    echo_info "  - Riffle Server 1: http://localhost:19998"
+    echo_info "  - Riffle Server 2: http://localhost:19999"
+    echo_info "  - Spark Home: ${SPARK_HOME}"
+    echo_info "==========================================="
+    echo_info "Entering interactive bash shell..."
+    exec /bin/bash
 fi
 
 # Run Spark SQL Integration Test
