@@ -119,8 +119,15 @@ if [ "$SKIP_TESTS" = "true" ] || [ "$SKIP_TESTS" = "skip-tests" ]; then
     echo_info "  - Riffle Server 2: http://localhost:19999"
     echo_info "  - Spark Home: ${SPARK_HOME}"
     echo_info "==========================================="
-    echo_info "Entering interactive bash shell..."
-    exec /bin/bash
+    echo_info "Container is running. To enter bash shell, run:"
+    echo_info "    docker exec -it riffle-dev /bin/bash"
+    echo_info ""
+    echo_info "Or if using docker-compose:"
+    echo_info "    docker-compose exec riffle-dev /bin/bash"
+    echo_info "==========================================="
+    
+    # Keep the container running
+    tail -f /dev/null
 fi
 
 # Run Spark SQL Integration Test
