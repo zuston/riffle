@@ -167,7 +167,7 @@ mod tests {
     #[test]
     fn test_client() -> Result<()> {
         let port = util::find_available_port().unwrap();
-        let _ = setup_urpc_server(port)?;
+        let shutdown_hook = setup_urpc_server(port)?;
 
         // force sleep 1s to wait urpc start
         thread::sleep(Duration::from_secs(1));
