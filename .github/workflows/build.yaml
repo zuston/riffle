@@ -39,6 +39,7 @@ jobs:
         uses: arduino/setup-protoc@v2
         with:
           version: "23.2"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/checkout@v3
       - name: Code style check
         working-directory: ./
@@ -64,6 +65,7 @@ jobs:
         uses: arduino/setup-protoc@v2
         with:
           version: "23.2"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/checkout@v3
       - uses: Swatinem/rust-cache@v2
       - name: Build
