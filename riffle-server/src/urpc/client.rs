@@ -139,7 +139,6 @@ mod tests {
     use std::thread;
     use std::time::Duration;
     use tokio::sync::broadcast::Sender;
-    use tokio::time;
 
     fn setup_urpc_server(port: u16) -> Result<Sender<()>> {
         let mut config = Config::create_simple_config();
@@ -171,7 +170,7 @@ mod tests {
         let _ = setup_urpc_server(port)?;
 
         // force sleep 1s to wait urpc start
-        time::sleep(Duration::from_secs(1));
+        thread::sleep(Duration::from_secs(1));
 
         let rt = tokio::runtime::Runtime::new()?;
         let f = rt.block_on(async move {
