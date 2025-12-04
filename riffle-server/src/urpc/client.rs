@@ -169,7 +169,10 @@ mod tests {
         let port = util::find_available_port().unwrap();
         let shutdown_hook = setup_urpc_server(port)?;
 
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        // force sleep 1s to wait urpc start
+        thread::sleep(Duration::from_secs(1));
+
+        let rt = tokio::runtime::Runtime::new()?;
         let f = rt.block_on(async move {
             let mut client = UrpcClient::connect("0.0.0.0", port as usize).await.unwrap();
             let command = GetLocalDataRequestCommand {
