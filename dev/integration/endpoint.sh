@@ -101,6 +101,7 @@ case "$ROLE" in
     mkdir -p /tmp/riffle-server-1/data
     cd /tmp/riffle-server-1
     cp ${RIFFLE_HOME}/conf/riffle.conf.1 config.toml
+    mkdir /tmp/riffle-server-1/log
     
     nohup env RUST_LOG=info /riffle/target/release/riffle-server --config config.toml > /tmp/riffle-server-1/output.log 2>&1 &
     echo_info "Riffle Server is running in the background. Initial output:"
@@ -116,6 +117,7 @@ case "$ROLE" in
     mkdir -p /tmp/riffle-server-2/data
     cd /tmp/riffle-server-2
     cp ${RIFFLE_HOME}/conf/riffle.conf.2 config.toml
+    mkdir /tmp/riffle-server-2/log
     
     nohup env RUST_LOG=info /riffle/target/release/riffle-server --config config.toml > /tmp/riffle-server-2/output.log 2>&1 &
     echo_info "Riffle Server is running in the background. Initial output:"
