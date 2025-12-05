@@ -101,7 +101,7 @@ case "$ROLE" in
     mkdir -p /tmp/riffle-server-1/data
     cd /tmp/riffle-server-1
     cp ${RIFFLE_HOME}/conf/riffle.conf.1 config.toml
-    mkdir /tmp/riffle-server-1/log
+    mkdir -p /tmp/riffle-server-1/log
 
     exec nohup /riffle/target/release/riffle-server --config config.toml &
     sleep 5
@@ -116,7 +116,7 @@ case "$ROLE" in
     mkdir -p /tmp/riffle-server-2/data
     cd /tmp/riffle-server-2
     cp ${RIFFLE_HOME}/conf/riffle.conf.2 config.toml
-    mkdir /tmp/riffle-server-2/log
+    mkdir -p /tmp/riffle-server-2/log
 
     exec nohup /riffle/target/release/riffle-server --config config.toml &
     sleep 5
