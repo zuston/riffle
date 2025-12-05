@@ -35,7 +35,7 @@ prepare_uniffle_client() {
     UNIFFLE_REPO=/tmp/uniffle-repo
     mkdir -p ${UNIFFLE_REPO}
     cd ${UNIFFLE_REPO}
-    git clone git@github.com:apache/uniffle.git
+    git clone https://github.com/apache/uniffle.git
     cd uniffle
     ./mvnw clean package install -Pspark3.5 -pl client-spark/spark3-shaded -DskipTests -am
     cp client-spark/spark3-shaded/target/rss-client-spark3-shaded-*-SNAPSHOT.jar ${SPARK_HOME}/jars/
