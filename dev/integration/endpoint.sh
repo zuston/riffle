@@ -102,8 +102,10 @@ case "$ROLE" in
     cd /tmp/riffle-server-1
     cp ${RIFFLE_HOME}/conf/riffle.conf.1 config.toml
     
-    exec env RUST_LOG=info /riffle/target/release/riffle-server --config config.toml &
-    echo_info "Riffle Server is running in the background. Tailing logs..."
+    nohup env RUST_LOG=info /riffle/target/release/riffle-server --config config.toml > /tmp/riffle-server-1/output.log 2>&1 &
+    echo_info "Riffle Server is running in the background. Initial output:"
+    tail -n 100 /tmp/riffle-server-1/output.log
+    echo_info "Tailing logs:"
     tail -f /tmp/riffle-server-1/log/*
     ;;
 
@@ -115,8 +117,10 @@ case "$ROLE" in
     cd /tmp/riffle-server-2
     cp ${RIFFLE_HOME}/conf/riffle.conf.2 config.toml
     
-    exec env RUST_LOG=info /riffle/target/release/riffle-server --config config.toml &
-    echo_info "Riffle Server is running in the background. Tailing logs..."
+    nohup env RUST_LOG=info /riffle/target/release/riffle-server --config config.toml > /tmp/riffle-server-2/output.log 2>&1 &
+    echo_info "Riffle Server is running in the background. Initial output:"
+    tail -n 100 /tmp/riffle-server-2/output.log
+    echo_info "Tailing logs:"
     tail -f /tmp/riffle-server-2/log/*
     ;;
 
