@@ -88,11 +88,6 @@ case "$ROLE" in
     cd /tmp/riffle-server-1
     cp ${RIFFLE_HOME}/conf/riffle.conf.1 config.toml
     
-    # Update coordinator address if needed
-    if [ -n "$COORDINATOR_HOST" ] && [ "$COORDINATOR_HOST" != "127.0.0.1" ] && [ "$COORDINATOR_HOST" != "localhost" ]; then
-        sed -i "s/localhost:21000/${COORDINATOR_HOST}:21000/g" config.toml
-    fi
-    
     echo_info "Starting with config:"
     cat config.toml
     exec env RUST_LOG=info /riffle/target/release/riffle-server --config config.toml
@@ -111,11 +106,6 @@ case "$ROLE" in
     cd /tmp/riffle-server-2
     cp ${RIFFLE_HOME}/conf/riffle.conf.2 config.toml
     
-    # Update coordinator address if needed
-    if [ -n "$COORDINATOR_HOST" ] && [ "$COORDINATOR_HOST" != "127.0.0.1" ] && [ "$COORDINATOR_HOST" != "localhost" ]; then
-        sed -i "s/localhost:21000/${COORDINATOR_HOST}:21000/g" config.toml
-    fi
-    
     echo_info "Starting with config:"
     cat config.toml
     exec env RUST_LOG=info /riffle/target/release/riffle-server --config config.toml
@@ -124,9 +114,9 @@ case "$ROLE" in
   spark-client)
     echo_info "==========================================="
     echo_info "Spark Client is ready. Services available:"
-    echo_info "  - Uniffle Coordinator: http://${COORDINATOR_HOST:-coordinator}:19995"
-    echo_info "  - Riffle Server 1: http://${RIFFLE_SERVER_1_HOST}:19998"
-    echo_info "  - Riffle Server 2: http://${RIFFLE_SERVER_2_HOST}:19999"
+    echo_info "  - Uniffle Coordinator: http://uniffle-coordinator:19995"
+    echo_info "  - Riffle Server 1: http://riffle-server-1:19998"
+    echo_info "  - Riffle Server 2: http://riffle-server-2:19999"
     echo_info "  - Spark Home: ${SPARK_HOME}"
     echo_info "==========================================="
     echo_info "To run Spark Shell:"
@@ -146,20 +136,6 @@ case "$ROLE" in
     COORDINATOR_HOST=${COORDINATOR_HOST:-coordinator}
     RIFFLE_SERVER_1_HOST=${RIFFLE_SERVER_1_HOST:-riffle-server-1}
     RIFFLE_SERVER_2_HOST=${RIFFLE_SERVER_2_HOST:-riffle-server-2}
-    
-    for i in {1..30}; do
-        if curl -f http://${RIFFLE_SERVER_1_HOST}:19998/metrics >/dev/null 2>&1 && \
-           curl -f http://${RIFFLE_SERVER_2_HOST}:19999/metrics >/dev/null 2>&1; then
-            echo_info "Both Riffle Servers are ready!"
-            break
-        fi
-        if [ $i -eq 30 ]; then
-            echo_error "Riffle Servers not ready after 60 seconds"
-            exit 1
-        fi
-        echo "Waiting for Riffle Servers... ($i/30)"
-        sleep 2
-    done
 
     # Run Spark SQL Integration Test
     echo_info "Running basic test..."
