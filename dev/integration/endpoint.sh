@@ -41,6 +41,14 @@ prepare_uniffle_client() {
     cp client-spark/spark3-shaded/target/rss-client-spark3-shaded-*-SNAPSHOT.jar ${SPARK_HOME}/jars/
 }
 
+build_riffle_server() {
+    if [ ! -f /riffle/target/release/riffle-server ]; then
+        echo_info "Building Riffle Server..."
+        cd /riffle
+        cargo build --release --bin riffle-server
+    fi
+}
+
 # ============================================================================
 # Role-based service startup
 # ============================================================================
@@ -87,12 +95,7 @@ case "$ROLE" in
     ;;
 
   riffle-server-1)
-    # Build Riffle Server if not exists
-    if [ ! -f /riffle/target/release/riffle-server ]; then
-        echo_info "Building Riffle Server..."
-        cd /riffle
-        cargo build --release
-    fi
+    build_riffle_server
 
     echo_info "Starting Riffle Server 1..."
     mkdir -p /tmp/riffle-server-1/data
@@ -105,12 +108,7 @@ case "$ROLE" in
     ;;
 
   riffle-server-2)
-    # Build Riffle Server if not exists
-    if [ ! -f /riffle/target/release/riffle-server ]; then
-        echo_info "Building Riffle Server..."
-        cd /riffle
-        cargo build --release
-    fi
+    build_riffle_server
 
     echo_info "Starting Riffle Server 2..."
     mkdir -p /tmp/riffle-server-2/data
