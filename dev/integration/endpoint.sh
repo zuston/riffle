@@ -47,25 +47,11 @@ case "$ROLE" in
     
     echo_info "Starting coordinator..."
     exec ./bin/start-coordinator.sh
+    
+    exec tail -f /dev/null
     ;;
 
   riffle-server-1)
-    # ========== Riffle Server 1 ==========
-    echo_info "Waiting for coordinator to be ready..."
-    COORDINATOR_HOST=${COORDINATOR_HOST:-coordinator}
-    for i in {1..60}; do
-        if nc -z $COORDINATOR_HOST 21000 2>/dev/null; then
-            echo_info "Coordinator is ready!"
-            break
-        fi
-        if [ $i -eq 60 ]; then
-            echo_error "Coordinator not available after 120 seconds"
-            exit 1
-        fi
-        echo "Waiting for coordinator... ($i/60)"
-        sleep 2
-    done
-
     # Build Riffle Server if not exists
     if [ ! -f /riffle/target/release/riffle-server ]; then
         echo_info "Building Riffle Server..."
@@ -89,22 +75,6 @@ case "$ROLE" in
     ;;
 
   riffle-server-2)
-    # ========== Riffle Server 2 ==========
-    echo_info "Waiting for coordinator to be ready..."
-    COORDINATOR_HOST=${COORDINATOR_HOST:-coordinator}
-    for i in {1..60}; do
-        if nc -z $COORDINATOR_HOST 21000 2>/dev/null; then
-            echo_info "Coordinator is ready!"
-            break
-        fi
-        if [ $i -eq 60 ]; then
-            echo_error "Coordinator not available after 120 seconds"
-            exit 1
-        fi
-        echo "Waiting for coordinator... ($i/60)"
-        sleep 2
-    done
-
     # Build Riffle Server if not exists
     if [ ! -f /riffle/target/release/riffle-server ]; then
         echo_info "Building Riffle Server..."
@@ -128,25 +98,6 @@ case "$ROLE" in
     ;;
 
   spark-client)
-    # ========== Spark Client (Interactive) ==========
-    echo_info "Waiting for Riffle Servers to be ready..."
-    RIFFLE_SERVER_1_HOST=${RIFFLE_SERVER_1_HOST:-riffle-server-1}
-    RIFFLE_SERVER_2_HOST=${RIFFLE_SERVER_2_HOST:-riffle-server-2}
-    
-    for i in {1..30}; do
-        if curl -f http://${RIFFLE_SERVER_1_HOST}:19998/metrics >/dev/null 2>&1 && \
-           curl -f http://${RIFFLE_SERVER_2_HOST}:19999/metrics >/dev/null 2>&1; then
-            echo_info "Both Riffle Servers are ready!"
-            break
-        fi
-        if [ $i -eq 30 ]; then
-            echo_error "Riffle Servers not ready after 60 seconds"
-            exit 1
-        fi
-        echo "Waiting for Riffle Servers... ($i/30)"
-        sleep 2
-    done
-
     echo_info "==========================================="
     echo_info "Spark Client is ready. Services available:"
     echo_info "  - Uniffle Coordinator: http://${COORDINATOR_HOST:-coordinator}:19995"
