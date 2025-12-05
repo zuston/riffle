@@ -30,6 +30,17 @@ echo_role() {
     echo -e "${BLUE}[ROLE: $ROLE]${NC} $1"
 }
 
+# compile the uniffle client jar and copy to SPARK_HOME/jars
+prepare_uniffle_client() {
+    UNIFFLE_REPO=/tmp/uniffle-repo
+    mkdir -p ${UNIFFLE_REPO}
+    cd ${UNIFFLE_REPO}
+    git clone git@github.com:apache/uniffle.git
+    cd uniffle
+    ./mvnw clean package install -Pspark3.5 -pl client-spark/spark3-shaded -DskipTests -am
+    cp client-spark/spark3-shaded/target/rss-client-spark3-shaded-*-SNAPSHOT.jar ${SPARK_HOME}/jars/
+}
+
 # ============================================================================
 # Role-based service startup
 # ============================================================================
@@ -125,7 +136,9 @@ case "$ROLE" in
     echo_info "To run Spark SQL:"
     echo_info "    ${SPARK_HOME}/bin/spark-sql --master local[*]"
     echo_info "==========================================="
-    
+
+    prepare_uniffle_client
+
     # Keep the container running
     exec tail -f /dev/null
     ;;
@@ -136,6 +149,8 @@ case "$ROLE" in
     COORDINATOR_HOST=${COORDINATOR_HOST:-coordinator}
     RIFFLE_SERVER_1_HOST=${RIFFLE_SERVER_1_HOST:-riffle-server-1}
     RIFFLE_SERVER_2_HOST=${RIFFLE_SERVER_2_HOST:-riffle-server-2}
+
+    prepare_uniffle_client
 
     # Run Spark SQL Integration Test
     echo_info "Running basic test..."
@@ -171,7 +186,7 @@ case "$ROLE" in
         echo_error "Execution of merged SQL file failed!"
         exit 1
     fi
-    
+
     echo_info "==========================================="
     echo_info "All tests passed successfully!"
     echo_info "==========================================="
