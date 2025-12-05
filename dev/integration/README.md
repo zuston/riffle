@@ -23,7 +23,27 @@ cd dev/integration
 docker-compose up -d
 ```
 
-This starts coordinator, two riffle-servers, and spark-client.
+This starts all services including:
+- Prometheus (monitoring)
+- Grafana (visualization)
+- Pushgateway (metrics gateway)
+- Uniffle Coordinator
+- Two Riffle Servers
+- Spark Client
+
+### Start only monitoring services
+
+```bash
+# Start Prometheus, Grafana, and Pushgateway only
+docker-compose up -d prometheus grafana pushgateway
+```
+
+### Start only Prometheus
+
+```bash
+# Start Prometheus only
+docker-compose up -d prometheus
+```
 
 ### Check service status
 
@@ -159,21 +179,27 @@ curl -X DELETE http://localhost:9091/metrics/job/my_job
 
 ### Grafana
 
-Grafana is pre-configured with Prometheus as the default data source.
+Grafana is pre-configured with Prometheus as the default data source and includes a pre-loaded Riffle dashboard.
 
 1. Access Grafana at http://localhost:3000
 2. Login with default credentials:
    - Username: `admin`
    - Password: `admin`
-3. Navigate to **Explore** to query metrics or create dashboards
+3. The **Riffle Dashboard** is automatically loaded and available in the **Dashboards** menu
 4. Prometheus data source is automatically configured at `http://prometheus:9090`
 
-To create dashboards:
-- Go to **Dashboards** → **New Dashboard**
-- Add panels and use PromQL queries to visualize metrics
+**Pre-loaded Dashboard:**
+- **Riffle Dashboard**: A comprehensive dashboard showing Riffle cluster metrics, server statistics, and performance indicators
+
+**To explore metrics manually:**
+- Navigate to **Explore** to query metrics using PromQL
 - Example queries:
   - `up{job="riffle-server-1"}` - Check if server is up
   - `rate(http_requests_total[5m])` - Request rate
+
+**To create custom dashboards:**
+- Go to **Dashboards** → **New Dashboard**
+- Add panels and use PromQL queries to visualize metrics
 
 ## Partial Startup
 
