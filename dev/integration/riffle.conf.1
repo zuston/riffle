@@ -1,8 +1,12 @@
 store_type = "MEMORY_LOCALFILE"
 grpc_port = 21100
+urpc_port = 22200
 http_port = 19998
 coordinator_quorum = ["uniffle-coordinator:21000"]
-tags = ["riffle2", "datanode", "GRPC", "ss_v5"]
+tags = ["riffle2", "datanode", "GRPC", "ss_v5", "GRPC_NETTY"]
+
+[urpc_config]
+get_index_rpc_version = 'V2'
 
 [memory_store]
 capacity = "2G"
