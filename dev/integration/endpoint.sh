@@ -101,7 +101,7 @@ case "$ROLE" in
     
     exec env RUST_LOG=info /riffle/target/release/riffle-server --config config.toml &
     echo_info "Riffle Server is running in the background. Tailing logs..."
-    tail -f /tmp/riffle-server-1/riffle.log
+    tail -f /tmp/riffle-server-1/log/*
     ;;
 
   riffle-server-2)
@@ -119,7 +119,7 @@ case "$ROLE" in
     
     exec env RUST_LOG=info /riffle/target/release/riffle-server --config config.toml &
     echo_info "Riffle Server is running in the background. Tailing logs..."
-    tail -f /tmp/riffle-server-2/riffle.log
+    tail -f /tmp/riffle-server-2/log/*
     ;;
 
   spark-client)
