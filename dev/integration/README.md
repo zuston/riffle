@@ -78,11 +78,17 @@ docker-compose down
 - **Riffle Server 1 Metrics**: http://localhost:19998/metrics
 - **Riffle Server 2 Metrics**: http://localhost:19999/metrics
 - **Spark UI**: http://localhost:4040 (when Spark jobs are running)
+- **Prometheus**: http://localhost:9090
+- **Prometheus Pushgateway**: http://localhost:9091
+- **Grafana**: http://localhost:3000 (default credentials: admin/admin)
 
 ## Port Mapping
 
 | Service | Port | Description |
 |---------|------|-------------|
+| prometheus | 9090 | Prometheus UI |
+| pushgateway | 9091 | Prometheus Pushgateway UI |
+| grafana | 3000 | Grafana UI |
 | uniffle-coordinator | 19995 | Web UI |
 | uniffle-coordinator | 21000 | RPC |
 | riffle-server-1 | 19998 | HTTP/Metrics |
@@ -95,11 +101,79 @@ docker-compose down
 
 Services start in the following order to ensure correct dependencies:
 
-1. **uniffle-coordinator** starts first
-2. **riffle-server-1** and **riffle-server-2** wait for coordinator health check
-3. **spark-client** waits for both riffle-servers to be healthy
+1. **prometheus** starts first (monitoring service)
+2. **grafana** starts after prometheus (depends on prometheus)
+3. **uniffle-coordinator** starts in parallel with prometheus
+4. **riffle-server-1** and **riffle-server-2** wait for coordinator health check
+5. **spark-client** waits for both riffle-servers to be healthy
 
 Each service has `healthcheck` configured to ensure readiness.
+
+## Monitoring
+
+### Prometheus
+
+Prometheus automatically scrapes metrics from:
+- Uniffle Coordinator (port 19995)
+- Riffle Server 1 (port 19998)
+- Riffle Server 2 (port 19999)
+- Prometheus Pushgateway (port 9091)
+
+Access Prometheus UI at http://localhost:9090 to query metrics.
+
+### Prometheus Pushgateway
+
+Pushgateway allows short-lived jobs or batch jobs to push metrics to Prometheus.
+
+**Access Pushgateway UI**: http://localhost:9091
+
+**Push metrics to Pushgateway**:
+
+```bash
+# Example: Push a single metric
+echo "some_metric 3.14" | curl --data-binary @- http://localhost:9091/metrics/job/my_job/instance/my_instance
+
+# Example: Push metrics from a file
+cat metrics.txt | curl --data-binary @- http://localhost:9091/metrics/job/my_job/instance/my_instance
+
+# Example: Using curl with POST
+curl -X POST http://localhost:9091/metrics/job/my_job/instance/my_instance \
+  -d 'some_metric{label="value"} 42'
+```
+
+**Delete metrics**:
+
+```bash
+# Delete all metrics for a specific job/instance
+curl -X DELETE http://localhost:9091/metrics/job/my_job/instance/my_instance
+
+# Delete all metrics for a job
+curl -X DELETE http://localhost:9091/metrics/job/my_job
+```
+
+**Use cases**:
+- Batch jobs that run and exit
+- Short-lived services that don't expose HTTP endpoints
+- One-off scripts that need to report metrics
+- Spark jobs that need to push custom metrics
+
+### Grafana
+
+Grafana is pre-configured with Prometheus as the default data source.
+
+1. Access Grafana at http://localhost:3000
+2. Login with default credentials:
+   - Username: `admin`
+   - Password: `admin`
+3. Navigate to **Explore** to query metrics or create dashboards
+4. Prometheus data source is automatically configured at `http://prometheus:9090`
+
+To create dashboards:
+- Go to **Dashboards** → **New Dashboard**
+- Add panels and use PromQL queries to visualize metrics
+- Example queries:
+  - `up{job="riffle-server-1"}` - Check if server is up
+  - `rate(http_requests_total[5m])` - Request rate
 
 ## Partial Startup
 
