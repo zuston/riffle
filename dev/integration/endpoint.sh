@@ -88,9 +88,9 @@ case "$ROLE" in
     cd /tmp/riffle-server-1
     cp ${RIFFLE_HOME}/conf/riffle.conf.1 config.toml
     
-    echo_info "Starting with config:"
-    cat config.toml
-    exec env RUST_LOG=info /riffle/target/release/riffle-server --config config.toml
+    exec env RUST_LOG=info /riffle/target/release/riffle-server --config config.toml &
+    echo_info "Riffle Server is running in the background. Tailing logs..."
+    tail -f /tmp/riffle-server-1/riffle.log
     ;;
 
   riffle-server-2)
@@ -106,9 +106,9 @@ case "$ROLE" in
     cd /tmp/riffle-server-2
     cp ${RIFFLE_HOME}/conf/riffle.conf.2 config.toml
     
-    echo_info "Starting with config:"
-    cat config.toml
-    exec env RUST_LOG=info /riffle/target/release/riffle-server --config config.toml
+    exec env RUST_LOG=info /riffle/target/release/riffle-server --config config.toml &
+    echo_info "Riffle Server is running in the background. Tailing logs..."
+    tail -f /tmp/riffle-server-2/riffle.log
     ;;
 
   spark-client)
