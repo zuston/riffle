@@ -70,7 +70,7 @@ services:
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./../../grafana/riffle.json:/etc/grafana/provisioning/dashboards/riffle.json:ro
+      - ./../../grafana/riffle.json:/etc/grafana/dashboards/riffle.json:ro
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
