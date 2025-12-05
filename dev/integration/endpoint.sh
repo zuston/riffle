@@ -102,12 +102,11 @@ case "$ROLE" in
     cd /tmp/riffle-server-1
     cp ${RIFFLE_HOME}/conf/riffle.conf.1 config.toml
     mkdir /tmp/riffle-server-1/log
-    
-    nohup env RUST_LOG=info /riffle/target/release/riffle-server --config config.toml > /tmp/riffle-server-1/output.log 2>&1 &
-    echo_info "Riffle Server is running in the background. Initial output:"
-    tail -n 100 /tmp/riffle-server-1/output.log
+
+    exec nohup /riffle/target/release/riffle-server --config config.toml &
+    sleep 5
     echo_info "Tailing logs:"
-    tail -f /tmp/riffle-server-1/log/*
+    exec tail -f /tmp/riffle-server-1/log/riffle-server.0
     ;;
 
   riffle-server-2)
@@ -118,12 +117,11 @@ case "$ROLE" in
     cd /tmp/riffle-server-2
     cp ${RIFFLE_HOME}/conf/riffle.conf.2 config.toml
     mkdir /tmp/riffle-server-2/log
-    
-    nohup env RUST_LOG=info /riffle/target/release/riffle-server --config config.toml > /tmp/riffle-server-2/output.log 2>&1 &
-    echo_info "Riffle Server is running in the background. Initial output:"
-    tail -n 100 /tmp/riffle-server-2/output.log
+
+    exec nohup /riffle/target/release/riffle-server --config config.toml &
+    sleep 5
     echo_info "Tailing logs:"
-    tail -f /tmp/riffle-server-2/log/*
+    exec tail -f /tmp/riffle-server-2/log/riffle-server.0
     ;;
 
   spark-client)
