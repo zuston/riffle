@@ -46,9 +46,33 @@ case "$ROLE" in
     cd ${UNIFFLE_HOME}
     
     echo_info "Starting coordinator..."
-    exec ./bin/start-coordinator.sh
+    /bin/bash ./bin/start-coordinator.sh || {
+        echo_error "Failed to start coordinator"
+        exit 1
+    }
     
-    exec tail -f /dev/null
+    # Wait for coordinator to initialize and check health
+    echo_info "Waiting for coordinator to be ready..."
+    for i in {1..30}; do
+        if curl -f http://localhost:19995/api/app/total >/dev/null 2>&1; then
+            echo_info "Coordinator is ready!"
+            break
+        fi
+        if [ $i -eq 30 ]; then
+            echo_error "Coordinator failed to start after 60 seconds"
+            exit 1
+        fi
+        sleep 2
+    done
+    
+    # Keep container running by tailing coordinator logs
+    if [ -f ${UNIFFLE_HOME}/logs/coordinator.log ]; then
+        echo_info "Tailing coordinator logs..."
+        exec tail -f ${UNIFFLE_HOME}/logs/coordinator.log
+    else
+        echo_warn "Coordinator log file not found, keeping container alive..."
+        exec tail -f /dev/null
+    fi
     ;;
 
   riffle-server-1)
@@ -65,8 +89,8 @@ case "$ROLE" in
     cp ${RIFFLE_HOME}/conf/riffle.conf.1 config.toml
     
     # Update coordinator address if needed
-    if [ "$COORDINATOR_HOST" != "127.0.0.1" ] && [ "$COORDINATOR_HOST" != "localhost" ]; then
-        sed -i "s/127.0.0.1:21000/${COORDINATOR_HOST}:21000/g" config.toml
+    if [ -n "$COORDINATOR_HOST" ] && [ "$COORDINATOR_HOST" != "127.0.0.1" ] && [ "$COORDINATOR_HOST" != "localhost" ]; then
+        sed -i "s/localhost:21000/${COORDINATOR_HOST}:21000/g" config.toml
     fi
     
     echo_info "Starting with config:"
@@ -88,8 +112,8 @@ case "$ROLE" in
     cp ${RIFFLE_HOME}/conf/riffle.conf.2 config.toml
     
     # Update coordinator address if needed
-    if [ "$COORDINATOR_HOST" != "127.0.0.1" ] && [ "$COORDINATOR_HOST" != "localhost" ]; then
-        sed -i "s/127.0.0.1:21000/${COORDINATOR_HOST}:21000/g" config.toml
+    if [ -n "$COORDINATOR_HOST" ] && [ "$COORDINATOR_HOST" != "127.0.0.1" ] && [ "$COORDINATOR_HOST" != "localhost" ]; then
+        sed -i "s/localhost:21000/${COORDINATOR_HOST}:21000/g" config.toml
     fi
     
     echo_info "Starting with config:"

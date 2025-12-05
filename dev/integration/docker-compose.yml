@@ -47,6 +47,8 @@ services:
     depends_on:
       uniffle-coordinator:
         condition: service_healthy
+    environment:
+      - COORDINATOR_HOST=coordinator
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:19998/metrics"]
       interval: 10s
@@ -70,6 +72,8 @@ services:
     depends_on:
       uniffle-coordinator:
         condition: service_healthy
+    environment:
+      - COORDINATOR_HOST=coordinator
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:19999/metrics"]
       interval: 10s
