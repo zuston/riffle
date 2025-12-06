@@ -94,9 +94,12 @@ case "$ROLE" in
     fi
     ;;
 
-  riffle-server-1)
+  riffle-compile)
     build_riffle_server
+    exec tail -f /dev/null
+    ;;
 
+  riffle-server-1)
     echo_info "Starting Riffle Server 1..."
     mkdir -p /tmp/riffle-server-1/data
     cd /tmp/riffle-server-1
@@ -110,8 +113,6 @@ case "$ROLE" in
     ;;
 
   riffle-server-2)
-    build_riffle_server
-
     echo_info "Starting Riffle Server 2..."
     mkdir -p /tmp/riffle-server-2/data
     cd /tmp/riffle-server-2

@@ -114,8 +114,7 @@ services:
     networks:
       - riffle-network
     volumes: *common-volumes
-    command: |
-      bash -c "cd /riffle && cargo build --bin riffle-server"
+    command: riffle-compile
     healthcheck:
       test: ["CMD", "bash", "-c", "test -f /riffle/target/debug/riffle-server"]
       interval: 10s
