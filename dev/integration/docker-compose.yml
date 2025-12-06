@@ -1,37 +1,214 @@
 version: "3"
 
+networks:
+  riffle-network:
+    driver: bridge
+
+x-common-volumes: &common-volumes
+  - ~/.cargo/git:/root/.cargo/git:rw
+  - ~/.cargo/registry:/root/.cargo/registry:rw
+  - ./../../:/riffle:rw
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
 services:
-  # Service for running full tests (default)
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    hostname: prometheus
+    networks:
+      - riffle-network
+    ports:
+      - "9090:9090"  # Prometheus UI
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Prometheus Pushgateway
+  pushgateway:
+    image: prom/pushgateway:latest
+    container_name: pushgateway
+    hostname: pushgateway
+    networks:
+      - riffle-network
+    ports:
+      - "9091:9091"  # Pushgateway UI
+    command:
+      - '--web.listen-address=0.0.0.0:9091'
+      - '--web.telemetry-path=/metrics'
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9091/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    hostname: grafana
+    networks:
+      - riffle-network
+    ports:
+      - "3000:3000"  # Grafana UI
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./../../grafana/riffle.json:/etc/grafana/dashboards/riffle.json:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Uniffle Coordinator 
+  uniffle-coordinator:
+    build:
+      context: .
+    container_name: uniffle-coordinator
+    hostname: uniffle-coordinator
+    networks:
+      - riffle-network
+    ports:
+      - "19995:19995"  # Web UI
+      - "21000:21000"  # RPC
+    volumes: *common-volumes
+    command: coordinator
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      pushgateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:19995/api/app/total"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Code Compilation Service
+  riffle-compile:
+    build:
+      context: .
+    container_name: riffle-compile
+    hostname: riffle-compile
+    networks:
+      - riffle-network
+    volumes: *common-volumes
+    command: riffle-compile
+    healthcheck:
+      test: ["CMD", "bash", "-c", "test -f /riffle/target/debug/riffle-server"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 1200s
+
+  # Riffle Server 1 
+  riffle-server-1:
+    build:
+      context: .
+    container_name: riffle-server-1
+    hostname: riffle-server-1
+    networks:
+      - riffle-network
+    ports:
+      - "19998:19998"  # HTTP port
+      - "21100:21100"  # gRPC port
+    volumes: *common-volumes
+    command: riffle-server-1
+    depends_on:
+      riffle-compile:
+        condition: service_healthy
+      uniffle-coordinator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:19998/metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Riffle Server 2 
+  riffle-server-2:
+    build:
+      context: .
+    container_name: riffle-server-2
+    hostname: riffle-server-2
+    networks:
+      - riffle-network
+    ports:
+      - "19999:19999"  # HTTP port
+      - "21101:21101"  # gRPC port
+    volumes: *common-volumes
+    command: riffle-server-2
+    depends_on:
+      riffle-compile:
+        condition: service_healthy
+      uniffle-coordinator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:19999/metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Spark Client 
+  spark-client:
+    build:
+      context: .
+    container_name: spark-client
+    hostname: spark-client
+    stdin_open: true
+    tty: true
+    networks:
+      - riffle-network
+    ports:
+      - "4040:4040"  # Spark UI
+    volumes: *common-volumes
+    command: spark-client
+    depends_on:
+      riffle-server-1:
+        condition: service_healthy
+      riffle-server-2:
+        condition: service_healthy
+
+  # run all tests
   riffle-test:
     build:
       context: .
     container_name: riffle-test
-    volumes:
-      - ~/.cargo/git:/root/.cargo/git:rw
-      - ~/.cargo/registry:/root/.cargo/registry:rw
-      - ./../../:/riffle:rw
-      - ./../../target-docker:/riffle/target:rw
-    # endpoint.sh is set as ENTRYPOINT in Dockerfile, so no command needed
-    # This will run the tests by default
-
-  # Service for development - skip tests and enter bash
-  riffle-dev:
-    build:
-      context: .
-    container_name: riffle-dev
-    stdin_open: true  # equivalent to -i
-    tty: true         # equivalent to -t
-    volumes:
-      - ~/.cargo/git:/root/.cargo/git:rw
-      - ~/.cargo/registry:/root/.cargo/registry:rw
-      - ./../../:/riffle:rw
-      - ./../../target-docker:/riffle/target:rw
-    command: skip-tests  # Pass argument to skip tests and enter bash
-    ports:
-      - "19995:19995"  # Uniffle Coordinator Web UI
-      - "21000:21000"  # Uniffle Coordinator RPC
-      - "19998:19998"  # Riffle Server 1 (http port)
-      - "21100:21100"  # Riffle Server 1 (grpc port)
-      - "19999:19999"  # Riffle Server 2 (http port)
-      - "21101:21101"  # Riffle Server 2 (grpc port)
-      - "4040:4040"    # Spark UI (if needed)
+    networks:
+      - riffle-network
+    volumes: *common-volumes
+    command: run-tests
+    depends_on:
+      riffle-server-1:
+        condition: service_healthy
+      riffle-server-2:
+        condition: service_healthy
+    profiles:
+      - test

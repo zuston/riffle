@@ -94,39 +94,12 @@ The fastest way to get started with Riffle is using Docker Compose. This will se
 
 ```bash
 cd dev/integration
-docker-compose up -d riffle-dev
-
-# In another terminal, enter the container
-docker-compose exec riffle-dev /bin/bash
-
-# run Spark SQL with Riffle(Uniffle is enabled by default) and then you can open the spark web UI. 
-./bin/spark-sql --master local[1] -e "SELECT 1"
-
-# shutdown
-docker-compose down
-
-# Remove all volumes as well
-docker-compose down -v
-
-# or rebuild while starting
-docker-compose up --build riffle-dev
+docker-compose up -d
+docker-compose ps
 ```
 
-If you want to connect this riffle cluster for your external spark jobs, you could specify the following spark configs.
-```
-spark.shuffle.manager org.apache.spark.shuffle.RssShuffleManager
-spark.rss.coordinator.quorum localhost:21000
-spark.rss.storage.type MEMORY_LOCALFILE
-spark.serializer org.apache.spark.serializer.KryoSerializer
-spark.rss.client.assignment.shuffle.nodes.max 1
-spark.rss.dynamicClientConf.enabled false
-spark.rss.client.type GRPC
-```
+More detailed could be found dev/integration/README.md
 
-**Available Endpoints:**
-- Uniffle Coordinator Web UI: http://localhost:19995
-- Riffle Server 1 Metrics: http://localhost:19998/metrics
-- Riffle Server 2 Metrics: http://localhost:19999/metrics
 
 ## Build
 
