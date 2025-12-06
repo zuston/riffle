@@ -25,5 +25,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: ssh to debug 
+      - uses: valeriangalliat/action-sshd-cloudflared@v4
+        env:
+          - IX_USERNAME: ${{ secrets.IX_USERNAME }}
+          - IX_PASSWORD: ${{ secrets.IX_PASSWORD }}
+
+
       - name: Run Spark SQL Test
-        run: docker compose -f dev/integration/docker-compose.yml up -d riffle-test 
+        run: tail -f /dev/null
