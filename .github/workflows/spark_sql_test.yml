@@ -29,4 +29,4 @@ jobs:
         uses: valeriangalliat/action-sshd-cloudflared@v4
 
       - name: Run Spark SQL Test
-        run: tail -f /dev/null
+        run: docker compose -f dev/integration/docker-compose.yml up -d riffle-test

@@ -105,6 +105,24 @@ services:
       retries: 5
       start_period: 30s
 
+  # Code Compilation Service
+  riffle-compile:
+    build:
+      context: .
+    container_name: riffle-compile
+    hostname: riffle-compile
+    networks:
+      - riffle-network
+    volumes: *common-volumes
+    command: |
+      bash -c "cd /riffle && cargo build --bin riffle-server"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "test -f /riffle/target/debug/riffle-server"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 150s
+
   # Riffle Server 1 
   riffle-server-1:
     build:
@@ -119,6 +137,8 @@ services:
     volumes: *common-volumes
     command: riffle-server-1
     depends_on:
+      riffle-compile:
+        condition: service_healthy
       uniffle-coordinator:
         condition: service_healthy
     healthcheck:
@@ -142,6 +162,8 @@ services:
     volumes: *common-volumes
     command: riffle-server-2
     depends_on:
+      riffle-compile:
+        condition: service_healthy
       uniffle-coordinator:
         condition: service_healthy
     healthcheck:
