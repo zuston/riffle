@@ -97,6 +97,11 @@ services:
       - "21000:21000"  # RPC
     volumes: *common-volumes
     command: coordinator
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      pushgateway:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:19995/api/app/total"]
       interval: 10s
