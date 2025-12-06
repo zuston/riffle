@@ -38,6 +38,8 @@ prepare_uniffle_client() {
     git clone https://github.com/apache/uniffle.git
     cd uniffle
     ./mvnw clean package install -Pspark3.5 -pl client-spark/spark3-shaded -DskipTests -am
+    # remove the latest release uniffle client
+    rm ${SPARK_HOME}/jars/rss-client-spark3-shaded-*.jar
     cp client-spark/spark3-shaded/target/rss-client-spark3-shaded-*-SNAPSHOT.jar ${SPARK_HOME}/jars/
 }
 
