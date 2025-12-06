@@ -25,8 +25,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # - name: ssh to debug 
-      #   uses: valeriangalliat/action-sshd-cloudflared@v4
+      - name: ssh to debug 
+        uses: valeriangalliat/action-sshd-cloudflared@v4
 
       - name: Run Spark SQL Test
         run: docker compose -f dev/integration/docker-compose.yml up -d riffle-test
