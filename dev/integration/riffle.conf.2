@@ -1,8 +1,12 @@
 store_type = "MEMORY_LOCALFILE"
 grpc_port = 21101
+urpc_port = 22201
 http_port = 19999
-coordinator_quorum = ["localhost:21000"]
-tags = ["riffle2", "datanode", "GRPC", "ss_v5"]
+coordinator_quorum = ["uniffle-coordinator:21000"]
+tags = ["riffle2", "datanode", "GRPC", "ss_v5", "GRPC_NETTY"]
+
+[urpc_config]
+get_index_rpc_version = 'V2'
 
 [memory_store]
 capacity = "2G"
@@ -12,6 +16,7 @@ dashmap_shard_amount = 128
 data_paths = ["/tmp/riffle-server-2/data"]
 healthy_check_min_disks = 0
 disk_max_concurrency = 2000
+disk_high_watermark = 1.0
 
 [hybrid_store]
 memory_spill_high_watermark = 0.5
@@ -26,3 +31,11 @@ http_thread_num = 5
 default_thread_num = 10
 dispatch_thread_num = 5
 
+[metrics]
+push_gateway_endpoint = "http://pushgateway:9091/"
+push_interval_sec = 5
+labels = { mode = "test" }
+
+[log]
+path = "/tmp/riffle-server-2/log"
+rotation = "Never"
