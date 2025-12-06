@@ -27,10 +27,6 @@ jobs:
 
       - name: ssh to debug 
         uses: valeriangalliat/action-sshd-cloudflared@v4
-        env:
-          - IX_USERNAME: ${{ secrets.IX_USERNAME }}
-          - IX_PASSWORD: ${{ secrets.IX_PASSWORD }}
-
 
       - name: Run Spark SQL Test
         run: tail -f /dev/null
