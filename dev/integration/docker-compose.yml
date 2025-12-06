@@ -120,7 +120,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 150s
+      start_period: 600s
 
   # Riffle Server 1 
   riffle-server-1:
