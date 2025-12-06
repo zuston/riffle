@@ -8,7 +8,6 @@ x-common-volumes: &common-volumes
   - ~/.cargo/git:/root/.cargo/git:rw
   - ~/.cargo/registry:/root/.cargo/registry:rw
   - ./../../:/riffle:rw
-  - ./../../target-docker:/riffle/target:rw
 
 volumes:
   prometheus-data:

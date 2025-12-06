@@ -42,10 +42,10 @@ prepare_uniffle_client() {
 }
 
 build_riffle_server() {
-    if [ ! -f /riffle/target/release/riffle-server ]; then
+    if [ ! -f /riffle/target/debug/riffle-server ]; then
         echo_info "Building Riffle Server..."
         cd /riffle
-        cargo build --release --bin riffle-server
+        cargo build --bin riffle-server
     fi
 }
 
@@ -106,7 +106,7 @@ case "$ROLE" in
     cp ${RIFFLE_HOME}/conf/riffle.conf.1 config.toml
     mkdir -p /tmp/riffle-server-1/log
 
-    exec nohup /riffle/target/release/riffle-server --config config.toml &
+    exec nohup /riffle/target/debug/riffle-server --config config.toml &
     sleep 5
     echo_info "Tailing logs:"
     exec tail -f /tmp/riffle-server-1/log/riffle-server.0
@@ -119,7 +119,7 @@ case "$ROLE" in
     cp ${RIFFLE_HOME}/conf/riffle.conf.2 config.toml
     mkdir -p /tmp/riffle-server-2/log
 
-    exec nohup /riffle/target/release/riffle-server --config config.toml &
+    exec nohup /riffle/target/debug/riffle-server --config config.toml &
     sleep 5
     echo_info "Tailing logs:"
     exec tail -f /tmp/riffle-server-2/log/riffle-server.0
