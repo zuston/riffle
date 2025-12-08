@@ -59,6 +59,8 @@ logforth = ["dep:logforth"]
 
 deadlock-detection = ["parking_lot/deadlock_detection"]
 
+urpc_uring = ["dep:monoio"]
+
 [dependencies]
 anyhow = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
@@ -134,6 +136,7 @@ tikv-jemalloc-sys= { workspace = true, features = ["stats", "profiling", "unpref
 tikv-jemallocator= { workspace = true, features = ["profiling", "unprefixed_malloc_on_supported_platforms"], optional = true }
 jemalloc_pprof= { workspace = true, features = ["symbolize", "flamegraph"], optional = true }
 nix= { workspace = true, optional = true }
+monoio = { workspace = true, optional = true, features = ["bytes"] }
 
 [build-dependencies]
 tonic-build = { workspace = true }

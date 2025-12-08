@@ -111,6 +111,8 @@ pub mod ddashmap;
 
 pub mod partition_stats;
 
+#[cfg(feature = "urpc_uring")]
+pub mod urpc_uring;
 const MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY: &str = "MAX_MEMORY_ALLOCATION_LIMIT_SIZE";
 
 #[derive(Parser, Debug)]

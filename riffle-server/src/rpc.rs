@@ -11,8 +11,8 @@ use crate::metric::GRPC_LATENCY_TIME_SEC;
 use crate::runtime::manager::RuntimeManager;
 use crate::server_state_manager::ServerStateManager;
 use crate::signal::details::graceful_wait_for_signal;
-use crate::urpc;
 use crate::util::is_port_in_used;
+use crate::{urpc, urpc_uring};
 use anyhow::Result;
 use async_trait::async_trait;
 use log::{debug, error, info};
@@ -78,14 +78,21 @@ impl DefaultRpcService {
             let app_manager = app_manager_ref.clone();
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port as u16);
 
-            std::thread::spawn(move || {
-                core_affinity::set_for_current(core_id);
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap()
-                    .block_on(urpc_serve(addr, shutdown(rx), app_manager));
-            });
+            if cfg!(feature = "urpc_uring") {
+                let app_manager_ref = app_manager_ref.clone();
+                let _ = monoio::spawn(async move {
+                    urpc_serve(addr, shutdown(rx), app_manager_ref).await;
+                });
+            } else {
+                std::thread::spawn(move || {
+                    core_affinity::set_for_current(core_id);
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap()
+                        .block_on(urpc_serve(addr, shutdown(rx), app_manager));
+                });
+            }
         }
 
         Ok(())
@@ -214,8 +221,13 @@ async fn urpc_serve(addr: SocketAddr, shutdown: impl Future, app_manager_ref: Ap
     sock.bind(&addr.into()).unwrap();
     sock.listen(8192).unwrap();
 
-    let listener = TcpListener::from_std(sock.into()).unwrap();
-    let _ = urpc::server::run(listener, shutdown, app_manager_ref).await;
+    if cfg!(feature = "urpc_uring") {
+        let listner: monoio::net::TcpListener = monoio::net::TcpListener::bind(addr).unwrap();
+        let _ = urpc_uring::server::run(listner, shutdown, app_manager_ref).await;
+    } else {
+        let listener = TcpListener::from_std(sock.into()).unwrap();
+        let _ = urpc::server::run(listener, shutdown, app_manager_ref).await;
+    }
 }
 
 async fn grpc_serve(

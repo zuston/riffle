@@ -89,6 +89,14 @@ datafusion-postgres = { git = "https://github.com/zuston/datafusion-postgres.git
 sqlparser = "0.56.0"
 nix = { version = "0.29.0" }
 dirs = { version = "6.0.0" }
+monoio = { git = "https://github.com/bytedance/monoio.git", rev = "212fde187f3d41f65ecd35b9cac80f7e246bb58e", features = ["async-cancel",
+    "sync",
+    "bytes",
+    "iouring",
+    "legacy",
+    "macros",
+    "utils",
+"bytes"] }
 
 [profile.release]
 strip = true
