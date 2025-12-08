@@ -223,49 +223,53 @@ impl SyncLocalIO {
     ) -> anyhow::Result<Bytes, WorkerError> {
         let path = self.with_root(path);
         let buf = self.inner.buf_reader_capacity.clone();
+        let f = move || {
+            let path = Path::new(&path);
+            if length.is_none() {
+                let data = fs::read(path)?;
+                return Ok(Bytes::from(data));
+            }
 
-        let r = self
-            .inner
-            .read_runtime_ref
-            .spawn_blocking(move || {
-                let path = Path::new(&path);
-                if length.is_none() {
-                    let data = fs::read(path)?;
-                    return Ok(Bytes::from(data));
+            let len = length.unwrap() as usize;
+            let mut file = File::open(path)?;
+
+            let start = Instant::now();
+            let mut buffer = vec![0; len];
+            LOCALFILE_READ_MEMORY_ALLOCATION_LATENCY.record(start.elapsed().as_nanos() as u64);
+
+            let bytes_read = match buf {
+                Some(capacity) => {
+                    let mut reader = BufReader::with_capacity(capacity, file);
+                    reader.seek(SeekFrom::Start(offset))?;
+                    reader.read(&mut buffer)?
                 }
-
-                let len = length.unwrap() as usize;
-                let mut file = File::open(path)?;
-
-                let start = Instant::now();
-                let mut buffer = vec![0; len];
-                LOCALFILE_READ_MEMORY_ALLOCATION_LATENCY.record(start.elapsed().as_nanos() as u64);
-
-                let bytes_read = match buf {
-                    Some(capacity) => {
-                        let mut reader = BufReader::with_capacity(capacity, file);
-                        reader.seek(SeekFrom::Start(offset))?;
-                        reader.read(&mut buffer)?
-                    }
-                    _ => {
-                        file.seek(SeekFrom::Start(offset))?;
-                        file.read(&mut buffer)?
-                    }
-                };
-
-                if bytes_read != len {
-                    return Err(anyhow!(format!(
-                        "Not expected bytes reading. expected: {}, actual: {}",
-                        len, bytes_read
-                    )));
+                _ => {
+                    file.seek(SeekFrom::Start(offset))?;
+                    file.read(&mut buffer)?
                 }
+            };
 
-                Ok(Bytes::from(buffer))
-            })
-            .instrument_await("wait the spawned block future")
-            .await??;
+            if bytes_read != len {
+                return Err(anyhow!(format!(
+                    "Not expected bytes reading. expected: {}, actual: {}",
+                    len, bytes_read
+                )));
+            }
 
-        Ok(r)
+            Ok(Bytes::from(buffer))
+        };
+
+        let result = if cfg!(feature = "urpc_uring") {
+            f()?
+        } else {
+            self.inner
+                .read_runtime_ref
+                .spawn_blocking(f)
+                .instrument_await("wait the spawned block future")
+                .await??
+        };
+
+        Ok(result)
     }
 }
 
