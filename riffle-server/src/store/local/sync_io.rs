@@ -259,9 +259,13 @@ impl SyncLocalIO {
             Ok(Bytes::from(buffer))
         };
 
-        let result = if cfg!(feature = "urpc_uring") {
+        #[cfg(feature = "urpc_uring")]
+        let r = {
             f()?
-        } else {
+        };
+
+        #[cfg(not(feature = "urpc_uring"))]
+        let r = {
             self.inner
                 .read_runtime_ref
                 .spawn_blocking(f)
@@ -269,7 +273,7 @@ impl SyncLocalIO {
                 .await??
         };
 
-        Ok(result)
+        Ok(r)
     }
 }
 

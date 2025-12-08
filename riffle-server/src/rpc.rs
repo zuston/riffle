@@ -12,7 +12,7 @@ use crate::runtime::manager::RuntimeManager;
 use crate::server_state_manager::ServerStateManager;
 use crate::signal::details::graceful_wait_for_signal;
 use crate::util::is_port_in_used;
-use crate::{urpc, urpc_uring};
+use crate::urpc;
 use anyhow::Result;
 use async_trait::async_trait;
 use log::{debug, error, info};
@@ -25,6 +25,9 @@ use tokio::sync::broadcast;
 use tokio::sync::broadcast::{Receiver, Sender};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Server;
+
+#[cfg(feature="urpc_uring")]
+use crate::urpc_uring;
 
 pub static GRPC_PARALLELISM: Lazy<NonZeroUsize> = Lazy::new(|| {
     let available_cores = std::thread::available_parallelism().unwrap();
@@ -78,12 +81,16 @@ impl DefaultRpcService {
             let app_manager = app_manager_ref.clone();
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port as u16);
 
-            if cfg!(feature = "urpc_uring") {
+            #[cfg(feature = "urpc_uring")]
+            {
                 let app_manager_ref = app_manager_ref.clone();
                 let _ = monoio::spawn(async move {
                     urpc_serve(addr, shutdown(rx), app_manager_ref).await;
                 });
-            } else {
+            }
+
+            #[cfg(not(feature = "urpc_uring"))]
+            {
                 std::thread::spawn(move || {
                     core_affinity::set_for_current(core_id);
                     tokio::runtime::Builder::new_current_thread()
@@ -221,10 +228,14 @@ async fn urpc_serve(addr: SocketAddr, shutdown: impl Future, app_manager_ref: Ap
     sock.bind(&addr.into()).unwrap();
     sock.listen(8192).unwrap();
 
-    if cfg!(feature = "urpc_uring") {
+    #[cfg(feature = "urpc_uring")]
+    {
         let listner: monoio::net::TcpListener = monoio::net::TcpListener::bind(addr).unwrap();
         let _ = urpc_uring::server::run(listner, shutdown, app_manager_ref).await;
-    } else {
+    }
+
+    #[cfg(not(feature = "urpc_uring"))]
+    {
         let listener = TcpListener::from_std(sock.into()).unwrap();
         let _ = urpc::server::run(listener, shutdown, app_manager_ref).await;
     }

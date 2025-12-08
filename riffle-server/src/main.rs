@@ -17,6 +17,7 @@
 
 #![allow(dead_code, unused)]
 #![feature(impl_trait_in_assoc_type)]
+#[warn(unexpected_cfgs)]
 
 use crate::app_manager::{AppManager, APP_MANAGER_REF};
 use crate::common::init_global_variable;
