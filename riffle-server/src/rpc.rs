@@ -84,8 +84,15 @@ impl DefaultRpcService {
             #[cfg(feature = "urpc_uring")]
             {
                 let app_manager_ref = app_manager_ref.clone();
-                let _ = monoio::spawn(async move {
-                    urpc_serve(addr, shutdown(rx), app_manager_ref).await;
+                std::thread::spawn(move || {
+                    core_affinity::set_for_current(core_id);
+                    // Create monoio runtime and run urpc_serve inside it
+                    monoio::RuntimeBuilder::<monoio::FusionDriver>::new()
+                        .enable_all()
+                        .with_entries(512)
+                        .build()
+                        .unwrap()
+                        .block_on(urpc_serve(addr, shutdown(rx), app_manager_ref));
                 });
             }
 
@@ -211,6 +218,13 @@ impl DefaultRpcService {
     }
 }
 
+#[cfg(feature = "urpc_uring")]
+async fn urpc_serve(addr: SocketAddr, shutdown: impl Future, app_manager_ref: AppManagerRef) {
+    let listner: monoio::net::TcpListener = monoio::net::TcpListener::bind(addr).unwrap();
+    let _ = urpc_uring::server::run(listner, shutdown, app_manager_ref).await;
+}
+
+#[cfg(not(feature = "urpc_uring"))]
 async fn urpc_serve(addr: SocketAddr, shutdown: impl Future, app_manager_ref: AppManagerRef) {
     let sock = socket2::Socket::new(
         match addr {
@@ -228,17 +242,8 @@ async fn urpc_serve(addr: SocketAddr, shutdown: impl Future, app_manager_ref: Ap
     sock.bind(&addr.into()).unwrap();
     sock.listen(8192).unwrap();
 
-    #[cfg(feature = "urpc_uring")]
-    {
-        let listner: monoio::net::TcpListener = monoio::net::TcpListener::bind(addr).unwrap();
-        let _ = urpc_uring::server::run(listner, shutdown, app_manager_ref).await;
-    }
-
-    #[cfg(not(feature = "urpc_uring"))]
-    {
-        let listener = TcpListener::from_std(sock.into()).unwrap();
-        let _ = urpc::server::run(listener, shutdown, app_manager_ref).await;
-    }
+    let listener = TcpListener::from_std(sock.into()).unwrap();
+    let _ = urpc::server::run(listener, shutdown, app_manager_ref).await;
 }
 
 async fn grpc_serve(
