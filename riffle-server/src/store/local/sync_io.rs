@@ -260,9 +260,7 @@ impl SyncLocalIO {
         };
 
         #[cfg(feature = "urpc_uring")]
-        let r = {
-            f()?
-        };
+        let r = { f()? };
 
         #[cfg(not(feature = "urpc_uring"))]
         let r = {

@@ -11,8 +11,8 @@ use crate::metric::GRPC_LATENCY_TIME_SEC;
 use crate::runtime::manager::RuntimeManager;
 use crate::server_state_manager::ServerStateManager;
 use crate::signal::details::graceful_wait_for_signal;
-use crate::util::is_port_in_used;
 use crate::urpc;
+use crate::util::is_port_in_used;
 use anyhow::Result;
 use async_trait::async_trait;
 use log::{debug, error, info};
@@ -26,7 +26,7 @@ use tokio::sync::broadcast::{Receiver, Sender};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Server;
 
-#[cfg(feature="urpc_uring")]
+#[cfg(feature = "urpc_uring")]
 use crate::urpc_uring;
 
 pub static GRPC_PARALLELISM: Lazy<NonZeroUsize> = Lazy::new(|| {
