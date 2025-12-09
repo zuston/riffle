@@ -283,24 +283,28 @@ impl HybridStore {
             _ => warm,
         };
 
-        let ctx = spill_message.ctx.clone();
-        // when throwing the data lost error, it should fast fail for this partition data.
-        let result = candidate_store
-            .spill_insert(ctx)
-            .instrument_await("inserting into the persistent store, invoking [write]")
-            .await;
+        if std::env::var("MEMORY_SPILL_IGNORE").unwrap_or("".to_string()) == "true" {
+            // ignore spill to localfile for debug mode
+        } else {
+            let ctx = spill_message.ctx.clone();
+            // when throwing the data lost error, it should fast fail for this partition data.
+            let result = candidate_store
+                .spill_insert(ctx)
+                .instrument_await("inserting into the persistent store, invoking [write]")
+                .await;
 
-        match &storage_type {
-            StorageType::LOCALFILE => {
-                GAUGE_MEMORY_SPILL_TO_LOCALFILE.dec();
+            match &storage_type {
+                StorageType::LOCALFILE => {
+                    GAUGE_MEMORY_SPILL_TO_LOCALFILE.dec();
+                }
+                StorageType::HDFS => {
+                    GAUGE_MEMORY_SPILL_TO_HDFS.dec();
+                }
+                _ => {}
             }
-            StorageType::HDFS => {
-                GAUGE_MEMORY_SPILL_TO_HDFS.dec();
-            }
-            _ => {}
+
+            let _ = result?;
         }
-
-        let _ = result?;
 
         Ok(())
     }
