@@ -3892,6 +3892,7 @@ dependencies = [
  "rustc-hash 2.1.1",
  "socket2 0.5.9",
  "threadpool",
+ "tracing",
  "windows-sys 0.48.0",
 ]
 

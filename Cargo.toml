@@ -96,7 +96,8 @@ monoio = { git = "https://github.com/bytedance/monoio.git", rev = "212fde187f3d4
     "legacy",
     "macros",
     "utils",
-"bytes"] }
+"bytes",
+"debug",] }
 
 [profile.release]
 strip = true
