@@ -230,7 +230,11 @@ impl DefaultRpcService {
 }
 
 #[cfg(feature = "urpc_uring")]
-async fn urpc_serve_with_monoio(addr: SocketAddr, shutdown: impl Future, app_manager_ref: AppManagerRef) {
+async fn urpc_serve_with_monoio(
+    addr: SocketAddr,
+    shutdown: impl Future,
+    app_manager_ref: AppManagerRef,
+) {
     let listner: monoio::net::TcpListener = monoio::net::TcpListener::bind(addr).unwrap();
     let _ = urpc_uring::server::run(listner, shutdown, app_manager_ref).await;
 }
