@@ -81,23 +81,7 @@ impl DefaultRpcService {
             let app_manager = app_manager_ref.clone();
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port as u16);
 
-            #[cfg(feature = "urpc_uring")]
-            {
-                let app_manager_ref = app_manager_ref.clone();
-                std::thread::spawn(move || {
-                    core_affinity::set_for_current(core_id);
-                    // Create monoio runtime and run urpc_serve inside it
-                    monoio::RuntimeBuilder::<monoio::FusionDriver>::new()
-                        .enable_all()
-                        .with_entries(512)
-                        .build()
-                        .unwrap()
-                        .block_on(urpc_serve(addr, shutdown(rx), app_manager_ref));
-                });
-            }
-
-            #[cfg(not(feature = "urpc_uring"))]
-            {
+            let common_fn = || {
                 std::thread::spawn(move || {
                     core_affinity::set_for_current(core_id);
                     tokio::runtime::Builder::new_current_thread()
@@ -106,6 +90,33 @@ impl DefaultRpcService {
                         .unwrap()
                         .block_on(urpc_serve(addr, shutdown(rx), app_manager));
                 });
+            };
+
+            #[cfg(feature = "urpc_uring")]
+            {
+                if config.urpc_config.is_some()
+                    && config.urpc_config.as_ref().unwrap().io_uring_enabled
+                {
+                    let rx2 = tx.subscribe();
+                    let app_manager_ref = app_manager_ref.clone();
+                    std::thread::spawn(move || {
+                        core_affinity::set_for_current(core_id);
+                        // Create monoio runtime and run urpc_serve inside it
+                        monoio::RuntimeBuilder::<monoio::FusionDriver>::new()
+                            .enable_all()
+                            .with_entries(32768)
+                            .build()
+                            .unwrap()
+                            .block_on(urpc_serve(addr, shutdown(rx2), app_manager_ref));
+                    });
+                } else {
+                    common_fn();
+                }
+            }
+
+            #[cfg(not(feature = "urpc_uring"))]
+            {
+                without_uring_fn();
             }
         }
 
