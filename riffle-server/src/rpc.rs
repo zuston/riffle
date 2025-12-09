@@ -116,7 +116,7 @@ impl DefaultRpcService {
 
             #[cfg(not(feature = "urpc_uring"))]
             {
-                without_uring_fn();
+                common_fn();
             }
         }
 
