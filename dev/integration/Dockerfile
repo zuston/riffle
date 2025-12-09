@@ -24,7 +24,6 @@ RUN curl -LsSf https://dlcdn.apache.org/hadoop/common/hadoop-3.3.5/hadoop-3.3.5.
 RUN echo "export HADOOP_HOME=/root/hadoop-3.3.5" >> ~/.bashrc
 RUN echo "export CLASSPATH=$(${HADOOP_HOME}/bin/hadoop classpath --glob)" >> ~/.bashrc
 RUN echo "export HDRS_NAMENODE=default" >> ~/.bashrc
-RUN echo "export HDRS_WORKDIR=/tmp/hdrs
 
 # install python and pip
 RUN yum install -y python3 python3-pip
