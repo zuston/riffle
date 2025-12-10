@@ -96,27 +96,41 @@ impl LocalDiskDelegator {
         );
 
         let mut operator_builder = OperatorBuilder::new(Arc::new(Box::new(underlying_io_handler)));
-        if let Some(conf) = config.io_limiter.as_ref() {
-            operator_builder = operator_builder.layer(ThrottleLayer::new(
-                &runtime_manager.localfile_write_runtime,
-                &conf,
-            ));
-            info!(
-                "IO layer of throttle is enabled for disk: {}. throughput: {}/s",
-                root, conf.capacity
-            );
-        }
-        if let Some(options) = config.read_ahead_options.as_ref() {
-            operator_builder =
-                operator_builder.layer(ReadAheadLayer::new(root, options, runtime_manager.clone()));
-            info!("Read ahead layer is enabled for disk: {}.", root);
-        }
-        let io_handler = operator_builder
-            .layer(TimeoutLayer::new(config.io_duration_threshold_sec))
-            .layer(IoLayerRetry::new(RETRY_MAX_TIMES, root))
-            .layer(AwaitTreeLayer::new(root))
-            .layer(MetricsLayer::new(root))
-            .build();
+
+        let io_handler = {
+            #[cfg(feature = "urpc_uring")]
+            {
+                operator_builder.build()
+            }
+
+            #[cfg(not(feature = "urpc_uring"))]
+            {
+                if let Some(conf) = config.io_limiter.as_ref() {
+                    operator_builder = operator_builder.layer(ThrottleLayer::new(
+                        &runtime_manager.localfile_write_runtime,
+                        &conf,
+                    ));
+                    info!(
+                        "IO layer of throttle is enabled for disk: {}. throughput: {}/s",
+                        root, conf.capacity
+                    );
+                }
+                if let Some(options) = config.read_ahead_options.as_ref() {
+                    operator_builder = operator_builder.layer(ReadAheadLayer::new(
+                        root,
+                        options,
+                        runtime_manager.clone(),
+                    ));
+                    info!("Read ahead layer is enabled for disk: {}.", root);
+                }
+                operator_builder
+                    .layer(TimeoutLayer::new(config.io_duration_threshold_sec))
+                    .layer(IoLayerRetry::new(RETRY_MAX_TIMES, root))
+                    .layer(AwaitTreeLayer::new(root))
+                    .layer(MetricsLayer::new(root))
+                    .build()
+            }
+        };
 
         let delegator = Self {
             inner: Arc::new(Inner {

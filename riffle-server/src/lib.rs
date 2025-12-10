@@ -66,3 +66,6 @@ pub mod mini_riffle;
 mod partition_stats;
 mod raw_io;
 mod system_libc;
+
+#[cfg(feature = "urpc_uring")]
+mod urpc_uring;

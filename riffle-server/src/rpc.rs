@@ -26,6 +26,9 @@ use tokio::sync::broadcast::{Receiver, Sender};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Server;
 
+#[cfg(feature = "urpc_uring")]
+use crate::urpc_uring;
+
 pub static GRPC_PARALLELISM: Lazy<NonZeroUsize> = Lazy::new(|| {
     let available_cores = std::thread::available_parallelism().unwrap();
     std::env::var("GRPC_PARALLELISM").map_or(available_cores, |v| {
@@ -78,14 +81,43 @@ impl DefaultRpcService {
             let app_manager = app_manager_ref.clone();
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port as u16);
 
-            std::thread::spawn(move || {
-                core_affinity::set_for_current(core_id);
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap()
-                    .block_on(urpc_serve(addr, shutdown(rx), app_manager));
-            });
+            let common_fn = || {
+                std::thread::spawn(move || {
+                    core_affinity::set_for_current(core_id);
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap()
+                        .block_on(urpc_serve(addr, shutdown(rx), app_manager));
+                });
+            };
+
+            #[cfg(feature = "urpc_uring")]
+            {
+                if config.urpc_config.is_some()
+                    && config.urpc_config.as_ref().unwrap().io_uring_enabled
+                {
+                    let rx2 = tx.subscribe();
+                    let app_manager_ref = app_manager_ref.clone();
+                    std::thread::spawn(move || {
+                        core_affinity::set_for_current(core_id);
+                        // Create monoio runtime and run urpc_serve inside it
+                        monoio::RuntimeBuilder::<monoio::FusionDriver>::new()
+                            .enable_all()
+                            .with_entries(32768)
+                            .build()
+                            .unwrap()
+                            .block_on(urpc_serve_with_monoio(addr, shutdown(rx2), app_manager_ref));
+                    });
+                } else {
+                    common_fn();
+                }
+            }
+
+            #[cfg(not(feature = "urpc_uring"))]
+            {
+                common_fn();
+            }
         }
 
         Ok(())
@@ -195,6 +227,16 @@ impl DefaultRpcService {
 
         Ok(())
     }
+}
+
+#[cfg(feature = "urpc_uring")]
+async fn urpc_serve_with_monoio(
+    addr: SocketAddr,
+    shutdown: impl Future,
+    app_manager_ref: AppManagerRef,
+) {
+    let listner: monoio::net::TcpListener = monoio::net::TcpListener::bind(addr).unwrap();
+    let _ = urpc_uring::server::run(listner, shutdown, app_manager_ref).await;
 }
 
 async fn urpc_serve(addr: SocketAddr, shutdown: impl Future, app_manager_ref: AppManagerRef) {

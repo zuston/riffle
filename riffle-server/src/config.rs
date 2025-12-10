@@ -470,6 +470,8 @@ pub struct Config {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct UrpcConfig {
     pub get_index_rpc_version: RpcVersion,
+    #[serde(default = "bool::default")]
+    pub io_uring_enabled: bool,
 }
 
 fn as_default_get_memory_rpc_version() -> RpcVersion {

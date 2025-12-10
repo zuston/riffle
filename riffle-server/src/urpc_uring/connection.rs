@@ -1,0 +1,89 @@
+use bytes::{Buf, BytesMut};
+use monoio::io::{AsyncReadRent, AsyncReadRentExt, AsyncWriteRentExt};
+use monoio::net::TcpStream;
+use std::io::Cursor;
+
+use crate::error::WorkerError;
+use crate::metric::URPC_REQUEST_PARSING_LATENCY;
+use crate::urpc_uring::frame::Frame;
+use anyhow::Result;
+
+const INITIAL_BUFFER_LENGTH: usize = 1024 * 1024;
+
+#[derive(Debug)]
+pub struct Connection {
+    stream: TcpStream,
+    read_buf: BytesMut,
+    write_buf: BytesMut,
+}
+
+impl Connection {
+    pub fn new(socket: TcpStream) -> Self {
+        Connection {
+            stream: socket,
+            read_buf: BytesMut::with_capacity(INITIAL_BUFFER_LENGTH),
+            write_buf: BytesMut::with_capacity(INITIAL_BUFFER_LENGTH),
+        }
+    }
+
+    fn parse_frame(&mut self) -> Result<Option<Frame>> {
+        let mut buf = Cursor::new(&self.read_buf[..]);
+
+        match Frame::check(&mut buf) {
+            Ok(_) => {
+                let timer = std::time::Instant::now();
+                let len = buf.position() as usize;
+                buf.set_position(0);
+                let frame = Frame::parse(&mut buf)?;
+                self.read_buf.advance(len);
+                URPC_REQUEST_PARSING_LATENCY
+                    .with_label_values(&[&format!("{}", &frame)])
+                    .observe(timer.elapsed().as_secs_f64());
+                Ok(Some(frame))
+            }
+            Err(WorkerError::STREAM_INCOMPLETE) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub async fn write_frame(&mut self, frame: &Frame) -> Result<()> {
+        Frame::write(&mut self.stream, frame, &mut self.write_buf).await?;
+        Ok(())
+    }
+
+    pub async fn read_frame(&mut self) -> Result<Option<Frame>, WorkerError> {
+        loop {
+            // Attempt to parse a frame from the buffered data. If enough data
+            // has been buffered, the frame is returned.
+            if let Some(frame) = self.parse_frame()? {
+                return Ok(Some(frame));
+            }
+
+            // There is not enough buffered data to read a frame. Attempt to
+            // read more data from the socket.
+            //
+            // On success, the number of bytes is returned. `0` indicates "end
+            // of stream".
+            let mut buf = vec![0u8; 4096];
+            let (res, read_buf) = self.stream.read(buf).await;
+            let n = match res {
+                Ok(n) => n,
+                Err(e) => return Err(WorkerError::Other(anyhow::anyhow!("read error: {}", e))),
+            };
+
+            if n == 0 {
+                // The remote closed the connection. For this to be a clean
+                // shutdown, there should be no data in the read buffer. If
+                // there is, this means that the peer closed the socket while
+                // sending a frame.
+                if self.read_buf.is_empty() {
+                    return Ok(None);
+                } else {
+                    return Err(WorkerError::STREAM_ABNORMAL);
+                }
+            }
+
+            self.read_buf.extend_from_slice(&read_buf[..n]);
+        }
+    }
+}

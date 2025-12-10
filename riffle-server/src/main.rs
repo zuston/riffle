@@ -17,7 +17,7 @@
 
 #![allow(dead_code, unused)]
 #![feature(impl_trait_in_assoc_type)]
-
+#[warn(unexpected_cfgs)]
 use crate::app_manager::{AppManager, APP_MANAGER_REF};
 use crate::common::init_global_variable;
 use crate::config::{Config, LogConfig};
@@ -111,6 +111,8 @@ pub mod ddashmap;
 
 pub mod partition_stats;
 
+#[cfg(feature = "urpc_uring")]
+pub mod urpc_uring;
 const MAX_MEMORY_ALLOCATION_SIZE_ENV_KEY: &str = "MAX_MEMORY_ALLOCATION_LIMIT_SIZE";
 
 #[derive(Parser, Debug)]
