@@ -16,6 +16,7 @@ pub enum StatusCode {
     // to indicate shuffle-writing not retry!
     // todo: we should introduce the dedicated status code to indicate this
     EXCEED_HUGE_PARTITION_HARD_LIMIT = 12,
+    HARD_SPLIT_FROM_SERVER = 15,
 }
 
 impl Into<i32> for StatusCode {
