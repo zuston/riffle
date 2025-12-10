@@ -109,7 +109,7 @@ impl MemoryBuffer {
         Ok(())
     }
 
-    pub fn get_v2(
+    pub fn get(
         &self,
         last_block_id: i64,
         read_bytes_limit_len: i64,
@@ -314,7 +314,7 @@ mod test {
             if cnt > 1 {
                 panic!();
             }
-            let mem_data = &buffer.get_v2(last_block_id, 19, None)?;
+            let mem_data = &buffer.get(last_block_id, 19, None)?;
             let segs = &mem_data.shuffle_data_block_segments;
             if segs.len() > 0 {
                 let last = segs.get(segs.len() - 1).unwrap();
@@ -368,7 +368,7 @@ mod test {
         assert_eq!(10 * 10, buffer.staging_size()?);
 
         /// case5: read from the flight. expected blockId: 0 -> 9
-        let read_result = buffer.get_v2(-1, 10 * 10, None)?;
+        let read_result = buffer.get(-1, 10 * 10, None)?;
         assert_eq!(10 * 10, read_result.data.len());
         assert_eq!(10, read_result.shuffle_data_block_segments.len());
         assert_eq!(
@@ -381,7 +381,7 @@ mod test {
         );
 
         /// case6: read from flight again. expected blockId: 10 -> 19
-        let read_result = buffer.get_v2(9, 10 * 10, None)?;
+        let read_result = buffer.get(9, 10 * 10, None)?;
         assert_eq!(10 * 10, read_result.data.len());
         assert_eq!(10, read_result.shuffle_data_block_segments.len());
         assert_eq!(
@@ -394,7 +394,7 @@ mod test {
         );
 
         /// case7: read from staging. expected blockId: 20 -> 29
-        let read_result = buffer.get_v2(19, 10 * 10, None)?;
+        let read_result = buffer.get(19, 10 * 10, None)?;
         assert_eq!(10 * 10, read_result.data.len());
         assert_eq!(10, read_result.shuffle_data_block_segments.len());
         assert_eq!(
@@ -407,7 +407,7 @@ mod test {
         );
 
         /// case8: blockId not found, and then read from the flight -> staging.
-        let read_result = buffer.get_v2(100, 10 * 10, None)?;
+        let read_result = buffer.get(100, 10 * 10, None)?;
         assert_eq!(10 * 10, read_result.data.len());
         assert_eq!(10, read_result.shuffle_data_block_segments.len());
         assert_eq!(
@@ -439,19 +439,19 @@ mod test {
         buffer.direct_push(create_blocks(0, cnt, block_len))?;
 
         // case1: read all
-        let result = buffer.get_v2(-1, (cnt * block_len) as i64 + 1, None)?;
+        let result = buffer.get(-1, (cnt * block_len) as i64 + 1, None)?;
         assert_eq!(result.shuffle_data_block_segments.len(), cnt as usize);
         assert_eq!(result.data.len(), (cnt * block_len) as usize);
         assert_eq!(result.is_end, true); // no more data
 
         // case2: read partial data without reaching to end
-        let result = buffer.get_v2(-1, (cnt * block_len / 2) as i64 - 1, None)?;
+        let result = buffer.get(-1, (cnt * block_len / 2) as i64 - 1, None)?;
         assert_eq!(result.shuffle_data_block_segments.len(), (cnt / 2) as usize);
         assert_eq!(result.data.len(), (cnt * block_len / 2) as usize);
         assert_eq!(result.is_end, false);
 
         // case3: read partial data and reaches end
-        let result = buffer.get_v2(5, (cnt * block_len) as i64, None)?;
+        let result = buffer.get(5, (cnt * block_len) as i64, None)?;
         // blockIds [6, 7, 8, 9]
         assert_eq!(result.shuffle_data_block_segments.len(), 4);
         assert_eq!(result.data.len(), 4 * block_len as usize);
@@ -474,12 +474,12 @@ mod test {
         buffer.direct_push(create_blocks(3, 2, 5))?;
 
         // first read: should return 0..2 from flight
-        let result1 = buffer.get_v2(-1, 15, None)?;
+        let result1 = buffer.get(-1, 15, None)?;
         assert_eq!(result1.shuffle_data_block_segments.len(), 3);
         assert_eq!(result1.is_end, false); // still staging blocks remaining
 
         // second read: should return 3..4 from staging
-        let result2 = buffer.get_v2(2, 15, None)?;
+        let result2 = buffer.get(2, 15, None)?;
         assert_eq!(result2.shuffle_data_block_segments.len(), 2);
         assert_eq!(result2.is_end, true); // no more data after staging
         Ok(())

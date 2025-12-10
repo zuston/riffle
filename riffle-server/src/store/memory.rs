@@ -270,7 +270,7 @@ impl Store for MemoryStore {
         let options = ctx.reading_options;
         let read_data = match options {
             MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(last_block_id, max_size) => {
-                buffer.get_v2(last_block_id, max_size, ctx.task_ids_filter)?
+                buffer.get(last_block_id, max_size, ctx.task_ids_filter)?
             }
             _ => panic!("Should not happen."),
         };
