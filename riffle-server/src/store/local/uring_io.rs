@@ -354,7 +354,7 @@ impl UringIo {
 #[async_trait::async_trait]
 impl LocalIO for UringIo {
     async fn create(&self, path: &str, options: CreateOptions) -> anyhow::Result<(), WorkerError> {
-        self.sync_local_io.create(path, options)
+        self.sync_local_io.create(path, options).await
     }
 
     async fn write(&self, path: &str, options: WriteOptions) -> anyhow::Result<(), WorkerError> {
@@ -394,10 +394,10 @@ impl LocalIO for UringIo {
     }
 
     async fn delete(&self, path: &str) -> anyhow::Result<(), WorkerError> {
-        self.sync_local_io.delete(path)
+        self.sync_local_io.delete(path).await
     }
 
     async fn file_stat(&self, path: &str) -> anyhow::Result<FileStat, WorkerError> {
-        self.sync_local_io.file_stat(path)
+        self.sync_local_io.file_stat(path).await
     }
 }
