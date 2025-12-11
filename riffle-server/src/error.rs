@@ -111,6 +111,9 @@ pub enum WorkerError {
 
     #[error("HDFS client initialization failed")]
     HDFS_CLIENT_INIT_FAILED,
+
+    #[error("raw io error code: {0}")]
+    RAW_IO_ERR(i32),
 }
 
 impl From<AcquireError> for WorkerError {

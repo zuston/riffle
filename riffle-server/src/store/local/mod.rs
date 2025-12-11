@@ -36,6 +36,9 @@ pub mod options;
 pub mod read_options;
 pub mod sync_io;
 
+#[cfg(target_os = "linux")]
+pub mod uring_io;
+
 pub struct FileStat {
     pub content_length: u64,
 }

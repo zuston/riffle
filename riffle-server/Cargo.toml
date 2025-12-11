@@ -134,6 +134,7 @@ tikv-jemalloc-sys= { workspace = true, features = ["stats", "profiling", "unpref
 tikv-jemallocator= { workspace = true, features = ["profiling", "unprefixed_malloc_on_supported_platforms"], optional = true }
 jemalloc_pprof= { workspace = true, features = ["symbolize", "flamegraph"], optional = true }
 nix= { workspace = true, optional = true }
+io-uring = { workspace = true, optional = true, features = ["bindgen"] }
 
 [build-dependencies]
 tonic-build = { workspace = true }
