@@ -457,7 +457,6 @@ mod tests {
     use crate::store::local::sync_io::SyncLocalIO;
     use crate::store::local::uring_io::UringIoEngineBuilder;
     use crate::store::local::LocalIO;
-    use log::info;
 
     #[test]
     fn test_uring_write_read() -> anyhow::Result<()> {
@@ -468,7 +467,7 @@ mod tests {
 
         let temp_dir = TempDir::new("test_write_read")?;
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
-        log::info!("init local file path: {}", temp_path);
+        println!("init local file path: {}", temp_path);
 
         let r_runtime = create_runtime(1, "r");
         let w_runtime = create_runtime(2, "w");
@@ -478,6 +477,7 @@ mod tests {
         let uring_io_engine = UringIoEngineBuilder::new().build(sync_io_engine)?;
 
         // 1. write
+        println!("writing...");
         let write_data = b"hello io_uring test";
         let write_options = crate::store::local::options::WriteOptions {
             append: true,
@@ -493,6 +493,7 @@ mod tests {
         });
 
         // 2. read
+        println!("reading...");
         let read_options = crate::store::local::read_options::ReadOptions {
             task_id: 0,
             read_range: crate::store::local::read_options::ReadRange::ALL,
@@ -507,6 +508,7 @@ mod tests {
         });
 
         // 3. validation
+        println!("validating...");
         match result {
             DataBytes::Direct(bytes) => {
                 assert_eq!(bytes.as_ref(), write_data.as_slice());
