@@ -232,6 +232,9 @@ struct RawBuf {
     len: usize,
 }
 
+unsafe impl Send for RawBuf {}
+unsafe impl Sync for RawBuf {}
+
 struct UringIoCtx {
     tx: oneshot::Sender<anyhow::Result<(), WorkerError>>,
     io_type: UringIoType,
