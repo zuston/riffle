@@ -227,12 +227,17 @@ struct RawFileAddress {
     offset: u64,
 }
 
+struct RawBuf {
+    ptr: *mut u8,
+    len: usize,
+}
+
 struct UringIoCtx {
     tx: oneshot::Sender<anyhow::Result<(), WorkerError>>,
     io_type: UringIoType,
     addr: RawFileAddress,
     w_bufs: Vec<bytes::Bytes>,
-    r_bufs: Vec<bytes::BytesMut>,
+    r_bufs: Vec<RawBuf>,
 }
 
 struct UringIoEngineShard {
@@ -291,7 +296,7 @@ impl UringIoEngineShard {
                     UringIoType::Read => {
                         self.read_inflight += 1;
                         // ensure only one buf
-                        opcode::Read::new(fd, ctx.r_bufs[0].as_mut_ptr(), ctx.r_bufs[0].len() as _)
+                        opcode::Read::new(fd, ctx.r_bufs[0].ptr, ctx.r_bufs[0].len as _)
                             .offset(ctx.addr.offset)
                             .build()
                     }
@@ -428,7 +433,7 @@ impl LocalIO for UringIo {
         let raw_fd = file.as_raw_fd();
 
         // init buf with BytesMut for io_uring to write into
-        let buf = BytesMut::with_capacity(length as _);
+        let mut buf = BytesMut::with_capacity(length as _);
 
         let ctx = UringIoCtx {
             tx,
@@ -438,7 +443,10 @@ impl LocalIO for UringIo {
                 offset,
             },
             w_bufs: vec![],
-            r_bufs: vec![buf.clone()],
+            r_bufs: vec![RawBuf {
+                ptr: buf.as_mut_ptr(),
+                len: length as usize,
+            }],
         };
 
         let _ = shard.send(ctx);
@@ -446,8 +454,8 @@ impl LocalIO for UringIo {
             Ok(res) => res,
             Err(e) => {
                 println!("read error: {:?}", e);
-                return Err(WorkerError::Other(anyhow::Error::from(e)))
-            },
+                return Err(WorkerError::Other(anyhow::Error::from(e)));
+            }
         }?;
 
         Ok(DataBytes::Direct(buf.freeze()))
@@ -464,13 +472,13 @@ impl LocalIO for UringIo {
 
 #[cfg(test)]
 mod tests {
-    use log::info;
     use crate::runtime::manager::create_runtime;
     use crate::runtime::RuntimeRef;
+    use crate::store::local::read_options::IoMode;
     use crate::store::local::sync_io::SyncLocalIO;
     use crate::store::local::uring_io::UringIoEngineBuilder;
     use crate::store::local::LocalIO;
-    use crate::store::local::read_options::IoMode;
+    use log::info;
 
     #[test]
     fn test_uring_write_read() -> anyhow::Result<()> {
