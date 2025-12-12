@@ -311,13 +311,12 @@ impl UringIoEngineShard {
                         self.write_inflight += 1;
                         // https://github.com/tokio-rs/io-uring/blob/master/io-uring-test/src/utils.rs#L95
                         use libc::iovec;
-
                         let slices: Vec<iovec> = ctx
                             .w_bufs
                             .iter()
                             .map(|b| iovec {
-                                iov_base: b.as_ptr() as *mut _,
-                                iov_len: b.len(),
+                                iov_base: b.ptr as *mut _,
+                                iov_len: b.len,
                             })
                             .collect();
                         opcode::Writev::new(fd, slices.as_ptr(), slices.len() as _)
