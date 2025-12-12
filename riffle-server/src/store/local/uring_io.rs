@@ -300,6 +300,7 @@ impl UringIoEngineShard {
                             .build()
                     }
                     UringIoType::WriteV => {
+                        self.write_inflight += 1;
                         // https://github.com/tokio-rs/io-uring/blob/master/io-uring-test/src/utils.rs#L95
                         use libc::iovec;
 
@@ -381,7 +382,7 @@ impl LocalIO for UringIo {
 
         let ctx = UringIoCtx {
             tx,
-            io_type: UringIoType::WriteV,
+            io_type: UringIoType::Write,
             addr: RawFileAddress {
                 file: RawFile(raw_fd),
                 offset: options.offset.unwrap_or(0),
