@@ -69,6 +69,10 @@ impl SyncLocalIO {
         }
     }
 
+    pub fn root(&self) -> &str {
+        &self.inner.root
+    }
+
     fn with_root(&self, path: &str) -> String {
         format!("{}/{}", &self.inner.root, path)
     }

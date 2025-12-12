@@ -215,7 +215,7 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    fn create_runtime(pool_size: usize, name: &str) -> Arc<Runtime> {
+    pub fn create_runtime(pool_size: usize, name: &str) -> Arc<Runtime> {
         let runtime = Builder::default()
             .worker_threads(pool_size as usize)
             .thread_name(name)
