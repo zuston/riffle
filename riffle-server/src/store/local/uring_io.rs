@@ -377,7 +377,7 @@ impl LocalIO for UringIo {
             },
             bufs,
         };
-        shard.send(ctx).await?;
+        let _ = shard.send(ctx);
         let res = match rx.await {
             Ok(res) => res,
             Err(e) => Err(WorkerError::Other(anyhow::Error::from(e))),
