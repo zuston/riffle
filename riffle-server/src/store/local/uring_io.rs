@@ -380,16 +380,19 @@ impl LocalIO for UringIo {
         let (tx, rx) = oneshot::channel();
         let tag = options.data.len();
         let shard = &self.write_txs[tag % self.write_txs.len()];
+
         let bufs = options
             .data
             .always_bytes()
             .iter_mut()
-            .map(|x| x.as_ref())
-            .map(|mut x| RawBuf {
-                ptr: x.as_mut_ptr(),
-                len: x.len() as _,
+            .map(|bytes| {
+                let slice: &mut [u8] = bytes.as_mut();
+                RawBuf {
+                    ptr: slice.as_mut_ptr(),
+                    len: slice.len(),
+                }
             })
-            .collect();
+            .collect::<Vec<_>>();
 
         let path = self.with_root(path);
         let path = Path::new(&path);
