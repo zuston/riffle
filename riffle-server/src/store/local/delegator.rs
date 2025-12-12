@@ -98,7 +98,11 @@ impl LocalDiskDelegator {
         );
 
         #[cfg(feature = "io-uring")]
+        info!("Binary compiled with the io-uring feature enabled.");
+
+        #[cfg(feature = "io-uring")]
         let mut operator_builder = if let Some(cfg) = &config.io_uring_options {
+            info!("io-uring engine is activated!");
             OperatorBuilder::new(Arc::new(Box::new(
                 UringIoEngineBuilder::new()
                     .build(underlying_io_handler)
