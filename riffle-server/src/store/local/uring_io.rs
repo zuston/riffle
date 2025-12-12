@@ -215,7 +215,6 @@ impl UringIoEngineBuilder {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UringIoType {
     Read,
-    Write,
     WriteV,
 }
 
@@ -300,13 +299,6 @@ impl UringIoEngineShard {
                             .offset(ctx.addr.offset)
                             .build()
                     }
-                    UringIoType::Write => {
-                        self.write_inflight += 1;
-                        // ensure only one buf
-                        opcode::Write::new(fd, ctx.w_bufs[0].ptr, ctx.w_bufs[0].len as _)
-                            .offset(ctx.addr.offset)
-                            .build()
-                    }
                     UringIoType::WriteV => {
                         self.write_inflight += 1;
                         // https://github.com/tokio-rs/io-uring/blob/master/io-uring-test/src/utils.rs#L95
@@ -336,7 +328,7 @@ impl UringIoEngineShard {
 
                 match ctx.io_type {
                     UringIoType::Read => self.read_inflight -= 1,
-                    UringIoType::Write | UringIoType::WriteV => self.write_inflight -= 1,
+                    UringIoType::WriteV => self.write_inflight -= 1,
                 }
 
                 let res = cqe.result();
