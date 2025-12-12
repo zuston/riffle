@@ -239,7 +239,7 @@ struct UringIoCtx {
     tx: oneshot::Sender<anyhow::Result<(), WorkerError>>,
     io_type: UringIoType,
     addr: RawFileAddress,
-    w_bufs: Vec<bytes::Bytes>,
+    w_bufs: Vec<RawBuf>,
     r_bufs: Vec<RawBuf>,
 }
 
@@ -303,7 +303,7 @@ impl UringIoEngineShard {
                     UringIoType::Write => {
                         self.write_inflight += 1;
                         // ensure only one buf
-                        opcode::Write::new(fd, ctx.w_bufs[0].as_ptr(), ctx.w_bufs[0].len() as _)
+                        opcode::Write::new(fd, ctx.w_bufs[0].ptr, ctx.w_bufs[0].len as _)
                             .offset(ctx.addr.offset)
                             .build()
                     }
@@ -381,7 +381,16 @@ impl LocalIO for UringIo {
         let (tx, rx) = oneshot::channel();
         let tag = options.data.len();
         let shard = &self.write_txs[tag % self.write_txs.len()];
-        let bufs = options.data.always_bytes();
+        let bufs = options
+            .data
+            .always_bytes()
+            .iter()
+            .map(|x| x.as_ref())
+            .map(|mut x| RawBuf {
+                ptr: x.as_mut_ptr(),
+                len: x.len() as _,
+            })
+            .collect();
 
         let path = self.with_root(path);
         let path = Path::new(&path);
