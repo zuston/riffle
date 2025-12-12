@@ -442,7 +442,10 @@ impl LocalIO for UringIo {
         let _ = shard.send(ctx);
         let _result = match rx.await {
             Ok(res) => res,
-            Err(e) => return Err(WorkerError::Other(anyhow::Error::from(e))),
+            Err(e) => {
+                println!("read error: {:?}", e);
+                return Err(WorkerError::Other(anyhow::Error::from(e)))
+            },
         }?;
 
         Ok(DataBytes::Direct(buf.freeze()))
