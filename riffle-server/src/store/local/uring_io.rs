@@ -423,7 +423,9 @@ impl LocalIO for UringIo {
         // open the file
         let path = self.with_root(path);
         let path = Path::new(&path);
-        let raw_fd = OpenOptions::new().open(path)?.as_raw_fd();
+        // must ensure the file lifecycle > raw_fd
+        let file = OpenOptions::new().open(path)?;
+        let raw_fd = file.as_raw_fd();
 
         // init buf with BytesMut for io_uring to write into
         let buf = BytesMut::with_capacity(length as _);
@@ -462,6 +464,7 @@ impl LocalIO for UringIo {
 
 #[cfg(test)]
 mod tests {
+    use log::info;
     use crate::runtime::manager::create_runtime;
     use crate::runtime::RuntimeRef;
     use crate::store::local::sync_io::SyncLocalIO;
