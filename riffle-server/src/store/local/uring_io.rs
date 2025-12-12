@@ -14,11 +14,12 @@
 
 use crate::error::WorkerError;
 use crate::store::local::options::{CreateOptions, WriteOptions};
-use crate::store::local::read_options::ReadOptions;
+use crate::store::local::read_options::{ReadOptions, ReadRange};
 use crate::store::local::sync_io::SyncLocalIO;
 use crate::store::local::{FileStat, LocalIO};
 use crate::store::DataBytes;
 use anyhow::anyhow;
+use bytes::BytesMut;
 use clap::builder::Str;
 use core_affinity::CoreId;
 use io_uring::types::Fd;
@@ -230,7 +231,8 @@ struct UringIoCtx {
     tx: oneshot::Sender<anyhow::Result<(), WorkerError>>,
     io_type: UringIoType,
     addr: RawFileAddress,
-    bufs: Vec<bytes::Bytes>,
+    w_bufs: Vec<bytes::Bytes>,
+    r_bufs: Vec<bytes::BytesMut>,
 }
 
 struct UringIoEngineShard {
@@ -286,20 +288,20 @@ impl UringIoEngineShard {
                     UringIoType::Read => {
                         self.read_inflight += 1;
                         // ensure only one buf
-                        opcode::Read::new(fd, ctx.bufs[0].as_mut_ptr(), ctx.bufs[0].len() as _)
+                        opcode::Read::new(fd, ctx.r_bufs[0].as_mut_ptr(), ctx.r_bufs[0].len() as _)
                             .offset(ctx.addr.offset)
                             .build()
                     }
                     UringIoType::Write => {
                         self.write_inflight += 1;
                         // ensure only one buf
-                        opcode::Write::new(fd, ctx.bufs[0].as_mut_ptr(), ctx.bufs[0].len() as _)
+                        opcode::Write::new(fd, ctx.w_bufs[0].as_mut_ptr(), ctx.w_bufs[0].len() as _)
                             .offset(ctx.addr.offset)
                             .build()
                     }
                     UringIoType::WriteV => {
                         // https://github.com/tokio-rs/io-uring/blob/master/io-uring-test/src/utils.rs#L95
-                        let slices = ctx.bufs.iter().map(|x| IoSlice::new(x)).collect();
+                        let slices = ctx.w_bufs.iter().map(|x| IoSlice::new(x)).collect();
                         opcode::Writev::new(fd, slices.as_ptr(), slices.len() as _)
                             .offset(ctx.addr.offset)
                             .build()
@@ -375,7 +377,8 @@ impl LocalIO for UringIo {
                 file: RawFile(raw_fd),
                 offset: options.offset.unwrap_or(0),
             },
-            bufs,
+            w_bufs: bufs,
+            r_bufs: vec![],
         };
         let _ = shard.send(ctx);
         let res = match rx.await {
@@ -390,7 +393,43 @@ impl LocalIO for UringIo {
         path: &str,
         options: ReadOptions,
     ) -> anyhow::Result<DataBytes, WorkerError> {
-        todo!()
+        let (offset, length) = match &options.read_range {
+            ReadRange::ALL => {
+                let fs_sts = self.file_stat(path).await?;
+                (0, fs_sts.content_length)
+            }
+            ReadRange::RANGE(x, y) => (*x, *y),
+        };
+
+        let (tx, rx) = oneshot::channel();
+        let shard = &self.read_txs[options.task_id as usize % self.read_txs.len()];
+
+        // open the file
+        let path = self.with_root(path);
+        let path = Path::new(&path);
+        let raw_fd = OpenOptions::new().open(path)?.as_raw_fd();
+
+        // init buf with BytesMut for io_uring to write into
+        let buf = BytesMut::zeroed(length as usize);
+
+        let ctx = UringIoCtx {
+            tx,
+            io_type: UringIoType::Read,
+            addr: RawFileAddress {
+                file: RawFile(raw_fd),
+                offset,
+            },
+            w_bufs: vec![],
+            r_bufs: vec![buf],
+        };
+
+        let _ = shard.send(ctx);
+        let bufs = match rx.await {
+            Ok(res) => res,
+            Err(e) => return Err(WorkerError::Other(anyhow::Error::from(e))),
+        }?;
+
+        Ok(DataBytes::Direct(buf.freeze()))
     }
 
     async fn delete(&self, path: &str) -> anyhow::Result<(), WorkerError> {
