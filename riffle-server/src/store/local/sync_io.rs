@@ -34,14 +34,14 @@ static IO_BUFFER_POOL: Lazy<IoBufferPool> =
 
 #[derive(Clone)]
 pub struct SyncLocalIO {
-    pub inner: Arc<Inner>,
+    inner: Arc<Inner>,
 }
 
 unsafe impl Sync for SyncLocalIO {}
 unsafe impl Send for SyncLocalIO {}
 
 struct Inner {
-    pub root: String,
+    root: String,
 
     buf_writer_capacity: Option<usize>,
     buf_reader_capacity: Option<usize>,
@@ -67,6 +67,10 @@ impl SyncLocalIO {
                 write_runtime_ref: write_runtime_ref.clone(),
             }),
         }
+    }
+
+    pub fn root(&self) -> &str {
+        &self.inner.root
     }
 
     fn with_root(&self, path: &str) -> String {

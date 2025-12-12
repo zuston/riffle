@@ -203,7 +203,7 @@ impl UringIoEngineBuilder {
         }
 
         let engine = UringIo {
-            root: sync_io.inner.root.clone(),
+            root: sync_io.root().to_owned(),
             read_txs: Arc::new(read_txs),
             write_txs: Arc::new(write_txs),
             sync_local_io: sync_io,
