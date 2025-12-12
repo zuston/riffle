@@ -424,7 +424,7 @@ impl LocalIO for UringIo {
         let path = self.with_root(path);
         let path = Path::new(&path);
         // must ensure the file lifecycle > raw_fd
-        let file = OpenOptions::new().open(path)?;
+        let file = OpenOptions::new().read(true).open(path)?;
         let raw_fd = file.as_raw_fd();
 
         // init buf with BytesMut for io_uring to write into
