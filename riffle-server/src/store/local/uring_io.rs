@@ -394,7 +394,7 @@ impl LocalIO for UringIo {
             w_bufs: bufs,
             r_bufs: vec![],
         };
-        shard.send(ctx).map_err(|e| {Err(WorkerError::Other(anyhow!("Errors on sending writing ctx to uring shard")))})?;
+        let _ = shard.send(ctx);
         let res = match rx.await {
             Ok(res) => res,
             Err(e) => Err(WorkerError::Other(anyhow::Error::from(e))),
