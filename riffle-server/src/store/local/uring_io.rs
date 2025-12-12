@@ -301,7 +301,16 @@ impl UringIoEngineShard {
                     }
                     UringIoType::WriteV => {
                         // https://github.com/tokio-rs/io-uring/blob/master/io-uring-test/src/utils.rs#L95
-                        let slices = ctx.w_bufs.iter().map(|x| IoSlice::new(x)).collect();
+                        use libc::iovec;
+
+                        let slices: Vec<iovec> = ctx
+                            .w_bufs
+                            .iter()
+                            .map(|b| iovec {
+                                iov_base: b.as_ptr() as *mut _,
+                                iov_len: b.len(),
+                            })
+                            .collect();
                         opcode::Writev::new(fd, slices.as_ptr(), slices.len() as _)
                             .offset(ctx.addr.offset)
                             .build()
@@ -420,7 +429,7 @@ impl LocalIO for UringIo {
                 offset,
             },
             w_bufs: vec![],
-            r_bufs: vec![buf],
+            r_bufs: vec![buf.clone()],
         };
 
         let _ = shard.send(ctx);
