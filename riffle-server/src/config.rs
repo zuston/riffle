@@ -139,6 +139,18 @@ pub struct LocalfileStoreConfig {
     pub read_io_sendfile_enable: bool,
 
     pub read_ahead_options: Option<ReadAheadConfig>,
+
+    pub io_uring_options: Option<IoUringConfig>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct IoUringConfig {
+    #[serde(default = "as_default_io_uring_threads")]
+    pub threads: usize,
+}
+
+fn as_default_io_uring_threads() -> usize {
+    1
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -253,6 +265,7 @@ impl LocalfileStoreConfig {
             io_limiter: None,
             read_io_sendfile_enable: as_default_read_io_sendfile_enable(),
             read_ahead_options: None,
+            io_uring_options: None,
         }
     }
 }

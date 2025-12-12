@@ -188,6 +188,14 @@ impl DataBytes {
             _ => panic!(),
         }
     }
+
+    pub fn always_bytes(self) -> Vec<Bytes> {
+        match self {
+            Direct(bytes) => vec![bytes],
+            Composed(composed) => composed.to_vec(),
+            _ => panic!(),
+        }
+    }
 }
 
 impl Default for DataBytes {

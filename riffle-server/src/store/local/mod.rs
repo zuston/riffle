@@ -36,6 +36,9 @@ pub mod options;
 pub mod read_options;
 pub mod sync_io;
 
+#[cfg(feature = "io-uring")]
+pub mod uring_io;
+
 pub struct FileStat {
     pub content_length: u64,
 }
@@ -77,5 +80,36 @@ impl LocalfileStoreStat {
 impl Default for LocalfileStoreStat {
     fn default() -> Self {
         Self { stats: vec![] }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::BytesMut;
+
+    #[test]
+    fn test_bytes_as_mut_ptr() {
+        struct RawBuf<T> {
+            ptr: T,
+            len: usize,
+        }
+
+        // 1. use bytesMut to write
+        let mut bytes = BytesMut::zeroed(10);
+        let ptr = bytes.as_mut_ptr();
+        let raw_buf = RawBuf { ptr, len: 10 };
+        unsafe {
+            for i in 0..bytes.len() {
+                *raw_buf.ptr.add(i) = 1;
+            }
+        }
+        for &b in bytes.iter() {
+            assert_eq!(b, 1);
+        }
+
+        // 2. use bytes to read
+        let mut bytes = bytes.freeze();
+        let prt = bytes.as_ptr();
+        let raw_buf = RawBuf { ptr, len: 10 };
     }
 }

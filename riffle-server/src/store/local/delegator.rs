@@ -21,6 +21,8 @@ use crate::store::local::layers::{Handler, OperatorBuilder};
 use crate::store::local::options::WriteOptions;
 use crate::store::local::read_options::ReadOptions;
 use crate::store::local::sync_io::SyncLocalIO;
+#[cfg(feature = "io-uring")]
+use crate::store::local::uring_io::UringIoEngineBuilder;
 use crate::store::local::{DiskStat, FileStat, LocalDiskStorage, LocalIO};
 use crate::store::DataBytes;
 use crate::util;
@@ -95,7 +97,24 @@ impl LocalDiskDelegator {
             Some(read_capacity.as_u64() as usize),
         );
 
+        #[cfg(feature = "io-uring")]
+        info!("Binary compiled with the io-uring feature enabled.");
+
+        #[cfg(feature = "io-uring")]
+        let mut operator_builder = if let Some(cfg) = &config.io_uring_options {
+            info!("io-uring engine is activated!");
+            OperatorBuilder::new(Arc::new(Box::new(
+                UringIoEngineBuilder::new()
+                    .build(underlying_io_handler)
+                    .unwrap(),
+            )))
+        } else {
+            OperatorBuilder::new(Arc::new(Box::new(underlying_io_handler)))
+        };
+
+        #[cfg(not(feature = "io-uring"))]
         let mut operator_builder = OperatorBuilder::new(Arc::new(Box::new(underlying_io_handler)));
+
         if let Some(conf) = config.io_limiter.as_ref() {
             operator_builder = operator_builder.layer(ThrottleLayer::new(
                 &runtime_manager.localfile_write_runtime,
