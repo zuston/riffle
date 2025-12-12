@@ -281,7 +281,7 @@ impl UringIoEngineShard {
                     None => break 'prepare,
                 };
 
-                let ctx = Box::new(ctx);
+                let mut ctx = Box::new(ctx);
 
                 let fd = Fd(ctx.addr.file.0);
                 let sqe = match ctx.io_type {
@@ -480,9 +480,9 @@ mod tests {
         // 1. write
         let write_data = b"hello io_uring test";
         let write_options = crate::store::local::options::WriteOptions {
+            append: true,
             offset: Some(0),
             data: DataBytes::Direct(Bytes::from(write_data)),
-            ..Default::default()
         };
 
         w_runtime.block_on(async {

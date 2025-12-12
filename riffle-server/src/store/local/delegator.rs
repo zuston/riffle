@@ -100,7 +100,9 @@ impl LocalDiskDelegator {
         #[cfg(feature = "io-uring")]
         let mut operator_builder = if let Some(cfg) = &config.io_uring_options {
             OperatorBuilder::new(Arc::new(Box::new(
-                UringIoEngineBuilder::new().build(underlying_io_handler),
+                UringIoEngineBuilder::new()
+                    .build(underlying_io_handler)
+                    .unwrap(),
             )))
         } else {
             OperatorBuilder::new(Arc::new(Box::new(underlying_io_handler)))
