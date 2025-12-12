@@ -141,9 +141,9 @@ mod tests {
         // 1. write
         let write_data = b"hello io_uring test";
         let write_options = crate::store::local::options::WriteOptions {
+            append: true,
             offset: Some(0),
-            data: DataBytes::Direct(Bytes::from(write_data)),
-            ..Default::default()
+            data: DataBytes::Direct(Bytes::from(&write_data[..])),
         };
 
         w_runtime.block_on(async {

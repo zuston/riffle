@@ -295,7 +295,7 @@ impl UringIoEngineShard {
                     UringIoType::Write => {
                         self.write_inflight += 1;
                         // ensure only one buf
-                        opcode::Write::new(fd, ctx.w_bufs[0].as_mut_ptr(), ctx.w_bufs[0].len() as _)
+                        opcode::Write::new(fd, ctx.w_bufs[0].as_ptr(), ctx.w_bufs[0].len() as _)
                             .offset(ctx.addr.offset)
                             .build()
                     }
@@ -482,7 +482,7 @@ mod tests {
         let write_options = crate::store::local::options::WriteOptions {
             append: true,
             offset: Some(0),
-            data: DataBytes::Direct(Bytes::from(write_data)),
+            data: DataBytes::Direct(Bytes::from(&write_data[..])),
         };
 
         w_runtime.block_on(async {
