@@ -383,7 +383,7 @@ impl LocalIO for UringIo {
         let bufs = options
             .data
             .always_bytes()
-            .iter()
+            .iter_mut()
             .map(|x| x.as_ref())
             .map(|mut x| RawBuf {
                 ptr: x.as_mut_ptr(),
