@@ -239,7 +239,7 @@ struct UringIoCtx {
     tx: oneshot::Sender<anyhow::Result<(), WorkerError>>,
     io_type: UringIoType,
     addr: RawFileAddress,
-    w_bufs: Vec<RawBuf>,
+    w_bufs: Vec<bytes::Bytes>,
     r_bufs: Vec<RawBuf>,
 }
 
@@ -310,16 +310,12 @@ impl UringIoEngineShard {
                     UringIoType::WriteV => {
                         self.write_inflight += 1;
                         // https://github.com/tokio-rs/io-uring/blob/master/io-uring-test/src/utils.rs#L95
-                        use libc::iovec;
-                        let slices: Vec<iovec> = ctx
+                        let slices = ctx
                             .w_bufs
                             .iter()
-                            .map(|b| iovec {
-                                iov_base: b.ptr as *mut _,
-                                iov_len: b.len,
-                            })
-                            .collect();
-                        opcode::Writev::new(fd, slices.as_ptr(), slices.len() as _)
+                            .map(|x| IoSlice::new(x.as_ref()))
+                            .collect::<Vec<_>>();
+                        opcode::Writev::new(fd, slices.as_ptr().cast(), slices.len() as _)
                             .offset(ctx.addr.offset)
                             .build()
                             .flags(squeue::Flags::IO_LINK)
@@ -380,19 +376,7 @@ impl LocalIO for UringIo {
         let (tx, rx) = oneshot::channel();
         let tag = options.data.len();
         let shard = &self.write_txs[tag % self.write_txs.len()];
-
-        let bufs = options
-            .data
-            .always_bytes()
-            .iter_mut()
-            .map(|bytes| {
-                let slice: &mut [u8] = bytes.as_mut();
-                RawBuf {
-                    ptr: slice.as_mut_ptr(),
-                    len: slice.len(),
-                }
-            })
-            .collect::<Vec<_>>();
+        let bufs = options.data.always_bytes();
 
         let path = self.with_root(path);
         let path = Path::new(&path);
