@@ -415,6 +415,8 @@ impl LocalIO for UringIo {
             ReadRange::RANGE(x, y) => (*x, *y),
         };
 
+        println!("offset: {}. len: {}", offset, length);
+
         let (tx, rx) = oneshot::channel();
         let shard = &self.read_txs[options.task_id as usize % self.read_txs.len()];
 
@@ -424,7 +426,7 @@ impl LocalIO for UringIo {
         let raw_fd = OpenOptions::new().open(path)?.as_raw_fd();
 
         // init buf with BytesMut for io_uring to write into
-        let buf = BytesMut::zeroed(length as usize);
+        let buf = BytesMut::with_capacity(length as _);
 
         let ctx = UringIoCtx {
             tx,
@@ -462,6 +464,7 @@ mod tests {
     use crate::store::local::sync_io::SyncLocalIO;
     use crate::store::local::uring_io::UringIoEngineBuilder;
     use crate::store::local::LocalIO;
+    use crate::store::local::read_options::IoMode;
 
     #[test]
     fn test_uring_write_read() -> anyhow::Result<()> {
@@ -500,9 +503,10 @@ mod tests {
         // 2. read
         println!("reading...");
         let read_options = crate::store::local::read_options::ReadOptions {
+            io_mode: IoMode::SENDFILE,
             task_id: 0,
             read_range: crate::store::local::read_options::ReadRange::ALL,
-            ..Default::default()
+            ahead_options: None,
         };
 
         let result = r_runtime.block_on(async {
