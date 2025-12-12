@@ -36,7 +36,7 @@ pub mod options;
 pub mod read_options;
 pub mod sync_io;
 
-#[cfg(target_os = "linux")]
+#[cfg(feature = "io-uring")]
 pub mod uring_io;
 
 pub struct FileStat {
