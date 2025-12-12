@@ -250,6 +250,7 @@ impl UringIoEngineShard {
         loop {
             'prepare: loop {
                 if self.read_inflight + self.write_inflight >= self.io_depth {
+                    println!("wait...");
                     break 'prepare;
                 }
 
@@ -275,6 +276,8 @@ impl UringIoEngineShard {
                         },
                     }
                 };
+
+                println!("received...");
 
                 let ctx = match ctx {
                     Some(ctx) => ctx,
@@ -337,6 +340,7 @@ impl UringIoEngineShard {
                 }
 
                 let res = cqe.result();
+                println!("finished...");
                 if res < 0 {
                     let _ = ctx.tx.send(Err(WorkerError::RAW_IO_ERR(res)));
                 } else {
@@ -382,7 +386,7 @@ impl LocalIO for UringIo {
 
         let ctx = UringIoCtx {
             tx,
-            io_type: UringIoType::Write,
+            io_type: UringIoType::WriteV,
             addr: RawFileAddress {
                 file: RawFile(raw_fd),
                 offset: options.offset.unwrap_or(0),
@@ -390,7 +394,7 @@ impl LocalIO for UringIo {
             w_bufs: bufs,
             r_bufs: vec![],
         };
-        let _ = shard.send(ctx);
+        shard.send(ctx).map_err(|e| {Err(WorkerError::Other(anyhow!("Errors on sending writing ctx to uring shard")))})?;
         let res = match rx.await {
             Ok(res) => res,
             Err(e) => Err(WorkerError::Other(anyhow::Error::from(e))),
