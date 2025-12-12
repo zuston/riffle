@@ -258,7 +258,6 @@ impl UringIoEngineShard {
         loop {
             'prepare: loop {
                 if self.read_inflight + self.write_inflight >= self.io_depth {
-                    println!("wait...");
                     break 'prepare;
                 }
 
@@ -289,8 +288,6 @@ impl UringIoEngineShard {
                     Some(ctx) => ctx,
                     None => break 'prepare,
                 };
-
-                println!("received...");
 
                 let mut ctx = Box::new(ctx);
 
@@ -348,7 +345,6 @@ impl UringIoEngineShard {
                 }
 
                 let res = cqe.result();
-                println!("finished...");
                 if res < 0 {
                     let _ = ctx.tx.send(Err(WorkerError::RAW_IO_ERR(res)));
                 } else {
@@ -423,8 +419,6 @@ impl LocalIO for UringIo {
             ReadRange::RANGE(x, y) => (*x, *y),
         };
 
-        println!("offset: {}. len: {}", offset, length);
-
         let (tx, rx) = oneshot::channel();
         let shard = &self.read_txs[options.task_id as usize % self.read_txs.len()];
 
@@ -456,7 +450,6 @@ impl LocalIO for UringIo {
         let _result = match rx.await {
             Ok(res) => res,
             Err(e) => {
-                println!("read error: {:?}", e);
                 return Err(WorkerError::Other(anyhow::Error::from(e)));
             }
         }?;
