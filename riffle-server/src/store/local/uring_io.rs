@@ -475,12 +475,14 @@ impl LocalIO for UringIo {
 
 #[cfg(test)]
 mod tests {
+    use crate::composed_bytes::ComposedBytes;
     use crate::runtime::manager::create_runtime;
     use crate::runtime::RuntimeRef;
     use crate::store::local::read_options::IoMode;
     use crate::store::local::sync_io::SyncLocalIO;
     use crate::store::local::uring_io::UringIoEngineBuilder;
     use crate::store::local::LocalIO;
+    use bytes::{BufMut, BytesMut};
     use log::info;
 
     #[test]
@@ -503,11 +505,34 @@ mod tests {
 
         // 1. write
         println!("writing...");
-        let write_data = b"hello io_uring test";
+        let write_data_1 = b"hello io_uring test";
         let write_options = crate::store::local::options::WriteOptions {
             append: true,
-            offset: Some(0),
-            data: DataBytes::Direct(Bytes::from(&write_data[..])),
+            offset: None,
+            data: DataBytes::Direct(Bytes::from(&write_data_1[..])),
+        };
+
+        w_runtime.block_on(async {
+            uring_io_engine
+                .write("test_file", write_options)
+                .await
+                .unwrap();
+        });
+
+        // 2. append with multi bytes
+        println!("appending...");
+        let write_data_2 = b"hello io_uring test";
+        let write_data_3 = b"hello world";
+        let write_options = crate::store::local::options::WriteOptions {
+            append: true,
+            offset: Some(write_data_1.len() as _),
+            data: DataBytes::Composed(ComposedBytes::from(
+                vec![
+                    Bytes::from(&write_data_2[..]),
+                    Bytes::from(&write_data_3[..]),
+                ],
+                write_data_2.len() + write_data_3.len(),
+            )),
         };
 
         w_runtime.block_on(async {
@@ -535,9 +560,15 @@ mod tests {
 
         // 3. validation
         println!("validating...");
+
+        let mut expected = BytesMut::new();
+        expected.put(write_data_1.as_ref());
+        expected.put(write_data_2.as_ref());
+        expected.put(write_data_3.as_ref());
+
         match result {
             DataBytes::Direct(bytes) => {
-                assert_eq!(bytes.as_ref(), write_data.as_slice());
+                assert_eq!(bytes.as_ref(), expected.as_ref());
             }
             _ => panic!("Expected direct bytes"),
         }
