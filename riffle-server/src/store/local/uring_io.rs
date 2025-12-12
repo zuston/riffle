@@ -436,7 +436,7 @@ impl LocalIO for UringIo {
         let raw_fd = file.as_raw_fd();
 
         // init buf with BytesMut for io_uring to write into
-        let mut buf = BytesMut::with_capacity(length as _);
+        let mut buf = BytesMut::zeroed(length as _);
 
         let ctx = UringIoCtx {
             tx,
