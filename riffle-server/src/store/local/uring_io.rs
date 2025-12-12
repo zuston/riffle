@@ -277,12 +277,12 @@ impl UringIoEngineShard {
                     }
                 };
 
-                println!("received...");
-
                 let ctx = match ctx {
                     Some(ctx) => ctx,
                     None => break 'prepare,
                 };
+
+                println!("received...");
 
                 let mut ctx = Box::new(ctx);
 
@@ -438,7 +438,7 @@ impl LocalIO for UringIo {
         };
 
         let _ = shard.send(ctx);
-        let bufs = match rx.await {
+        let _result = match rx.await {
             Ok(res) => res,
             Err(e) => return Err(WorkerError::Other(anyhow::Error::from(e))),
         }?;
