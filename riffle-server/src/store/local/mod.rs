@@ -112,4 +112,69 @@ mod tests {
         let prt = bytes.as_ptr();
         let raw_buf = RawBuf { ptr, len: 10 };
     }
+
+    #[test]
+    fn test_uring_write_read() -> anyhow::Result<()> {
+        use crate::runtime::manager::create_runtime;
+        use crate::runtime::RuntimeRef;
+        use crate::store::local::sync_io::SyncLocalIO;
+        use crate::store::local::uring_io::UringIoEngineBuilder;
+        use crate::store::local::LocalIO;
+        use log::info;
+
+        use crate::store::DataBytes;
+        use bytes::Bytes;
+        use tempdir::TempDir;
+        use tokio::runtime::Runtime;
+
+        let temp_dir = TempDir::new("test_write_read")?;
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        log::info!("init local file path: {}", temp_path);
+
+        let r_runtime = create_runtime(1, "r");
+        let w_runtime = create_runtime(2, "w");
+
+        let sync_io_engine =
+            SyncLocalIO::new(&r_runtime, &w_runtime, temp_path.as_str(), None, None);
+        let uring_io_engine = UringIoEngineBuilder::new().build(sync_io_engine)?;
+
+        // 1. write
+        let write_data = b"hello io_uring test";
+        let write_options = crate::store::local::options::WriteOptions {
+            offset: Some(0),
+            data: DataBytes::Direct(Bytes::from(write_data)),
+            ..Default::default()
+        };
+
+        w_runtime.block_on(async {
+            uring_io_engine
+                .write("test_file", write_options)
+                .await
+                .unwrap();
+        });
+
+        // 2. read
+        let read_options = crate::store::local::read_options::ReadOptions {
+            task_id: 0,
+            read_range: crate::store::local::read_options::ReadRange::ALL,
+            ..Default::default()
+        };
+
+        let result = r_runtime.block_on(async {
+            uring_io_engine
+                .read("test_file", read_options)
+                .await
+                .unwrap()
+        });
+
+        // 3. validation
+        match result {
+            DataBytes::Direct(bytes) => {
+                assert_eq!(bytes.as_ref(), write_data.as_slice());
+            }
+            _ => panic!("Expected direct bytes"),
+        }
+
+        Ok(())
+    }
 }
