@@ -140,6 +140,11 @@ impl UringIoEngineBuilder {
         self
     }
 
+    pub fn with_io_depth(mut self, depth: usize) -> Self {
+        self.io_depth = depth;
+        self
+    }
+
     pub fn build(self, sync_io: SyncLocalIO) -> anyhow::Result<UringIo, WorkerError> {
         if self.threads == 0 {
             return Err(WorkerError::Other(anyhow!(
