@@ -235,7 +235,7 @@ unsafe impl Send for RawBuf {}
 unsafe impl Sync for RawBuf {}
 
 struct UringIoCtx {
-    tx: oneshot::Sender<anyhow::Result<(), WorkerError>>,
+    tx: oneshot::Sender<anyhow::Result<usize, WorkerError>>,
     io_type: UringIoType,
     addr: RawFileAddress,
     w_bufs: Vec<bytes::Bytes>,
@@ -335,7 +335,7 @@ impl UringIoEngineShard {
                 if res < 0 {
                     let _ = ctx.tx.send(Err(WorkerError::RAW_IO_ERR(res)));
                 } else {
-                    let _ = ctx.tx.send(Ok(()));
+                    let _ = ctx.tx.send(Ok(res as usize));
                 }
             }
         }
@@ -368,6 +368,7 @@ impl LocalIO for UringIo {
         let (tx, rx) = oneshot::channel();
         let tag = options.data.len();
         let shard = &self.write_txs[tag % self.write_txs.len()];
+        let byte_size = options.data.len();
         let bufs = options.data.always_bytes();
 
         let path = self.with_root(path);
@@ -386,10 +387,17 @@ impl LocalIO for UringIo {
             r_bufs: vec![],
         };
         let _ = shard.send(ctx);
-        let res = match rx.await {
+        let written_bytes = match rx.await {
             Ok(res) => res,
             Err(e) => Err(WorkerError::Other(anyhow::Error::from(e))),
         }?;
+        if (byte_size != written_bytes) {
+            return Err(WorkerError::Other(anyhow!(
+                "Unexpected io write. expected/written: {}/{}",
+                byte_size,
+                written_bytes
+            )));
+        }
         Ok(())
     }
 
