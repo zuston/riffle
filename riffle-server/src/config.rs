@@ -147,10 +147,16 @@ pub struct LocalfileStoreConfig {
 pub struct IoUringConfig {
     #[serde(default = "as_default_io_uring_threads")]
     pub threads: usize,
+    #[serde(default = "as_default_io_uring_io_depth")]
+    pub io_depth: usize,
+}
+
+fn as_default_io_uring_io_depth() -> usize {
+    64
 }
 
 fn as_default_io_uring_threads() -> usize {
-    1
+    16
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

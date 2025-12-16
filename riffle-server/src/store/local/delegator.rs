@@ -105,6 +105,8 @@ impl LocalDiskDelegator {
             info!("io-uring engine is activated!");
             OperatorBuilder::new(Arc::new(Box::new(
                 UringIoEngineBuilder::new()
+                    .with_threads(cfg.threads)
+                    .with_io_depth(cfg.io_depth)
                     .build(underlying_io_handler)
                     .unwrap(),
             )))
