@@ -24,6 +24,7 @@ use clap::builder::Str;
 use core_affinity::CoreId;
 use io_uring::types::Fd;
 use io_uring::{opcode, squeue, IoUring};
+use libc::iovec;
 use std::fs::OpenOptions;
 use std::io::{Bytes, IoSlice};
 use std::os::fd::AsRawFd;
@@ -240,10 +241,13 @@ struct UringIoCtx {
     addr: RawFileAddress,
 
     w_bufs: Vec<bytes::Bytes>,
-    w_iovecs: Vec<IoSlice<'static>>,
+    w_iovecs: Vec<iovec>,
 
     r_bufs: Vec<RawBuf>,
 }
+
+unsafe impl Send for UringIoCtx {}
+unsafe impl Sync for UringIoCtx {}
 
 struct UringIoEngineShard {
     read_rx: mpsc::Receiver<UringIoCtx>,
@@ -312,7 +316,6 @@ impl UringIoEngineShard {
                         )
                         .offset(ctx.addr.offset)
                         .build()
-                        .flags(squeue::Flags::IO_LINK)
                         .into()
                     }
                 };
@@ -373,6 +376,7 @@ impl LocalIO for UringIo {
         let shard = &self.write_txs[tag % self.write_txs.len()];
         let byte_size = options.data.len();
         let bufs = options.data.always_bytes();
+        let buf_len = bufs.len();
         let slices = bufs
             .iter()
             .map(|x| IoSlice::new(x.as_ref()))
@@ -383,7 +387,7 @@ impl LocalIO for UringIo {
         let mut file = OpenOptions::new().append(true).create(true).open(path)?;
         let raw_fd = file.as_raw_fd();
 
-        let ctx = UringIoCtx {
+        let mut ctx = UringIoCtx {
             tx,
             io_type: UringIoType::WriteV,
             addr: RawFileAddress {
@@ -391,9 +395,18 @@ impl LocalIO for UringIo {
                 offset: options.offset.unwrap_or(0),
             },
             w_bufs: bufs,
-            w_iovecs: slices,
+            w_iovecs: Vec::with_capacity(buf_len),
             r_bufs: vec![],
         };
+        ctx.w_iovecs = ctx
+            .w_bufs
+            .iter()
+            .map(|b| iovec {
+                iov_base: b.as_ptr() as *mut _,
+                iov_len: b.len(),
+            })
+            .collect();
+
         let _ = shard.send(ctx);
         let written_bytes = match rx.await {
             Ok(res) => res,
