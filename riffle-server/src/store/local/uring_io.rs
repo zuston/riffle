@@ -295,6 +295,7 @@ impl UringIoEngineShard {
                 let ctx = match ctx {
                     Some(ctx) => ctx,
                     None => {
+                        // todo: we must sleep to avoid cpu busy, but maybe recv is better rather than try_recv
                         sleep(Duration::from_millis(5));
                         break 'prepare;
                     }
