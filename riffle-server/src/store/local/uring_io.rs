@@ -29,6 +29,8 @@ use std::fs::OpenOptions;
 use std::io::{Bytes, IoSlice};
 use std::os::fd::AsRawFd;
 use std::path::Path;
+use std::thread::sleep;
+use std::time::Duration;
 use std::{
     fmt::Debug,
     fs,
@@ -292,7 +294,10 @@ impl UringIoEngineShard {
 
                 let ctx = match ctx {
                     Some(ctx) => ctx,
-                    None => break 'prepare,
+                    None => {
+                        sleep(Duration::from_millis(5));
+                        break 'prepare;
+                    }
                 };
 
                 let mut ctx = Box::new(ctx);
