@@ -238,7 +238,10 @@ struct UringIoCtx {
     tx: oneshot::Sender<anyhow::Result<usize, WorkerError>>,
     io_type: UringIoType,
     addr: RawFileAddress,
+
     w_bufs: Vec<bytes::Bytes>,
+    w_iovecs: Vec<IoSlice<'static>>,
+
     r_bufs: Vec<RawBuf>,
 }
 
@@ -302,15 +305,15 @@ impl UringIoEngineShard {
                     UringIoType::WriteV => {
                         self.write_inflight += 1;
                         // https://github.com/tokio-rs/io-uring/blob/master/io-uring-test/src/utils.rs#L95
-                        let slices = ctx
-                            .w_bufs
-                            .iter()
-                            .map(|x| IoSlice::new(x.as_ref()))
-                            .collect::<Vec<_>>();
-                        opcode::Writev::new(fd, slices.as_ptr().cast(), slices.len() as _)
-                            .offset(ctx.addr.offset)
-                            .build()
-                            .flags(squeue::Flags::IO_LINK)
+                        opcode::Writev::new(
+                            fd,
+                            ctx.w_iovecs.as_ptr().cast(),
+                            ctx.w_iovecs.len() as _,
+                        )
+                        .offset(ctx.addr.offset)
+                        .build()
+                        .flags(squeue::Flags::IO_LINK)
+                        .into()
                     }
                 };
                 let data = Box::into_raw(ctx) as u64;
@@ -370,6 +373,10 @@ impl LocalIO for UringIo {
         let shard = &self.write_txs[tag % self.write_txs.len()];
         let byte_size = options.data.len();
         let bufs = options.data.always_bytes();
+        let slices = bufs
+            .iter()
+            .map(|x| IoSlice::new(x.as_ref()))
+            .collect::<Vec<_>>();
 
         let path = self.with_root(path);
         let path = Path::new(&path);
@@ -384,6 +391,7 @@ impl LocalIO for UringIo {
                 offset: options.offset.unwrap_or(0),
             },
             w_bufs: bufs,
+            w_iovecs: slices,
             r_bufs: vec![],
         };
         let _ = shard.send(ctx);
@@ -435,6 +443,7 @@ impl LocalIO for UringIo {
                 offset,
             },
             w_bufs: vec![],
+            w_iovecs: vec![],
             r_bufs: vec![RawBuf {
                 ptr: buf.as_mut_ptr(),
                 len: length as usize,
