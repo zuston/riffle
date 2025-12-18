@@ -114,7 +114,7 @@ impl LocalDiskDelegator {
             OperatorBuilder::new(Arc::new(Box::new(underlying_io_handler)))
         };
 
-        #[cfg(not(feature = "io-uring"))]
+        #[cfg(not(all(feature = "io-uring", target_os = "linux")))]
         let mut operator_builder = OperatorBuilder::new(Arc::new(Box::new(underlying_io_handler)));
 
         if let Some(conf) = config.io_limiter.as_ref() {
