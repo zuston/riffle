@@ -21,7 +21,7 @@ use crate::store::local::layers::{Handler, OperatorBuilder};
 use crate::store::local::options::WriteOptions;
 use crate::store::local::read_options::ReadOptions;
 use crate::store::local::sync_io::SyncLocalIO;
-#[cfg(feature = "io-uring")]
+#[cfg(all(feature = "io-uring", target_os = "linux"))]
 use crate::store::local::uring_io::UringIoEngineBuilder;
 use crate::store::local::{DiskStat, FileStat, LocalDiskStorage, LocalIO};
 use crate::store::DataBytes;
@@ -97,10 +97,10 @@ impl LocalDiskDelegator {
             Some(read_capacity.as_u64() as usize),
         );
 
-        #[cfg(feature = "io-uring")]
+        #[cfg(all(feature = "io-uring", target_os = "linux"))]
         info!("Binary compiled with the io-uring feature enabled.");
 
-        #[cfg(feature = "io-uring")]
+        #[cfg(all(feature = "io-uring", target_os = "linux"))]
         let mut operator_builder = if let Some(cfg) = &config.io_uring_options {
             info!("io-uring engine is activated!");
             OperatorBuilder::new(Arc::new(Box::new(
