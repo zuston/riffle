@@ -1,3 +1,4 @@
+use crate::raw_pipe::RawPipe;
 use crate::urpc::frame::Frame;
 use anyhow::{anyhow, Result};
 use log::warn;
@@ -93,6 +94,62 @@ pub fn send_file(
             "sendfile is only supported on Linux and macOS",
         ))
     }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub async fn splice(io_out: &mut TcpStream, pipe: &RawPipe) -> Result<()> {
+    Err(anyhow!("splice is only supported on Linux"))
+}
+
+#[cfg(target_os = "linux")]
+pub async fn splice(io_out: &mut TcpStream, pipe: &RawPipe) -> Result<()> {
+    use libc::{splice, SPLICE_F_MORE, SPLICE_F_MOVE};
+    use std::io;
+
+    let pipe_out_fd = pipe.pipe_out_fd.as_raw_fd();
+    let sock_fd = io_out.as_raw_fd();
+
+    let mut remaining = pipe.length;
+
+    while remaining > 0 {
+        let res = io_out
+            .async_io(Interest::WRITABLE, || {
+                let ret = unsafe {
+                    splice(
+                        pipe_out_fd,
+                        std::ptr::null_mut(),
+                        sock_fd,
+                        std::ptr::null_mut(),
+                        remaining,
+                        SPLICE_F_MOVE | SPLICE_F_MORE,
+                    )
+                };
+
+                if ret == -1 {
+                    let err = io::Error::last_os_error();
+                    return Err(err);
+                }
+
+                Ok(ret as usize)
+            })
+            .await;
+
+        match res {
+            Ok(0) => {
+                return Err(anyhow!("splice returned 0 bytes (pipe EOF)"));
+            }
+            Ok(n) => {
+                remaining -= n;
+            }
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                continue;
+            }
+            Err(e) => {
+                return Err(anyhow!(e));
+            }
+        }
+    }
+    Ok(())
 }
 
 pub async fn send_file_full(

@@ -65,9 +65,12 @@ impl ReadRange {
 #[derive(Clone, Debug)]
 #[allow(non_camel_case_types)]
 pub enum IoMode {
+    // only valid for read in linux
     SENDFILE,
     DIRECT_IO,
     BUFFER_IO,
+    // only valid for read in linux io-uring engine
+    SPLICE,
 }
 
 impl Default for ReadOptions {
@@ -120,6 +123,11 @@ impl ReadOptions {
 
     pub fn with_sendfile(mut self) -> Self {
         self.io_mode = IoMode::SENDFILE;
+        self
+    }
+
+    pub fn with_splice(mut self) -> Self {
+        self.io_mode = IoMode::SPLICE;
         self
     }
 

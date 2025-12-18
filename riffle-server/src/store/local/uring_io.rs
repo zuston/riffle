@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use crate::error::WorkerError;
+use crate::raw_pipe::RawPipe;
 use crate::store::local::options::{CreateOptions, WriteOptions};
-use crate::store::local::read_options::{ReadOptions, ReadRange};
+use crate::store::local::read_options::{IoMode, ReadOptions, ReadRange};
 use crate::store::local::sync_io::SyncLocalIO;
 use crate::store::local::{FileStat, LocalIO};
 use crate::store::DataBytes;
@@ -27,7 +28,7 @@ use io_uring::{opcode, squeue, IoUring};
 use libc::iovec;
 use std::fs::OpenOptions;
 use std::io::{Bytes, IoSlice};
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::Path;
 use std::thread::sleep;
 use std::time::Duration;
@@ -224,6 +225,8 @@ impl UringIoEngineBuilder {
 enum UringIoType {
     Read,
     WriteV,
+    // data zero-copy to socket for read
+    Splice,
 }
 
 #[cfg(any(target_family = "unix", target_family = "wasm"))]
@@ -251,6 +254,13 @@ struct UringIoCtx {
     w_iovecs: Vec<iovec>,
 
     r_bufs: Vec<RawBuf>,
+
+    splice_pipe: Option<SplicePipe>,
+}
+
+struct SplicePipe {
+    sin: i32,
+    len: usize,
 }
 
 unsafe impl Send for UringIoCtx {}
@@ -329,6 +339,22 @@ impl UringIoEngineShard {
                         .build()
                         .into()
                     }
+                    UringIoType::Splice => {
+                        // refer: https://github.com/tokio-rs/io-uring/blob/7ec7ae909f7eabcf03450e6b858919449f135ac3/io-uring-test/src/tests/fs.rs#L1084
+                        self.read_inflight += 1;
+                        let pipe = ctx.splice_pipe.as_ref().unwrap();
+                        let pipe_in = pipe.sin;
+                        let len: u32 = pipe.len as u32;
+                        opcode::Splice::new(
+                            fd,
+                            ctx.addr.offset as i64,
+                            Fd(pipe_in),
+                            -1, // pipe/socket destination must use -1
+                            len,
+                        )
+                        .build()
+                        .into()
+                    }
                 };
                 let data = Box::into_raw(ctx) as u64;
                 let sqe = sqe.user_data(data);
@@ -346,6 +372,7 @@ impl UringIoEngineShard {
                 match ctx.io_type {
                     UringIoType::Read => self.read_inflight -= 1,
                     UringIoType::WriteV => self.write_inflight -= 1,
+                    UringIoType::Splice => self.read_inflight -= 1,
                 }
 
                 let res = cqe.result();
@@ -408,6 +435,7 @@ impl LocalIO for UringIo {
             w_bufs: bufs,
             w_iovecs: Vec::with_capacity(buf_len),
             r_bufs: vec![],
+            splice_pipe: None,
         };
         ctx.w_iovecs = ctx
             .w_bufs
@@ -456,6 +484,53 @@ impl LocalIO for UringIo {
         let file = OpenOptions::new().read(true).open(path)?;
         let raw_fd = file.as_raw_fd();
 
+        if matches!(options.io_mode, IoMode::SPLICE) {
+            // init the pipe
+            let (pipe_in, mut pipe_out) = {
+                let mut pipes = [0, 0];
+                let ret = unsafe { libc::pipe(pipes.as_mut_ptr()) };
+                if (ret != 0) {
+                    return Err(WorkerError::Other(anyhow!(
+                        "Failed to create pipe for splice: {}",
+                        std::io::Error::last_os_error()
+                    )));
+                }
+                let pipe_out = unsafe { std::fs::File::from_raw_fd(pipes[0]) };
+                let pipe_in = unsafe { fs::File::from_raw_fd(pipes[1]) };
+                (pipe_in, pipe_out)
+            };
+
+            let ctx = UringIoCtx {
+                tx,
+                io_type: UringIoType::Splice,
+                addr: RawFileAddress {
+                    file: RawFile(raw_fd),
+                    offset,
+                },
+                w_bufs: vec![],
+                w_iovecs: vec![],
+                r_bufs: vec![],
+                splice_pipe: Some(SplicePipe {
+                    sin: pipe_in.as_raw_fd(),
+                    len: length as _,
+                }),
+            };
+
+            let _ = shard.send(ctx);
+            let _result = match rx.await {
+                Ok(res) => res,
+                Err(e) => {
+                    return Err(WorkerError::Other(anyhow::Error::from(e)));
+                }
+            }?;
+
+            return Ok(DataBytes::RawPipe(RawPipe::from(
+                pipe_in,
+                pipe_out,
+                length as usize,
+            )));
+        }
+
         // init buf with BytesMut for io_uring to write into
         let mut buf = BytesMut::zeroed(length as _);
 
@@ -472,6 +547,7 @@ impl LocalIO for UringIo {
                 ptr: buf.as_mut_ptr(),
                 len: length as usize,
             }],
+            splice_pipe: None,
         };
 
         let _ = shard.send(ctx);

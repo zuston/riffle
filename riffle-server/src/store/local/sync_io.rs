@@ -192,7 +192,7 @@ impl SyncLocalIO {
                     DataBytes::Composed(composed) => {
                         buf_writer.write_all(&composed.freeze())?;
                     }
-                    DataBytes::RawIO(_) => todo!(),
+                    _ => todo!(),
                 }
                 buf_writer.flush()?;
 
@@ -430,7 +430,7 @@ impl LocalIO for SyncLocalIO {
         options: ReadOptions,
     ) -> anyhow::Result<DataBytes, WorkerError> {
         let data = match options.io_mode {
-            IoMode::SENDFILE => {
+            IoMode::SENDFILE | IoMode::SPLICE => {
                 let (off, len) = match options.read_range {
                     ReadRange::RANGE(off, len) => (off, len),
                     _ => {

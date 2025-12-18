@@ -149,6 +149,9 @@ pub struct IoUringConfig {
     pub threads: usize,
     #[serde(default = "as_default_io_uring_io_depth")]
     pub io_depth: usize,
+
+    #[serde(default = "bool::default")]
+    pub read_splice_enbaled: bool,
 }
 
 fn as_default_io_uring_io_depth() -> usize {
