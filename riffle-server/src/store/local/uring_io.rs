@@ -572,13 +572,14 @@ impl LocalIO for UringIo {
 
 #[cfg(test)]
 mod tests {
-    use crate::composed_bytes::ComposedBytes;
     use crate::runtime::manager::create_runtime;
     use crate::runtime::RuntimeRef;
     use crate::store::local::read_options::IoMode;
     use crate::store::local::sync_io::SyncLocalIO;
     use crate::store::local::uring_io::UringIoEngineBuilder;
     use crate::store::local::LocalIO;
+    use crate::store::DataBytes;
+    use crate::{composed_bytes::ComposedBytes, raw_pipe::RawPipe};
     use bytes::{BufMut, BytesMut};
     use log::info;
 
@@ -668,6 +669,73 @@ mod tests {
                 assert_eq!(bytes.as_ref(), expected.as_ref());
             }
             _ => panic!("Expected direct bytes"),
+        }
+
+        Ok(())
+    }
+
+    fn read_with_splice(content: String) -> anyhow::Result<DataBytes> {
+        // create the data and then read with splice
+        use crate::store::DataBytes;
+        use bytes::Bytes;
+        use std::io::Read;
+        use tempdir::TempDir;
+        let temp_dir = TempDir::new("test_read_splice")?;
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        println!("init local file path: {}", temp_path);
+        let r_runtime = create_runtime(1, "r");
+        let w_runtime = create_runtime(2, "w");
+        let sync_io_engine =
+            SyncLocalIO::new(&r_runtime, &w_runtime, temp_path.as_str(), None, None);
+        let uring_io_engine = UringIoEngineBuilder::new().build(sync_io_engine)?;
+        // 1. write
+        println!("writing...");
+        let write_options = crate::store::local::options::WriteOptions {
+            append: true,
+            offset: Some(0),
+            data: DataBytes::Direct(Bytes::from(content)),
+        };
+        w_runtime.block_on(async {
+            uring_io_engine
+                .write("test_file_splice", write_options)
+                .await
+                .unwrap();
+        });
+        // 2. read with splice
+        println!("reading with splice...");
+        let read_options = crate::store::local::read_options::ReadOptions {
+            io_mode: IoMode::SPLICE,
+            task_id: 0,
+            read_range: crate::store::local::read_options::ReadRange::ALL,
+            ahead_options: None,
+        };
+        let result = r_runtime.block_on(async {
+            uring_io_engine
+                .read("test_file_splice", read_options)
+                .await
+                .unwrap()
+        });
+        Ok(result)
+    }
+
+    #[test]
+    fn test_read_with_splice() -> anyhow::Result<()> {
+        use std::io::Read;
+
+        // case1: check the raw-pipe read
+        let write_data = "helloworld!!!!!!";
+        println!("validating with direct read...");
+        let result = read_with_splice(write_data.to_owned())?;
+        match result {
+            DataBytes::RawPipe(raw_pipe) => {
+                assert!(raw_pipe.length == write_data.len());
+                let mut read_buf = vec![0u8; raw_pipe.length];
+                let mut fd = raw_pipe.pipe_out_fd;
+                fd.read_exact(&mut read_buf)?;
+                // to compare
+                assert_eq!(read_buf.as_slice(), write_data.as_bytes());
+            }
+            _ => panic!("Expected raw pipe bytes"),
         }
 
         Ok(())
