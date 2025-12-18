@@ -25,7 +25,7 @@ use clap::builder::Str;
 use core_affinity::CoreId;
 use io_uring::types::Fd;
 use io_uring::{opcode, squeue, IoUring};
-use libc::iovec;
+use libc::{fcntl, iovec, F_SETPIPE_SZ};
 use std::fs::OpenOptions;
 use std::io::{Bytes, IoSlice};
 use std::os::fd::{AsRawFd, FromRawFd};
@@ -484,7 +484,8 @@ impl LocalIO for UringIo {
         let file = OpenOptions::new().read(true).open(path)?;
         let raw_fd = file.as_raw_fd();
 
-        if matches!(options.io_mode, IoMode::SPLICE) {
+        // make the size as the optional config option in io-uring
+        if matches!(options.io_mode, IoMode::SPLICE) && length < 16 * 1024 * 1024 {
             // init the pipe
             let (pipe_in, mut pipe_out) = {
                 let mut pipes = [0, 0];
@@ -499,6 +500,13 @@ impl LocalIO for UringIo {
                 let pipe_in = unsafe { fs::File::from_raw_fd(pipes[1]) };
                 (pipe_in, pipe_out)
             };
+
+            use libc::fcntl;
+            use libc::F_SETPIPE_SZ;
+            unsafe {
+                let pipe_size = 16 * 1024 * 1024;
+                fcntl(pipe_in.as_raw_fd(), F_SETPIPE_SZ, pipe_size);
+            }
 
             let ctx = UringIoCtx {
                 tx,
@@ -571,7 +579,7 @@ impl LocalIO for UringIo {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use crate::runtime::manager::create_runtime;
     use crate::runtime::RuntimeRef;
     use crate::store::local::read_options::IoMode;
@@ -674,7 +682,7 @@ mod tests {
         Ok(())
     }
 
-    fn read_with_splice(content: String) -> anyhow::Result<DataBytes> {
+    pub fn read_with_splice(content: String) -> anyhow::Result<DataBytes> {
         // create the data and then read with splice
         use crate::store::DataBytes;
         use bytes::Bytes;
