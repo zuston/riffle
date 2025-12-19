@@ -1,22 +1,14 @@
 use crate::config::RpcVersion;
+use crate::store::local::read_options::IoMode;
 use crate::util;
 use clap::builder::Str;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 
 /// The configuration options related to riffle-servers on the Uniffle client side.
-pub static SENDFILE_ENABLED_OPTION: Lazy<ClientConfigOption<bool>> = Lazy::new(|| {
-    ClientConfigOption::key("spark.rss.riffle.urpcSendfileEnabled")
-        .default_value(false)
-        .with_description("This indicates whether the sendfile is enabled when urpc is activated without io-uring.")
-});
-
-pub static SPLICE_ENABLED_OPTION: Lazy<ClientConfigOption<bool>> = Lazy::new(|| {
-    ClientConfigOption::key("spark.rss.riffle.urpcSpliceEnabled")
-        .default_value(false)
-        .with_description(
-            "This indicates whether the splice is enabled when urpc is activated with io-uring.",
-        )
+pub static READ_IO_MODE_OPTION: Lazy<ClientConfigOption<IoMode>> = Lazy::new(|| {
+    ClientConfigOption::key("spark.rss.riffle.readIoMode").default_value(IoMode::BUFFER_IO)
+        .with_description("Io mode for reading, but sendfile is only valid in urpc without uring and splice is only valid in urpc with uring!")
 });
 
 pub static HDFS_CLIENT_EAGER_LOADING_ENABLED_OPTION: Lazy<ClientConfigOption<bool>> = Lazy::new(
@@ -164,26 +156,5 @@ mod tests {
     fn test_no_default_value() {
         let conf = ClientRssConf::default();
         assert_eq!(None, conf.get(&READ_AHEAD_BATCH_SIZE));
-    }
-
-    #[test]
-    fn test_sendfile_enabled_option_default() {
-        let conf = ClientRssConf {
-            properties: HashMap::new(),
-        };
-        let result = conf.get(&SENDFILE_ENABLED_OPTION);
-        assert_eq!(result, Some(false));
-    }
-
-    #[test]
-    fn test_sendfile_enabled_option_set_true() {
-        let mut props = HashMap::new();
-        props.insert(
-            "spark.rss.riffle.urpcSendfileEnabled".to_string(),
-            "true".to_string(),
-        );
-        let conf = ClientRssConf { properties: props };
-        let result = conf.get(&SENDFILE_ENABLED_OPTION);
-        assert_eq!(result, Some(true));
     }
 }
