@@ -97,8 +97,14 @@ pub struct LocalFileStore {
     direct_io_read_enable: bool,
     direct_io_append_enable: bool,
 
-    // This is only valid in urpc mode.
+    // This is only valid in urpc mode without io-uring
     read_io_sendfile_enable: bool,
+
+    io_uring_enabled: bool,
+    // this is only for the urpc + io-uring mode.
+    // todo: now we have too many IO mode to be compatible with the upper RPC layer.
+    // we'd better refactor later.
+    read_io_splice_enabled: bool,
 
     conf: LocalfileStoreConfig,
 }
@@ -127,6 +133,8 @@ impl LocalFileStore {
             direct_io_append_enable: config.direct_io_append_enable,
             read_io_sendfile_enable: false,
             conf: Default::default(),
+            io_uring_enabled: false,
+            read_io_splice_enabled: false,
         }
     }
 
@@ -182,6 +190,12 @@ impl LocalFileStore {
             direct_io_append_enable: localfile_config.direct_io_append_enable,
             read_io_sendfile_enable: localfile_config.read_io_sendfile_enable,
             conf: localfile_config.clone(),
+            io_uring_enabled: localfile_config.io_uring_options.is_some(),
+            read_io_splice_enabled: localfile_config
+                .io_uring_options
+                .as_ref()
+                .map(|x| x.read_splice_enbaled)
+                .unwrap_or(false),
         }
     }
 
@@ -491,6 +505,11 @@ impl Store for LocalFileStore {
                     && client_sendfile_enabled)
                 {
                     read_options.with_sendfile()
+                } else if (self.io_uring_enabled
+                    && rpc_source == RpcType::URPC
+                    && self.read_io_splice_enabled)
+                {
+                    read_options.with_splice()
                 } else {
                     read_options.with_buffer_io()
                 };

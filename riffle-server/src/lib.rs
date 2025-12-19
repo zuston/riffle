@@ -65,3 +65,5 @@ pub mod mini_riffle;
 mod partition_stats;
 mod raw_io;
 mod system_libc;
+
+pub mod raw_pipe;
