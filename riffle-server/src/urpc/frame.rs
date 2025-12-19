@@ -2,7 +2,7 @@ use crate::error::WorkerError;
 use crate::error::WorkerError::{STREAM_INCOMPLETE, STREAM_INCORRECT};
 use crate::store::ResponseData::Mem;
 use crate::store::{Block, DataBytes};
-use crate::system_libc::send_file_full;
+use crate::system_libc::{self, send_file_full};
 use crate::urpc::command::{
     GetLocalDataIndexRequestCommand, GetLocalDataIndexResponseCommand,
     GetLocalDataIndexV2ResponseCommand, GetLocalDataRequestCommand, GetLocalDataRequestV2Command,
@@ -21,6 +21,7 @@ use std::io;
 use std::io::{Cursor, IoSlice};
 use strum_macros::EnumVariantNames;
 use tokio::io::{AsyncWriteExt, BufWriter, Interest};
+use tokio::net::unix::pipe;
 use tokio::net::TcpStream;
 use tracing::{debug, info};
 
@@ -151,6 +152,12 @@ impl Frame {
                         )
                         .await.map_err(|e| {
                             error!("Errors on getting localfile data by sendfile. off:{}. length:{}. e: {}", raw.offset, raw.length, &e);
+                            e
+                        })?;
+                    }
+                    DataBytes::RawPipe(pipe) => {
+                        system_libc::splice(stream, pipe).await.map_err(|e| {
+                            error!("Errors on getting localfile data by splice from pipe. length:{}. e: {}", pipe.length, &e);
                             e
                         })?;
                     }

@@ -44,6 +44,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use crate::composed_bytes::ComposedBytes;
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::raw_io::RawIO;
+use crate::raw_pipe::RawPipe;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::index_codec::IndexCodec;
 use crate::store::spill::SpillWritingViewContext;
@@ -143,6 +144,7 @@ pub enum DataBytes {
     Direct(Bytes),
     Composed(ComposedBytes),
     RawIO(RawIO),
+    RawPipe(RawPipe),
 }
 
 impl Into<DataBytes> for Bytes {
@@ -163,6 +165,7 @@ impl DataBytes {
             DataBytes::Direct(bytes) => bytes.len(),
             DataBytes::Composed(composed) => composed.len(),
             DataBytes::RawIO(io_handle) => io_handle.length as usize,
+            DataBytes::RawPipe(pipe_handle) => pipe_handle.length,
         }
     }
 
