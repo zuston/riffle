@@ -157,7 +157,7 @@ impl ReadingViewContext {
         self
     }
 
-    pub fn with_urpc_read_io_mode(mut self, mode: IoMode) -> Self {
+    pub fn with_io_mode(mut self, mode: IoMode) -> Self {
         self.urpc_read_io_mode = mode;
         self
     }

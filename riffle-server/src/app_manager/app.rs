@@ -230,7 +230,7 @@ impl App {
         self.heartbeat()?;
 
         // with the read mode.
-        let ctx = ctx.with_urpc_read_io_mode(self.app_config_options.urpc_read_io_mode.clone());
+        let ctx = ctx.with_io_mode(self.app_config_options.urpc_read_io_mode.clone());
 
         let ctx = if self.app_config_options.read_ahead_enable {
             // This is a workaround — we can infer sequential reads when the taskId filter bitmap is enabled.
