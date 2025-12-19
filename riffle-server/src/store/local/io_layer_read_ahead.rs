@@ -376,7 +376,7 @@ mod tests {
     use super::*;
     use crate::error::WorkerError;
     use crate::runtime::manager::create_runtime;
-    use crate::store::local::read_options::{ReadOptions, ReadRange};
+    use crate::store::local::read_options::{IoMode, ReadOptions, ReadRange};
     use crate::store::local::FileStat;
     use crate::store::local::{CreateOptions, LocalIO, WriteOptions};
     use crate::store::DataBytes;
@@ -425,7 +425,7 @@ mod tests {
 
         // 1st read ahead
         let options = ReadOptions::default()
-            .with_buffer_io()
+            .with_io_mode(IoMode::BUFFER_IO)
             .with_read_range(ReadRange::RANGE(0, 5))
             .with_ahead_options(AheadOptions {
                 sequential: true,
@@ -495,7 +495,7 @@ mod tests {
         };
 
         let options = ReadOptions::default()
-            .with_buffer_io()
+            .with_io_mode(IoMode::BUFFER_IO)
             .with_read_range(ReadRange::RANGE(0, 1))
             .with_ahead_options(AheadOptions {
                 sequential: false,

@@ -44,12 +44,6 @@ mod tests {
         config.hybrid_store.memory_single_buffer_max_spill_size = Some("1B".to_string());
         config.localfile_store.as_mut().unwrap().disk_high_watermark = 1.0;
 
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        {
-            let localfile_config = config.localfile_store.as_mut().unwrap();
-            localfile_config.read_io_sendfile_enable = true
-        }
-
         let _app_ref = mini_riffle::start(&config).await?;
         // wait all setup
         tokio::time::sleep(Duration::from_secs(1)).await;

@@ -16,7 +16,10 @@
 // under the License.
 
 use crate::app_manager::request_context::PurgeDataContext;
+use crate::config::RpcVersion;
 use crate::urpc::command::ReadSegment;
+use std::str::FromStr;
+use strum_macros::Display;
 
 #[derive(Clone, Debug)]
 pub struct ReadOptions {
@@ -62,7 +65,7 @@ impl ReadRange {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Display)]
 #[allow(non_camel_case_types)]
 pub enum IoMode {
     // only valid for read in linux
@@ -71,6 +74,36 @@ pub enum IoMode {
     BUFFER_IO,
     // only valid for read in linux io-uring engine
     SPLICE,
+}
+
+impl IoMode {
+    pub(crate) fn fallback(self, exclusive: Vec<IoMode>, to: IoMode) -> Self {
+        for mode in exclusive {
+            if matches!(&self, mode) {
+                return to;
+            }
+        }
+        self
+    }
+}
+
+impl Default for IoMode {
+    fn default() -> Self {
+        IoMode::BUFFER_IO
+    }
+}
+
+impl FromStr for IoMode {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s.to_uppercase().as_str() {
+            "SENDFILE" => IoMode::SENDFILE,
+            "DIRECT_IO" => IoMode::DIRECT_IO,
+            "SPLICE" => IoMode::SPLICE,
+            _ => IoMode::BUFFER_IO,
+        })
+    }
 }
 
 impl Default for ReadOptions {
@@ -100,34 +133,13 @@ impl ReadOptions {
         self
     }
 
-    pub fn with_read_all(mut self) -> Self {
-        self.io_mode = IoMode::BUFFER_IO;
-        self.read_range = ReadRange::ALL;
-        self
-    }
-
     pub fn with_read_range(mut self, range: ReadRange) -> Self {
         self.read_range = range;
         self
     }
 
-    pub fn with_buffer_io(mut self) -> Self {
-        self.io_mode = IoMode::BUFFER_IO;
-        self
-    }
-
-    pub fn with_direct_io(mut self) -> Self {
-        self.io_mode = IoMode::DIRECT_IO;
-        self
-    }
-
-    pub fn with_sendfile(mut self) -> Self {
-        self.io_mode = IoMode::SENDFILE;
-        self
-    }
-
-    pub fn with_splice(mut self) -> Self {
-        self.io_mode = IoMode::SPLICE;
+    pub fn with_io_mode(mut self, io_mode: IoMode) -> Self {
+        self.io_mode = io_mode;
         self
     }
 
@@ -173,7 +185,7 @@ mod test {
         assert_eq!(opts.ahead_options.is_some(), true);
 
         // with_read_all
-        let opts2 = ReadOptions::default().with_read_all();
+        let opts2 = ReadOptions::default().with_read_range(ReadRange::ALL);
         assert!(matches!(opts2.io_mode, IoMode::BUFFER_IO));
         assert!(matches!(opts2.read_range, ReadRange::ALL));
         assert_eq!(opts2.ahead_options.is_some(), false);
@@ -184,17 +196,17 @@ mod test {
         assert_eq!(opts3.ahead_options.is_some(), false);
 
         // with_buffer_io
-        let opts4 = ReadOptions::default().with_buffer_io();
+        let opts4 = ReadOptions::default().with_io_mode(IoMode::BUFFER_IO);
         assert!(matches!(opts4.io_mode, IoMode::BUFFER_IO));
         assert_eq!(opts4.ahead_options.is_some(), false);
 
         // with_direct_io
-        let opts5 = ReadOptions::default().with_direct_io();
+        let opts5 = ReadOptions::default().with_io_mode(IoMode::DIRECT_IO);
         assert!(matches!(opts5.io_mode, IoMode::DIRECT_IO));
         assert_eq!(opts5.ahead_options.is_some(), false);
 
         // with_sendfile
-        let opts6 = ReadOptions::default().with_sendfile();
+        let opts6 = ReadOptions::default().with_io_mode(IoMode::SENDFILE);
         assert!(matches!(opts6.io_mode, IoMode::SENDFILE));
         assert_eq!(opts6.ahead_options.is_some(), false);
     }
