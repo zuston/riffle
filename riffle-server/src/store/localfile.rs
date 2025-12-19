@@ -56,7 +56,7 @@ use crate::runtime::manager::RuntimeManager;
 use crate::store::index_codec::{IndexCodec, INDEX_BLOCK_SIZE};
 use crate::store::local::delegator::LocalDiskDelegator;
 use crate::store::local::options::{CreateOptions, WriteOptions};
-use crate::store::local::read_options::{AheadOptions, ReadOptions, ReadRange};
+use crate::store::local::read_options::{AheadOptions, IoMode, ReadOptions, ReadRange};
 use crate::store::local::{LocalDiskStorage, LocalIO, LocalfileStoreStat};
 use crate::store::spill::SpillWritingViewContext;
 use crate::util;
@@ -97,15 +97,6 @@ pub struct LocalFileStore {
     direct_io_read_enable: bool,
     direct_io_append_enable: bool,
 
-    // This is only valid in urpc mode without io-uring
-    read_io_sendfile_enable: bool,
-
-    io_uring_enabled: bool,
-    // this is only for the urpc + io-uring mode.
-    // todo: now we have too many IO mode to be compatible with the upper RPC layer.
-    // we'd better refactor later.
-    read_io_splice_enabled: bool,
-
     conf: LocalfileStoreConfig,
 }
 
@@ -131,10 +122,7 @@ impl LocalFileStore {
             direct_io_enable: config.direct_io_enable,
             direct_io_read_enable: config.direct_io_read_enable,
             direct_io_append_enable: config.direct_io_append_enable,
-            read_io_sendfile_enable: false,
             conf: Default::default(),
-            io_uring_enabled: false,
-            read_io_splice_enabled: false,
         }
     }
 
@@ -188,14 +176,7 @@ impl LocalFileStore {
             direct_io_enable: localfile_config.direct_io_enable,
             direct_io_read_enable: localfile_config.direct_io_read_enable,
             direct_io_append_enable: localfile_config.direct_io_append_enable,
-            read_io_sendfile_enable: localfile_config.read_io_sendfile_enable,
             conf: localfile_config.clone(),
-            io_uring_enabled: localfile_config.io_uring_options.is_some(),
-            read_io_splice_enabled: localfile_config
-                .io_uring_options
-                .as_ref()
-                .map(|x| x.read_splice_enbaled)
-                .unwrap_or(false),
         }
     }
 
@@ -462,7 +443,7 @@ impl Store for LocalFileStore {
         let timer = Instant::now();
         let uid = ctx.uid;
         let rpc_source = ctx.rpc_source;
-        let client_sendfile_enabled = ctx.sendfile_enabled;
+        let io_mode = ctx.urpc_read_io_mode;
         let (offset, len) = match ctx.reading_options {
             FILE_OFFSET_AND_LEN(offset, len) => (offset as u64, len as u64),
             _ => (0, 0),
@@ -495,24 +476,22 @@ impl Store for LocalFileStore {
                 }
 
                 // Setting up the read options for downstream to determinize io mode ...
-                let read_options =
-                    ReadOptions::default().with_read_range(ReadRange::RANGE(offset, len));
+                let mut read_options = ReadOptions::default()
+                    .with_read_range(ReadRange::RANGE(offset, len))
+                    .with_task_id(ctx.task_id);
 
-                let mut read_options = if self.direct_io_enable && self.direct_io_read_enable {
-                    read_options.with_direct_io()
-                } else if (self.read_io_sendfile_enable
-                    && rpc_source == RpcType::URPC
-                    && client_sendfile_enabled)
-                {
-                    read_options.with_sendfile()
-                } else if (self.io_uring_enabled
-                    && rpc_source == RpcType::URPC
-                    && self.read_io_splice_enabled)
-                {
-                    read_options.with_splice()
+                // determine to use which io_mode
+                let io_mode = if self.direct_io_enable && self.direct_io_read_enable {
+                    IoMode::DIRECT_IO
                 } else {
-                    read_options.with_buffer_io()
+                    if matches!(rpc_source, RpcType::URPC) {
+                        io_mode
+                    } else {
+                        io_mode.fallback()
+                    }
                 };
+                read_options = read_options.with_io_mode(io_mode);
+
                 if ctx.read_ahead_client_enabled {
                     let ahead = AheadOptions {
                         sequential: ctx.sequential,
@@ -522,7 +501,6 @@ impl Store for LocalFileStore {
                     };
                     read_options = read_options.with_ahead_options(ahead);
                 }
-                let read_options = read_options.with_task_id(ctx.task_id);
 
                 let future_read = local_disk.read(&data_file_path, read_options);
                 let data = future_read
@@ -574,7 +552,7 @@ impl Store for LocalFileStore {
                 let len = partition_coordinator.pointer.load(SeqCst);
                 let read_options = ReadOptions::default()
                     .with_read_range(ReadRange::ALL)
-                    .with_buffer_io();
+                    .with_io_mode(IoMode::BUFFER_IO);
                 let mut data = local_disk
                     .read(&index_file_path, read_options)
                     .instrument_await(format!(

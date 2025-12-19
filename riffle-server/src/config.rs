@@ -134,10 +134,6 @@ pub struct LocalfileStoreConfig {
 
     pub io_limiter: Option<IoLimiterConfig>,
 
-    // This is only for urpc without uring
-    #[serde(default = "as_default_read_io_sendfile_enable")]
-    pub read_io_sendfile_enable: bool,
-
     pub read_ahead_options: Option<ReadAheadConfig>,
 
     pub io_uring_options: Option<IoUringConfig>,
@@ -149,9 +145,6 @@ pub struct IoUringConfig {
     pub threads: usize,
     #[serde(default = "as_default_io_uring_io_depth")]
     pub io_depth: usize,
-
-    #[serde(default = "bool::default")]
-    pub read_splice_enbaled: bool,
 }
 
 fn as_default_io_uring_io_depth() -> usize {
@@ -272,7 +265,6 @@ impl LocalfileStoreConfig {
             io_duration_threshold_sec: as_default_io_duration_threshold_sec(),
             index_consistency_detection_enable: false,
             io_limiter: None,
-            read_io_sendfile_enable: as_default_read_io_sendfile_enable(),
             read_ahead_options: None,
             io_uring_options: None,
         }

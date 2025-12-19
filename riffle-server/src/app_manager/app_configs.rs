@@ -2,10 +2,11 @@ use crate::app_manager::request_context::PurgeDataContext;
 use crate::client_configs::{
     ClientConfigOption, ClientRssConf, GET_MEMORY_DATA_URPC_VERSION,
     HDFS_CLIENT_EAGER_LOADING_ENABLED_OPTION, READ_AHEAD_BATCH_NUMBER, READ_AHEAD_BATCH_SIZE,
-    READ_AHEAD_ENABLED_OPTION, SENDFILE_ENABLED_OPTION,
+    READ_AHEAD_ENABLED_OPTION, URPC_READ_IO_MODE_OPTION,
 };
 use crate::config::RpcVersion;
 use crate::grpc::protobuf::uniffle::RemoteStorage;
+use crate::store::local::read_options::IoMode;
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::{Display, Formatter};
@@ -25,14 +26,20 @@ pub struct AppConfigOptions {
     pub data_distribution: DataDistribution,
     pub max_concurrency_per_partition_to_write: i32,
     pub remote_storage_config_option: Option<RemoteStorageConfig>,
-    pub sendfile_enable: bool,
+
+    // about read ahead configs
     pub read_ahead_enable: bool,
     pub read_ahead_batch_number: Option<usize>,
     pub read_ahead_batch_size: Option<usize>,
-    pub client_configs: ClientRssConf,
 
     // the urpc endpoint version
     pub get_memory_data_urpc_version: RpcVersion,
+
+    // urpc_read_io_mode
+    pub urpc_read_io_mode: IoMode,
+
+    // all client configs
+    pub client_configs: ClientRssConf,
 }
 
 impl AppConfigOptions {
@@ -46,7 +53,6 @@ impl AppConfigOptions {
             data_distribution,
             max_concurrency_per_partition_to_write,
             remote_storage_config_option,
-            sendfile_enable: rss_config.get(&SENDFILE_ENABLED_OPTION).unwrap_or(false),
             read_ahead_enable: rss_config.get(&READ_AHEAD_ENABLED_OPTION).unwrap_or(false),
             read_ahead_batch_number: rss_config.get(&READ_AHEAD_BATCH_NUMBER),
             read_ahead_batch_size: rss_config
@@ -55,6 +61,9 @@ impl AppConfigOptions {
             get_memory_data_urpc_version: rss_config
                 .get(&GET_MEMORY_DATA_URPC_VERSION)
                 .unwrap_or(RpcVersion::V1),
+            urpc_read_io_mode: rss_config
+                .get(&URPC_READ_IO_MODE_OPTION)
+                .unwrap_or(IoMode::BUFFER_IO),
             client_configs: rss_config,
         }
     }
@@ -66,12 +75,12 @@ impl Default for AppConfigOptions {
             data_distribution: DataDistribution::LOCAL_ORDER,
             max_concurrency_per_partition_to_write: 20,
             remote_storage_config_option: None,
-            sendfile_enable: false,
             read_ahead_enable: false,
             read_ahead_batch_number: None,
             read_ahead_batch_size: None,
             client_configs: Default::default(),
             get_memory_data_urpc_version: RpcVersion::V1,
+            urpc_read_io_mode: Default::default(),
         }
     }
 }
@@ -80,8 +89,8 @@ impl Display for AppConfigOptions {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "data_distribution={}, sendfile_enable={}, read_ahead_enable={}",
-            &self.data_distribution, self.sendfile_enable, self.read_ahead_enable
+            "data_distribution={}, urpc_read_io_mode={}, read_ahead_enable={}",
+            &self.data_distribution, self.urpc_read_io_mode, self.read_ahead_enable
         )
     }
 }

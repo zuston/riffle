@@ -229,11 +229,8 @@ impl App {
     pub async fn select(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
         self.heartbeat()?;
 
-        let ctx = if (self.app_config_options.sendfile_enable) {
-            ctx.with_sendfile_enabled()
-        } else {
-            ctx
-        };
+        // with the read mode.
+        let ctx = ctx.with_urpc_read_io_mode(self.app_config_options.urpc_read_io_mode.clone());
 
         let ctx = if self.app_config_options.read_ahead_enable {
             // This is a workaround — we can infer sequential reads when the taskId filter bitmap is enabled.
