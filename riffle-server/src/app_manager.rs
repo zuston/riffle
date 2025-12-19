@@ -440,13 +440,13 @@ pub(crate) mod test {
             data_distribution: DataDistribution::NORMAL,
             max_concurrency_per_partition_to_write: 0,
             remote_storage_config_option: None,
-            sendfile_enable: false,
             // activate read ahead
             read_ahead_enable: true,
             read_ahead_batch_number: None,
             read_ahead_batch_size: None,
             client_configs: Default::default(),
             get_memory_data_urpc_version: Default::default(),
+            read_io_mode: Default::default(),
         };
         app_manager_ref
             .register(raw_app_id.to_string(), shuffle_id, app_options)
