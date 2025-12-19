@@ -8,7 +8,15 @@ use std::collections::HashMap;
 pub static SENDFILE_ENABLED_OPTION: Lazy<ClientConfigOption<bool>> = Lazy::new(|| {
     ClientConfigOption::key("spark.rss.riffle.urpcSendfileEnabled")
         .default_value(false)
-        .with_description("This indicates whether the sendfile is enabled when urpc is activated")
+        .with_description("This indicates whether the sendfile is enabled when urpc is activated without io-uring.")
+});
+
+pub static SPLICE_ENABLED_OPTION: Lazy<ClientConfigOption<bool>> = Lazy::new(|| {
+    ClientConfigOption::key("spark.rss.riffle.urpcSpliceEnabled")
+        .default_value(false)
+        .with_description(
+            "This indicates whether the splice is enabled when urpc is activated with io-uring.",
+        )
 });
 
 pub static HDFS_CLIENT_EAGER_LOADING_ENABLED_OPTION: Lazy<ClientConfigOption<bool>> = Lazy::new(

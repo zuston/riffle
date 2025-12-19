@@ -134,7 +134,7 @@ pub struct LocalfileStoreConfig {
 
     pub io_limiter: Option<IoLimiterConfig>,
 
-    // This is only for urpc
+    // This is only for urpc without uring
     #[serde(default = "as_default_read_io_sendfile_enable")]
     pub read_io_sendfile_enable: bool,
 
