@@ -193,7 +193,7 @@ pub async fn shuffle_testing(config: &Config, app_ref: AppManagerRef) -> anyhow:
             read_ahead_batch_size: None,
             localfile_next_read_segments: vec![],
             task_id: 0,
-            urpc_read_io_mode: Default::default(),
+            io_mode: Default::default(),
         })
         .await?;
     let mut total_partition_len = 0;
@@ -211,7 +211,7 @@ pub async fn shuffle_testing(config: &Config, app_ref: AppManagerRef) -> anyhow:
             read_ahead_batch_size: None,
             localfile_next_read_segments: vec![],
             task_id: 0,
-            urpc_read_io_mode: Default::default(),
+            io_mode: Default::default(),
         })
         .await?;
     let xdata = response.from_local();

@@ -125,7 +125,8 @@ pub struct ReadingViewContext {
     pub localfile_next_read_segments: Vec<ReadSegment>,
     pub task_id: i64,
 
-    pub urpc_read_io_mode: IoMode,
+    // read io mode
+    pub io_mode: IoMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,7 +148,7 @@ impl ReadingViewContext {
             read_ahead_batch_size: None,
             localfile_next_read_segments: vec![],
             task_id: 0,
-            urpc_read_io_mode: Default::default(),
+            io_mode: Default::default(),
         }
     }
 
@@ -158,7 +159,7 @@ impl ReadingViewContext {
     }
 
     pub fn with_io_mode(mut self, mode: IoMode) -> Self {
-        self.urpc_read_io_mode = mode;
+        self.io_mode = mode;
         self
     }
 

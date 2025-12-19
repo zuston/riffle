@@ -6,8 +6,9 @@ use once_cell::sync::Lazy;
 use std::collections::HashMap;
 
 /// The configuration options related to riffle-servers on the Uniffle client side.
-pub static URPC_READ_IO_MODE_OPTION: Lazy<ClientConfigOption<IoMode>> = Lazy::new(|| {
-    ClientConfigOption::key("spark.rss.riffle.urpcReadIoMode").default_value(IoMode::BUFFER_IO)
+pub static READ_IO_MODE_OPTION: Lazy<ClientConfigOption<IoMode>> = Lazy::new(|| {
+    ClientConfigOption::key("spark.rss.riffle.readIoMode").default_value(IoMode::BUFFER_IO)
+        .with_description("Io mode for reading, but sendfile is only valid in urpc without uring and splice is only valid in urpc with uring!")
 });
 
 pub static HDFS_CLIENT_EAGER_LOADING_ENABLED_OPTION: Lazy<ClientConfigOption<bool>> = Lazy::new(

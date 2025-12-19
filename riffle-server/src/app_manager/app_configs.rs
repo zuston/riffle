@@ -2,7 +2,7 @@ use crate::app_manager::request_context::PurgeDataContext;
 use crate::client_configs::{
     ClientConfigOption, ClientRssConf, GET_MEMORY_DATA_URPC_VERSION,
     HDFS_CLIENT_EAGER_LOADING_ENABLED_OPTION, READ_AHEAD_BATCH_NUMBER, READ_AHEAD_BATCH_SIZE,
-    READ_AHEAD_ENABLED_OPTION, URPC_READ_IO_MODE_OPTION,
+    READ_AHEAD_ENABLED_OPTION, READ_IO_MODE_OPTION,
 };
 use crate::config::RpcVersion;
 use crate::grpc::protobuf::uniffle::RemoteStorage;
@@ -36,7 +36,7 @@ pub struct AppConfigOptions {
     pub get_memory_data_urpc_version: RpcVersion,
 
     // urpc_read_io_mode
-    pub urpc_read_io_mode: IoMode,
+    pub read_io_mode: IoMode,
 
     // all client configs
     pub client_configs: ClientRssConf,
@@ -61,8 +61,8 @@ impl AppConfigOptions {
             get_memory_data_urpc_version: rss_config
                 .get(&GET_MEMORY_DATA_URPC_VERSION)
                 .unwrap_or(RpcVersion::V1),
-            urpc_read_io_mode: rss_config
-                .get(&URPC_READ_IO_MODE_OPTION)
+            read_io_mode: rss_config
+                .get(&READ_IO_MODE_OPTION)
                 .unwrap_or(IoMode::BUFFER_IO),
             client_configs: rss_config,
         }
@@ -80,7 +80,7 @@ impl Default for AppConfigOptions {
             read_ahead_batch_size: None,
             client_configs: Default::default(),
             get_memory_data_urpc_version: RpcVersion::V1,
-            urpc_read_io_mode: Default::default(),
+            read_io_mode: Default::default(),
         }
     }
 }
@@ -90,7 +90,7 @@ impl Display for AppConfigOptions {
         write!(
             f,
             "data_distribution={}, urpc_read_io_mode={}, read_ahead_enable={}",
-            &self.data_distribution, self.urpc_read_io_mode, self.read_ahead_enable
+            &self.data_distribution, self.read_io_mode, self.read_ahead_enable
         )
     }
 }

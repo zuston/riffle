@@ -77,9 +77,11 @@ pub enum IoMode {
 }
 
 impl IoMode {
-    pub(crate) fn fallback(self) -> Self {
-        if matches!(&self, IoMode::SPLICE) || matches!(self, IoMode::SENDFILE) {
-            return IoMode::BUFFER_IO;
+    pub(crate) fn fallback(self, exclusive: Vec<IoMode>, to: IoMode) -> Self {
+        for mode in exclusive {
+            if matches!(&self, mode) {
+                return to;
+            }
         }
         self
     }

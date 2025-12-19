@@ -93,8 +93,8 @@ pub struct LocalFileStore {
     runtime_manager: RuntimeManager,
     partition_coordinators: DDashMap<String, Arc<PartitionCoordinator>>,
 
-    direct_io_enable: bool,
-    direct_io_read_enable: bool,
+    // just control whether to use the direct_io for append operations.
+    // for the read, this is determined by the client side.
     direct_io_append_enable: bool,
 
     conf: LocalfileStoreConfig,
@@ -119,9 +119,7 @@ impl LocalFileStore {
             min_number_of_available_disks: 1,
             runtime_manager,
             partition_coordinators: DDashMap::default(),
-            direct_io_enable: config.direct_io_enable,
-            direct_io_read_enable: config.direct_io_read_enable,
-            direct_io_append_enable: config.direct_io_append_enable,
+            direct_io_append_enable: false,
             conf: Default::default(),
         }
     }
@@ -173,8 +171,6 @@ impl LocalFileStore {
             min_number_of_available_disks,
             runtime_manager,
             partition_coordinators: DDashMap::default(),
-            direct_io_enable: localfile_config.direct_io_enable,
-            direct_io_read_enable: localfile_config.direct_io_read_enable,
             direct_io_append_enable: localfile_config.direct_io_append_enable,
             conf: localfile_config.clone(),
         }
@@ -299,7 +295,7 @@ impl LocalFileStore {
         }
 
         let shuffle_file_format = self.create_shuffle_format(blocks, next_offset as i64)?;
-        let options = if self.direct_io_enable && self.direct_io_append_enable {
+        let options = if self.direct_io_append_enable {
             WriteOptions::with_append_of_direct_io(shuffle_file_format.data, next_offset)
         } else {
             WriteOptions::with_append_of_buffer_io(shuffle_file_format.data)
@@ -443,7 +439,7 @@ impl Store for LocalFileStore {
         let timer = Instant::now();
         let uid = ctx.uid;
         let rpc_source = ctx.rpc_source;
-        let io_mode = ctx.urpc_read_io_mode;
+        let io_mode = ctx.io_mode;
         let (offset, len) = match ctx.reading_options {
             FILE_OFFSET_AND_LEN(offset, len) => (offset as u64, len as u64),
             _ => (0, 0),
@@ -480,14 +476,21 @@ impl Store for LocalFileStore {
                     .with_read_range(ReadRange::RANGE(offset, len))
                     .with_task_id(ctx.task_id);
 
-                // determine to use which io_mode
-                let io_mode = if self.direct_io_enable && self.direct_io_read_enable {
-                    IoMode::DIRECT_IO
+                // determine to use which io_mode. having the following limitations
+                // 1. io_mode==DIRECT_IO, this is only valid when append use the direct_io mode!
+                // 2. sendfile + splice are only valid in urpc
+                let io_mode = if matches!(io_mode, IoMode::DIRECT_IO) {
+                    if !self.direct_io_append_enable {
+                        debug!("Fallback DIRECT_IO to BUFFER_IO due to append mode mismatch");
+                        IoMode::BUFFER_IO
+                    } else {
+                        io_mode
+                    }
                 } else {
                     if matches!(rpc_source, RpcType::URPC) {
                         io_mode
                     } else {
-                        io_mode.fallback()
+                        io_mode.fallback(vec![IoMode::SPLICE, IoMode::SENDFILE], IoMode::BUFFER_IO)
                     }
                 };
                 read_options = read_options.with_io_mode(io_mode);
