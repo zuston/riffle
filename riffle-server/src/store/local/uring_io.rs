@@ -466,6 +466,12 @@ impl LocalIO for UringIo {
         path: &str,
         options: ReadOptions,
     ) -> anyhow::Result<DataBytes, WorkerError> {
+        // if the io_mode is sendfile, we fallback to sync io read
+        if matches!(options.io_mode, IoMode::SENDFILE) {
+            // use sendfile via sync io
+            return self.sync_local_io.read(path, options).await;
+        }
+
         let (offset, length) = match &options.read_range {
             ReadRange::ALL => {
                 let fs_sts = self.file_stat(path).await?;
@@ -484,7 +490,7 @@ impl LocalIO for UringIo {
         let file = OpenOptions::new().read(true).open(path)?;
         let raw_fd = file.as_raw_fd();
 
-        // make the size as the optional config option in io-uring
+        // todo: make the size as the optional config option in io-uring
         if matches!(options.io_mode, IoMode::SPLICE) && length < 16 * 1024 * 1024 {
             // init the pipe
             let (pipe_in, mut pipe_out) = {
