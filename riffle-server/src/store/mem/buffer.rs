@@ -13,6 +13,7 @@ use std::mem;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
+#[derive(Debug)]
 pub struct MemoryBuffer {
     buffer: Mutex<BufferInternal>,
 }
@@ -56,7 +57,9 @@ pub struct BufferInternal {
     staging_size: i64,
     flight_size: i64,
 
-    staging: BatchMemoryBlock,
+    staging: Vec<Block>,
+    batch_boundaries: Vec<usize>, // Track where each batch starts
+    block_position_index: HashMap<i64, usize>, // Maps block_id to Vec index
 
     flight: HashMap<u64, Arc<BatchMemoryBlock>>,
     flight_counter: u64,
@@ -68,7 +71,9 @@ impl BufferInternal {
             total_size: 0,
             staging_size: 0,
             flight_size: 0,
-            staging: Default::default(),
+            staging: Vec::new(),
+            batch_boundaries: Vec::new(),
+            block_position_index: HashMap::new(),
             flight: Default::default(),
             flight_counter: 0,
         }
@@ -124,40 +129,16 @@ impl MemoryBuffer {
         let mut read_len = 0i64;
         let mut flight_found = false;
 
-        let mut exit = false;
-        while !exit {
-            exit = true;
-            {
-                if last_block_id == INVALID_BLOCK_ID {
-                    flight_found = true;
-                }
-                for (_, batch_block) in buffer.flight.iter() {
-                    for blocks in batch_block.iter() {
-                        for block in blocks {
-                            if !flight_found && block.block_id == last_block_id {
-                                flight_found = true;
-                                continue;
-                            }
-                            if !flight_found {
-                                continue;
-                            }
-                            if read_len >= read_bytes_limit_len {
-                                break;
-                            }
-                            if let Some(ref expected_task_id) = task_ids {
-                                if !expected_task_id.contains(block.task_attempt_id as u64) {
-                                    continue;
-                                }
-                            }
-                            read_len += block.length as i64;
-                            read_result.push(block);
-                        }
-                    }
-                }
-            }
+        const FIRST_ATTEMP: u8 = 0;
+        const FALLBACK: u8 = 1;
+        let strategies = [FIRST_ATTEMP, FALLBACK];
 
-            {
-                for blocks in buffer.staging.iter() {
+        for loop_index in strategies {
+            if last_block_id == INVALID_BLOCK_ID {
+                flight_found = true;
+            }
+            for (_, batch_block) in buffer.flight.iter() {
+                for blocks in batch_block.iter() {
                     for block in blocks {
                         if !flight_found && block.block_id == last_block_id {
                             flight_found = true;
@@ -180,9 +161,38 @@ impl MemoryBuffer {
                 }
             }
 
-            if !flight_found {
+            // Handle staging with Vec + index optimization
+            let staging_start_idx = if loop_index == FIRST_ATTEMP && !flight_found {
+                // Try to find position after last_block_id
+                // Always set flight_found = true for the next searching
                 flight_found = true;
-                exit = false;
+                if let Some(&position) = buffer.block_position_index.get(&last_block_id) {
+                    position + 1
+                } else {
+                    // Not found in staging, will handle in fallback
+                    continue;
+                }
+            } else {
+                // Fallback: read from beginning
+                0
+            };
+
+            for block in &buffer.staging[staging_start_idx..] {
+                if read_len >= read_bytes_limit_len {
+                    break;
+                }
+                if let Some(ref expected_task_id) = task_ids {
+                    if !expected_task_id.contains(block.task_attempt_id as u64) {
+                        continue;
+                    }
+                }
+                read_len += block.length as i64;
+                read_result.push(block);
+            }
+
+            // // If we found data in first attempt, no need for fallback
+            if flight_found && loop_index == FIRST_ATTEMP {
+                break;
             }
         }
 
@@ -225,7 +235,33 @@ impl MemoryBuffer {
             return Ok(None);
         }
 
-        let staging: BatchMemoryBlock = { mem::replace(&mut buffer.staging, Default::default()) };
+        // Reconstruct batches from boundaries
+        let mut batches = Vec::new();
+        let mut start = 0;
+        for i in 0..buffer.batch_boundaries.len() {
+            let end = buffer.batch_boundaries[i];
+            if end >= buffer.staging.len() {
+                break;
+            }
+
+            // Find next boundary or use end of staging
+            let next_boundary = if i + 1 < buffer.batch_boundaries.len() {
+                buffer.batch_boundaries[i + 1]
+            } else {
+                buffer.staging.len()
+            };
+
+            batches.push(buffer.staging[start..next_boundary].to_vec());
+            start = next_boundary;
+        }
+
+        let staging: BatchMemoryBlock = BatchMemoryBlock(batches);
+
+        // Clear everything
+        buffer.staging.clear();
+        buffer.block_position_index.clear();
+        buffer.batch_boundaries.clear();
+
         let staging_ref = Arc::new(staging);
         let flight_id = buffer.flight_counter;
 
@@ -247,12 +283,20 @@ impl MemoryBuffer {
     #[trace]
     pub fn append(&self, blocks: Vec<Block>, size: u64) -> Result<()> {
         let mut buffer = self.buffer.lock();
-        let mut staging = &mut buffer.staging;
-        staging.push(blocks);
+        let current_position = buffer.staging.len();
 
+        // Record batch boundary
+        if !blocks.is_empty() {
+            buffer.batch_boundaries.push(current_position);
+        }
+        for (idx, block) in blocks.into_iter().enumerate() {
+            buffer
+                .block_position_index
+                .insert(block.block_id, current_position + idx);
+            buffer.staging.push(block);
+        }
         buffer.staging_size += size as i64;
         buffer.total_size += size as i64;
-
         Ok(())
     }
 }
