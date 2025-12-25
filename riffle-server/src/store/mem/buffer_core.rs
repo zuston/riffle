@@ -9,11 +9,6 @@ use std::hash::Hash;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-#[derive(Debug)]
-pub struct MemoryBuffer {
-    buffer: Mutex<BufferInternal>,
-}
-
 #[derive(Default, Debug)]
 pub struct BatchMemoryBlock(pub Vec<Vec<Block>>);
 impl Deref for BatchMemoryBlock {
@@ -44,35 +39,6 @@ impl BufferSpillResult {
     }
     pub fn blocks(&self) -> Arc<BatchMemoryBlock> {
         self.blocks.clone()
-    }
-}
-
-#[derive(Debug)]
-pub struct BufferInternal {
-    pub total_size: i64,
-    pub staging_size: i64,
-    pub flight_size: i64,
-
-    pub staging: Vec<Block>,
-    pub batch_boundaries: Vec<usize>, // Track where each batch starts
-    pub block_position_index: HashMap<i64, usize>, // Maps block_id to Vec index
-
-    pub flight: HashMap<u64, Arc<BatchMemoryBlock>>,
-    pub flight_counter: u64,
-}
-
-impl BufferInternal {
-    pub fn new() -> Self {
-        BufferInternal {
-            total_size: 0,
-            staging_size: 0,
-            flight_size: 0,
-            staging: Vec::new(),
-            batch_boundaries: Vec::new(),
-            block_position_index: HashMap::new(),
-            flight: Default::default(),
-            flight_counter: 0,
-        }
     }
 }
 

@@ -1,4 +1,4 @@
-use super::buffer_core::{BatchMemoryBlock, BufferInternal, BufferOps, BufferSpillResult};
+use super::buffer_core::{BatchMemoryBlock, BufferOps, BufferSpillResult};
 use crate::composed_bytes;
 use crate::composed_bytes::ComposedBytes;
 use crate::constant::INVALID_BLOCK_ID;
@@ -15,19 +15,48 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 #[derive(Debug)]
-pub struct MemoryBuffer {
-    buffer: Mutex<BufferInternal>,
+pub struct OptStagingBufferInternal {
+    pub total_size: i64,
+    pub staging_size: i64,
+    pub flight_size: i64,
+
+    pub staging: Vec<Block>,
+    pub batch_boundaries: Vec<usize>, // Track where each batch starts
+    pub block_position_index: HashMap<i64, usize>, // Maps block_id to Vec index
+
+    pub flight: HashMap<u64, Arc<BatchMemoryBlock>>,
+    pub flight_counter: u64,
 }
 
-impl MemoryBuffer {
-    pub fn new() -> MemoryBuffer {
-        MemoryBuffer {
-            buffer: Mutex::new(BufferInternal::new()),
+impl OptStagingBufferInternal {
+    pub fn new() -> Self {
+        OptStagingBufferInternal {
+            total_size: 0,
+            staging_size: 0,
+            flight_size: 0,
+            staging: Vec::new(),
+            batch_boundaries: Vec::new(),
+            block_position_index: HashMap::new(),
+            flight: Default::default(),
+            flight_counter: 0,
         }
     }
 }
 
-impl BufferOps for MemoryBuffer {
+#[derive(Debug)]
+pub struct OptStagingMemoryBuffer {
+    buffer: Mutex<OptStagingBufferInternal>,
+}
+
+impl OptStagingMemoryBuffer {
+    pub fn new() -> OptStagingMemoryBuffer {
+        OptStagingMemoryBuffer {
+            buffer: Mutex::new(OptStagingBufferInternal::new()),
+        }
+    }
+}
+
+impl BufferOps for OptStagingMemoryBuffer {
     #[trace]
     fn total_size(&self) -> Result<i64> {
         return Ok(self.buffer.lock().total_size);
@@ -249,6 +278,225 @@ impl BufferOps for MemoryBuffer {
 }
 
 /// for tests.
+impl OptStagingMemoryBuffer {
+    fn direct_push(&self, blocks: Vec<Block>) -> Result<()> {
+        let len: u64 = blocks.iter().map(|block| block.length).sum::<i32>() as u64;
+        self.append(blocks, len)
+    }
+}
+
+#[derive(Debug)]
+pub struct BufferInternal {
+    pub total_size: i64,
+    pub staging_size: i64,
+    pub flight_size: i64,
+
+    pub staging: BatchMemoryBlock,
+
+    pub flight: HashMap<u64, Arc<BatchMemoryBlock>>,
+    pub flight_counter: u64,
+}
+
+impl BufferInternal {
+    pub fn new() -> Self {
+        BufferInternal {
+            total_size: 0,
+            staging_size: 0,
+            flight_size: 0,
+            staging: Default::default(),
+            flight: Default::default(),
+            flight_counter: 0,
+        }
+    }
+}
+pub struct MemoryBuffer {
+    buffer: Mutex<BufferInternal>,
+}
+
+impl MemoryBuffer {
+    pub fn new() -> MemoryBuffer {
+        MemoryBuffer {
+            buffer: Mutex::new(BufferInternal::new()),
+        }
+    }
+}
+impl BufferOps for MemoryBuffer {
+    #[trace]
+    fn total_size(&self) -> Result<i64> {
+        return Ok(self.buffer.lock().total_size);
+    }
+
+    #[trace]
+    fn flight_size(&self) -> Result<i64> {
+        return Ok(self.buffer.lock().flight_size);
+    }
+
+    #[trace]
+    fn staging_size(&self) -> Result<i64> {
+        return Ok(self.buffer.lock().staging_size);
+    }
+
+    #[trace]
+    fn clear(&self, flight_id: u64, flight_size: u64) -> Result<()> {
+        let mut buffer = self.buffer.lock();
+        let flight = &mut buffer.flight;
+        let removed = flight.remove(&flight_id);
+        if let Some(block_ref) = removed {
+            buffer.total_size -= flight_size as i64;
+            buffer.flight_size -= flight_size as i64;
+        }
+        Ok(())
+    }
+
+    fn get(
+        &self,
+        last_block_id: i64,
+        read_bytes_limit_len: i64,
+        task_ids: Option<Treemap>,
+    ) -> Result<PartitionedMemoryData> {
+        /// read sequence
+        /// 1. from flight (expect: last_block_id not found or last_block_id == -1)
+        /// 2. from staging
+        let buffer = self.buffer.lock();
+
+        let mut read_result = vec![];
+        let mut read_len = 0i64;
+        let mut flight_found = false;
+
+        let mut exit = false;
+        while !exit {
+            exit = true;
+            {
+                if last_block_id == INVALID_BLOCK_ID {
+                    flight_found = true;
+                }
+                for (_, batch_block) in buffer.flight.iter() {
+                    for blocks in batch_block.iter() {
+                        for block in blocks {
+                            if !flight_found && block.block_id == last_block_id {
+                                flight_found = true;
+                                continue;
+                            }
+                            if !flight_found {
+                                continue;
+                            }
+                            if read_len >= read_bytes_limit_len {
+                                break;
+                            }
+                            if let Some(ref expected_task_id) = task_ids {
+                                if !expected_task_id.contains(block.task_attempt_id as u64) {
+                                    continue;
+                                }
+                            }
+                            read_len += block.length as i64;
+                            read_result.push(block);
+                        }
+                    }
+                }
+            }
+
+            {
+                for blocks in buffer.staging.iter() {
+                    for block in blocks {
+                        if !flight_found && block.block_id == last_block_id {
+                            flight_found = true;
+                            continue;
+                        }
+                        if !flight_found {
+                            continue;
+                        }
+                        if read_len >= read_bytes_limit_len {
+                            break;
+                        }
+                        if let Some(ref expected_task_id) = task_ids {
+                            if !expected_task_id.contains(block.task_attempt_id as u64) {
+                                continue;
+                            }
+                        }
+                        read_len += block.length as i64;
+                        read_result.push(block);
+                    }
+                }
+            }
+
+            if !flight_found {
+                flight_found = true;
+                exit = false;
+            }
+        }
+
+        let mut block_bytes = Vec::with_capacity(read_result.len());
+        let mut segments = Vec::with_capacity(read_result.len());
+        let mut offset = 0;
+        for block in read_result {
+            let data = &block.data;
+            block_bytes.push(data.clone());
+            segments.push(DataSegment {
+                block_id: block.block_id,
+                offset,
+                length: block.length,
+                uncompress_length: block.uncompress_length,
+                crc: block.crc,
+                task_attempt_id: block.task_attempt_id,
+            });
+            offset += block.length as i64;
+        }
+        let total_bytes = offset as usize;
+
+        // Note: is_end is computed as total_bytes < read_bytes_limit_len. This works in general,
+        // but it can incorrectly be false in the edge case where total_bytes == read_bytes_limit_len
+        // and the buffer has no more blocks left. In that situation, buffer is actually fully read,
+        // so the client code may need to perform an additional empty-check to handle this case.
+        let is_end = total_bytes < read_bytes_limit_len as usize;
+
+        let composed_bytes = ComposedBytes::from(block_bytes, total_bytes);
+        Ok(PartitionedMemoryData {
+            shuffle_data_block_segments: segments,
+            data: DataBytes::Composed(composed_bytes),
+            is_end,
+        })
+    }
+
+    // when there is no any staging data, it will return the None
+    fn spill(&self) -> Result<Option<BufferSpillResult>> {
+        let mut buffer = self.buffer.lock();
+        if buffer.staging_size == 0 {
+            return Ok(None);
+        }
+
+        let staging: BatchMemoryBlock = { mem::replace(&mut buffer.staging, Default::default()) };
+        let staging_ref = Arc::new(staging);
+        let flight_id = buffer.flight_counter;
+
+        let flight = &mut buffer.flight;
+        flight.insert(flight_id, staging_ref.clone());
+
+        let spill_size = buffer.staging_size;
+        buffer.flight_counter += 1;
+        buffer.flight_size += spill_size;
+        buffer.staging_size = 0;
+
+        Ok(Some(BufferSpillResult {
+            flight_id,
+            flight_len: spill_size as u64,
+            blocks: staging_ref.clone(),
+        }))
+    }
+
+    #[trace]
+    fn append(&self, blocks: Vec<Block>, size: u64) -> Result<()> {
+        let mut buffer = self.buffer.lock();
+        let mut staging = &mut buffer.staging;
+        staging.push(blocks);
+
+        buffer.staging_size += size as i64;
+        buffer.total_size += size as i64;
+
+        Ok(())
+    }
+}
+
+/// for tests.
 impl MemoryBuffer {
     fn direct_push(&self, blocks: Vec<Block>) -> Result<()> {
         let len: u64 = blocks.iter().map(|block| block.length).sum::<i32>() as u64;
@@ -258,8 +506,8 @@ impl MemoryBuffer {
 
 #[cfg(test)]
 mod test {
-    use crate::store::mem::buffer::BufferOps;
-    use crate::store::mem::buffer::MemoryBuffer;
+    use crate::store::mem::buffer::{MemoryBuffer, OptStagingMemoryBuffer};
+    use crate::store::mem::buffer_core::BufferOps;
     use crate::store::Block;
     use hashlink::LinkedHashMap;
     use std::collections::LinkedList;
@@ -292,8 +540,30 @@ mod test {
         }
     }
 
-    #[test]
-    fn test_with_block_id_zero() -> anyhow::Result<()> {
+    trait TestBuffer: BufferOps {
+        fn new() -> Self;
+        fn direct_push(&self, blocks: Vec<Block>) -> anyhow::Result<()>;
+    }
+
+    impl TestBuffer for MemoryBuffer {
+        fn new() -> Self {
+            MemoryBuffer::new()
+        }
+        fn direct_push(&self, blocks: Vec<Block>) -> anyhow::Result<()> {
+            MemoryBuffer::direct_push(self, blocks)
+        }
+    }
+
+    impl TestBuffer for OptStagingMemoryBuffer {
+        fn new() -> Self {
+            OptStagingMemoryBuffer::new()
+        }
+        fn direct_push(&self, blocks: Vec<Block>) -> anyhow::Result<()> {
+            OptStagingMemoryBuffer::direct_push(self, blocks)
+        }
+    }
+
+    fn run_test_with_block_id_zero<B: TestBuffer + 'static>() -> anyhow::Result<()> {
         let mut buffer = MemoryBuffer::new();
         let block_1 = create_block(10, 100);
         let block_2 = create_block(10, 0);
@@ -321,7 +591,13 @@ mod test {
     }
 
     #[test]
-    fn test_put_get() -> anyhow::Result<()> {
+    fn test_with_block_id_zero() -> anyhow::Result<()> {
+        run_test_with_block_id_zero::<MemoryBuffer>()?;
+        run_test_with_block_id_zero::<OptStagingMemoryBuffer>()?;
+        Ok(())
+    }
+
+    fn run_test_put_get<B: TestBuffer + 'static>() -> anyhow::Result<()> {
         let mut buffer = MemoryBuffer::new();
 
         /// case1
@@ -423,7 +699,13 @@ mod test {
     }
 
     #[test]
-    fn test_get_v2_is_end_with_only_staging() -> anyhow::Result<()> {
+    fn test_put_get() -> anyhow::Result<()> {
+        run_test_put_get::<MemoryBuffer>()?;
+        run_test_put_get::<OptStagingMemoryBuffer>()?;
+        Ok(())
+    }
+
+    fn run_test_get_v2_is_end_with_only_staging<B: TestBuffer + 'static>() -> anyhow::Result<()> {
         let buffer = MemoryBuffer::new();
         // 0 -> 10 blocks with total 100 bytes
         let cnt = 10;
@@ -453,7 +735,14 @@ mod test {
     }
 
     #[test]
-    fn test_get_v2_is_end_across_flight_and_staging() -> anyhow::Result<()> {
+    fn test_get_v2_is_end_with_only_staging() -> anyhow::Result<()> {
+        run_test_get_v2_is_end_with_only_staging::<MemoryBuffer>()?;
+        run_test_get_v2_is_end_with_only_staging::<OptStagingMemoryBuffer>()?;
+        Ok(())
+    }
+
+    fn run_test_get_v2_is_end_across_flight_and_staging<B: TestBuffer + 'static>(
+    ) -> anyhow::Result<()> {
         let buffer = MemoryBuffer::new();
 
         // staging: 0..2
@@ -474,6 +763,13 @@ mod test {
         let result2 = buffer.get(2, 15, None)?;
         assert_eq!(result2.shuffle_data_block_segments.len(), 2);
         assert_eq!(result2.is_end, true); // no more data after staging
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_v2_is_end_across_flight_and_staging() -> anyhow::Result<()> {
+        run_test_get_v2_is_end_across_flight_and_staging::<MemoryBuffer>()?;
+        run_test_get_v2_is_end_across_flight_and_staging::<OptStagingMemoryBuffer>()?;
         Ok(())
     }
 }
