@@ -31,12 +31,14 @@ use crate::metric::{
 #[cfg(feature = "hdfs")]
 use crate::store::hdfs::HdfsStore;
 use crate::store::localfile::LocalFileStore;
+use crate::store::mem::buffer_core::BufferOps;
 use crate::store::memory::MemoryStore;
 
 use crate::store::{Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex, Store};
 use anyhow::{anyhow, Result};
 
 use async_trait::async_trait;
+use bytes::buf;
 use log::{error, info, warn};
 use prometheus::core::Atomic;
 use std::any::Any;

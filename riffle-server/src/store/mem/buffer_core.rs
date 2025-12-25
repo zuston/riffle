@@ -76,7 +76,6 @@ impl BufferInternal {
     }
 }
 
-
 pub trait BufferOps {
     /// Returns the total size of the buffer.
     fn total_size(&self) -> Result<i64>;
