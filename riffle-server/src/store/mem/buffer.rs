@@ -1,3 +1,4 @@
+use super::buffer_core::{BatchMemoryBlock, BufferInternal, BufferOps, BufferSpillResult};
 use crate::composed_bytes;
 use crate::composed_bytes::ComposedBytes;
 use crate::constant::INVALID_BLOCK_ID;
@@ -18,92 +19,32 @@ pub struct MemoryBuffer {
     buffer: Mutex<BufferInternal>,
 }
 
-#[derive(Default, Debug)]
-pub struct BatchMemoryBlock(Vec<Vec<Block>>);
-impl Deref for BatchMemoryBlock {
-    type Target = Vec<Vec<Block>>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-impl DerefMut for BatchMemoryBlock {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-#[derive(Debug)]
-pub struct BufferSpillResult {
-    flight_id: u64,
-    flight_len: u64,
-    blocks: Arc<BatchMemoryBlock>,
-}
-
-impl BufferSpillResult {
-    pub fn flight_id(&self) -> u64 {
-        self.flight_id
-    }
-    pub fn flight_len(&self) -> u64 {
-        self.flight_len
-    }
-    pub fn blocks(&self) -> Arc<BatchMemoryBlock> {
-        self.blocks.clone()
-    }
-}
-
-#[derive(Debug)]
-pub struct BufferInternal {
-    total_size: i64,
-    staging_size: i64,
-    flight_size: i64,
-
-    staging: Vec<Block>,
-    batch_boundaries: Vec<usize>, // Track where each batch starts
-    block_position_index: HashMap<i64, usize>, // Maps block_id to Vec index
-
-    flight: HashMap<u64, Arc<BatchMemoryBlock>>,
-    flight_counter: u64,
-}
-
-impl BufferInternal {
-    fn new() -> Self {
-        BufferInternal {
-            total_size: 0,
-            staging_size: 0,
-            flight_size: 0,
-            staging: Vec::new(),
-            batch_boundaries: Vec::new(),
-            block_position_index: HashMap::new(),
-            flight: Default::default(),
-            flight_counter: 0,
-        }
-    }
-}
-
 impl MemoryBuffer {
     pub fn new() -> MemoryBuffer {
         MemoryBuffer {
             buffer: Mutex::new(BufferInternal::new()),
         }
     }
+}
 
+impl BufferOps for MemoryBuffer {
     #[trace]
-    pub fn total_size(&self) -> Result<i64> {
+    fn total_size(&self) -> Result<i64> {
         return Ok(self.buffer.lock().total_size);
     }
 
     #[trace]
-    pub fn flight_size(&self) -> Result<i64> {
+    fn flight_size(&self) -> Result<i64> {
         return Ok(self.buffer.lock().flight_size);
     }
 
     #[trace]
-    pub fn staging_size(&self) -> Result<i64> {
+    fn staging_size(&self) -> Result<i64> {
         return Ok(self.buffer.lock().staging_size);
     }
 
     #[trace]
-    pub fn clear(&self, flight_id: u64, flight_size: u64) -> Result<()> {
+    fn clear(&self, flight_id: u64, flight_size: u64) -> Result<()> {
         let mut buffer = self.buffer.lock();
         let flight = &mut buffer.flight;
         let removed = flight.remove(&flight_id);
@@ -114,7 +55,7 @@ impl MemoryBuffer {
         Ok(())
     }
 
-    pub fn get(
+    fn get(
         &self,
         last_block_id: i64,
         read_bytes_limit_len: i64,
@@ -229,7 +170,7 @@ impl MemoryBuffer {
     }
 
     // when there is no any staging data, it will return the None
-    pub fn spill(&self) -> Result<Option<BufferSpillResult>> {
+    fn spill(&self) -> Result<Option<BufferSpillResult>> {
         let mut buffer = self.buffer.lock();
         if buffer.staging_size == 0 {
             return Ok(None);
@@ -281,7 +222,7 @@ impl MemoryBuffer {
     }
 
     #[trace]
-    pub fn append(&self, blocks: Vec<Block>, size: u64) -> Result<()> {
+    fn append(&self, blocks: Vec<Block>, size: u64) -> Result<()> {
         let mut buffer = self.buffer.lock();
         let current_position = buffer.staging.len();
         let block_count = blocks.len();
@@ -317,6 +258,7 @@ impl MemoryBuffer {
 
 #[cfg(test)]
 mod test {
+    use crate::store::mem::buffer::BufferOps;
     use crate::store::mem::buffer::MemoryBuffer;
     use crate::store::Block;
     use hashlink::LinkedHashMap;
