@@ -68,4 +68,8 @@ pub trait BufferOps {
 
     /// Appends blocks to staging area.
     fn append(&self, blocks: Vec<Block>, size: u64) -> Result<()>;
+
+    /// push directly, just use only in test
+    #[cfg(test)]
+    fn direct_push(&self, blocks: Vec<Block>) -> anyhow::Result<()>;
 }

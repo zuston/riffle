@@ -275,10 +275,8 @@ impl BufferOps for OptStagingMemoryBuffer {
         buffer.total_size += size as i64;
         Ok(())
     }
-}
 
-/// for tests.
-impl OptStagingMemoryBuffer {
+    #[cfg(test)]
     fn direct_push(&self, blocks: Vec<Block>) -> Result<()> {
         let len: u64 = blocks.iter().map(|block| block.length).sum::<i32>() as u64;
         self.append(blocks, len)
@@ -494,10 +492,8 @@ impl BufferOps for MemoryBuffer {
 
         Ok(())
     }
-}
 
-/// for tests.
-impl MemoryBuffer {
+    #[cfg(test)]
     fn direct_push(&self, blocks: Vec<Block>) -> Result<()> {
         let len: u64 = blocks.iter().map(|block| block.length).sum::<i32>() as u64;
         self.append(blocks, len)
@@ -542,15 +538,11 @@ mod test {
 
     trait TestBuffer: BufferOps {
         fn new() -> Self;
-        fn direct_push(&self, blocks: Vec<Block>) -> anyhow::Result<()>;
     }
 
     impl TestBuffer for MemoryBuffer {
         fn new() -> Self {
             MemoryBuffer::new()
-        }
-        fn direct_push(&self, blocks: Vec<Block>) -> anyhow::Result<()> {
-            MemoryBuffer::direct_push(self, blocks)
         }
     }
 
@@ -558,13 +550,10 @@ mod test {
         fn new() -> Self {
             OptStagingMemoryBuffer::new()
         }
-        fn direct_push(&self, blocks: Vec<Block>) -> anyhow::Result<()> {
-            OptStagingMemoryBuffer::direct_push(self, blocks)
-        }
     }
 
     fn run_test_with_block_id_zero<B: TestBuffer + 'static>() -> anyhow::Result<()> {
-        let mut buffer = MemoryBuffer::new();
+        let mut buffer = B::new();
         let block_1 = create_block(10, 100);
         let block_2 = create_block(10, 0);
 
@@ -598,7 +587,7 @@ mod test {
     }
 
     fn run_test_put_get<B: TestBuffer + 'static>() -> anyhow::Result<()> {
-        let mut buffer = MemoryBuffer::new();
+        let mut buffer = B::new();
 
         /// case1
         buffer.direct_push(create_blocks(0, 10, 10))?;
@@ -706,7 +695,7 @@ mod test {
     }
 
     fn run_test_get_v2_is_end_with_only_staging<B: TestBuffer + 'static>() -> anyhow::Result<()> {
-        let buffer = MemoryBuffer::new();
+        let buffer = B::new();
         // 0 -> 10 blocks with total 100 bytes
         let cnt = 10;
         let block_len = 10;
@@ -743,7 +732,7 @@ mod test {
 
     fn run_test_get_v2_is_end_across_flight_and_staging<B: TestBuffer + 'static>(
     ) -> anyhow::Result<()> {
-        let buffer = MemoryBuffer::new();
+        let buffer = B::new();
 
         // staging: 0..2
         buffer.direct_push(create_blocks(0, 3, 5))?;
