@@ -284,11 +284,17 @@ impl MemoryBuffer {
     pub fn append(&self, blocks: Vec<Block>, size: u64) -> Result<()> {
         let mut buffer = self.buffer.lock();
         let current_position = buffer.staging.len();
+        let block_count = blocks.len();
+
+        // Pre-allocate capacities
+        buffer.staging.reserve(block_count);
+        buffer.block_position_index.reserve(block_count);
 
         // Record batch boundary
         if !blocks.is_empty() {
             buffer.batch_boundaries.push(current_position);
         }
+
         for (idx, block) in blocks.into_iter().enumerate() {
             buffer
                 .block_position_index
