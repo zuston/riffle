@@ -31,7 +31,6 @@ use crate::metric::{
 #[cfg(feature = "hdfs")]
 use crate::store::hdfs::HdfsStore;
 use crate::store::localfile::LocalFileStore;
-use crate::store::mem::buffer_core::BufferOps;
 use crate::store::memory::MemoryStore;
 
 use crate::store::{Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex, Store};
@@ -62,6 +61,7 @@ use crate::app_manager::AppManagerRef;
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::local::LocalfileStoreStat;
+use crate::store::mem::buffer::default_buffer::MemoryBuffer;
 use crate::store::mem::buffer::MemoryBuffer;
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::spill::hierarchy_event_bus::HierarchyEventBus;

@@ -37,8 +37,8 @@ use crate::app_manager::partition_identifier::PartitionUId;
 use crate::ddashmap::DDashMap;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::mem::budget::MemoryBudget;
-use crate::store::mem::buffer::MemoryBuffer;
-use crate::store::mem::buffer_core::BufferOps;
+use crate::store::mem::buffer::default_buffer::MemoryBuffer;
+use crate::store::mem::buffer::BufferOps;
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::mem::ticket::TicketManager;
 use crate::store::spill::SpillWritingViewContext;
@@ -407,8 +407,6 @@ mod test {
         WritingViewContext,
     };
 
-    use crate::store::mem::buffer::{MemoryBuffer, OptStagingMemoryBuffer};
-    use crate::store::mem::buffer_core::BufferOps;
     use crate::store::memory::MemoryStore;
     use crate::store::ResponseData::Mem;
 
@@ -421,6 +419,9 @@ mod test {
     use crate::app_manager::application_identifier::ApplicationId;
     use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::purge_event::PurgeReason;
+    use crate::store::mem::buffer::default_buffer::MemoryBuffer;
+    use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
+    use crate::store::mem::buffer::BufferOps;
     use anyhow::Result;
     use croaring::Treemap;
 
