@@ -38,7 +38,6 @@ use crate::store::{Persistent, RequireBufferResponse, ResponseData, ResponseData
 use anyhow::{anyhow, Result};
 
 use async_trait::async_trait;
-use bytes::buf;
 use log::{error, info, warn};
 use prometheus::core::Atomic;
 use std::any::Any;
