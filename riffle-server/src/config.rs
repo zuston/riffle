@@ -16,6 +16,7 @@
 // under the License.
 
 use crate::block_id_manager::BlockIdManagerType;
+use crate::store::mem::buffer::BufferType;
 use crate::store::ResponseDataIndex::Local;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -31,6 +32,13 @@ pub struct MemoryStoreConfig {
     pub buffer_ticket_timeout_sec: i64,
     #[serde(default = "as_default_buffer_ticket_timeout_check_interval_sec")]
     pub buffer_ticket_check_interval_sec: i64,
+
+    #[serde(default = "as_default_buffer_type")]
+    pub buffer_type: BufferType,
+}
+
+fn as_default_buffer_type() -> BufferType {
+    BufferType::DEFAULT
 }
 
 fn as_default_buffer_ticket_timeout_check_interval_sec() -> i64 {
@@ -47,6 +55,7 @@ impl MemoryStoreConfig {
             capacity,
             buffer_ticket_timeout_sec: as_default_buffer_ticket_timeout_sec(),
             buffer_ticket_check_interval_sec: as_default_buffer_ticket_timeout_check_interval_sec(),
+            buffer_type: BufferType::DEFAULT,
         }
     }
 
@@ -55,6 +64,7 @@ impl MemoryStoreConfig {
             capacity,
             buffer_ticket_timeout_sec,
             buffer_ticket_check_interval_sec: as_default_buffer_ticket_timeout_check_interval_sec(),
+            buffer_type: BufferType::DEFAULT,
         }
     }
 }
