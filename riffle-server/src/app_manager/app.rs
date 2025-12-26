@@ -539,10 +539,7 @@ mod tests {
         let app_id = ApplicationId::YARN(1, 1, 1);
 
         let mut hmap = HashMap::new();
-        hmap.insert(
-            "spark.rss.riffle.storageCapacityPartitionSplitEnabled".to_string(),
-            "true".to_string(),
-        );
+        hmap.insert(HARD_SPLIT_ENABLED.get_key(), "true".to_string());
         let conf = ClientRssConf::from(hmap);
         let options = AppConfigOptions::new(DataDistribution::NORMAL, 1, None, conf);
 

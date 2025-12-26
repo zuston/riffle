@@ -96,6 +96,10 @@ impl<T: Clone + Send + Sync + 'static> ClientConfigOption<T> {
         self.description = Some(desc.to_string());
         self
     }
+
+    pub fn get_key(&self) -> String {
+        self.key.clone()
+    }
 }
 #[cfg(test)]
 mod tests {
