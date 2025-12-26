@@ -48,32 +48,50 @@ pub struct OptStagingMemoryBuffer {
     buffer: Mutex<OptStagingBufferInternal>,
 }
 
-impl OptStagingMemoryBuffer {
-    pub fn new() -> OptStagingMemoryBuffer {
+// impl OptStagingMemoryBuffer {
+//     pub fn new() -> OptStagingMemoryBuffer {
+//         OptStagingMemoryBuffer {
+//             buffer: Mutex::new(OptStagingBufferInternal::new()),
+//         }
+//     }
+// }
+
+impl BufferOps for OptStagingMemoryBuffer {
+    #[trace]
+    fn new() -> OptStagingMemoryBuffer {
         OptStagingMemoryBuffer {
             buffer: Mutex::new(OptStagingBufferInternal::new()),
         }
     }
-}
-
-impl BufferOps for OptStagingMemoryBuffer {
     #[trace]
-    fn total_size(&self) -> Result<i64> {
+    fn total_size(&self) -> Result<i64>
+    where
+        Self: Send + Sync,
+    {
         return Ok(self.buffer.lock().total_size);
     }
 
     #[trace]
-    fn flight_size(&self) -> Result<i64> {
+    fn flight_size(&self) -> Result<i64>
+    where
+        Self: Send + Sync,
+    {
         return Ok(self.buffer.lock().flight_size);
     }
 
     #[trace]
-    fn staging_size(&self) -> Result<i64> {
+    fn staging_size(&self) -> Result<i64>
+    where
+        Self: Send + Sync,
+    {
         return Ok(self.buffer.lock().staging_size);
     }
 
     #[trace]
-    fn clear(&self, flight_id: u64, flight_size: u64) -> Result<()> {
+    fn clear(&self, flight_id: u64, flight_size: u64) -> Result<()>
+    where
+        Self: Send + Sync,
+    {
         let mut buffer = self.buffer.lock();
         let flight = &mut buffer.flight;
         let removed = flight.remove(&flight_id);
@@ -84,12 +102,16 @@ impl BufferOps for OptStagingMemoryBuffer {
         Ok(())
     }
 
+    #[trace]
     fn get(
         &self,
         last_block_id: i64,
         read_bytes_limit_len: i64,
         task_ids: Option<Treemap>,
-    ) -> Result<PartitionedMemoryData> {
+    ) -> Result<PartitionedMemoryData>
+    where
+        Self: Send + Sync,
+    {
         /// read sequence
         /// 1. from flight (expect: last_block_id not found or last_block_id == -1)
         /// 2. from staging
@@ -199,6 +221,7 @@ impl BufferOps for OptStagingMemoryBuffer {
     }
 
     // when there is no any staging data, it will return the None
+    #[trace]
     fn spill(&self) -> Result<Option<BufferSpillResult>> {
         let mut buffer = self.buffer.lock();
         if buffer.staging_size == 0 {
@@ -277,6 +300,7 @@ impl BufferOps for OptStagingMemoryBuffer {
     }
 
     #[cfg(test)]
+    #[trace]
     fn direct_push(&self, blocks: Vec<Block>) -> Result<()> {
         let len: u64 = blocks.iter().map(|block| block.length).sum::<i32>() as u64;
         self.append(blocks, len)
@@ -311,31 +335,49 @@ pub struct MemoryBuffer {
     buffer: Mutex<BufferInternal>,
 }
 
-impl MemoryBuffer {
-    pub fn new() -> MemoryBuffer {
+// impl MemoryBuffer {
+//     pub fn new() -> MemoryBuffer {
+//         MemoryBuffer {
+//             buffer: Mutex::new(BufferInternal::new()),
+//         }
+//     }
+// }
+impl BufferOps for MemoryBuffer {
+    #[trace]
+    fn new() -> MemoryBuffer {
         MemoryBuffer {
             buffer: Mutex::new(BufferInternal::new()),
         }
     }
-}
-impl BufferOps for MemoryBuffer {
     #[trace]
-    fn total_size(&self) -> Result<i64> {
+    fn total_size(&self) -> Result<i64>
+    where
+        Self: Send + Sync,
+    {
         return Ok(self.buffer.lock().total_size);
     }
 
     #[trace]
-    fn flight_size(&self) -> Result<i64> {
+    fn flight_size(&self) -> Result<i64>
+    where
+        Self: Send + Sync,
+    {
         return Ok(self.buffer.lock().flight_size);
     }
 
     #[trace]
-    fn staging_size(&self) -> Result<i64> {
+    fn staging_size(&self) -> Result<i64>
+    where
+        Self: Send + Sync,
+    {
         return Ok(self.buffer.lock().staging_size);
     }
 
     #[trace]
-    fn clear(&self, flight_id: u64, flight_size: u64) -> Result<()> {
+    fn clear(&self, flight_id: u64, flight_size: u64) -> Result<()>
+    where
+        Self: Send + Sync,
+    {
         let mut buffer = self.buffer.lock();
         let flight = &mut buffer.flight;
         let removed = flight.remove(&flight_id);
@@ -346,12 +388,16 @@ impl BufferOps for MemoryBuffer {
         Ok(())
     }
 
+    #[trace]
     fn get(
         &self,
         last_block_id: i64,
         read_bytes_limit_len: i64,
         task_ids: Option<Treemap>,
-    ) -> Result<PartitionedMemoryData> {
+    ) -> Result<PartitionedMemoryData>
+    where
+        Self: Send + Sync,
+    {
         /// read sequence
         /// 1. from flight (expect: last_block_id not found or last_block_id == -1)
         /// 2. from staging
@@ -456,7 +502,11 @@ impl BufferOps for MemoryBuffer {
     }
 
     // when there is no any staging data, it will return the None
-    fn spill(&self) -> Result<Option<BufferSpillResult>> {
+    #[trace]
+    fn spill(&self) -> Result<Option<BufferSpillResult>>
+    where
+        Self: Send + Sync,
+    {
         let mut buffer = self.buffer.lock();
         if buffer.staging_size == 0 {
             return Ok(None);
@@ -482,7 +532,10 @@ impl BufferOps for MemoryBuffer {
     }
 
     #[trace]
-    fn append(&self, blocks: Vec<Block>, size: u64) -> Result<()> {
+    fn append(&self, blocks: Vec<Block>, size: u64) -> Result<()>
+    where
+        Self: Send + Sync,
+    {
         let mut buffer = self.buffer.lock();
         let mut staging = &mut buffer.staging;
         staging.push(blocks);
@@ -494,7 +547,11 @@ impl BufferOps for MemoryBuffer {
     }
 
     #[cfg(test)]
-    fn direct_push(&self, blocks: Vec<Block>) -> Result<()> {
+    #[trace]
+    fn direct_push(&self, blocks: Vec<Block>) -> Result<()>
+    where
+        Self: Send + Sync,
+    {
         let len: u64 = blocks.iter().map(|block| block.length).sum::<i32>() as u64;
         self.append(blocks, len)
     }
@@ -536,23 +593,13 @@ mod test {
         }
     }
 
-    trait TestBuffer: BufferOps {
-        fn new() -> Self;
-    }
+    trait TestBuffer: BufferOps {}
 
-    impl TestBuffer for MemoryBuffer {
-        fn new() -> Self {
-            MemoryBuffer::new()
-        }
-    }
+    impl TestBuffer for MemoryBuffer {}
 
-    impl TestBuffer for OptStagingMemoryBuffer {
-        fn new() -> Self {
-            OptStagingMemoryBuffer::new()
-        }
-    }
+    impl TestBuffer for OptStagingMemoryBuffer {}
 
-    fn run_test_with_block_id_zero<B: TestBuffer + 'static>() -> anyhow::Result<()> {
+    fn run_test_with_block_id_zero<B: TestBuffer + Send + Sync + 'static>() -> anyhow::Result<()> {
         let mut buffer = B::new();
         let block_1 = create_block(10, 100);
         let block_2 = create_block(10, 0);
@@ -586,7 +633,7 @@ mod test {
         Ok(())
     }
 
-    fn run_test_put_get<B: TestBuffer + 'static>() -> anyhow::Result<()> {
+    fn run_test_put_get<B: TestBuffer + Send + Sync + 'static>() -> anyhow::Result<()> {
         let mut buffer = B::new();
 
         /// case1
@@ -694,7 +741,8 @@ mod test {
         Ok(())
     }
 
-    fn run_test_get_v2_is_end_with_only_staging<B: TestBuffer + 'static>() -> anyhow::Result<()> {
+    fn run_test_get_v2_is_end_with_only_staging<B: TestBuffer + Send + Sync + 'static>(
+    ) -> anyhow::Result<()> {
         let buffer = B::new();
         // 0 -> 10 blocks with total 100 bytes
         let cnt = 10;
@@ -730,7 +778,7 @@ mod test {
         Ok(())
     }
 
-    fn run_test_get_v2_is_end_across_flight_and_staging<B: TestBuffer + 'static>(
+    fn run_test_get_v2_is_end_across_flight_and_staging<B: TestBuffer + Send + Sync + 'static>(
     ) -> anyhow::Result<()> {
         let buffer = B::new();
 

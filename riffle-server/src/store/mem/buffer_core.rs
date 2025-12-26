@@ -43,17 +43,29 @@ impl BufferSpillResult {
 }
 
 pub trait BufferOps {
-    /// Returns the total size of the buffer.
-    fn total_size(&self) -> Result<i64>;
+    /// Creates a new buffer instance
+    fn new() -> Self
+    where
+        Self: Sized;
 
+    /// Returns the total size of the buffer.
+    fn total_size(&self) -> Result<i64>
+    where
+        Self: Send + Sync;
     /// Returns the size of data in flight (spilled but not cleared).
-    fn flight_size(&self) -> Result<i64>;
+    fn flight_size(&self) -> Result<i64>
+    where
+        Self: Send + Sync;
 
     /// Returns the size of data in staging (not yet spilled).
-    fn staging_size(&self) -> Result<i64>;
+    fn staging_size(&self) -> Result<i64>
+    where
+        Self: Send + Sync;
 
     /// Clears a specific flight by ID and size.
-    fn clear(&self, flight_id: u64, flight_size: u64) -> Result<()>;
+    fn clear(&self, flight_id: u64, flight_size: u64) -> Result<()>
+    where
+        Self: Send + Sync;
 
     /// Reads data starting after last_block_id, up to read_bytes_limit_len.
     fn get(
@@ -61,15 +73,23 @@ pub trait BufferOps {
         last_block_id: i64,
         read_bytes_limit_len: i64,
         task_ids: Option<Treemap>,
-    ) -> Result<PartitionedMemoryData>;
+    ) -> Result<PartitionedMemoryData>
+    where
+        Self: Send + Sync;
 
     /// Spills staging data to flight, returns None if no staging data.
-    fn spill(&self) -> Result<Option<BufferSpillResult>>;
+    fn spill(&self) -> Result<Option<BufferSpillResult>>
+    where
+        Self: Send + Sync;
 
     /// Appends blocks to staging area.
-    fn append(&self, blocks: Vec<Block>, size: u64) -> Result<()>;
+    fn append(&self, blocks: Vec<Block>, size: u64) -> Result<()>
+    where
+        Self: Send + Sync;
 
     /// push directly, just use only in test
     #[cfg(test)]
-    fn direct_push(&self, blocks: Vec<Block>) -> anyhow::Result<()>;
+    fn direct_push(&self, blocks: Vec<Block>) -> anyhow::Result<()>
+    where
+        Self: Send + Sync;
 }
