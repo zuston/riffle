@@ -31,6 +31,7 @@ use crate::metric::{
 #[cfg(feature = "hdfs")]
 use crate::store::hdfs::HdfsStore;
 use crate::store::localfile::LocalFileStore;
+use crate::store::mem::buffer_core::BufferOps;
 use crate::store::memory::MemoryStore;
 
 use crate::store::{Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex, Store};

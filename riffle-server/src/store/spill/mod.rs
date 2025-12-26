@@ -8,7 +8,7 @@ use crate::metric::{
     TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND,
 };
 use crate::store::hybrid::{HybridStore, PersistentStore};
-use crate::store::mem::buffer::BatchMemoryBlock;
+use crate::store::mem::buffer_core::BatchMemoryBlock;
 use log::{debug, error, warn};
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;

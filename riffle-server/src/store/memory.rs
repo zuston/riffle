@@ -38,6 +38,7 @@ use crate::ddashmap::DDashMap;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::mem::budget::MemoryBudget;
 use crate::store::mem::buffer::MemoryBuffer;
+use crate::store::mem::buffer_core::BufferOps;
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::mem::ticket::TicketManager;
 use crate::store::spill::SpillWritingViewContext;
@@ -50,18 +51,18 @@ use fxhash::{FxBuildHasher, FxHasher};
 use log::{debug, info, warn};
 use std::sync::Arc;
 
-pub struct MemoryStore {
+pub struct MemoryStore<B: BufferOps + Send + Sync + 'static = MemoryBuffer> {
     memory_capacity: i64,
-    state: DDashMap<PartitionUId, Arc<MemoryBuffer>>,
+    state: DDashMap<PartitionUId, Arc<B>>,
     budget: MemoryBudget,
     runtime_manager: RuntimeManager,
     ticket_manager: TicketManager,
 }
 
-unsafe impl Send for MemoryStore {}
-unsafe impl Sync for MemoryStore {}
+unsafe impl<B: BufferOps + Send + Sync> Send for MemoryStore<B> {}
+unsafe impl<B: BufferOps + Send + Sync> Sync for MemoryStore<B> {}
 
-impl MemoryStore {
+impl<B: BufferOps + Send + Sync + 'static> MemoryStore<B> {
     // only for test cases
     pub fn new(max_memory_size: i64) -> Self {
         let budget = MemoryBudget::new(max_memory_size);
@@ -134,7 +135,7 @@ impl MemoryStore {
     pub fn lookup_spill_buffers(
         &self,
         expected_spill_total_bytes: i64,
-    ) -> Result<HashMap<PartitionUId, Arc<MemoryBuffer>>, anyhow::Error> {
+    ) -> Result<HashMap<PartitionUId, Arc<B>>, anyhow::Error> {
         // 1. sort by the staging size.
         // 2. get the spill buffers until reaching the single max batch size
 
@@ -203,12 +204,11 @@ impl MemoryStore {
     }
 
     // only invoked when inserting
-    pub fn get_or_create_buffer(&self, uid: PartitionUId) -> Arc<MemoryBuffer> {
-        self.state
-            .compute_if_absent(uid, || Arc::new(MemoryBuffer::new()))
+    pub fn get_or_create_buffer(&self, uid: PartitionUId) -> Arc<B> {
+        self.state.compute_if_absent(uid, || Arc::new(B::new()))
     }
 
-    pub fn get_buffer(&self, uid: &PartitionUId) -> Result<Arc<MemoryBuffer>> {
+    pub fn get_buffer(&self, uid: &PartitionUId) -> Result<Arc<B>> {
         let buffer = self.state.get(uid);
         if buffer.is_none() {
             return Err(anyhow!(format!(
@@ -246,11 +246,10 @@ impl MemoryStore {
 }
 
 #[async_trait]
-impl Store for MemoryStore {
+impl<B: BufferOps + Send + Sync + 'static> Store for MemoryStore<B> {
     fn start(self: Arc<Self>) {
         // ignore
     }
-
     #[trace]
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
         let uid = ctx.uid;
@@ -408,6 +407,8 @@ mod test {
         WritingViewContext,
     };
 
+    use crate::store::mem::buffer::{MemoryBuffer, OptStagingMemoryBuffer};
+    use crate::store::mem::buffer_core::BufferOps;
     use crate::store::memory::MemoryStore;
     use crate::store::ResponseData::Mem;
 
@@ -423,9 +424,8 @@ mod test {
     use anyhow::Result;
     use croaring::Treemap;
 
-    #[test]
-    fn test_read_buffer_in_flight() {
-        let store = MemoryStore::new(1024);
+    fn run_test_read_buffer_in_flight<B: BufferOps + Send + Sync + 'static>() {
+        let store: MemoryStore<B> = MemoryStore::new(1024);
         let runtime = store.runtime_manager.clone();
 
         let uid = PartitionUId::new(&Default::default(), 0, 0);
@@ -591,10 +591,16 @@ mod test {
         // assert_eq!(0, mem_data.shuffle_data_block_segments.len());
     }
 
-    async fn get_data_with_last_block_id(
+    #[test]
+    fn test_read_buffer_in_flight() {
+        run_test_read_buffer_in_flight::<MemoryBuffer>();
+        run_test_read_buffer_in_flight::<OptStagingMemoryBuffer>();
+    }
+
+    async fn get_data_with_last_block_id<B: BufferOps + Send + Sync + 'static>(
         default_single_read_size: i64,
         last_block_id: i64,
-        store: &MemoryStore,
+        store: &MemoryStore<B>,
         uid: PartitionUId,
     ) -> PartitionedMemoryData {
         let ctx = ReadingViewContext::new(
@@ -634,9 +640,8 @@ mod test {
         WritingViewContext::create_for_test(uid, data_blocks)
     }
 
-    #[test]
-    fn test_allocated_and_purge_for_memory() {
-        let store = MemoryStore::new(1024 * 1024 * 1024);
+    fn run_test_allocated_and_purge_for_memory<B: BufferOps + Send + Sync + 'static>() {
+        let store: MemoryStore<B> = MemoryStore::new(1024 * 1024 * 1024);
         let runtime = store.runtime_manager.clone();
 
         let app_id = ApplicationId::from("application_1_1_2");
@@ -662,8 +667,13 @@ mod test {
     }
 
     #[test]
-    fn test_purge() -> Result<()> {
-        let store = MemoryStore::new(1024);
+    fn test_allocated_and_purge_for_memory() {
+        run_test_allocated_and_purge_for_memory::<MemoryBuffer>();
+        run_test_allocated_and_purge_for_memory::<OptStagingMemoryBuffer>();
+    }
+
+    fn run_test_purge<B: BufferOps + Send + Sync + 'static>() -> Result<()> {
+        let store: MemoryStore<B> = MemoryStore::new(1024);
         let runtime = store.runtime_manager.clone();
 
         let shuffle_id = 1;
@@ -740,8 +750,13 @@ mod test {
     }
 
     #[test]
-    fn test_put_and_get_for_memory() {
-        let store = MemoryStore::new(1024 * 1024 * 1024);
+    fn test_purge() {
+        run_test_purge::<MemoryBuffer>();
+        run_test_purge::<OptStagingMemoryBuffer>();
+    }
+
+    fn run_test_put_and_get_for_memory<B: BufferOps + Send + Sync + 'static>() {
+        let store: MemoryStore<B> = MemoryStore::new(1024 * 1024 * 1024);
         let runtime = store.runtime_manager.clone();
 
         let writing_ctx = WritingViewContext::create_for_test(
@@ -784,8 +799,13 @@ mod test {
     }
 
     #[test]
-    fn test_block_id_filter_for_memory() {
-        let store = MemoryStore::new(1024 * 1024 * 1024);
+    fn test_put_and_get_for_memory() {
+        run_test_put_and_get_for_memory::<MemoryBuffer>();
+        run_test_put_and_get_for_memory::<OptStagingMemoryBuffer>();
+    }
+
+    fn run_test_block_id_filter_for_memory<B: BufferOps + Send + Sync + 'static>() {
+        let store: MemoryStore<B> = MemoryStore::new(1024 * 1024 * 1024);
         let runtime = store.runtime_manager.clone();
 
         // 1. insert 2 block
@@ -849,5 +869,10 @@ mod test {
             }
             _ => panic!("should not"),
         }
+    }
+    #[test]
+    fn test_block_id_filter_for_memory() {
+        run_test_block_id_filter_for_memory::<MemoryBuffer>();
+        run_test_block_id_filter_for_memory::<OptStagingMemoryBuffer>();
     }
 }
