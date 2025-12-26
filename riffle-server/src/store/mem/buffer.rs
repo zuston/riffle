@@ -576,13 +576,7 @@ mod test {
         }
     }
 
-    trait TestBuffer: BufferOps {}
-
-    impl TestBuffer for MemoryBuffer {}
-
-    impl TestBuffer for OptStagingMemoryBuffer {}
-
-    fn run_test_with_block_id_zero<B: TestBuffer + Send + Sync + 'static>() -> anyhow::Result<()> {
+    fn run_test_with_block_id_zero<B: BufferOps + Send + Sync + 'static>() -> anyhow::Result<()> {
         let mut buffer = B::new();
         let block_1 = create_block(10, 100);
         let block_2 = create_block(10, 0);
@@ -616,7 +610,7 @@ mod test {
         Ok(())
     }
 
-    fn run_test_put_get<B: TestBuffer + Send + Sync + 'static>() -> anyhow::Result<()> {
+    fn run_test_put_get<B: BufferOps + Send + Sync + 'static>() -> anyhow::Result<()> {
         let mut buffer = B::new();
 
         /// case1
@@ -724,7 +718,7 @@ mod test {
         Ok(())
     }
 
-    fn run_test_get_v2_is_end_with_only_staging<B: TestBuffer + Send + Sync + 'static>(
+    fn run_test_get_v2_is_end_with_only_staging<B: BufferOps + Send + Sync + 'static>(
     ) -> anyhow::Result<()> {
         let buffer = B::new();
         // 0 -> 10 blocks with total 100 bytes
@@ -761,7 +755,7 @@ mod test {
         Ok(())
     }
 
-    fn run_test_get_v2_is_end_across_flight_and_staging<B: TestBuffer + Send + Sync + 'static>(
+    fn run_test_get_v2_is_end_across_flight_and_staging<B: BufferOps + Send + Sync + 'static>(
     ) -> anyhow::Result<()> {
         let buffer = B::new();
 
