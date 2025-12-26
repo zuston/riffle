@@ -925,7 +925,7 @@ impl ShuffleServer for DefaultShuffleServer {
                 "".to_string(),
                 vec![],
             ),
-            Err(WorkerError::WRITE_LIMITED_BY_STORAGE_STATE) => (
+            Err(WorkerError::HARD_SPLIT_BY_UNHEALTHY_STORAGE) => (
                 StatusCode::HARD_SPLIT_FROM_SERVER,
                 -1i64,
                 "".to_string(),

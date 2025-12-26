@@ -41,12 +41,11 @@ pub static GET_MEMORY_DATA_URPC_VERSION: Lazy<ClientConfigOption<RpcVersion>> = 
         .with_description("the urpc version of getMemoryData")
 });
 
-pub static STORAGE_CAPACITY_PARTITION_SPLIT_ENABLED: Lazy<ClientConfigOption<bool>> =
-    Lazy::new(|| {
-        ClientConfigOption::key("spark.rss.riffle.storageCapacityPartitionSplitEnabled")
-            .default_value(false)
-            .with_description("whether to trigger partition split by the storage capacity")
-    });
+pub static HARD_SPLIT_ENABLED: Lazy<ClientConfigOption<bool>> = Lazy::new(|| {
+    ClientConfigOption::key("spark.rss.riffle.hardSplitEnabled")
+        .default_value(false)
+        .with_description("whether to trigger partition hard split by the server")
+});
 
 #[derive(Debug, Clone, Default)]
 pub struct ClientRssConf {
