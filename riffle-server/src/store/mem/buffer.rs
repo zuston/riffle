@@ -48,14 +48,6 @@ pub struct OptStagingMemoryBuffer {
     buffer: Mutex<OptStagingBufferInternal>,
 }
 
-// impl OptStagingMemoryBuffer {
-//     pub fn new() -> OptStagingMemoryBuffer {
-//         OptStagingMemoryBuffer {
-//             buffer: Mutex::new(OptStagingBufferInternal::new()),
-//         }
-//     }
-// }
-
 impl BufferOps for OptStagingMemoryBuffer {
     #[trace]
     fn new() -> OptStagingMemoryBuffer {
@@ -335,13 +327,6 @@ pub struct MemoryBuffer {
     buffer: Mutex<BufferInternal>,
 }
 
-// impl MemoryBuffer {
-//     pub fn new() -> MemoryBuffer {
-//         MemoryBuffer {
-//             buffer: Mutex::new(BufferInternal::new()),
-//         }
-//     }
-// }
 impl BufferOps for MemoryBuffer {
     #[trace]
     fn new() -> MemoryBuffer {
