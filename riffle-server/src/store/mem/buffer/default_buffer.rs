@@ -1,4 +1,4 @@
-use super::{BufferOps, BufferOptions, BufferSpillResult, MemBlockBatch};
+use super::{BufferOptions, BufferSpillResult, MemBlockBatch, MemoryBuffer};
 use crate::composed_bytes;
 use crate::composed_bytes::ComposedBytes;
 use crate::constant::INVALID_BLOCK_ID;
@@ -43,7 +43,7 @@ impl Inner {
     }
 }
 
-impl BufferOps for DefaultMemoryBuffer {
+impl MemoryBuffer for DefaultMemoryBuffer {
     fn new(opt: BufferOptions) -> DefaultMemoryBuffer {
         DefaultMemoryBuffer {
             buffer: Mutex::new(Inner::new()),

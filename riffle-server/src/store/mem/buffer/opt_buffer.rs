@@ -1,7 +1,7 @@
 use crate::composed_bytes::ComposedBytes;
 use crate::constant::INVALID_BLOCK_ID;
 use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
-use crate::store::mem::buffer::{BufferOps, BufferOptions, BufferSpillResult, MemBlockBatch};
+use crate::store::mem::buffer::{BufferOptions, BufferSpillResult, MemBlockBatch, MemoryBuffer};
 use crate::store::{Block, DataBytes, DataSegment, PartitionedMemoryData};
 use croaring::Treemap;
 use fastrace::trace;
@@ -44,7 +44,7 @@ pub struct OptStagingMemoryBuffer {
     buffer: Mutex<OptStagingBufferInternal>,
 }
 
-impl BufferOps for OptStagingMemoryBuffer {
+impl MemoryBuffer for OptStagingMemoryBuffer {
     #[trace]
     fn new(opt: BufferOptions) -> Self {
         OptStagingMemoryBuffer {

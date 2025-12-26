@@ -15,7 +15,7 @@ pub mod tests {
     };
     use crate::runtime::manager::RuntimeManager;
     use crate::store::hybrid::{HybridStore, PersistentStore};
-    use crate::store::mem::buffer::BufferOps;
+    use crate::store::mem::buffer::MemoryBuffer;
     use crate::store::spill::spill_test::mock::MockStore;
     use crate::store::spill::storage_flush_handler::StorageFlushHandler;
     use crate::store::spill::storage_select_handler::StorageSelectHandler;

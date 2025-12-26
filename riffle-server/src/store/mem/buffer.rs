@@ -69,7 +69,7 @@ impl BufferSpillResult {
     }
 }
 
-pub trait BufferOps {
+pub trait MemoryBuffer {
     /// Creates a new buffer instance
     fn new(options: BufferOptions) -> Self
     where
@@ -125,7 +125,7 @@ pub trait BufferOps {
 mod test {
     use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
     use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
-    use crate::store::mem::buffer::BufferOps;
+    use crate::store::mem::buffer::MemoryBuffer;
     use crate::store::Block;
     use hashlink::LinkedHashMap;
     use std::collections::LinkedList;
@@ -158,7 +158,8 @@ mod test {
         }
     }
 
-    fn run_test_with_block_id_zero<B: BufferOps + Send + Sync + 'static>() -> anyhow::Result<()> {
+    fn run_test_with_block_id_zero<B: MemoryBuffer + Send + Sync + 'static>() -> anyhow::Result<()>
+    {
         let mut buffer = B::new(Default::default());
         let block_1 = create_block(10, 100);
         let block_2 = create_block(10, 0);
@@ -192,7 +193,7 @@ mod test {
         Ok(())
     }
 
-    fn run_test_put_get<B: BufferOps + Send + Sync + 'static>() -> anyhow::Result<()> {
+    fn run_test_put_get<B: MemoryBuffer + Send + Sync + 'static>() -> anyhow::Result<()> {
         let mut buffer = B::new(Default::default());
 
         /// case1
@@ -300,7 +301,7 @@ mod test {
         Ok(())
     }
 
-    fn run_test_get_v2_is_end_with_only_staging<B: BufferOps + Send + Sync + 'static>(
+    fn run_test_get_v2_is_end_with_only_staging<B: MemoryBuffer + Send + Sync + 'static>(
     ) -> anyhow::Result<()> {
         let buffer = B::new(Default::default());
         // 0 -> 10 blocks with total 100 bytes
@@ -337,7 +338,7 @@ mod test {
         Ok(())
     }
 
-    fn run_test_get_v2_is_end_across_flight_and_staging<B: BufferOps + Send + Sync + 'static>(
+    fn run_test_get_v2_is_end_across_flight_and_staging<B: MemoryBuffer + Send + Sync + 'static>(
     ) -> anyhow::Result<()> {
         let buffer = B::new(Default::default());
 

@@ -63,7 +63,7 @@ use crate::runtime::manager::RuntimeManager;
 use crate::store::local::LocalfileStoreStat;
 use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
 use crate::store::mem::buffer::unified_buffer::UnifiedBuffer;
-use crate::store::mem::buffer::{BufferOps, BufferType};
+use crate::store::mem::buffer::{BufferType, MemoryBuffer};
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::spill::hierarchy_event_bus::HierarchyEventBus;
 use crate::store::spill::storage_flush_handler::StorageFlushHandler;

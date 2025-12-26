@@ -1,7 +1,7 @@
 use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
 use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
 use crate::store::mem::buffer::unified_buffer::UnifiedBuffer::{DEFAULT, EXPERIMENTAL};
-use crate::store::mem::buffer::{BufferOps, BufferOptions, BufferSpillResult, BufferType};
+use crate::store::mem::buffer::{BufferOptions, BufferSpillResult, BufferType, MemoryBuffer};
 use crate::store::{Block, PartitionedMemoryData};
 use croaring::Treemap;
 
@@ -11,7 +11,7 @@ pub enum UnifiedBuffer {
     EXPERIMENTAL(OptStagingMemoryBuffer),
 }
 
-impl BufferOps for UnifiedBuffer {
+impl MemoryBuffer for UnifiedBuffer {
     fn new(opts: BufferOptions) -> Self
     where
         Self: Sized,

@@ -39,7 +39,7 @@ use crate::runtime::manager::RuntimeManager;
 use crate::store::mem::budget::MemoryBudget;
 use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
 use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
-use crate::store::mem::buffer::{BufferOps, BufferOptions, BufferType};
+use crate::store::mem::buffer::{BufferOptions, BufferType, MemoryBuffer};
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::mem::ticket::TicketManager;
 use crate::store::spill::SpillWritingViewContext;
@@ -52,7 +52,7 @@ use fxhash::{FxBuildHasher, FxHasher};
 use log::{debug, info, warn};
 use std::sync::Arc;
 
-pub struct MemoryStore<B: BufferOps + Send + Sync + 'static = DefaultMemoryBuffer> {
+pub struct MemoryStore<B: MemoryBuffer + Send + Sync + 'static = DefaultMemoryBuffer> {
     memory_capacity: i64,
     state: DDashMap<PartitionUId, Arc<B>>,
     budget: MemoryBudget,
@@ -61,10 +61,10 @@ pub struct MemoryStore<B: BufferOps + Send + Sync + 'static = DefaultMemoryBuffe
     cfg: Option<MemoryStoreConfig>,
 }
 
-unsafe impl<B: BufferOps + Send + Sync> Send for MemoryStore<B> {}
-unsafe impl<B: BufferOps + Send + Sync> Sync for MemoryStore<B> {}
+unsafe impl<B: MemoryBuffer + Send + Sync> Send for MemoryStore<B> {}
+unsafe impl<B: MemoryBuffer + Send + Sync> Sync for MemoryStore<B> {}
 
-impl<B: BufferOps + Send + Sync + 'static> MemoryStore<B> {
+impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
     // only for test cases
     pub fn new(max_memory_size: i64) -> Self {
         let budget = MemoryBudget::new(max_memory_size);
@@ -258,7 +258,7 @@ impl<B: BufferOps + Send + Sync + 'static> MemoryStore<B> {
 }
 
 #[async_trait]
-impl<B: BufferOps + Send + Sync + 'static> Store for MemoryStore<B> {
+impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
     fn start(self: Arc<Self>) {
         // ignore
     }
@@ -433,11 +433,11 @@ mod test {
     use crate::app_manager::purge_event::PurgeReason;
     use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
     use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
-    use crate::store::mem::buffer::BufferOps;
+    use crate::store::mem::buffer::MemoryBuffer;
     use anyhow::Result;
     use croaring::Treemap;
 
-    fn run_test_read_buffer_in_flight<B: BufferOps + Send + Sync + 'static>() {
+    fn run_test_read_buffer_in_flight<B: MemoryBuffer + Send + Sync + 'static>() {
         let store: MemoryStore<B> = MemoryStore::new(1024);
         let runtime = store.runtime_manager.clone();
 
@@ -610,7 +610,7 @@ mod test {
         run_test_read_buffer_in_flight::<OptStagingMemoryBuffer>();
     }
 
-    async fn get_data_with_last_block_id<B: BufferOps + Send + Sync + 'static>(
+    async fn get_data_with_last_block_id<B: MemoryBuffer + Send + Sync + 'static>(
         default_single_read_size: i64,
         last_block_id: i64,
         store: &MemoryStore<B>,
@@ -653,7 +653,7 @@ mod test {
         WritingViewContext::create_for_test(uid, data_blocks)
     }
 
-    fn run_test_allocated_and_purge_for_memory<B: BufferOps + Send + Sync + 'static>() {
+    fn run_test_allocated_and_purge_for_memory<B: MemoryBuffer + Send + Sync + 'static>() {
         let store: MemoryStore<B> = MemoryStore::new(1024 * 1024 * 1024);
         let runtime = store.runtime_manager.clone();
 
@@ -685,7 +685,7 @@ mod test {
         run_test_allocated_and_purge_for_memory::<OptStagingMemoryBuffer>();
     }
 
-    fn run_test_purge<B: BufferOps + Send + Sync + 'static>() -> Result<()> {
+    fn run_test_purge<B: MemoryBuffer + Send + Sync + 'static>() -> Result<()> {
         let store: MemoryStore<B> = MemoryStore::new(1024);
         let runtime = store.runtime_manager.clone();
 
@@ -768,7 +768,7 @@ mod test {
         run_test_purge::<OptStagingMemoryBuffer>();
     }
 
-    fn run_test_put_and_get_for_memory<B: BufferOps + Send + Sync + 'static>() {
+    fn run_test_put_and_get_for_memory<B: MemoryBuffer + Send + Sync + 'static>() {
         let store: MemoryStore<B> = MemoryStore::new(1024 * 1024 * 1024);
         let runtime = store.runtime_manager.clone();
 
@@ -817,7 +817,7 @@ mod test {
         run_test_put_and_get_for_memory::<OptStagingMemoryBuffer>();
     }
 
-    fn run_test_block_id_filter_for_memory<B: BufferOps + Send + Sync + 'static>() {
+    fn run_test_block_id_filter_for_memory<B: MemoryBuffer + Send + Sync + 'static>() {
         let store: MemoryStore<B> = MemoryStore::new(1024 * 1024 * 1024);
         let runtime = store.runtime_manager.clone();
 
