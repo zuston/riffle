@@ -37,7 +37,7 @@ use crate::app_manager::partition_identifier::PartitionUId;
 use crate::ddashmap::DDashMap;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::mem::budget::MemoryBudget;
-use crate::store::mem::buffer::default_buffer::MemoryBuffer;
+use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
 use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
 use crate::store::mem::buffer::BufferOps;
 use crate::store::mem::capacity::CapacitySnapshot;
@@ -52,7 +52,7 @@ use fxhash::{FxBuildHasher, FxHasher};
 use log::{debug, info, warn};
 use std::sync::Arc;
 
-pub struct MemoryStore<B: BufferOps + Send + Sync + 'static = MemoryBuffer> {
+pub struct MemoryStore<B: BufferOps + Send + Sync + 'static = DefaultMemoryBuffer> {
     memory_capacity: i64,
     state: DDashMap<PartitionUId, Arc<B>>,
     budget: MemoryBudget,
@@ -420,7 +420,7 @@ mod test {
     use crate::app_manager::application_identifier::ApplicationId;
     use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::purge_event::PurgeReason;
-    use crate::store::mem::buffer::default_buffer::MemoryBuffer;
+    use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
     use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
     use crate::store::mem::buffer::BufferOps;
     use anyhow::Result;
@@ -595,7 +595,7 @@ mod test {
 
     #[test]
     fn test_read_buffer_in_flight() {
-        run_test_read_buffer_in_flight::<MemoryBuffer>();
+        run_test_read_buffer_in_flight::<DefaultMemoryBuffer>();
         run_test_read_buffer_in_flight::<OptStagingMemoryBuffer>();
     }
 
@@ -670,7 +670,7 @@ mod test {
 
     #[test]
     fn test_allocated_and_purge_for_memory() {
-        run_test_allocated_and_purge_for_memory::<MemoryBuffer>();
+        run_test_allocated_and_purge_for_memory::<DefaultMemoryBuffer>();
         run_test_allocated_and_purge_for_memory::<OptStagingMemoryBuffer>();
     }
 
@@ -753,7 +753,7 @@ mod test {
 
     #[test]
     fn test_purge() {
-        run_test_purge::<MemoryBuffer>();
+        run_test_purge::<DefaultMemoryBuffer>();
         run_test_purge::<OptStagingMemoryBuffer>();
     }
 
@@ -802,7 +802,7 @@ mod test {
 
     #[test]
     fn test_put_and_get_for_memory() {
-        run_test_put_and_get_for_memory::<MemoryBuffer>();
+        run_test_put_and_get_for_memory::<DefaultMemoryBuffer>();
         run_test_put_and_get_for_memory::<OptStagingMemoryBuffer>();
     }
 
@@ -874,7 +874,7 @@ mod test {
     }
     #[test]
     fn test_block_id_filter_for_memory() {
-        run_test_block_id_filter_for_memory::<MemoryBuffer>();
+        run_test_block_id_filter_for_memory::<DefaultMemoryBuffer>();
         run_test_block_id_filter_for_memory::<OptStagingMemoryBuffer>();
     }
 }

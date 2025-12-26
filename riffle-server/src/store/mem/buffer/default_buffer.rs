@@ -14,8 +14,12 @@ use std::mem;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
+pub struct DefaultMemoryBuffer {
+    buffer: Mutex<Inner>,
+}
+
 #[derive(Debug)]
-pub struct BufferInternal {
+struct Inner {
     pub total_size: i64,
     pub staging_size: i64,
     pub flight_size: i64,
@@ -26,9 +30,9 @@ pub struct BufferInternal {
     pub flight_counter: u64,
 }
 
-impl BufferInternal {
+impl Inner {
     pub fn new() -> Self {
-        BufferInternal {
+        Inner {
             total_size: 0,
             staging_size: 0,
             flight_size: 0,
@@ -38,14 +42,11 @@ impl BufferInternal {
         }
     }
 }
-pub struct MemoryBuffer {
-    buffer: Mutex<BufferInternal>,
-}
 
-impl BufferOps for MemoryBuffer {
-    fn new() -> MemoryBuffer {
-        MemoryBuffer {
-            buffer: Mutex::new(BufferInternal::new()),
+impl BufferOps for DefaultMemoryBuffer {
+    fn new() -> DefaultMemoryBuffer {
+        DefaultMemoryBuffer {
+            buffer: Mutex::new(Inner::new()),
         }
     }
 

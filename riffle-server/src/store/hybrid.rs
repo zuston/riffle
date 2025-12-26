@@ -61,7 +61,7 @@ use crate::app_manager::AppManagerRef;
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::local::LocalfileStoreStat;
-use crate::store::mem::buffer::default_buffer::MemoryBuffer;
+use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
 use crate::store::mem::buffer::route_buffer::RouterBuffer;
 use crate::store::mem::buffer::{BufferOps, MemoryBufferType};
 use crate::store::mem::capacity::CapacitySnapshot;

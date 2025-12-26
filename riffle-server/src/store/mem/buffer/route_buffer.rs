@@ -1,4 +1,4 @@
-use crate::store::mem::buffer::default_buffer::MemoryBuffer;
+use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
 use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
 use crate::store::mem::buffer::{BufferOps, BufferSpillResult};
 use crate::store::{Block, PartitionedMemoryData};
@@ -6,7 +6,7 @@ use croaring::Treemap;
 
 /// this is the router to delegate to the underlying concrete implementation without any cost
 pub enum RouterBuffer {
-    DEFAULT(MemoryBuffer),
+    DEFAULT(DefaultMemoryBuffer),
     EXPERIMENTAL(OptStagingMemoryBuffer),
 }
 

@@ -3,7 +3,7 @@ pub mod opt_buffer;
 pub mod route_buffer;
 
 use crate::composed_bytes::ComposedBytes;
-use crate::store::mem::buffer::default_buffer::MemoryBuffer;
+use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
 use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
 use crate::store::DataBytes;
 use crate::store::{Block, DataSegment, PartitionedMemoryData};
@@ -111,7 +111,7 @@ pub trait BufferOps {
 
 #[cfg(test)]
 mod test {
-    use crate::store::mem::buffer::default_buffer::MemoryBuffer;
+    use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
     use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
     use crate::store::mem::buffer::BufferOps;
     use crate::store::Block;
@@ -175,7 +175,7 @@ mod test {
 
     #[test]
     fn test_with_block_id_zero() -> anyhow::Result<()> {
-        run_test_with_block_id_zero::<MemoryBuffer>()?;
+        run_test_with_block_id_zero::<DefaultMemoryBuffer>()?;
         run_test_with_block_id_zero::<OptStagingMemoryBuffer>()?;
         Ok(())
     }
@@ -283,7 +283,7 @@ mod test {
 
     #[test]
     fn test_put_get() -> anyhow::Result<()> {
-        run_test_put_get::<MemoryBuffer>()?;
+        run_test_put_get::<DefaultMemoryBuffer>()?;
         run_test_put_get::<OptStagingMemoryBuffer>()?;
         Ok(())
     }
@@ -320,7 +320,7 @@ mod test {
 
     #[test]
     fn test_get_v2_is_end_with_only_staging() -> anyhow::Result<()> {
-        run_test_get_v2_is_end_with_only_staging::<MemoryBuffer>()?;
+        run_test_get_v2_is_end_with_only_staging::<DefaultMemoryBuffer>()?;
         run_test_get_v2_is_end_with_only_staging::<OptStagingMemoryBuffer>()?;
         Ok(())
     }
@@ -352,7 +352,7 @@ mod test {
 
     #[test]
     fn test_get_v2_is_end_across_flight_and_staging() -> anyhow::Result<()> {
-        run_test_get_v2_is_end_across_flight_and_staging::<MemoryBuffer>()?;
+        run_test_get_v2_is_end_across_flight_and_staging::<DefaultMemoryBuffer>()?;
         run_test_get_v2_is_end_across_flight_and_staging::<OptStagingMemoryBuffer>()?;
         Ok(())
     }
