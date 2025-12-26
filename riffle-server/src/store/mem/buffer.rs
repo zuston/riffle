@@ -1,6 +1,6 @@
 pub mod default_buffer;
 pub mod opt_buffer;
-mod route_buffer;
+pub mod route_buffer;
 
 use crate::composed_bytes::ComposedBytes;
 use crate::store::mem::buffer::default_buffer::MemoryBuffer;
@@ -16,7 +16,7 @@ use std::hash::Hash;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Copy)]
 pub enum MemoryBufferType {
     // the default memory_buffer type
     DEFAULT,

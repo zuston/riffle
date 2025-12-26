@@ -62,12 +62,14 @@ use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::local::LocalfileStoreStat;
 use crate::store::mem::buffer::default_buffer::MemoryBuffer;
-use crate::store::mem::buffer::BufferOps;
+use crate::store::mem::buffer::route_buffer::RouterBuffer;
+use crate::store::mem::buffer::{BufferOps, MemoryBufferType};
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::spill::hierarchy_event_bus::HierarchyEventBus;
 use crate::store::spill::storage_flush_handler::StorageFlushHandler;
 use crate::store::spill::storage_select_handler::StorageSelectHandler;
 use crate::store::spill::{SpillMessage, SpillWritingViewContext};
+use crate::store::ResponseData::Mem;
 use tokio::time::Instant;
 
 pub trait PersistentStore: Store + Persistent + Send + Sync + Any {
@@ -90,7 +92,7 @@ const DEFAULT_MEMORY_SPILL_MAX_CONCURRENCY: i32 = 20;
 
 pub struct HybridStore {
     // Box<dyn Store> will build fail
-    pub(crate) hot_store: Arc<MemoryStore>,
+    pub(crate) hot_store: Arc<MemoryStore<RouterBuffer>>,
 
     pub(crate) warm_store: Option<Box<dyn PersistentStore>>,
     pub(crate) cold_store: Option<Box<dyn PersistentStore>>,
@@ -173,11 +175,16 @@ impl HybridStore {
         }
         let async_watermark_spill_enable = hybrid_conf.async_watermark_spill_trigger_enable;
 
+        let mem_buffer_type = config
+            .memory_store
+            .as_ref()
+            .map(|x| x.buffer_type)
+            .unwrap_or(MemoryBufferType::DEFAULT);
+        let mem_store: MemoryStore<RouterBuffer> =
+            MemoryStore::from(config.memory_store.unwrap(), runtime_manager.clone());
+
         let store = HybridStore {
-            hot_store: Arc::new(MemoryStore::from(
-                config.memory_store.unwrap(),
-                runtime_manager.clone(),
-            )),
+            hot_store: Arc::new(mem_store),
             warm_store: persistent_stores.pop_front(),
             cold_store: persistent_stores.pop_front(),
             config: hybrid_conf,
@@ -427,7 +434,7 @@ impl HybridStore {
         Ok(Default::default())
     }
 
-    pub async fn get_memory_buffer(&self, uid: &PartitionUId) -> Result<Arc<MemoryBuffer>> {
+    pub async fn get_memory_buffer(&self, uid: &PartitionUId) -> Result<Arc<RouterBuffer>> {
         self.hot_store.get_buffer(uid)
     }
 
@@ -470,7 +477,7 @@ impl HybridStore {
     async fn buffer_spill_impl(
         &self,
         uid: &PartitionUId,
-        buffer: Arc<MemoryBuffer>,
+        buffer: Arc<RouterBuffer>,
     ) -> Result<u64> {
         let spill_result = buffer.spill()?;
         if spill_result.is_none() {
