@@ -5,12 +5,12 @@ use crate::store::{Block, PartitionedMemoryData};
 use croaring::Treemap;
 
 /// this is the router to delegate to the underlying concrete implementation without any cost
-pub enum RouterBuffer {
+pub enum UnifiedBuffer {
     DEFAULT(DefaultMemoryBuffer),
     EXPERIMENTAL(OptStagingMemoryBuffer),
 }
 
-impl BufferOps for RouterBuffer {
+impl BufferOps for UnifiedBuffer {
     fn new() -> Self
     where
         Self: Sized,

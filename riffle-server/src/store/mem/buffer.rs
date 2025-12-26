@@ -1,6 +1,6 @@
 pub mod default_buffer;
 pub mod opt_buffer;
-pub mod route_buffer;
+pub mod unified_buffer;
 
 use crate::composed_bytes::ComposedBytes;
 use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
