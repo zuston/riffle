@@ -1,6 +1,7 @@
 use crate::composed_bytes::ComposedBytes;
 use crate::constant::INVALID_BLOCK_ID;
-use crate::store::mem::buffer::{BatchMemoryBlock, BufferOps, BufferSpillResult};
+use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
+use crate::store::mem::buffer::{BufferOps, BufferOptions, BufferSpillResult, MemBlockBatch};
 use crate::store::{Block, DataBytes, DataSegment, PartitionedMemoryData};
 use croaring::Treemap;
 use fastrace::trace;
@@ -19,7 +20,7 @@ pub struct OptStagingBufferInternal {
     pub batch_boundaries: Vec<usize>, // Track where each batch starts
     pub block_position_index: HashMap<i64, usize>, // Maps block_id to Vec index
 
-    pub flight: HashMap<u64, Arc<BatchMemoryBlock>>,
+    pub flight: HashMap<u64, Arc<MemBlockBatch>>,
     pub flight_counter: u64,
 }
 
@@ -45,7 +46,7 @@ pub struct OptStagingMemoryBuffer {
 
 impl BufferOps for OptStagingMemoryBuffer {
     #[trace]
-    fn new() -> OptStagingMemoryBuffer {
+    fn new(opt: BufferOptions) -> Self {
         OptStagingMemoryBuffer {
             buffer: Mutex::new(OptStagingBufferInternal::new()),
         }
@@ -235,7 +236,7 @@ impl BufferOps for OptStagingMemoryBuffer {
             start = next_boundary;
         }
 
-        let staging: BatchMemoryBlock = BatchMemoryBlock(batches);
+        let staging: MemBlockBatch = MemBlockBatch(batches);
 
         // Clear everything
         buffer.staging.clear();

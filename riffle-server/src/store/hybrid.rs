@@ -63,7 +63,7 @@ use crate::runtime::manager::RuntimeManager;
 use crate::store::local::LocalfileStoreStat;
 use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
 use crate::store::mem::buffer::unified_buffer::UnifiedBuffer;
-use crate::store::mem::buffer::{BufferOps, MemoryBufferType};
+use crate::store::mem::buffer::{BufferOps, BufferType};
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::spill::hierarchy_event_bus::HierarchyEventBus;
 use crate::store::spill::storage_flush_handler::StorageFlushHandler;
@@ -175,11 +175,7 @@ impl HybridStore {
         }
         let async_watermark_spill_enable = hybrid_conf.async_watermark_spill_trigger_enable;
 
-        let mem_buffer_type = config
-            .memory_store
-            .as_ref()
-            .map(|x| x.buffer_type)
-            .unwrap_or(MemoryBufferType::DEFAULT);
+        // use the unified buffer to delegate the underlying concrete buffer
         let mem_store: MemoryStore<UnifiedBuffer> =
             MemoryStore::from(config.memory_store.unwrap(), runtime_manager.clone());
 

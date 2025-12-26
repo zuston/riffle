@@ -1,4 +1,4 @@
-use super::{BatchMemoryBlock, BufferOps, BufferSpillResult};
+use super::{BufferOps, BufferOptions, BufferSpillResult, MemBlockBatch};
 use crate::composed_bytes;
 use crate::composed_bytes::ComposedBytes;
 use crate::constant::INVALID_BLOCK_ID;
@@ -24,9 +24,9 @@ struct Inner {
     pub staging_size: i64,
     pub flight_size: i64,
 
-    pub staging: BatchMemoryBlock,
+    pub staging: MemBlockBatch,
 
-    pub flight: HashMap<u64, Arc<BatchMemoryBlock>>,
+    pub flight: HashMap<u64, Arc<MemBlockBatch>>,
     pub flight_counter: u64,
 }
 
@@ -44,7 +44,7 @@ impl Inner {
 }
 
 impl BufferOps for DefaultMemoryBuffer {
-    fn new() -> DefaultMemoryBuffer {
+    fn new(opt: BufferOptions) -> DefaultMemoryBuffer {
         DefaultMemoryBuffer {
             buffer: Mutex::new(Inner::new()),
         }
@@ -207,7 +207,7 @@ impl BufferOps for DefaultMemoryBuffer {
             return Ok(None);
         }
 
-        let staging: BatchMemoryBlock = { mem::replace(&mut buffer.staging, Default::default()) };
+        let staging: MemBlockBatch = { mem::replace(&mut buffer.staging, Default::default()) };
         let staging_ref = Arc::new(staging);
         let flight_id = buffer.flight_counter;
 

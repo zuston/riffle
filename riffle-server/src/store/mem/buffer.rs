@@ -5,6 +5,7 @@ pub mod unified_buffer;
 use crate::composed_bytes::ComposedBytes;
 use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
 use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
+use crate::store::mem::buffer::BufferType::DEFAULT;
 use crate::store::DataBytes;
 use crate::store::{Block, DataSegment, PartitionedMemoryData};
 use anyhow::Result;
@@ -17,22 +18,33 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Copy)]
-pub enum MemoryBufferType {
+pub enum BufferType {
     // the default memory_buffer type
     DEFAULT,
     // the experimental memory_buffer type
     EXPERIMENTAL,
 }
 
+impl Default for BufferType {
+    fn default() -> Self {
+        DEFAULT
+    }
+}
+
+#[derive(Default)]
+pub struct BufferOptions {
+    pub buffer_type: BufferType,
+}
+
 #[derive(Default, Debug)]
-pub struct BatchMemoryBlock(pub Vec<Vec<Block>>);
-impl Deref for BatchMemoryBlock {
+pub struct MemBlockBatch(pub Vec<Vec<Block>>);
+impl Deref for MemBlockBatch {
     type Target = Vec<Vec<Block>>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
-impl DerefMut for BatchMemoryBlock {
+impl DerefMut for MemBlockBatch {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -42,7 +54,7 @@ impl DerefMut for BatchMemoryBlock {
 pub struct BufferSpillResult {
     pub flight_id: u64,
     pub flight_len: u64,
-    pub blocks: Arc<BatchMemoryBlock>,
+    pub blocks: Arc<MemBlockBatch>,
 }
 
 impl BufferSpillResult {
@@ -52,14 +64,14 @@ impl BufferSpillResult {
     pub fn flight_len(&self) -> u64 {
         self.flight_len
     }
-    pub fn blocks(&self) -> Arc<BatchMemoryBlock> {
+    pub fn blocks(&self) -> Arc<MemBlockBatch> {
         self.blocks.clone()
     }
 }
 
 pub trait BufferOps {
     /// Creates a new buffer instance
-    fn new() -> Self
+    fn new(options: BufferOptions) -> Self
     where
         Self: Sized;
 
@@ -147,7 +159,7 @@ mod test {
     }
 
     fn run_test_with_block_id_zero<B: BufferOps + Send + Sync + 'static>() -> anyhow::Result<()> {
-        let mut buffer = B::new();
+        let mut buffer = B::new(Default::default());
         let block_1 = create_block(10, 100);
         let block_2 = create_block(10, 0);
 
@@ -181,7 +193,7 @@ mod test {
     }
 
     fn run_test_put_get<B: BufferOps + Send + Sync + 'static>() -> anyhow::Result<()> {
-        let mut buffer = B::new();
+        let mut buffer = B::new(Default::default());
 
         /// case1
         buffer.direct_push(create_blocks(0, 10, 10))?;
@@ -290,7 +302,7 @@ mod test {
 
     fn run_test_get_v2_is_end_with_only_staging<B: BufferOps + Send + Sync + 'static>(
     ) -> anyhow::Result<()> {
-        let buffer = B::new();
+        let buffer = B::new(Default::default());
         // 0 -> 10 blocks with total 100 bytes
         let cnt = 10;
         let block_len = 10;
@@ -327,7 +339,7 @@ mod test {
 
     fn run_test_get_v2_is_end_across_flight_and_staging<B: BufferOps + Send + Sync + 'static>(
     ) -> anyhow::Result<()> {
-        let buffer = B::new();
+        let buffer = B::new(Default::default());
 
         // staging: 0..2
         buffer.direct_push(create_blocks(0, 3, 5))?;

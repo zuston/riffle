@@ -39,7 +39,7 @@ use crate::runtime::manager::RuntimeManager;
 use crate::store::mem::budget::MemoryBudget;
 use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
 use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
-use crate::store::mem::buffer::BufferOps;
+use crate::store::mem::buffer::{BufferOps, BufferOptions, BufferType};
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::mem::ticket::TicketManager;
 use crate::store::spill::SpillWritingViewContext;
@@ -58,6 +58,7 @@ pub struct MemoryStore<B: BufferOps + Send + Sync + 'static = DefaultMemoryBuffe
     budget: MemoryBudget,
     runtime_manager: RuntimeManager,
     ticket_manager: TicketManager,
+    cfg: Option<MemoryStoreConfig>,
 }
 
 unsafe impl<B: BufferOps + Send + Sync> Send for MemoryStore<B> {}
@@ -81,6 +82,7 @@ impl<B: BufferOps + Send + Sync + 'static> MemoryStore<B> {
             memory_capacity: max_memory_size,
             ticket_manager,
             runtime_manager,
+            cfg: None,
         }
     }
 
@@ -105,6 +107,7 @@ impl<B: BufferOps + Send + Sync + 'static> MemoryStore<B> {
             memory_capacity: capacity.as_u64() as i64,
             ticket_manager,
             runtime_manager,
+            cfg: Some(conf),
         }
     }
 
@@ -206,7 +209,15 @@ impl<B: BufferOps + Send + Sync + 'static> MemoryStore<B> {
 
     // only invoked when inserting
     pub fn get_or_create_buffer(&self, uid: PartitionUId) -> Arc<B> {
-        self.state.compute_if_absent(uid, || Arc::new(B::new()))
+        let buf_opts = BufferOptions {
+            buffer_type: self
+                .cfg
+                .as_ref()
+                .map(|x| x.buffer_type)
+                .unwrap_or(BufferType::DEFAULT),
+        };
+        self.state
+            .compute_if_absent(uid, || Arc::new(B::new(buf_opts)))
     }
 
     pub fn get_buffer(&self, uid: &PartitionUId) -> Result<Arc<B>> {
