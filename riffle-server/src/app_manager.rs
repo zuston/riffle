@@ -562,6 +562,7 @@ pub(crate) mod test {
                 capacity: "20B".to_string(),
                 buffer_ticket_timeout_sec: 1,
                 buffer_ticket_check_interval_sec: 1,
+                buffer_type: Default::default(),
             }),
         );
         let _ = std::mem::replace(
