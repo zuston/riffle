@@ -62,7 +62,7 @@ use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::local::LocalfileStoreStat;
 use crate::store::mem::buffer::default_buffer::MemoryBuffer;
-use crate::store::mem::buffer::MemoryBuffer;
+use crate::store::mem::buffer::BufferOps;
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::spill::hierarchy_event_bus::HierarchyEventBus;
 use crate::store::spill::storage_flush_handler::StorageFlushHandler;

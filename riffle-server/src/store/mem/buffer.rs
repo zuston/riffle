@@ -1,16 +1,28 @@
 pub mod default_buffer;
 pub mod opt_buffer;
+mod route_buffer;
 
 use crate::composed_bytes::ComposedBytes;
+use crate::store::mem::buffer::default_buffer::MemoryBuffer;
+use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
 use crate::store::DataBytes;
 use crate::store::{Block, DataSegment, PartitionedMemoryData};
 use anyhow::Result;
 use croaring::Treemap;
 use parking_lot::Mutex;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum MemoryBufferType {
+    // the default memory_buffer type
+    DEFAULT,
+    // the experimental memory_buffer type
+    EXPERIMENTAL,
+}
 
 #[derive(Default, Debug)]
 pub struct BatchMemoryBlock(pub Vec<Vec<Block>>);
