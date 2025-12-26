@@ -576,6 +576,9 @@ pub static GAUGE_LOCAL_DISK_IS_HEALTHY: Lazy<IntGaugeVec> = Lazy::new(|| {
     .unwrap()
 });
 
+pub static HARD_SPLIT_COUNTER: Lazy<IntCounter> =
+    Lazy::new(|| IntCounter::new("hard_split_count", "hard_split_count").expect(""));
+
 pub static SERVICE_IS_HEALTHY: Lazy<IntGauge> =
     Lazy::new(|| IntGauge::new("service_is_healthy", "service_is_healthy").expect(""));
 
