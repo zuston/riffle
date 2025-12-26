@@ -1,3 +1,4 @@
+use crate::raw_pipe::RawPipe;
 use crate::urpc::frame::Frame;
 use anyhow::{anyhow, Result};
 use log::warn;
@@ -95,6 +96,62 @@ pub fn send_file(
     }
 }
 
+#[cfg(not(target_os = "linux"))]
+pub async fn splice(io_out: &mut TcpStream, pipe: &RawPipe) -> Result<()> {
+    Err(anyhow!("splice is only supported on Linux"))
+}
+
+#[cfg(target_os = "linux")]
+pub async fn splice(io_out: &mut TcpStream, pipe: &RawPipe) -> Result<()> {
+    use libc::{splice, SPLICE_F_MORE, SPLICE_F_MOVE};
+    use std::io;
+
+    let pipe_out_fd = pipe.pipe_out_fd.as_raw_fd();
+    let sock_fd = io_out.as_raw_fd();
+
+    let mut remaining = pipe.length;
+
+    while remaining > 0 {
+        let res = io_out
+            .async_io(Interest::WRITABLE, || {
+                let ret = unsafe {
+                    splice(
+                        pipe_out_fd,
+                        std::ptr::null_mut(),
+                        sock_fd,
+                        std::ptr::null_mut(),
+                        remaining,
+                        SPLICE_F_MOVE | SPLICE_F_MORE,
+                    )
+                };
+
+                if ret == -1 {
+                    let err = io::Error::last_os_error();
+                    return Err(err);
+                }
+
+                Ok(ret as usize)
+            })
+            .await;
+
+        match res {
+            Ok(0) => {
+                return Err(anyhow!("splice returned 0 bytes (pipe EOF)"));
+            }
+            Ok(n) => {
+                remaining -= n;
+            }
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                continue;
+            }
+            Err(e) => {
+                return Err(anyhow!(e));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub async fn send_file_full(
     io_out: &mut TcpStream,
     fd_in: i32,
@@ -157,9 +214,14 @@ pub fn read_ahead(file: &std::fs::File, off: i64, len: i64) -> Result<()> {
 #[cfg(test)]
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod tests {
+    use crate::runtime::manager::create_runtime;
+    use crate::store::DataBytes;
+
     use super::*;
+    use bytes::buf;
     use libc::{shutdown, SHUT_WR};
     use std::fs::{File, OpenOptions};
+    use std::io::Read;
     use std::io::Seek;
     use std::io::Write;
     use std::os::fd::AsRawFd;
@@ -167,6 +229,65 @@ mod tests {
     use tokio::io::AsyncReadExt;
     use tokio::net::{TcpListener, TcpStream};
     use tokio::task;
+
+    fn generate_14mb_string() -> String {
+        const MB14: usize = 14 * 1024 * 1024;
+        let pattern = "ABCD";
+        let repeat_count = MB14 / pattern.len();
+        let remainder = MB14 % pattern.len();
+
+        let mut s = pattern.repeat(repeat_count);
+        s.push_str(&pattern[..remainder]);
+        s
+    }
+
+    // only test splice on linux
+    #[cfg(all(feature = "io-uring", target_os = "linux"))]
+    #[test]
+    fn test_splice() -> anyhow::Result<()> {
+        use rand::Rng;
+
+        const FILE_SIZE: usize = 150 * 1024 * 1024;
+        const CHUNK_SIZE: usize = 15 * 1024 * 1024;
+        const NUM_CHUNKS: usize = FILE_SIZE / CHUNK_SIZE;
+
+        let w_runtime = create_runtime(2, "w");
+
+        let listener =
+            w_runtime.block_on(async { TcpListener::bind("127.0.0.1:0").await.unwrap() });
+        let addr = listener.local_addr().unwrap();
+
+        let server = w_runtime.spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = Vec::new();
+            socket.read_to_end(&mut buf).await.unwrap();
+            buf
+        });
+
+        let mut stream = w_runtime.block_on(async { TcpStream::connect(addr).await.unwrap() });
+
+        use crate::store::local::uring_io::tests::read_with_splice;
+
+        let write_data = generate_14mb_string();
+
+        println!("validating with direct read...");
+        let result = read_with_splice(write_data.to_owned())?;
+        match result {
+            DataBytes::RawPipe(raw_pipe) => {
+                assert!(raw_pipe.length == write_data.len());
+                println!("Have read into the pipe");
+                w_runtime.block_on(async { splice(&mut stream, &raw_pipe).await })?;
+                let ret = unsafe { shutdown(stream.as_raw_fd(), SHUT_WR) };
+                assert_eq!(ret, 0, "shutdown failed");
+            }
+            _ => panic!("Expected raw pipe bytes"),
+        };
+
+        let accepted = w_runtime.block_on(async { server.await })?;
+        assert_eq!(accepted.as_slice(), write_data.as_bytes());
+
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_send_file_full_linux() {

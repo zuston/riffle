@@ -19,9 +19,9 @@ use crate::store::local::io_layer_throttle::{ThrottleLayer, ThroughputBasedRateL
 use crate::store::local::io_layer_timeout::TimeoutLayer;
 use crate::store::local::layers::{Handler, OperatorBuilder};
 use crate::store::local::options::WriteOptions;
-use crate::store::local::read_options::ReadOptions;
+use crate::store::local::read_options::{ReadOptions, ReadRange};
 use crate::store::local::sync_io::SyncLocalIO;
-#[cfg(feature = "io-uring")]
+#[cfg(all(feature = "io-uring", target_os = "linux"))]
 use crate::store::local::uring_io::UringIoEngineBuilder;
 use crate::store::local::{DiskStat, FileStat, LocalDiskStorage, LocalIO};
 use crate::store::DataBytes;
@@ -97,10 +97,10 @@ impl LocalDiskDelegator {
             Some(read_capacity.as_u64() as usize),
         );
 
-        #[cfg(feature = "io-uring")]
+        #[cfg(all(feature = "io-uring", target_os = "linux"))]
         info!("Binary compiled with the io-uring feature enabled.");
 
-        #[cfg(feature = "io-uring")]
+        #[cfg(all(feature = "io-uring", target_os = "linux"))]
         let mut operator_builder = if let Some(cfg) = &config.io_uring_options {
             info!("io-uring engine is activated!");
             OperatorBuilder::new(Arc::new(Box::new(
@@ -114,7 +114,7 @@ impl LocalDiskDelegator {
             OperatorBuilder::new(Arc::new(Box::new(underlying_io_handler)))
         };
 
-        #[cfg(not(feature = "io-uring"))]
+        #[cfg(not(all(feature = "io-uring", target_os = "linux")))]
         let mut operator_builder = OperatorBuilder::new(Arc::new(Box::new(underlying_io_handler)));
 
         if let Some(conf) = config.io_limiter.as_ref() {
@@ -313,7 +313,7 @@ impl LocalDiskDelegator {
         let write_time = timer.elapsed().as_millis();
 
         let timer = Instant::now();
-        let options = ReadOptions::default().with_read_all();
+        let options = ReadOptions::default().with_read_range(ReadRange::RANGE(0, 1024 * 1024 * 10));
         let read_data = self.read(&detection_file, options).await?;
         let read_data = read_data.freeze();
         let read_time = timer.elapsed().as_millis();

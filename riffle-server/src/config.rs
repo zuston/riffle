@@ -128,10 +128,6 @@ pub struct LocalfileStoreConfig {
     #[serde(default = "as_default_disk_healthy_check_interval_sec")]
     pub disk_healthy_check_interval_sec: u64,
 
-    #[serde(default = "as_default_direct_io_enable")]
-    pub direct_io_enable: bool,
-    #[serde(default = "as_default_direct_io_read_enable")]
-    pub direct_io_read_enable: bool,
     #[serde(default = "as_default_direct_io_append_enable")]
     pub direct_io_append_enable: bool,
 
@@ -143,10 +139,6 @@ pub struct LocalfileStoreConfig {
     pub index_consistency_detection_enable: bool,
 
     pub io_limiter: Option<IoLimiterConfig>,
-
-    // This is only for urpc
-    #[serde(default = "as_default_read_io_sendfile_enable")]
-    pub read_io_sendfile_enable: bool,
 
     pub read_ahead_options: Option<ReadAheadConfig>,
 
@@ -273,13 +265,10 @@ impl LocalfileStoreConfig {
             disk_write_buf_capacity: as_default_disk_write_buf_capacity(),
             disk_read_buf_capacity: as_default_disk_read_buf_capacity(),
             disk_healthy_check_interval_sec: as_default_disk_healthy_check_interval_sec(),
-            direct_io_enable: as_default_direct_io_enable(),
-            direct_io_read_enable: as_default_direct_io_read_enable(),
             direct_io_append_enable: as_default_direct_io_append_enable(),
             io_duration_threshold_sec: as_default_io_duration_threshold_sec(),
             index_consistency_detection_enable: false,
             io_limiter: None,
-            read_io_sendfile_enable: as_default_read_io_sendfile_enable(),
             read_ahead_options: None,
             io_uring_options: None,
         }

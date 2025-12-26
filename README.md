@@ -244,6 +244,21 @@ labels = { env = "production", service = "my_service" }
 
 ## Disk Throughput and Latency Optimization
 
+### io_uring-based Disk I/O
+
+Riffle supports an io_uring-based local I/O engine to improve shuffle performance on modern Linux kernels. (Linux kernel >= 5.10, and it was verified on Anolis OS 8)
+   - Up to ~25% higher write throughput compared to the non-io_uring implementation
+   - ~3× lower CPU load under write-intensive shuffle workloads
+
+```shell
+# compile it with io-uring feature
+cargo build --features io-uring --bin riffle-server
+
+# set the following options in the server toml
+[localfile_store#io_uring_options]
+threads = 2
+```
+
 ### Predictable Performance with Direct I/O Flushes
 
 Buffered I/O in Linux relies on the page cache, which can introduce latency spikes. 

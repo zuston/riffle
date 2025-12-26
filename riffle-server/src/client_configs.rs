@@ -1,14 +1,14 @@
 use crate::config::RpcVersion;
+use crate::store::local::read_options::IoMode;
 use crate::util;
 use clap::builder::Str;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 
 /// The configuration options related to riffle-servers on the Uniffle client side.
-pub static SENDFILE_ENABLED_OPTION: Lazy<ClientConfigOption<bool>> = Lazy::new(|| {
-    ClientConfigOption::key("spark.rss.riffle.urpcSendfileEnabled")
-        .default_value(false)
-        .with_description("This indicates whether the sendfile is enabled when urpc is activated")
+pub static READ_IO_MODE_OPTION: Lazy<ClientConfigOption<IoMode>> = Lazy::new(|| {
+    ClientConfigOption::key("spark.rss.riffle.readIoMode").default_value(IoMode::BUFFER_IO)
+        .with_description("Io mode for reading, but sendfile is only valid in urpc without uring and splice is only valid in urpc with uring!")
 });
 
 pub static HDFS_CLIENT_EAGER_LOADING_ENABLED_OPTION: Lazy<ClientConfigOption<bool>> = Lazy::new(
@@ -41,12 +41,11 @@ pub static GET_MEMORY_DATA_URPC_VERSION: Lazy<ClientConfigOption<RpcVersion>> = 
         .with_description("the urpc version of getMemoryData")
 });
 
-pub static STORAGE_CAPACITY_PARTITION_SPLIT_ENABLED: Lazy<ClientConfigOption<bool>> =
-    Lazy::new(|| {
-        ClientConfigOption::key("spark.rss.riffle.storageCapacityPartitionSplitEnabled")
-            .default_value(false)
-            .with_description("whether to trigger partition split by the storage capacity")
-    });
+pub static HARD_SPLIT_ENABLED: Lazy<ClientConfigOption<bool>> = Lazy::new(|| {
+    ClientConfigOption::key("spark.rss.riffle.hardSplitEnabled")
+        .default_value(false)
+        .with_description("whether to trigger partition hard split by the server")
+});
 
 #[derive(Debug, Clone, Default)]
 pub struct ClientRssConf {
@@ -96,6 +95,10 @@ impl<T: Clone + Send + Sync + 'static> ClientConfigOption<T> {
     pub fn with_description(mut self, desc: &str) -> Self {
         self.description = Some(desc.to_string());
         self
+    }
+
+    pub fn get_key(&self) -> String {
+        self.key.clone()
     }
 }
 #[cfg(test)]
@@ -156,26 +159,5 @@ mod tests {
     fn test_no_default_value() {
         let conf = ClientRssConf::default();
         assert_eq!(None, conf.get(&READ_AHEAD_BATCH_SIZE));
-    }
-
-    #[test]
-    fn test_sendfile_enabled_option_default() {
-        let conf = ClientRssConf {
-            properties: HashMap::new(),
-        };
-        let result = conf.get(&SENDFILE_ENABLED_OPTION);
-        assert_eq!(result, Some(false));
-    }
-
-    #[test]
-    fn test_sendfile_enabled_option_set_true() {
-        let mut props = HashMap::new();
-        props.insert(
-            "spark.rss.riffle.urpcSendfileEnabled".to_string(),
-            "true".to_string(),
-        );
-        let conf = ClientRssConf { properties: props };
-        let result = conf.get(&SENDFILE_ENABLED_OPTION);
-        assert_eq!(result, Some(true));
     }
 }

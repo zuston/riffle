@@ -192,7 +192,7 @@ impl SyncLocalIO {
                     DataBytes::Composed(composed) => {
                         buf_writer.write_all(&composed.freeze())?;
                     }
-                    DataBytes::RawIO(_) => todo!(),
+                    _ => todo!(),
                 }
                 buf_writer.flush()?;
 
@@ -430,7 +430,7 @@ impl LocalIO for SyncLocalIO {
         options: ReadOptions,
     ) -> anyhow::Result<DataBytes, WorkerError> {
         let data = match options.io_mode {
-            IoMode::SENDFILE => {
+            IoMode::SENDFILE | IoMode::SPLICE => {
                 let (off, len) = match options.read_range {
                     ReadRange::RANGE(off, len) => (off, len),
                     _ => {
@@ -509,7 +509,7 @@ mod test {
     use crate::store::alignment::io_buffer_pool::IoBufferPool;
     use crate::store::alignment::io_bytes::IoBuffer;
     use crate::store::local::options::WriteOptions;
-    use crate::store::local::read_options::{ReadOptions, ReadRange};
+    use crate::store::local::read_options::{IoMode, ReadOptions, ReadRange};
     use crate::store::local::sync_io::{fill_buffer_and_write, SyncLocalIO, ALIGN};
     use crate::store::local::LocalIO;
     use bytes::{Bytes, BytesMut};
@@ -559,7 +559,7 @@ mod test {
         assert_eq!(1000 * 3, stat.content_length);
 
         // read all
-        let options = ReadOptions::default().with_read_all();
+        let options = ReadOptions::default().with_read_range(ReadRange::ALL);
         let data = base_runtime_ref
             .block_on(io_handler.read(data_file_name, options))?
             .freeze();
@@ -567,7 +567,7 @@ mod test {
 
         // seek read
         let options = ReadOptions::default()
-            .with_buffer_io()
+            .with_io_mode(IoMode::BUFFER_IO)
             .with_read_range(ReadRange::RANGE(10, 20));
         let data = base_runtime_ref
             .block_on(io_handler.read(data_file_name, options))?
@@ -711,14 +711,14 @@ mod test {
         // read
         let options = ReadOptions::default()
             .with_read_range(ReadRange::RANGE(3, 3))
-            .with_direct_io();
+            .with_io_mode(IoMode::DIRECT_IO);
         let data_1 = base_runtime_ref
             .block_on(io_handler.read(data_file_name, options))?
             .freeze();
         assert_eq!(vec![b'y', b'y', b'z'], data_1);
 
         let options = ReadOptions::default()
-            .with_direct_io()
+            .with_io_mode(IoMode::DIRECT_IO)
             .with_read_range(ReadRange::RANGE(11, 4));
         let data_2 = base_runtime_ref
             .block_on(io_handler.read(data_file_name, options))?
@@ -726,7 +726,7 @@ mod test {
         assert_eq!(vec![b'x', b'x', b'y', b'y'], data_2);
 
         let options = ReadOptions::default()
-            .with_direct_io()
+            .with_io_mode(IoMode::DIRECT_IO)
             .with_read_range(ReadRange::RANGE(19, 2));
         let data_3 = base_runtime_ref
             .block_on(io_handler.read(data_file_name, options))?

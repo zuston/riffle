@@ -8,7 +8,7 @@ use crate::app_manager::request_context::{
     RequireBufferContext, ShuffleResult, WritingViewContext,
 };
 use crate::block_id_manager::{get_block_id_manager, BlockIdManager};
-use crate::client_configs::STORAGE_CAPACITY_PARTITION_SPLIT_ENABLED;
+use crate::client_configs::HARD_SPLIT_ENABLED;
 use crate::config::Config;
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::config_ref::{ByteString, ConfigOption};
@@ -16,8 +16,8 @@ use crate::constant::ALL_LABEL;
 use crate::ddashmap::DDashMap;
 use crate::error::WorkerError;
 use crate::metric::{
-    BLOCK_ID_NUMBER, GAUGE_HUGE_PARTITION_NUMBER, GAUGE_PARTITION_NUMBER, RESIDENT_BYTES,
-    TOTAL_HUGE_PARTITION_NUMBER, TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED,
+    BLOCK_ID_NUMBER, GAUGE_HUGE_PARTITION_NUMBER, GAUGE_PARTITION_NUMBER, HARD_SPLIT_COUNTER,
+    RESIDENT_BYTES, TOTAL_HUGE_PARTITION_NUMBER, TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED,
     TOTAL_PARTITION_NUMBER, TOTAL_READ_DATA, TOTAL_READ_DATA_FROM_LOCALFILE,
     TOTAL_READ_DATA_FROM_MEMORY, TOTAL_READ_INDEX_FROM_LOCALFILE, TOTAL_RECEIVED_DATA,
     TOTAL_REQUIRE_BUFFER_FAILED,
@@ -229,11 +229,8 @@ impl App {
     pub async fn select(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
         self.heartbeat()?;
 
-        let ctx = if (self.app_config_options.sendfile_enable) {
-            ctx.with_sendfile_enabled()
-        } else {
-            ctx
-        };
+        // with the read mode.
+        let ctx = ctx.with_io_mode(self.app_config_options.read_io_mode.clone());
 
         let ctx = if self.app_config_options.read_ahead_enable {
             // This is a workaround — we can infer sequential reads when the taskId filter bitmap is enabled.
@@ -351,15 +348,17 @@ impl App {
         if self
             .app_config_options
             .client_configs
-            .get(&STORAGE_CAPACITY_PARTITION_SPLIT_ENABLED)
+            .get(&HARD_SPLIT_ENABLED)
             .unwrap_or(false)
+            // TODO: If the store is corrupted and only a single replica exists, fail the job fast instead of performing a hard split.
             && !self.store.is_healthy().await?
         {
             warn!(
-                "[{}] writing is limited due to the unhealthy storage",
+                "Hard split is activated for [{}] due to the unhealthy storage",
                 &app_id.to_string()
             );
-            return Err(WorkerError::WRITE_LIMITED_BY_STORAGE_STATE);
+            HARD_SPLIT_COUNTER.inc();
+            return Err(WorkerError::HARD_SPLIT_BY_UNHEALTHY_STORAGE);
         }
 
         let mut partition_split_candidates = HashSet::new();
@@ -519,7 +518,7 @@ mod tests {
     use crate::app_manager::application_identifier::ApplicationId;
     use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::request_context::RequireBufferContext;
-    use crate::client_configs::{ClientRssConf, STORAGE_CAPACITY_PARTITION_SPLIT_ENABLED};
+    use crate::client_configs::{ClientRssConf, HARD_SPLIT_ENABLED};
     use crate::config::StorageType;
     use crate::config::StorageType::LOCALFILE;
     use crate::config_reconfigure::ReconfigurableConfManager;
@@ -540,10 +539,7 @@ mod tests {
         let app_id = ApplicationId::YARN(1, 1, 1);
 
         let mut hmap = HashMap::new();
-        hmap.insert(
-            "spark.rss.riffle.storageCapacityPartitionSplitEnabled".to_string(),
-            "true".to_string(),
-        );
+        hmap.insert(HARD_SPLIT_ENABLED.get_key(), "true".to_string());
         let conf = ClientRssConf::from(hmap);
         let options = AppConfigOptions::new(DataDistribution::NORMAL, 1, None, conf);
 
@@ -599,7 +595,7 @@ mod tests {
         healthy_tag.store(false, Ordering::SeqCst);
 
         match runtime.block_on(async { app.require_buffer(ctx.clone()).await }) {
-            Err(WorkerError::WRITE_LIMITED_BY_STORAGE_STATE) => {
+            Err(WorkerError::HARD_SPLIT_BY_UNHEALTHY_STORAGE) => {
                 // pass
             }
             _ => {

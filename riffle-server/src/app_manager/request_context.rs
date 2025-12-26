@@ -3,6 +3,7 @@ use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::purge_event::PurgeReason;
 use crate::id_layout::IdLayout;
 use crate::partition_stats::{PartitionStats, TaskToRecordStatRef};
+use crate::store::local::read_options::IoMode;
 use crate::store::Block;
 use crate::urpc::command::ReadSegment;
 use bytes::Bytes;
@@ -111,7 +112,6 @@ pub struct ReadingViewContext {
     pub reading_options: ReadingOptions,
     pub task_ids_filter: Option<Treemap>,
     pub rpc_source: RpcType,
-    pub sendfile_enabled: bool,
 
     // tag whether the read-ahead is enabled
     pub read_ahead_client_enabled: bool,
@@ -124,6 +124,9 @@ pub struct ReadingViewContext {
     // next read segments
     pub localfile_next_read_segments: Vec<ReadSegment>,
     pub task_id: i64,
+
+    // read io mode
+    pub io_mode: IoMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,13 +142,13 @@ impl ReadingViewContext {
             reading_options,
             task_ids_filter: None,
             rpc_source,
-            sendfile_enabled: false,
             read_ahead_client_enabled: false,
             sequential: false,
             read_ahead_batch_number: None,
             read_ahead_batch_size: None,
             localfile_next_read_segments: vec![],
             task_id: 0,
+            io_mode: Default::default(),
         }
     }
 
@@ -155,8 +158,8 @@ impl ReadingViewContext {
         self
     }
 
-    pub fn with_sendfile_enabled(mut self) -> Self {
-        self.sendfile_enabled = true;
+    pub fn with_io_mode(mut self, mode: IoMode) -> Self {
+        self.io_mode = mode;
         self
     }
 
