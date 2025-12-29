@@ -24,12 +24,12 @@ jobs:
             artifact_path: target/release/riffle-ctl
             docker_compose: ""
             component: riffle-ctl
-#          - name: linux-arm64-anolisos8
-#            os: ubuntu-22.04-arm
-#            build_command: docker compose -f dev/anolisos8/arm64/docker-compose.yml up
-#            artifact_path: target-docker/release/riffle-server
-#            docker_compose: dev/anolisos8/arm64/docker-compose.yml
-#            component: riffle-server
+          - name: linux-arm64-anolisos8
+            os: ubuntu-22.04-arm
+            build_command: docker compose -f dev/anolisos8/arm64/docker-compose.yml up
+            artifact_path: target-docker/release/riffle-server
+            docker_compose: dev/anolisos8/arm64/docker-compose.yml
+            component: riffle-server
           - name: linux-amd64-centos7
             os: ubuntu-22.04
             build_command: docker compose -f dev/centos7/amd64/docker-compose.yml up
@@ -109,7 +109,7 @@ jobs:
           name: riffle-server-${{ matrix.name }}-${{ steps.vars.outputs.name }}
           path: target-docker/release/riffle-server
           if-no-files-found: warn
-      
+
       - name: Upload riffle-ctl
         if: steps.find_binaries.outputs.ctl_exists == 'true'
         uses: actions/upload-artifact@v4
