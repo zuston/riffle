@@ -1317,6 +1317,10 @@ fn register_custom_metrics() {
     REGISTRY
         .register(Box::new(READ_AHEAD_OPERATION_FAILURE_COUNT.clone()))
         .expect("read_ahead_operation_failure_count must be registered");
+
+    REGISTRY
+        .register(Box::new(HARD_SPLIT_COUNTER.clone()))
+        .expect("");
 }
 
 const JOB_NAME: &str = "uniffle-worker";
