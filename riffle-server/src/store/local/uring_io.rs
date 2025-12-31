@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use crate::error::WorkerError;
+use crate::metric::TOTAL_URING_SPLICE;
 use crate::raw_pipe::RawPipe;
 use crate::store::local::options::{CreateOptions, WriteOptions};
 use crate::store::local::read_options::{IoMode, ReadOptions, ReadRange};
@@ -492,6 +493,7 @@ impl LocalIO for UringIo {
 
         // todo: make the size as the optional config option in io-uring
         if matches!(options.io_mode, IoMode::SPLICE) && length < 16 * 1024 * 1024 {
+            TOTAL_URING_SPLICE.inc();
             // init the pipe
             let (pipe_in, mut pipe_out) = {
                 let mut pipes = [0, 0];
