@@ -158,7 +158,7 @@ fn as_default_io_uring_io_depth() -> usize {
 }
 
 fn as_default_io_uring_threads() -> usize {
-    16
+    2
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -195,10 +195,6 @@ fn as_default_read_ahead_batch_number() -> usize {
 
 fn as_default_read_ahead_batch_size() -> String {
     "14M".to_string()
-}
-
-fn as_default_read_io_sendfile_enable() -> bool {
-    false
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
