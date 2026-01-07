@@ -24,10 +24,6 @@ edition = "2021"
 name = "riffle-coordinator"
 path = "src/main.rs"
 
-[lib]
-name = "riffle_coordinator"
-path = "src/lib.rs"
-
 [features]
 default = ["logforth"]
 logforth = ["dep:logforth"]

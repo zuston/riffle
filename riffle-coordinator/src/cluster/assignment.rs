@@ -54,10 +54,10 @@ pub trait AssignmentStrategy: Send + Sync {
     fn assign(
         &self,
         servers: &[ShuffleServerNode],
-        partition_num: i32,
-        partition_num_per_range: i32,
-        data_replica: i32,
-        max_server_num: i32,
+        partition_num: usize,
+        partition_num_per_range: usize,
+        data_replica: usize,
+        max_server_num: usize,
     ) -> Result<Vec<PartitionAssignment>, AssignmentError>;
 }
 
@@ -92,10 +92,10 @@ impl AssignmentStrategy for WeightedAssignment {
     fn assign(
         &self,
         servers: &[ShuffleServerNode],
-        partition_num: i32,
-        partition_num_per_range: i32,
-        data_replica: i32,
-        max_server_num: i32,
+        partition_num: usize,
+        partition_num_per_range: usize,
+        data_replica: usize,
+        max_server_num: usize,
     ) -> Result<Vec<PartitionAssignment>, AssignmentError> {
         if servers.is_empty() {
             return Err(AssignmentError::NoAvailableServers);
@@ -117,7 +117,7 @@ impl AssignmentStrategy for WeightedAssignment {
         let replica_count = data_replica as usize;
         if replica_count > selected_servers.len() {
             return Err(AssignmentError::InsufficientServersForReplication {
-                required: data_replica,
+                required: data_replica as i32,
                 available: selected_servers.len(),
             });
         }

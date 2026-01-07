@@ -20,7 +20,5 @@ pub mod assignment;
 pub mod cluster_manager;
 pub mod server_node;
 
-pub use application::ApplicationInfo;
-pub use assignment::{AssignmentStrategy, PartitionAssignment, WeightedAssignment};
-pub use cluster_manager::{ClusterConfig, ClusterManager, ClusterManagerRef};
-pub use server_node::ShuffleServerNode;
+pub use assignment::AssignmentStrategy;
+pub use cluster_manager::{ClusterManager, ClusterManagerRef};

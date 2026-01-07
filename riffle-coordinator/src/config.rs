@@ -15,31 +15,54 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use serde::Deserialize;
+use riffle_server::config::LogConfig;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Config {
+    #[serde(default = "as_default_grpc_port")]
     pub grpc_port: u16,
+
+    #[serde(default = "as_default_http_port")]
     pub http_port: u16,
-    pub heartbeat_timeout_seconds: i64,
-    pub node_expiry_check_interval_seconds: i64,
+
+    #[serde(default = "as_default_node_heartbeat_timeout_seconds")]
+    pub node_heartbeat_timeout_seconds: usize,
+
+    #[serde(default = "as_default_node_expiry_check_interval_seconds")]
+    pub node_expiry_check_interval_seconds: usize,
+
     pub memory_weight: f64,
     pub partition_weight: f64,
-    pub default_remote_storage_path: Option<String>,
-    pub client_conf: Vec<(String, String)>,
+
+    pub log: Option<LogConfig>,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            grpc_port: 19999,
-            http_port: 19998,
-            heartbeat_timeout_seconds: 60,
-            node_expiry_check_interval_seconds: 30,
-            memory_weight: 1.0,
-            partition_weight: 1000.0,
-            default_remote_storage_path: None,
-            client_conf: vec![],
-        }
+fn as_default_node_expiry_check_interval_seconds() -> usize {
+    20
+}
+
+fn as_default_node_heartbeat_timeout_seconds() -> usize {
+    60
+}
+
+fn as_default_grpc_port() -> u16 {
+    20010
+}
+
+fn as_default_http_port() -> u16 {
+    20020
+}
+
+impl Config {
+    pub fn from(cfg_path: &str) -> Self {
+        let path = Path::new(cfg_path);
+
+        // Read the file content as a string
+        let file_content = fs::read_to_string(path).expect("Failed to read file");
+
+        toml::from_str(&file_content).unwrap()
     }
 }

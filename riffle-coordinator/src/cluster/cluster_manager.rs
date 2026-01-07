@@ -31,40 +31,16 @@ use crate::config::Config;
 
 pub type ClusterManagerRef = Arc<ClusterManager>;
 
-/// Configuration for the cluster manager
-#[derive(Clone, Debug)]
-pub struct ClusterConfig {
-    pub heartbeat_timeout_seconds: i64,
-    pub node_expiry_check_interval_seconds: i64,
-    pub memory_weight: f64,
-    pub partition_weight: f64,
-    pub default_remote_storage_path: Option<String>,
-    pub client_conf: Vec<(String, String)>,
-}
-
-impl From<Config> for ClusterConfig {
-    fn from(config: Config) -> Self {
-        Self {
-            heartbeat_timeout_seconds: config.heartbeat_timeout_seconds,
-            node_expiry_check_interval_seconds: config.node_expiry_check_interval_seconds,
-            memory_weight: config.memory_weight,
-            partition_weight: config.partition_weight,
-            default_remote_storage_path: config.default_remote_storage_path,
-            client_conf: config.client_conf,
-        }
-    }
-}
-
 /// Request for shuffle assignment
 #[derive(Clone, Debug)]
 pub struct AssignmentRequest {
     pub app_id: String,
     pub shuffle_id: i32,
-    pub partition_num: i32,
-    pub partition_num_per_range: i32,
-    pub data_replica: i32,
+    pub partition_num: usize,
+    pub partition_num_per_range: usize,
+    pub data_replica: usize,
     pub require_tags: Vec<String>,
-    pub assignment_server_num: i32,
+    pub require_server_num: usize,
 }
 
 /// Result of shuffle assignment
@@ -105,7 +81,7 @@ pub struct ClusterManager {
     applications: DashMap<String, ApplicationInfo>,
 
     /// Configuration
-    config: ClusterConfig,
+    config: Config,
 
     /// Assignment strategy
     assignment_strategy: Arc<dyn AssignmentStrategy>,
@@ -114,7 +90,7 @@ pub struct ClusterManager {
 impl ClusterManager {
     /// Create a new ClusterManager with the given configuration
     pub fn new(config: Config) -> ClusterManagerRef {
-        let cluster_config = ClusterConfig::from(config);
+        let cluster_config = config;
         let assignment_strategy = Arc::new(WeightedAssignment::new(
             cluster_config.memory_weight,
             cluster_config.partition_weight,
@@ -231,7 +207,7 @@ impl ClusterManager {
             request.partition_num,
             request.partition_num_per_range,
             request.data_replica,
-            request.assignment_server_num,
+            request.require_server_num,
         )?;
 
         // 3. Update partition count for selected servers
@@ -278,7 +254,7 @@ impl ClusterManager {
 
     /// Remove expired nodes based on heartbeat timeout
     pub fn cleanup_expired_nodes(&self) {
-        let timeout = Duration::seconds(self.config.heartbeat_timeout_seconds);
+        let timeout = Duration::seconds(self.config.node_heartbeat_timeout_seconds as i64);
         let now = Utc::now();
 
         self.servers.retain(|id, node| {
@@ -292,7 +268,7 @@ impl ClusterManager {
 
     /// Remove expired applications
     pub fn cleanup_expired_applications(&self) {
-        let timeout = Duration::seconds(self.config.heartbeat_timeout_seconds * 2);
+        let timeout = Duration::seconds((self.config.node_heartbeat_timeout_seconds * 2) as i64);
         let now = Utc::now();
 
         self.applications.retain(|id, app| {
@@ -302,12 +278,6 @@ impl ClusterManager {
             }
             !expired
         });
-    }
-
-    // ==================== Getters ====================
-
-    pub fn config(&self) -> &ClusterConfig {
-        &self.config
     }
 
     pub fn server_count(&self) -> usize {

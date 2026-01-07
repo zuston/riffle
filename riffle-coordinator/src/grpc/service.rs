@@ -97,11 +97,11 @@ impl CoordinatorServer for DefaultCoordinatorServer {
         let assignment_request = AssignmentRequest {
             app_id: inner.application_id.clone(),
             shuffle_id: inner.shuffle_id,
-            partition_num: inner.partition_num,
-            partition_num_per_range: inner.partition_num_per_range,
-            data_replica: inner.data_replica,
+            partition_num: inner.partition_num as usize,
+            partition_num_per_range: inner.partition_num_per_range as usize,
+            data_replica: inner.data_replica as usize,
             require_tags: inner.require_tags,
-            assignment_server_num: inner.assignment_shuffle_server_number,
+            require_server_num: inner.assignment_shuffle_server_number as usize,
         };
 
         match self
@@ -224,18 +224,7 @@ impl CoordinatorServer for DefaultCoordinatorServer {
         &self,
         _request: Request<()>,
     ) -> Result<Response<GetShuffleDataStorageInfoResponse>, Status> {
-        let config = self.cluster_manager.config();
-        let default_path = config
-            .default_remote_storage_path
-            .as_ref()
-            .cloned()
-            .unwrap_or_default();
-
-        Ok(Response::new(GetShuffleDataStorageInfoResponse {
-            storage: "LOCALFILE".to_string(),
-            storage_path: default_path,
-            storage_pattern: "".to_string(),
-        }))
+        todo!()
     }
 
     // ==================== 6. checkServiceAvailable ====================
@@ -342,20 +331,11 @@ impl CoordinatorServer for DefaultCoordinatorServer {
         &self,
         _request: Request<()>,
     ) -> Result<Response<FetchClientConfResponse>, Status> {
-        let config = self.cluster_manager.config();
-        let client_conf: Vec<ClientConfItem> = config
-            .client_conf
-            .iter()
-            .map(|(k, v)| ClientConfItem {
-                key: k.clone(),
-                value: v.clone(),
-            })
-            .collect();
-
+        // todo: haven't support
         Ok(Response::new(FetchClientConfResponse {
             status: StatusCode::Success.into(),
             ret_msg: "".to_string(),
-            client_conf,
+            client_conf: vec![],
         }))
     }
 
@@ -363,23 +343,11 @@ impl CoordinatorServer for DefaultCoordinatorServer {
 
     async fn fetch_remote_storage(
         &self,
-        request: Request<FetchRemoteStorageRequest>,
+        _request: Request<FetchRemoteStorageRequest>,
     ) -> Result<Response<FetchRemoteStorageResponse>, Status> {
-        let _inner = request.into_inner();
-        let config = self.cluster_manager.config();
-
-        let remote_storage =
-            config
-                .default_remote_storage_path
-                .as_ref()
-                .map(|path| RemoteStorage {
-                    path: path.clone(),
-                    remote_storage_conf: vec![],
-                });
-
         Ok(Response::new(FetchRemoteStorageResponse {
             status: StatusCode::Success.into(),
-            remote_storage,
+            remote_storage: None,
         }))
     }
 }
