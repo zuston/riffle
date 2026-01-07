@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use super::application::ApplicationInfo;
 use super::assignment::{
-    AssignmentError, AssignmentStrategy, PartitionAssignment, WeightedAssignment,
+    AssignmentError, AssignmentStrategy, PartitionAssignment, PartitionBalanceAssignmentStrategy,
 };
 use super::server_node::{ServerStatus, ShuffleServerNode};
 use crate::config::Config;
@@ -91,10 +91,8 @@ impl ClusterManager {
     /// Create a new ClusterManager with the given configuration
     pub fn new(config: Config) -> ClusterManagerRef {
         let cluster_config = config;
-        let assignment_strategy = Arc::new(WeightedAssignment::new(
-            cluster_config.memory_weight,
-            cluster_config.partition_weight,
-        ));
+        let assignment_strategy: Arc<dyn AssignmentStrategy> =
+            Arc::new(PartitionBalanceAssignmentStrategy::new());
 
         Arc::new(Self {
             servers: DashMap::new(),
@@ -110,6 +108,7 @@ impl ClusterManager {
     /// Registers new servers or updates existing server state
     pub fn handle_heartbeat(&self, heartbeat: HeartbeatInfo) {
         let now = Utc::now();
+        let timestamp = now.timestamp_millis();
 
         self.servers
             .entry(heartbeat.server_id.clone())
@@ -124,6 +123,7 @@ impl ClusterManager {
                 node.status = heartbeat.status.clone();
                 node.storage_info = heartbeat.storage_info.clone();
                 node.last_heartbeat = now;
+                node.timestamp = timestamp;
             })
             .or_insert_with(|| {
                 // New server registration
@@ -142,6 +142,7 @@ impl ClusterManager {
                     pre_allocated_memory: heartbeat.pre_allocated_memory,
                     event_num_in_flush: heartbeat.event_num_in_flush,
                     assigned_partition_count: 0,
+                    timestamp,
                     tags: heartbeat.tags,
                     is_healthy: heartbeat.is_healthy,
                     status: heartbeat.status,
@@ -202,24 +203,16 @@ impl ClusterManager {
         }
 
         // 2. Apply assignment strategy
+        let require_tags: Vec<String> = request.require_tags.iter().cloned().collect();
         let assignments = self.assignment_strategy.assign(
             &available_servers,
             request.partition_num,
             request.partition_num_per_range,
             request.data_replica,
             request.require_server_num,
+            &require_tags,
+            &Vec::<String>::new(),
         )?;
-
-        // 3. Update partition count for selected servers
-        for assignment in &assignments {
-            let partition_count =
-                (assignment.end_partition - assignment.start_partition + 1) as i64;
-            for server_id in &assignment.server_ids {
-                if let Some(mut node) = self.servers.get_mut(server_id) {
-                    node.assigned_partition_count += partition_count;
-                }
-            }
-        }
 
         Ok(AssignmentResult {
             app_id: request.app_id,

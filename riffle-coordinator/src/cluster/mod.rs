@@ -21,4 +21,5 @@ pub mod cluster_manager;
 pub mod server_node;
 
 pub use assignment::AssignmentStrategy;
+pub use assignment::PartitionBalanceAssignmentStrategy;
 pub use cluster_manager::{ClusterManager, ClusterManagerRef};

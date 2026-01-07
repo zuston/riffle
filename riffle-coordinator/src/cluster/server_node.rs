@@ -37,6 +37,9 @@ pub struct ShuffleServerNode {
     // Assigned partition count (for weighted assignment)
     pub assigned_partition_count: i64,
 
+    // Timestamp for detecting server restarts
+    pub timestamp: i64,
+
     // Tags for filtering
     pub tags: Vec<String>,
 
