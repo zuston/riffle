@@ -100,9 +100,7 @@ pub trait AssignmentStrategy: Send + Sync {
         partition_num: usize,
         partition_num_per_range: usize,
         data_replica: usize,
-        max_server_num: usize,
-        required_tags: &[String],
-        exclude_server_ids: &[String],
+        request_server_num: usize,
     ) -> Result<Vec<PartitionAssignment>, AssignmentError>;
 }
 
@@ -120,18 +118,18 @@ pub trait AssignmentStrategy: Send + Sync {
 #[derive(Clone, Debug)]
 pub struct PartitionBalanceAssignmentStrategy {
     /// Maps server ID to partition assignment info
-    server_to_partitions: Arc<Mutex<HashMap<String, PartitionAssignmentInfo>>>,
+    server_to_assignments: Arc<Mutex<HashMap<String, PartitionAssignmentInfo>>>,
 }
 
 impl PartitionBalanceAssignmentStrategy {
     pub fn new() -> Self {
         Self {
-            server_to_partitions: Arc::new(Mutex::new(HashMap::new())),
+            server_to_assignments: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     /// Update partition info for servers, resetting if timestamp changed
-    fn update_partition_info(
+    fn update_assignment_info(
         &self,
         servers: &[ShuffleServerNode],
         server_to_partitions: &mut HashMap<String, PartitionAssignmentInfo>,
@@ -172,11 +170,11 @@ impl PartitionBalanceAssignmentStrategy {
     /// Get candidate nodes based on expected count
     fn get_candidate_nodes<'a>(
         &self,
-        nodes: &'a [ShuffleServerNode],
+        nodes: &Vec<&'a ShuffleServerNode>,
         expect_num: usize,
     ) -> Vec<&'a ShuffleServerNode> {
         let count = std::cmp::min(expect_num, nodes.len());
-        nodes.iter().take(count).collect()
+        nodes.iter().take(count).cloned().collect()
     }
 
     /// Generate partition assignments for the given parameters
@@ -203,7 +201,7 @@ impl PartitionBalanceAssignmentStrategy {
             // Select servers for replicas using round-robin
             let mut server_ids = Vec::with_capacity(replica);
             for replica_idx in 0..replica {
-                let server_idx = ((range_idx as usize + replica_idx) % candidate_nodes.len());
+                let server_idx = (range_idx as usize + replica_idx) % candidate_nodes.len();
                 server_ids.push(candidate_nodes[server_idx].id.clone());
             }
 
@@ -227,13 +225,11 @@ impl Default for PartitionBalanceAssignmentStrategy {
 impl AssignmentStrategy for PartitionBalanceAssignmentStrategy {
     fn assign(
         &self,
-        servers: &[ShuffleServerNode],
+        available_servers: &[ShuffleServerNode],
         partition_num: usize,
         partition_num_per_range: usize,
         data_replica: usize,
-        max_server_num: usize,
-        _required_tags: &[String],
-        _exclude_server_ids: &[String],
+        request_server_num: usize,
     ) -> Result<Vec<PartitionAssignment>, AssignmentError> {
         // partition_num_per_range must be 1 for this strategy
         if partition_num_per_range != 1 {
@@ -242,43 +238,42 @@ impl AssignmentStrategy for PartitionBalanceAssignmentStrategy {
             });
         }
 
-        if servers.is_empty() {
+        if available_servers.is_empty() {
             return Err(AssignmentError::NoAvailableServers);
         }
 
-        if data_replica > servers.len() {
+        if data_replica > available_servers.len() {
             return Err(AssignmentError::InsufficientServersForReplication {
                 required: data_replica as i32,
-                available: servers.len(),
+                available: available_servers.len(),
             });
         }
 
         let mut assignments: Vec<PartitionAssignment> = Vec::new();
 
-        // Use mutex for synchronization (similar to Java synchronized block)
-        let mut server_to_partitions = self.server_to_partitions.lock().unwrap();
+        // Use mutex for synchronization
+        let mut server_to_partitions = self.server_to_assignments.lock().unwrap();
 
         // Update partition info for each node, resetting if timestamp changed
-        self.update_partition_info(servers, &mut server_to_partitions);
+        self.update_assignment_info(available_servers, &mut server_to_partitions);
 
         // Calculate assign_partitions: max(averagePartitions, 1)
         // averagePartitions = totalPartitionNum * replica / shuffleNodesMax
-        let shuffle_nodes_max = max_server_num.max(1);
+        let shuffle_nodes_max = request_server_num.max(1);
         let average_partitions = (partition_num * data_replica) as i32 / shuffle_nodes_max as i32;
-        let assign_partitions = std::cmp::max(average_partitions, 1);
+        let average_partitions = std::cmp::max(average_partitions, 1);
 
         // Sort servers by score in descending order
-        let mut sorted_servers: Vec<_> = servers.iter().collect();
+        let mut sorted_servers: Vec<_> = available_servers.iter().collect();
         sorted_servers.sort_by(|a, b| {
-            let info_a = server_to_partitions
-                .get(&a.id)
-                .unwrap_or(&PartitionAssignmentInfo::new());
-            let info_b = server_to_partitions
-                .get(&b.id)
-                .unwrap_or(&PartitionAssignmentInfo::new());
+            let binding_a = PartitionAssignmentInfo::new();
+            let info_a = server_to_partitions.get(&a.id).unwrap_or(&binding_a);
 
-            let score_a = self.calculate_score(a, info_a, assign_partitions);
-            let score_b = self.calculate_score(b, info_b, assign_partitions);
+            let binding_b = PartitionAssignmentInfo::new();
+            let info_b = server_to_partitions.get(&b.id).unwrap_or(&binding_b);
+
+            let score_a = self.calculate_score(a, info_a, average_partitions);
+            let score_b = self.calculate_score(b, info_b, average_partitions);
 
             // Higher score first (descending order)
             score_b
@@ -287,10 +282,10 @@ impl AssignmentStrategy for PartitionBalanceAssignmentStrategy {
         });
 
         // Determine expected number of servers
-        let expect_num = if max_server_num > 0 && max_server_num < servers.len() {
-            max_server_num
+        let expect_num = if request_server_num > 0 && request_server_num < available_servers.len() {
+            request_server_num
         } else {
-            servers.len()
+            available_servers.len()
         };
 
         // Get candidate nodes
@@ -316,102 +311,6 @@ impl AssignmentStrategy for PartitionBalanceAssignmentStrategy {
         }
 
         drop(server_to_partitions);
-
-        Ok(assignments)
-    }
-}
-
-/// Weighted assignment strategy based on available memory and partition count
-#[derive(Clone, Debug)]
-pub struct WeightedAssignment {
-    memory_weight: f64,
-    partition_weight: f64,
-}
-
-impl WeightedAssignment {
-    pub fn new(memory_weight: f64, partition_weight: f64) -> Self {
-        Self {
-            memory_weight,
-            partition_weight,
-        }
-    }
-
-    /// Sort servers by score in descending order
-    fn sort_servers_by_score(&self, servers: &mut Vec<ShuffleServerNode>) {
-        servers.sort_by(|a, b| {
-            let score_a = a.calculate_score(self.memory_weight, self.partition_weight);
-            let score_b = b.calculate_score(self.memory_weight, self.partition_weight);
-            score_b
-                .partial_cmp(&score_a)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-    }
-}
-
-impl AssignmentStrategy for WeightedAssignment {
-    fn assign(
-        &self,
-        servers: &[ShuffleServerNode],
-        partition_num: usize,
-        partition_num_per_range: usize,
-        data_replica: usize,
-        max_server_num: usize,
-        _required_tags: &[String],
-        _exclude_server_ids: &[String],
-    ) -> Result<Vec<PartitionAssignment>, AssignmentError> {
-        if servers.is_empty() {
-            return Err(AssignmentError::NoAvailableServers);
-        }
-
-        if partition_num <= 0 || partition_num_per_range <= 0 {
-            return Err(AssignmentError::InvalidParameters {
-                message: "partition_num and partition_num_per_range must be positive".to_string(),
-            });
-        }
-
-        // 1. Copy and sort servers by score (descending)
-        let mut sorted_servers = servers.to_vec();
-        self.sort_servers_by_score(&mut sorted_servers);
-
-        // 2. Determine actual number of servers to use
-        let actual_server_num = std::cmp::min(max_server_num as usize, sorted_servers.len());
-        let selected_servers: Vec<_> = sorted_servers.into_iter().take(actual_server_num).collect();
-
-        // 3. Check if we have enough servers for replication
-        let replica_count = data_replica as usize;
-        if replica_count > selected_servers.len() {
-            return Err(AssignmentError::InsufficientServersForReplication {
-                required: data_replica as i32,
-                available: selected_servers.len(),
-            });
-        }
-
-        // 4. Calculate number of partition ranges
-        let range_num = (partition_num as i64 + partition_num_per_range as i64 - 1)
-            / partition_num_per_range as i64;
-
-        // 5. Generate assignments (Round-Robin assignment to servers)
-        let mut assignments = Vec::with_capacity(range_num as usize);
-        for range_idx in 0..range_num {
-            let start_partition = range_idx * partition_num_per_range as i64;
-            let end_partition = std::cmp::min(
-                (range_idx + 1) * partition_num_per_range as i64 - 1,
-                partition_num as i64 - 1,
-            );
-
-            // Select servers for replicas using round-robin
-            let mut server_ids = Vec::with_capacity(replica_count);
-            for replica_idx in 0..replica_count {
-                let server_idx = ((range_idx as usize + replica_idx) % selected_servers.len());
-                server_ids.push(selected_servers[server_idx].id.clone());
-            }
-
-            assignments.push(PartitionAssignment {
-                start_partition: start_partition as i32,
-                end_partition: end_partition as i32,
-                server_ids,
-            });
-        }
 
         Ok(assignments)
     }

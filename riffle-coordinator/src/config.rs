@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use clap::builder::Str;
 use riffle_server::config::LogConfig;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -34,10 +35,19 @@ pub struct Config {
     #[serde(default = "as_default_node_expiry_check_interval_seconds")]
     pub node_expiry_check_interval_seconds: usize,
 
-    pub memory_weight: f64,
-    pub partition_weight: f64,
-
     pub log: Option<LogConfig>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            grpc_port: as_default_grpc_port(),
+            http_port: as_default_http_port(),
+            node_heartbeat_timeout_seconds: as_default_node_heartbeat_timeout_seconds(),
+            node_expiry_check_interval_seconds: as_default_node_expiry_check_interval_seconds(),
+            log: None,
+        }
+    }
 }
 
 fn as_default_node_expiry_check_interval_seconds() -> usize {
@@ -57,12 +67,16 @@ fn as_default_http_port() -> u16 {
 }
 
 impl Config {
-    pub fn from(cfg_path: &str) -> Self {
-        let path = Path::new(cfg_path);
+    pub fn from(cfg_path: &Option<String>) -> Self {
+        if let Some(path) = cfg_path {
+            let path = Path::new(path);
 
-        // Read the file content as a string
-        let file_content = fs::read_to_string(path).expect("Failed to read file");
+            // Read the file content as a string
+            let file_content = fs::read_to_string(path).expect("Failed to read file");
 
-        toml::from_str(&file_content).unwrap()
+            toml::from_str(&file_content).unwrap()
+        } else {
+            Self::default()
+        }
     }
 }

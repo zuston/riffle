@@ -37,7 +37,7 @@ use tonic::transport::Server;
 struct Args {
     /// Configuration file path
     #[arg[short, long]]
-    config: String,
+    config: Option<String>,
 }
 
 #[tokio::main]

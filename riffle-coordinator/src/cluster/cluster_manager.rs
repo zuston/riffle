@@ -41,6 +41,7 @@ pub struct AssignmentRequest {
     pub data_replica: usize,
     pub require_tags: Vec<String>,
     pub require_server_num: usize,
+    // todo: exclusive_server_ids
 }
 
 /// Result of shuffle assignment
@@ -188,6 +189,7 @@ impl ClusterManager {
         request: AssignmentRequest,
     ) -> Result<AssignmentResult, AssignmentError> {
         // 1. Filter available servers by required tags
+        // todo: filter exclusive shuffle-server ids
         let available_servers: Vec<ShuffleServerNode> = self
             .servers
             .iter()
@@ -203,15 +205,12 @@ impl ClusterManager {
         }
 
         // 2. Apply assignment strategy
-        let require_tags: Vec<String> = request.require_tags.iter().cloned().collect();
         let assignments = self.assignment_strategy.assign(
             &available_servers,
             request.partition_num,
             request.partition_num_per_range,
             request.data_replica,
             request.require_server_num,
-            &require_tags,
-            &Vec::<String>::new(),
         )?;
 
         Ok(AssignmentResult {
