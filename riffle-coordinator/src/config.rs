@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use clap::builder::Str;
 use riffle_server::config::LogConfig;
 use serde::{Deserialize, Serialize};
 use std::fs;
