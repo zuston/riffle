@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["riffle-server", "riffle-ctl"]
+members = ["riffle-server", "riffle-ctl", "riffle-coordinator"]
 
 [workspace.dependencies]
 tokio = { version = "1.45.0", features = ["full"] }
