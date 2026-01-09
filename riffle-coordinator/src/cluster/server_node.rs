@@ -34,9 +34,6 @@ pub struct ShuffleServerNode {
     pub pre_allocated_memory: i64,
     pub event_num_in_flush: i32,
 
-    // Assigned partition count (for weighted assignment)
-    pub assigned_partition_count: i64,
-
     // Timestamp for detecting server restarts
     pub timestamp: i64,
 
@@ -97,17 +94,6 @@ pub enum StorageStatus {
 }
 
 impl ShuffleServerNode {
-    /// Calculate the score for weighted assignment
-    /// Higher score means more suitable for assignment
-    pub fn calculate_score(&self, memory_weight: f64, partition_weight: f64) -> f64 {
-        let memory_score = self.available_memory as f64;
-        let partition_penalty = self.assigned_partition_count as f64;
-
-        // Higher available memory = higher score
-        // Higher partition count = lower score
-        memory_weight * memory_score - partition_weight * partition_penalty
-    }
-
     /// Check if the node is available for assignment
     pub fn is_available_for_assignment(&self) -> bool {
         self.is_healthy && self.status == ServerStatus::Active && self.available_memory > 0

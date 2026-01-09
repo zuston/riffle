@@ -142,7 +142,6 @@ impl ClusterManager {
                     available_memory: heartbeat.available_memory,
                     pre_allocated_memory: heartbeat.pre_allocated_memory,
                     event_num_in_flush: heartbeat.event_num_in_flush,
-                    assigned_partition_count: 0,
                     timestamp,
                     tags: heartbeat.tags,
                     is_healthy: heartbeat.is_healthy,
