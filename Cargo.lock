@@ -924,6 +924,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -5229,8 +5230,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "riffle-coordinator"
+version = "0.20.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes 1.10.1",
+ "chrono",
+ "clap",
+ "dashmap 5.5.3",
+ "env_logger 0.10.2",
+ "futures",
+ "log",
+ "logforth",
+ "parking_lot 0.12.3",
+ "poem",
+ "prost 0.12.6",
+ "rand 0.8.5",
+ "riffle-server",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml 0.7.8",
+ "tonic 0.10.2",
+ "uuid",
+]
+
+[[package]]
 name = "riffle-ctl"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5264,7 +5293,7 @@ dependencies = [
 
 [[package]]
 name = "riffle-server"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "allocator-api2",
  "anyhow",

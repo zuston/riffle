@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use crate::error::WorkerError;
+use crate::metric::TOTAL_URING_SPLICE;
 use crate::raw_pipe::RawPipe;
 use crate::store::local::options::{CreateOptions, WriteOptions};
 use crate::store::local::read_options::{IoMode, ReadOptions, ReadRange};
@@ -259,7 +260,8 @@ struct UringIoCtx {
 }
 
 struct SplicePipe {
-    sin: i32,
+    pipe_in_fd: i32,
+    _pipe_in_file: std::mem::ManuallyDrop<std::fs::File>,
     len: usize,
 }
 
@@ -340,20 +342,13 @@ impl UringIoEngineShard {
                         .into()
                     }
                     UringIoType::Splice => {
-                        // refer: https://github.com/tokio-rs/io-uring/blob/7ec7ae909f7eabcf03450e6b858919449f135ac3/io-uring-test/src/tests/fs.rs#L1084
                         self.read_inflight += 1;
                         let pipe = ctx.splice_pipe.as_ref().unwrap();
-                        let pipe_in = pipe.sin;
+                        let pipe_in_fd = pipe.pipe_in_fd;
                         let len: u32 = pipe.len as u32;
-                        opcode::Splice::new(
-                            fd,
-                            ctx.addr.offset as i64,
-                            Fd(pipe_in),
-                            -1, // pipe/socket destination must use -1
-                            len,
-                        )
-                        .build()
-                        .into()
+                        opcode::Splice::new(fd, ctx.addr.offset as i64, Fd(pipe_in_fd), -1, len)
+                            .build()
+                            .into()
                     }
                 };
                 let data = Box::into_raw(ctx) as u64;
@@ -492,8 +487,9 @@ impl LocalIO for UringIo {
 
         // todo: make the size as the optional config option in io-uring
         if matches!(options.io_mode, IoMode::SPLICE) && length < 16 * 1024 * 1024 {
+            TOTAL_URING_SPLICE.inc();
             // init the pipe
-            let (pipe_in, mut pipe_out) = {
+            let (pipe_in_fd, pipe_out_fd) = {
                 let mut pipes = [0, 0];
                 let ret = unsafe { libc::pipe(pipes.as_mut_ptr()) };
                 if (ret != 0) {
@@ -502,18 +498,19 @@ impl LocalIO for UringIo {
                         std::io::Error::last_os_error()
                     )));
                 }
-                let pipe_out = unsafe { std::fs::File::from_raw_fd(pipes[0]) };
-                let pipe_in = unsafe { fs::File::from_raw_fd(pipes[1]) };
-                (pipe_in, pipe_out)
+                let pipe_out_fd = unsafe { std::fs::File::from_raw_fd(pipes[0]) };
+                let pipe_in_fd = unsafe { std::fs::File::from_raw_fd(pipes[1]) };
+                (pipe_in_fd, pipe_out_fd)
             };
 
             use libc::fcntl;
             use libc::F_SETPIPE_SZ;
             unsafe {
                 let pipe_size = 16 * 1024 * 1024;
-                fcntl(pipe_in.as_raw_fd(), F_SETPIPE_SZ, pipe_size);
+                fcntl(pipe_in_fd.as_raw_fd(), F_SETPIPE_SZ, pipe_size);
             }
 
+            let pipe_in_fd_raw = pipe_in_fd.as_raw_fd();
             let ctx = UringIoCtx {
                 tx,
                 io_type: UringIoType::Splice,
@@ -525,7 +522,8 @@ impl LocalIO for UringIo {
                 w_iovecs: vec![],
                 r_bufs: vec![],
                 splice_pipe: Some(SplicePipe {
-                    sin: pipe_in.as_raw_fd(),
+                    pipe_in_fd: pipe_in_fd_raw,
+                    _pipe_in_file: std::mem::ManuallyDrop::new(pipe_in_fd),
                     len: length as _,
                 }),
             };
@@ -538,9 +536,15 @@ impl LocalIO for UringIo {
                 }
             }?;
 
+            let pipe_in_fd = unsafe {
+                let ptr = &mut ctx.splice_pipe.unwrap()._pipe_in_file
+                    as *mut std::mem::ManuallyDrop<std::fs::File>
+                    as *mut std::fs::File;
+                std::ptr::read(ptr)
+            };
             return Ok(DataBytes::RawPipe(RawPipe::from(
-                pipe_in,
-                pipe_out,
+                pipe_in_fd,
+                pipe_out_fd,
                 length as usize,
             )));
         }

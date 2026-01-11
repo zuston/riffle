@@ -690,6 +690,10 @@ pub static GAUGE_GRPC_REQUEST_QUEUE_SIZE: Lazy<IntGauge> = Lazy::new(|| {
     IntGauge::new("grpc_request_number", "current service request queue size").unwrap()
 });
 
+pub static TOTAL_URING_SPLICE: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new("total_uring_splice_number", "total_uring_splice_number").expect("")
+});
+
 pub static TOTAL_SPILL_EVENTS_DROPPED: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new(
         "total_spill_events_dropped",
@@ -1078,6 +1082,10 @@ fn register_custom_metrics() {
         .expect("");
 
     REGISTRY
+        .register(Box::new(TOTAL_URING_SPLICE.clone()))
+        .expect("");
+
+    REGISTRY
         .register(Box::new(
             TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND.clone(),
         ))
@@ -1317,6 +1325,10 @@ fn register_custom_metrics() {
     REGISTRY
         .register(Box::new(READ_AHEAD_OPERATION_FAILURE_COUNT.clone()))
         .expect("read_ahead_operation_failure_count must be registered");
+
+    REGISTRY
+        .register(Box::new(HARD_SPLIT_COUNTER.clone()))
+        .expect("");
 }
 
 const JOB_NAME: &str = "uniffle-worker";

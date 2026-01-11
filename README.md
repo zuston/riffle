@@ -255,7 +255,7 @@ Riffle supports an io_uring-based local I/O engine to improve shuffle performanc
 cargo build --features io-uring --bin riffle-server
 
 # set the following options in the server toml
-[localfile_store#io_uring_options]
+[localfile_store.io_uring_options]
 threads = 2
 ```
 
