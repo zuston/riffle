@@ -261,7 +261,6 @@ struct UringIoCtx {
 
 struct SplicePipe {
     pipe_in_fd: i32,
-    _pipe_in_file: std::mem::ManuallyDrop<std::fs::File>,
     len: usize,
 }
 
@@ -523,7 +522,6 @@ impl LocalIO for UringIo {
                 r_bufs: vec![],
                 splice_pipe: Some(SplicePipe {
                     pipe_in_fd: pipe_in_fd_raw,
-                    _pipe_in_file: std::mem::ManuallyDrop::new(pipe_in_fd),
                     len: length as _,
                 }),
             };
@@ -536,12 +534,6 @@ impl LocalIO for UringIo {
                 }
             }?;
 
-            let pipe_in_fd = unsafe {
-                let ptr = &mut ctx.splice_pipe.unwrap()._pipe_in_file
-                    as *mut std::mem::ManuallyDrop<std::fs::File>
-                    as *mut std::fs::File;
-                std::ptr::read(ptr)
-            };
             return Ok(DataBytes::RawPipe(RawPipe::from(
                 pipe_in_fd,
                 pipe_out_fd,
@@ -600,6 +592,9 @@ pub mod tests {
     use crate::{composed_bytes::ComposedBytes, raw_pipe::RawPipe};
     use bytes::{BufMut, BytesMut};
     use log::info;
+    use std::io::Read;
+    use std::io::Seek;
+    use std::os::fd::FromRawFd;
 
     #[test]
     fn test_uring_write_read() -> anyhow::Result<()> {
@@ -686,7 +681,18 @@ pub mod tests {
             DataBytes::Direct(bytes) => {
                 assert_eq!(bytes.as_ref(), expected.as_ref());
             }
-            _ => panic!("Expected direct bytes"),
+            DataBytes::RawIO(raw_io) => {
+                // Read the actual data from the file descriptor
+                use std::os::unix::fs::FileExt;
+                let mut buf = vec![0u8; raw_io.length as usize];
+                let mut file = unsafe { std::fs::File::from_raw_fd(raw_io.raw_fd) };
+                file.seek(std::io::SeekFrom::Start(raw_io.offset))?;
+                file.read_exact(&mut buf)?;
+                assert_eq!(buf.as_slice(), expected.as_ref());
+                // still keep file
+                std::mem::forget(file);
+            }
+            _ => panic!("Expected direct bytes or raw IO"),
         }
 
         Ok(())
