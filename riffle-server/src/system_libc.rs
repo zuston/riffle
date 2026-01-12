@@ -244,47 +244,79 @@ mod tests {
     // only test splice on linux
     #[cfg(all(feature = "io-uring", target_os = "linux"))]
     #[test]
-    fn test_splice() -> anyhow::Result<()> {
-        use rand::Rng;
-
-        const FILE_SIZE: usize = 150 * 1024 * 1024;
-        const CHUNK_SIZE: usize = 15 * 1024 * 1024;
-        const NUM_CHUNKS: usize = FILE_SIZE / CHUNK_SIZE;
+    fn test_splice_with_urpc() -> anyhow::Result<()> {
+        use crate::store::local::uring_io::tests::read_with_splice;
+        use crate::store::DataBytes;
+        use crate::urpc::command::GetLocalDataResponseCommand;
+        use crate::urpc::frame::Frame;
+        use bytes::{BufMut, BytesMut};
+        use std::io::Cursor;
 
         let w_runtime = create_runtime(2, "w");
 
+        // Create URPC server and client
         let listener =
             w_runtime.block_on(async { TcpListener::bind("127.0.0.1:0").await.unwrap() });
         let addr = listener.local_addr().unwrap();
 
+        // Server task that reads URPC frames
         let server = w_runtime.spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
-            let mut buf = Vec::new();
-            socket.read_to_end(&mut buf).await.unwrap();
-            buf
+            let mut buffer = BytesMut::with_capacity(1024);
+
+            loop {
+                match socket.read_buf(&mut buffer).await {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        if Frame::check(&mut Cursor::new(&buffer)).is_ok() {
+                            let frame = Frame::parse(&mut Cursor::new(&buffer))?;
+                            match frame {
+                                Frame::GetLocalDataResponse(resp) => {
+                                    return Ok(resp.data);
+                                }
+                                _ => panic!("Expected GetLocalDataResponse"),
+                            }
+                        }
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            Err(anyhow::anyhow!("No frame received"))
         });
 
+        // Client side
         let mut stream = w_runtime.block_on(async { TcpStream::connect(addr).await.unwrap() });
-
-        use crate::store::local::uring_io::tests::read_with_splice;
-
         let write_data = generate_14mb_string();
 
-        println!("validating with direct read...");
+        // Get pipe data using io_uring
         let result = read_with_splice(write_data.to_owned())?;
         match result {
             DataBytes::RawPipe(raw_pipe) => {
-                assert!(raw_pipe.length == write_data.len());
-                println!("Have read into the pipe");
-                w_runtime.block_on(async { splice(&mut stream, &raw_pipe).await })?;
-                let ret = unsafe { shutdown(stream.as_raw_fd(), SHUT_WR) };
-                assert_eq!(ret, 0, "shutdown failed");
+                // NO concurrent consumer needed - Frame::write handles it
+                let response = GetLocalDataResponseCommand {
+                    request_id: 1,
+                    status_code: 0,
+                    ret_msg: "OK".to_string(),
+                    data: DataBytes::RawPipe(raw_pipe),
+                };
+
+                // Frame::write will consume the pipe via splice()
+                let frame = Frame::GetLocalDataResponse(response);
+                let mut write_buf = BytesMut::new();
+                w_runtime
+                    .block_on(async { Frame::write(&mut stream, &frame, &mut write_buf).await })?;
             }
             _ => panic!("Expected raw pipe bytes"),
-        };
+        }
 
-        let accepted = w_runtime.block_on(async { server.await })?;
-        assert_eq!(accepted.as_slice(), write_data.as_bytes());
+        // Verify data received
+        let received_data = w_runtime.block_on(async { server.await })??;
+        match received_data {
+            DataBytes::Direct(data) => {
+                assert_eq!(data.as_ref(), write_data.as_bytes());
+            }
+            _ => panic!("Expected direct data"),
+        }
 
         Ok(())
     }
