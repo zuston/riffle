@@ -482,6 +482,38 @@ impl HybridStore {
         let spill_result = spill_result.unwrap();
         let flight_len = spill_result.flight_len();
 
+        // Buffer staging size is now 0 after spill
+        let mut cached_map = self.hot_store.cached_sorted_map.lock().await;
+
+        // Collect sizes to remove first to avoid borrow checker issues
+        let sizes_to_remove: Vec<i64> = cached_map
+            .iter()
+            .filter(|(&size, _)| size != 0)
+            .filter_map(|(&size, bucket)| {
+                if bucket.contains(uid) {
+                    Some(size)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Remove uid from all non-zero size buckets
+        for size in sizes_to_remove {
+            if let Some(bucket) = cached_map.get_mut(&size) {
+                bucket.retain(|id| id != uid);
+                if bucket.is_empty() {
+                    cached_map.remove(&size);
+                }
+            }
+        }
+
+        // Add to size 0 bucket
+        cached_map
+            .entry(0)
+            .or_insert_with(Vec::new)
+            .push(uid.clone());
+
         let app_manager_ref = self.app_manager.clone();
         let app_is_exist_func = move |app_id: &ApplicationId| -> bool {
             let app_ref = app_manager_ref.get();
