@@ -42,6 +42,7 @@ use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
 use crate::store::mem::buffer::{BufferOptions, BufferType, MemoryBuffer};
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::mem::ticket::TicketManager;
+use crate::store::merge_on_read_buffer_manager::MergeOnReadBufferManager;
 use crate::store::spill::SpillWritingViewContext;
 use anyhow::anyhow;
 use anyhow::Result;
@@ -60,7 +61,7 @@ pub struct MemoryStore<B: MemoryBuffer + Send + Sync + 'static = DefaultMemoryBu
     runtime_manager: RuntimeManager,
     ticket_manager: TicketManager,
     cfg: Option<MemoryStoreConfig>,
-    pub cached_sorted_map: Arc<Mutex<BTreeMap<i64, Vec<PartitionUId>>>>,
+    pub buffer_manager: Arc<MergeOnReadBufferManager>,
 }
 
 unsafe impl<B: MemoryBuffer + Send + Sync> Send for MemoryStore<B> {}
@@ -85,7 +86,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
             ticket_manager,
             runtime_manager,
             cfg: None,
-            cached_sorted_map: Arc::new(Mutex::new(BTreeMap::new())),
+            buffer_manager: Arc::new(MergeOnReadBufferManager::new()),
         }
     }
 
@@ -111,7 +112,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
             ticket_manager,
             runtime_manager,
             cfg: Some(conf),
-            cached_sorted_map: Arc::new(Mutex::new(BTreeMap::new())),
+            buffer_manager: Arc::new(MergeOnReadBufferManager::new()),
         }
     }
 
@@ -140,33 +141,35 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
         self.budget.move_allocated_to_used(size)
     }
 
-    pub fn lookup_spill_buffers(
+    pub async fn lookup_spill_buffers(
         &self,
         expected_spill_total_bytes: i64,
     ) -> Result<HashMap<PartitionUId, Arc<B>>, anyhow::Error> {
-        // Use cached map directly - always up to date
-        let sorted_tree_map = self.cached_sorted_map.blocking_lock();
+        let rt = self.runtime_manager.clone();
+        let sorted_tree_map = self
+            .buffer_manager
+            .merge(|uid| {
+                self.get_buffer(uid)
+                    .ok()
+                    .map(|b| b as Arc<dyn MemoryBuffer + Send + Sync>)
+            })
+            .await;
 
-        let mut real_spill_total_bytes = 0;
         let mut spill_candidates = HashMap::new();
+        let mut total = 0;
 
-        let iter = sorted_tree_map.iter().rev();
-        'outer: for (size, vals) in iter {
-            for pid in vals {
-                if real_spill_total_bytes >= expected_spill_total_bytes {
-                    break 'outer;
+        for (size, uids) in sorted_tree_map.iter().rev() {
+            for uid in uids {
+                if total >= expected_spill_total_bytes {
+                    break;
                 }
-                let partition_uid = (*pid).clone();
-                let buffer = self.get_buffer(pid);
-                real_spill_total_bytes += *size;
-                spill_candidates.insert(partition_uid, buffer?);
+                if let Ok(buffer) = self.get_buffer(uid) {
+                    total += *size;
+                    spill_candidates.insert(uid.clone(), buffer);
+                }
             }
         }
 
-        info!(
-            "[Spill] Candidate spill bytes. excepted/real: {}/{}",
-            &expected_spill_total_bytes, &real_spill_total_bytes
-        );
         Ok(spill_candidates)
     }
 
@@ -190,14 +193,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
         buffer.clear(flight_id, flight_len)?;
         self.dec_used(flight_len as i64)?;
 
-        // Remove from cached map if buffer is now empty
-        if buffer.total_size()? == 0 {
-            let mut cached_map = self.cached_sorted_map.lock().await;
-            for bucket in cached_map.values_mut() {
-                bucket.retain(|id| *id != uid);
-            }
-            cached_map.retain(|_, bucket| !bucket.is_empty());
-        }
+        self.buffer_manager.mark_changed(uid).await;
 
         Ok(())
     }
@@ -218,9 +214,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
             .compute_if_absent(uid, || Arc::new(B::new(buf_opts)));
 
         // Add to cached map with 0 staging size if this is a new buffer
-        if let Ok(mut cached_map) = self.cached_sorted_map.try_lock() {
-            cached_map.entry(0).or_insert_with(Vec::new).push(uid_clone);
-        }
+        self.buffer_manager.mark_changed(uid_clone);
 
         buffer
     }
@@ -269,38 +263,12 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
     }
     #[trace]
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
-        let uid = ctx.uid;
-        let blocks = ctx.data_blocks;
-        let size = ctx.data_size;
-
+        let uid = ctx.uid.clone();
         let buffer = self.get_or_create_buffer(uid.clone());
+        buffer.append(ctx.data_blocks, ctx.data_size)?;
 
-        // Get old staging size
-        let old_staging_size = buffer.staging_size()?;
-
-        buffer.append(blocks, ctx.data_size)?;
-
-        // Get new staging size
-        let new_staging_size = buffer.staging_size()?;
-
-        // Update cached map
-        if old_staging_size != new_staging_size {
-            let mut cached_map = self.cached_sorted_map.lock().await;
-
-            // Remove from old size bucket
-            if let Some(bucket) = cached_map.get_mut(&old_staging_size) {
-                bucket.retain(|id| *id != uid);
-                if bucket.is_empty() {
-                    cached_map.remove(&old_staging_size);
-                }
-            }
-
-            // Add to new size bucket
-            cached_map
-                .entry(new_staging_size)
-                .or_insert_with(Vec::new)
-                .push(uid);
-        }
+        // Mark as changed when data is appended
+        self.buffer_manager.mark_changed(uid).await;
 
         Ok(())
     }
@@ -352,17 +320,11 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
             }
         }
 
-        // Remove from cached map
-        let mut cached_map = self.cached_sorted_map.lock().await;
-        for &removed_uid in &_removed_list {
-            for bucket in cached_map.values_mut() {
-                bucket.retain(|id| *id != *removed_uid);
-            }
-        }
-        cached_map.retain(|_, bucket| !bucket.is_empty());
-
         let mut used = 0;
         for removed_pid in _removed_list {
+            // Mark as changed before removing
+            self.buffer_manager.mark_changed(removed_pid.clone()).await;
+
             if let Some(entry) = self.state.remove(removed_pid) {
                 used += entry.1.total_size()?;
             }

@@ -25,6 +25,7 @@ pub mod local;
 pub mod localfile;
 pub mod mem;
 pub mod memory;
+pub mod merge_on_read_buffer_manager;
 pub mod spill;
 
 use crate::app_manager::request_context::{
