@@ -7,7 +7,7 @@ use std::sync::{Arc, RwLock};
 pub struct MergeOnReadBufferManager {
     // Base state - buffers sorted by staging size
     base_map: Arc<Mutex<BTreeMap<i64, Vec<PartitionUId>>>>,
-
+    // The positions of partitions at the last merge
     positions: Arc<Mutex<HashMap<PartitionUId, i64>>>,
     // Set of partition IDs that changed since last merge
     changed_set: Arc<Mutex<HashSet<PartitionUId>>>,
@@ -34,7 +34,7 @@ impl MergeOnReadBufferManager {
         get_buffer: impl Fn(&PartitionUId) -> Option<Arc<dyn MemoryBuffer + Send + Sync + 'static>>,
     ) -> BTreeMap<i64, Vec<PartitionUId>> {
         let mut base_map = self.base_map.lock().unwrap();
-        let mut positions = self.positions.write().unwrap();
+        let mut positions = self.positions.lock().unwrap();
         let mut changed_set = self.changed_set.lock().unwrap();
 
         // For each changed partition, update its position in base_map
