@@ -267,9 +267,12 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
     }
     #[trace]
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
-        let uid = ctx.uid.clone();
-        let buffer = self.get_or_create_buffer(uid.clone());
-        buffer.append(ctx.data_blocks, ctx.data_size)?;
+        let uid = ctx.uid;
+        let blocks = ctx.data_blocks;
+        let size = ctx.data_size;
+
+        let buffer = self.get_or_create_buffer(uid);
+        buffer.append(blocks, ctx.data_size)?;
 
         // Mark as changed when data is appended
         self.buffer_manager.mark_changed(uid).await;
