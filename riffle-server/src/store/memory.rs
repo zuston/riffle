@@ -271,7 +271,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
         let blocks = ctx.data_blocks;
         let size = ctx.data_size;
 
-        let buffer = self.get_or_create_buffer(uid);
+        let buffer = self.get_or_create_buffer(uid.clone());
         buffer.append(blocks, ctx.data_size)?;
 
         // Mark as changed when data is appended
