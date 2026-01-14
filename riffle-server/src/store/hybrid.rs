@@ -503,7 +503,6 @@ impl HybridStore {
         };
         self.publish_spill_event(message).await?;
 
-        // Mark buffer as changed since staging size is now 0
         self.hot_store
             .buffer_manager
             .mark_changed(uid.clone())

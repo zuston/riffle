@@ -156,17 +156,21 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
             .await;
 
         let mut spill_candidates = HashMap::new();
-        let mut total = 0;
+        let mut real_spill_total_bytes = 0;
 
-        for (size, uids) in sorted_tree_map.iter().rev() {
-            for uid in uids {
-                if total >= expected_spill_total_bytes {
-                    break;
+        let iter = sorted_tree_map.iter().rev();
+        'outer: for (size, vals) in iter {
+            for pid in vals {
+                if real_spill_total_bytes >= expected_spill_total_bytes {
+                    break 'outer;
                 }
-                if let Ok(buffer) = self.get_buffer(uid) {
-                    total += *size;
-                    spill_candidates.insert(uid.clone(), buffer);
+                let partition_uid = (*pid).clone();
+                let buffer = self.get_buffer(pid);
+                if buffer.is_err() {
+                    continue;
                 }
+                real_spill_total_bytes += *size;
+                spill_candidates.insert(partition_uid, buffer?);
             }
         }
 
