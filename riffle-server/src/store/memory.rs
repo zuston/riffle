@@ -217,7 +217,6 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
             .state
             .compute_if_absent(uid, || Arc::new(B::new(buf_opts)));
 
-        // Add to cached map with 0 staging size if this is a new buffer
         self.buffer_manager.mark_changed(uid_clone);
 
         buffer
