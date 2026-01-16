@@ -599,6 +599,9 @@ pub mod tests {
     use crate::{composed_bytes::ComposedBytes, raw_pipe::RawPipe};
     use bytes::{BufMut, BytesMut};
     use log::info;
+    use std::io::Read;
+    use std::io::Seek;
+    use std::os::fd::FromRawFd;
 
     #[test]
     fn test_uring_write_read() -> anyhow::Result<()> {
@@ -685,7 +688,18 @@ pub mod tests {
             DataBytes::Direct(bytes) => {
                 assert_eq!(bytes.as_ref(), expected.as_ref());
             }
-            _ => panic!("Expected direct bytes"),
+            DataBytes::RawIO(raw_io) => {
+                // Read the actual data from the file descriptor
+                use std::os::unix::fs::FileExt;
+                let mut buf = vec![0u8; raw_io.length as usize];
+                let mut file = unsafe { std::fs::File::from_raw_fd(raw_io.raw_fd) };
+                file.seek(std::io::SeekFrom::Start(raw_io.offset))?;
+                file.read_exact(&mut buf)?;
+                assert_eq!(buf.as_slice(), expected.as_ref());
+                // still keep file
+                std::mem::forget(file);
+            }
+            _ => panic!("Expected direct bytes or raw IO"),
         }
 
         Ok(())
