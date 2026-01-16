@@ -61,7 +61,7 @@ pub struct MemoryStore<B: MemoryBuffer + Send + Sync + 'static = DefaultMemoryBu
     runtime_manager: RuntimeManager,
     ticket_manager: TicketManager,
     cfg: Option<MemoryStoreConfig>,
-    pub buffer_manager: Arc<MergeOnReadBufferManager>,
+    buffer_manager: Arc<MergeOnReadBufferManager>,
 }
 
 unsafe impl<B: MemoryBuffer + Send + Sync> Send for MemoryStore<B> {}
@@ -141,6 +141,11 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
         self.budget.move_allocated_to_used(size)
     }
 
+    /// Mark a buffer as changed
+    pub async fn mark_buffer_changed(&self, uid: PartitionUId) {
+        self.buffer_manager.mark_changed(uid).await;
+    }
+
     pub async fn lookup_spill_buffers(
         &self,
         expected_spill_total_bytes: i64,
@@ -197,7 +202,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
         buffer.clear(flight_id, flight_len)?;
         self.dec_used(flight_len as i64)?;
 
-        self.buffer_manager.mark_changed(uid).await;
+        self.mark_buffer_changed(uid);
 
         Ok(())
     }
@@ -217,7 +222,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
             .state
             .compute_if_absent(uid, || Arc::new(B::new(buf_opts)));
 
-        self.buffer_manager.mark_changed(uid_clone);
+        self.mark_buffer_changed(uid_clone);
 
         buffer
     }
@@ -274,7 +279,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
         buffer.append(blocks, ctx.data_size)?;
 
         // Mark as changed when data is appended
-        self.buffer_manager.mark_changed(uid).await;
+        self.mark_buffer_changed(uid);
 
         Ok(())
     }
@@ -329,8 +334,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
         let mut used = 0;
         for removed_pid in _removed_list {
             // Mark as changed before removing
-            self.buffer_manager.mark_changed(removed_pid.clone()).await;
-
+            self.mark_buffer_changed(removed_pid.clone());
             if let Some(entry) = self.state.remove(removed_pid) {
                 used += entry.1.total_size()?;
             }
