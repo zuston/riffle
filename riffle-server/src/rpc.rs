@@ -76,7 +76,7 @@ impl DefaultRpcService {
         {
             let rx = tx.subscribe();
             let app_manager = app_manager_ref.clone();
-            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port as u16);
+            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port);
 
             std::thread::spawn(move || {
                 tokio::runtime::Builder::new_multi_thread()
@@ -95,7 +95,7 @@ impl DefaultRpcService {
                 let rx = tx.subscribe();
 
                 let app_manager = app_manager_ref.clone();
-                let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port as u16);
+                let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port);
 
                 std::thread::spawn(move || {
                     core_affinity::set_for_current(core_id);
@@ -130,7 +130,7 @@ impl DefaultRpcService {
             for (_, core_id) in core_ids.into_iter().enumerate() {
                 let shuffle_server =
                     DefaultShuffleServer::from(app_manager_ref.clone(), server_state_manager);
-                let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), grpc_port as u16);
+                let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), grpc_port);
                 let service = ShuffleServerServer::new(shuffle_server.clone())
                     .max_decoding_message_size(usize::MAX)
                     .max_encoding_message_size(usize::MAX);
@@ -160,7 +160,7 @@ impl DefaultRpcService {
         {
             let shuffle_server =
                 DefaultShuffleServer::from(app_manager_ref.clone(), server_state_manager);
-            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), grpc_port as u16);
+            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), grpc_port);
             let service = ShuffleServerServer::new(shuffle_server.clone())
                 .max_decoding_message_size(usize::MAX)
                 .max_encoding_message_size(usize::MAX);
