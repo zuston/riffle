@@ -216,31 +216,13 @@ labels = { env = "production", service = "my_service" }
 
 ## Profiling
 
-### Heap profiling
 1. build with profile support
     ```shell
     cargo build --release --features memory-prof
     ```
-2. Start with profile
-    ```shell
-    curl localhost:20010/debug/heap/profile > heap.pb.gz
-    go tool pprof -http="0.0.0.0:8081" heap.pb.gz
-    ```
-   
-### CPU Profiling
-1. build with jemalloc feature
-    ```shell
-    cargo build --release --features jemalloc
-    ```
-2. Paste following command to get cpu profile flamegraph
-    ```shell
-    go tool pprof -http="0.0.0.0:8081" http://{remote_ip}:8080/debug/pprof/profile?format=pprof
-    ```
-   - localhost:8080: riffle server.
-   - remote_ip: pprof server address.
-   - seconds=30: Profiling lasts for 30 seconds.
-
-   Then open the URL <your-ip>:8081/ui/flamegraph in your browser to view the flamegraph:
+2. open the following URLs in your browser to view the heap flamegraph
+   - `<your-ip>:<http-port>/debug/heap/profile`
+   - `<your-ip>:<http-port>/debug/pprof/profile`
 
 ## Disk Throughput and Latency Optimization
 
