@@ -261,6 +261,7 @@ struct UringIoCtx {
 
 struct SplicePipe {
     pipe_in_fd: i32,
+    _pipe_in_file: std::mem::ManuallyDrop<std::fs::File>,
     len: usize,
 }
 
@@ -522,6 +523,7 @@ impl LocalIO for UringIo {
                 r_bufs: vec![],
                 splice_pipe: Some(SplicePipe {
                     pipe_in_fd: pipe_in_fd_raw,
+                    _pipe_in_file: std::mem::ManuallyDrop::new(pipe_in_fd),
                     len: length as _,
                 }),
             };
