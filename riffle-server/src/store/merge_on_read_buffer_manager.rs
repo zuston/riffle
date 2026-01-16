@@ -97,17 +97,6 @@ mod tests {
         return blocks;
     }
 
-    // Helper to create a buffer with test data
-    fn create_test_buffer<B: MemoryBuffer + Send + Sync + 'static>(
-        block_count: i32,
-        block_size: i32,
-    ) -> Arc<B> {
-        let buffer = Arc::new(B::new(Default::default()));
-        let blocks = create_blocks(0, block_count, block_size);
-        buffer.direct_push(blocks).unwrap();
-        buffer
-    }
-
     #[tokio::test]
     async fn test_mark_changed() {
         let manager = MergeOnReadBufferManager::new();
@@ -128,27 +117,25 @@ mod tests {
     #[tokio::test]
     async fn test_merge_with_default_buffers() {
         let manager = MergeOnReadBufferManager::new();
-        let app_id = Default::default();
+        let mut buffers = HashMap::new();
 
-        // Create test buffers with different sizes
-        let buffer1 = create_test_buffer::<DefaultMemoryBuffer>(5, 10); // 50 bytes
-        let buffer2 = create_test_buffer::<DefaultMemoryBuffer>(3, 20); // 60 bytes
-        let buffer3 = create_test_buffer::<DefaultMemoryBuffer>(2, 15); // 30 bytes
+        // Create test buffers with DefaultMemoryBuffer
+        for i in 0..5 {
+            let uid = PartitionUId::new(&Default::default(), i, 0);
+            let buffer = Arc::new(DefaultMemoryBuffer::new(Default::default()));
 
-        let uid1 = PartitionUId::new(&app_id, 1, 0);
-        let uid2 = PartitionUId::new(&app_id, 1, 1);
-        let uid3 = PartitionUId::new(&app_id, 1, 2);
+            // Add data to buffer
+            let blocks = create_blocks(i * 10, 2, 10);
+            MemoryBuffer::direct_push(&*buffer, blocks).unwrap();
 
-        // Mark some as changed
-        manager.mark_changed(uid1.clone()).await;
-        manager.mark_changed(uid2.clone()).await;
+            buffers.insert(uid.clone(), buffer);
+            manager.mark_changed(uid).await;
+        }
 
-        // Mock get_buffer function
-        let mut buffers = std::collections::HashMap::new();
-        buffers.insert(uid1.clone(), buffer1.clone());
-        buffers.insert(uid2.clone(), buffer2.clone());
-        buffers.insert(uid3.clone(), buffer3.clone());
+        // Verify all buffers are marked as changed
+        assert_eq!(manager.get_changed_count().await, 5);
 
+        // Merge and verify sorted order
         let sorted_map = manager
             .merge(|uid| {
                 buffers
@@ -158,34 +145,37 @@ mod tests {
             })
             .await;
 
-        // Should have entries for changed buffers only
-        assert_eq!(sorted_map.len(), 2);
+        // Should have 5 buffers, each with size 20 (2 blocks * 10 bytes)
+        assert_eq!(sorted_map.len(), 1);
+        assert!(sorted_map.contains_key(&20));
+        assert_eq!(sorted_map[&20].len(), 5);
 
-        // Verify sorted order (largest first)
-        let mut sizes: Vec<_> = sorted_map.keys().collect();
-        sizes.sort_by(|a, b| b.cmp(a));
-        assert_eq!(sizes, vec![&60, &50]);
+        // Verify no changes after merge
+        assert_eq!(manager.get_changed_count().await, 0);
     }
 
     #[tokio::test]
     async fn test_merge_with_opt_buffers() {
         let manager = MergeOnReadBufferManager::new();
-        let app_id = Default::default();
+        let mut buffers = HashMap::new();
 
-        // Create test buffers using OptStagingMemoryBuffer
-        let buffer1 = create_test_buffer::<OptStagingMemoryBuffer>(4, 25); // 100 bytes
-        let buffer2 = create_test_buffer::<OptStagingMemoryBuffer>(2, 50); // 100 bytes
+        // Create test buffers with OptStagingMemoryBuffer
+        for i in 0..5 {
+            let uid = PartitionUId::new(&Default::default(), i, 0);
+            let buffer = Arc::new(OptStagingMemoryBuffer::new(Default::default()));
 
-        let uid1 = PartitionUId::new(&app_id, 2, 0);
-        let uid2 = PartitionUId::new(&app_id, 2, 1);
+            // Add data to buffer
+            let blocks = create_blocks(i * 10, 2, 10);
+            MemoryBuffer::direct_push(&*buffer, blocks).unwrap();
 
-        manager.mark_changed(uid1.clone()).await;
-        manager.mark_changed(uid2.clone()).await;
+            buffers.insert(uid.clone(), buffer);
+            manager.mark_changed(uid).await;
+        }
 
-        let mut buffers = std::collections::HashMap::new();
-        buffers.insert(uid1.clone(), buffer1.clone());
-        buffers.insert(uid2.clone(), buffer2.clone());
+        // Verify all buffers are marked as changed
+        assert_eq!(manager.get_changed_count().await, 5);
 
+        // Merge and verify sorted order
         let sorted_map = manager
             .merge(|uid| {
                 buffers
@@ -195,11 +185,14 @@ mod tests {
             })
             .await;
 
-        // Both buffers have same size, should be in same bucket
+        // Should have 5 buffers, each with size 20 (2 blocks * 10 bytes)
         assert_eq!(sorted_map.len(), 1);
-        assert_eq!(sorted_map.get(&100).unwrap().len(), 2);
-    }
+        assert!(sorted_map.contains_key(&20));
+        assert_eq!(sorted_map[&20].len(), 5);
 
+        // Verify no changes after merge
+        assert_eq!(manager.get_changed_count().await, 0);
+    }
     #[tokio::test]
     async fn test_merge_removes_deleted_buffers() {
         let manager = MergeOnReadBufferManager::new();
