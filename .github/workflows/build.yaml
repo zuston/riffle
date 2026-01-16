@@ -54,7 +54,6 @@ jobs:
           - ubuntu-24.04-arm
         features:
           - "--features memory-prof"
-          - "--features io-uring"
           - ""
     runs-on: ${{ matrix.os }}
     steps:
