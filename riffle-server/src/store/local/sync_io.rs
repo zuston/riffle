@@ -433,6 +433,11 @@ impl LocalIO for SyncLocalIO {
             IoMode::SENDFILE | IoMode::SPLICE => {
                 let (off, len) = match options.read_range {
                     ReadRange::RANGE(off, len) => (off, len),
+                    ReadRange::ALL => {
+                        // Get file size for ALL range
+                        let stat = self.file_stat(path).await?;
+                        (0, stat.content_length)
+                    }
                     _ => {
                         return Err(anyhow!(
                             "Illegal vars, read range must include (offset, length)"
