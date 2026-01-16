@@ -63,29 +63,49 @@ impl DefaultRpcService {
         let urpc_port = config.urpc_port.unwrap();
         info!("Starting urpc server with port:[{}] ......", urpc_port);
 
-        let core_ids = core_affinity::get_core_ids().unwrap();
-        for (_, core_id) in core_ids.into_iter().enumerate() {
-            let rx = tx.subscribe();
-            async fn shutdown(mut rx: Receiver<()>) -> Result<()> {
-                if let Err(err) = rx.recv().await {
-                    error!("Errors on stopping the urpc service, err: {:?}.", err);
-                } else {
-                    debug!("urpc service has been graceful stopped.");
-                }
-                Ok(())
+        async fn shutdown(mut rx: Receiver<()>) -> Result<()> {
+            if let Err(err) = rx.recv().await {
+                error!("Errors on stopping the urpc service, err: {:?}.", err);
+            } else {
+                debug!("urpc service has been graceful stopped.");
             }
+            Ok(())
+        }
 
+        #[cfg(target_arch = "aarch64")]
+        {
+            let rx = tx.subscribe();
             let app_manager = app_manager_ref.clone();
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port as u16);
 
             std::thread::spawn(move || {
-                core_affinity::set_for_current(core_id);
-                tokio::runtime::Builder::new_current_thread()
+                tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(std::cmp::max(URPC_PARALLELISM.get(), 16))
                     .enable_all()
                     .build()
                     .unwrap()
                     .block_on(urpc_serve(addr, shutdown(rx), app_manager));
             });
+        }
+
+        #[cfg(not(target_arch = "aarch64"))]
+        {
+            let core_ids = core_affinity::get_core_ids().unwrap();
+            for (_, core_id) in core_ids.into_iter().enumerate() {
+                let rx = tx.subscribe();
+
+                let app_manager = app_manager_ref.clone();
+                let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port as u16);
+
+                std::thread::spawn(move || {
+                    core_affinity::set_for_current(core_id);
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap()
+                        .block_on(urpc_serve(addr, shutdown(rx), app_manager));
+                });
+            }
         }
 
         Ok(())
@@ -104,8 +124,40 @@ impl DefaultRpcService {
         let parallelism = GRPC_PARALLELISM.get();
         info!("grpc service with parallelism: [{}]", &parallelism);
 
-        let core_ids = core_affinity::get_core_ids().unwrap();
-        for (_, core_id) in core_ids.into_iter().enumerate() {
+        #[cfg(not(target_arch = "aarch64"))]
+        {
+            let core_ids = core_affinity::get_core_ids().unwrap();
+            for (_, core_id) in core_ids.into_iter().enumerate() {
+                let shuffle_server =
+                    DefaultShuffleServer::from(app_manager_ref.clone(), server_state_manager);
+                let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), grpc_port as u16);
+                let service = ShuffleServerServer::new(shuffle_server.clone())
+                    .max_decoding_message_size(usize::MAX)
+                    .max_encoding_message_size(usize::MAX);
+                let service_tx = tx.subscribe();
+
+                let internal_service = ShuffleServerInternalServer::new(shuffle_server.clone());
+
+                // every std::thread to bound the tokio thread to eliminate thread context switch.
+                // this has been verified by benchmark of terasort 1TB that the p99 long tail latency
+                // will be reduced from 2min -> 4sec.
+                // And after binding the physical core with the grpc thread,
+                // 1. the p99 transport time reduce from 4sec to 800ms.
+                // 2. the p99 processing time reduce from 600ms to 60ms.
+                std::thread::spawn(move || {
+                    core_affinity::set_for_current(core_id);
+
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap()
+                        .block_on(grpc_serve(service, internal_service, addr, service_tx));
+                });
+            }
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        {
             let shuffle_server =
                 DefaultShuffleServer::from(app_manager_ref.clone(), server_state_manager);
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), grpc_port as u16);
@@ -116,16 +168,9 @@ impl DefaultRpcService {
 
             let internal_service = ShuffleServerInternalServer::new(shuffle_server.clone());
 
-            // every std::thread to bound the tokio thread to eliminate thread context switch.
-            // this has been verified by benchmark of terasort 1TB that the p99 long tail latency
-            // will be reduced from 2min -> 4sec.
-            // And after binding the physical core with the grpc thread,
-            // 1. the p99 transport time reduce from 4sec to 800ms.
-            // 2. the p99 processing time reduce from 600ms to 60ms.
             std::thread::spawn(move || {
-                core_affinity::set_for_current(core_id);
-
-                tokio::runtime::Builder::new_current_thread()
+                tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(std::cmp::max(GRPC_PARALLELISM.get(), 16))
                     .enable_all()
                     .build()
                     .unwrap()
@@ -209,6 +254,7 @@ async fn urpc_serve(addr: SocketAddr, shutdown: impl Future, app_manager_ref: Ap
     .unwrap();
 
     sock.set_reuse_address(true).unwrap();
+    #[cfg(not(target_arch = "aarch64"))]
     sock.set_reuse_port(true).unwrap();
     sock.set_nonblocking(true).unwrap();
     sock.bind(&addr.into()).unwrap();
@@ -235,6 +281,7 @@ async fn grpc_serve(
     .unwrap();
 
     sock.set_reuse_address(true).unwrap();
+    #[cfg(not(target_arch = "aarch64"))]
     sock.set_reuse_port(true).unwrap();
     sock.set_nonblocking(true).unwrap();
     sock.bind(&addr.into()).unwrap();
