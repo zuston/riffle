@@ -61,7 +61,7 @@ pub struct MemoryStore<B: MemoryBuffer + Send + Sync + 'static = DefaultMemoryBu
     runtime_manager: RuntimeManager,
     ticket_manager: TicketManager,
     cfg: Option<MemoryStoreConfig>,
-    buffer_manager: Arc<MergeOnReadBufferManager>,
+    pub buffer_manager: Arc<MergeOnReadBufferManager>,
 }
 
 unsafe impl<B: MemoryBuffer + Send + Sync> Send for MemoryStore<B> {}
@@ -202,7 +202,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
         buffer.clear(flight_id, flight_len)?;
         self.dec_used(flight_len as i64)?;
 
-        self.mark_buffer_changed(uid);
+        self.mark_buffer_changed(uid).await;
 
         Ok(())
     }
@@ -279,8 +279,8 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
         buffer.append(blocks, ctx.data_size)?;
 
         // Mark as changed when data is appended
-        self.mark_buffer_changed(uid);
-
+        self.mark_buffer_changed(uid).await;
+        // self.buffer_manager.mark_changed(uid).await;
         Ok(())
     }
     #[trace]
@@ -334,7 +334,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
         let mut used = 0;
         for removed_pid in _removed_list {
             // Mark as changed before removing
-            self.mark_buffer_changed(removed_pid.clone());
+            self.mark_buffer_changed(removed_pid.clone()).await;
             if let Some(entry) = self.state.remove(removed_pid) {
                 used += entry.1.total_size()?;
             }
