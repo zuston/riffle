@@ -528,6 +528,9 @@ impl LocalIO for UringIo {
                 }),
             };
 
+            // Extract the raw fd BEFORE sending ctx to the worker
+            let pipe_in_fd_raw = ctx.splice_pipe.as_ref().unwrap().pipe_in_fd;
+
             let _ = shard.send(ctx);
             let _result = match rx.await {
                 Ok(res) => res,
@@ -536,12 +539,8 @@ impl LocalIO for UringIo {
                 }
             }?;
 
-            let pipe_in_fd = unsafe {
-                let ptr = &mut ctx.splice_pipe.unwrap()._pipe_in_file
-                    as *mut std::mem::ManuallyDrop<std::fs::File>
-                    as *mut std::fs::File;
-                std::ptr::read(ptr)
-            };
+            // Convert raw fd back to File handle
+            let pipe_in_fd = unsafe { std::fs::File::from_raw_fd(pipe_in_fd_raw) };
             return Ok(DataBytes::RawPipe(RawPipe::from(
                 pipe_in_fd,
                 pipe_out_fd,
