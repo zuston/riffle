@@ -36,13 +36,13 @@ use std::str::FromStr;
 use crate::app_manager::partition_identifier::PartitionUId;
 use crate::ddashmap::DDashMap;
 use crate::runtime::manager::RuntimeManager;
+use crate::store::buffer_size_tracking::BufferSizeTracking;
 use crate::store::mem::budget::MemoryBudget;
 use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
 use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
 use crate::store::mem::buffer::{BufferOptions, BufferType, MemoryBuffer};
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::mem::ticket::TicketManager;
-use crate::store::merge_on_read_buffer_manager::MergeOnReadBufferManager;
 use crate::store::spill::SpillWritingViewContext;
 use anyhow::anyhow;
 use anyhow::Result;
@@ -51,9 +51,9 @@ use croaring::Treemap;
 use fastrace::trace;
 use fxhash::{FxBuildHasher, FxHasher};
 use log::{debug, info, warn};
+use std::mem;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-
 pub struct MemoryStore<B: MemoryBuffer + Send + Sync + 'static = DefaultMemoryBuffer> {
     memory_capacity: i64,
     state: DDashMap<PartitionUId, Arc<B>>,
@@ -61,7 +61,7 @@ pub struct MemoryStore<B: MemoryBuffer + Send + Sync + 'static = DefaultMemoryBu
     runtime_manager: RuntimeManager,
     ticket_manager: TicketManager,
     cfg: Option<MemoryStoreConfig>,
-    pub buffer_manager: Arc<MergeOnReadBufferManager>,
+    buffer_size_tracking: Arc<BufferSizeTracking>,
 }
 
 unsafe impl<B: MemoryBuffer + Send + Sync> Send for MemoryStore<B> {}
@@ -86,7 +86,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
             ticket_manager,
             runtime_manager,
             cfg: None,
-            buffer_manager: Arc::new(MergeOnReadBufferManager::new()),
+            buffer_size_tracking: Arc::new(BufferSizeTracking::new()),
         }
     }
 
@@ -112,7 +112,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
             ticket_manager,
             runtime_manager,
             cfg: Some(conf),
-            buffer_manager: Arc::new(MergeOnReadBufferManager::new()),
+            buffer_size_tracking: Arc::new(BufferSizeTracking::new()),
         }
     }
 
@@ -141,13 +141,18 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
         self.budget.move_allocated_to_used(size)
     }
 
+    /// Mark a buffer as changed
+    pub async fn mark_buffer_changed(&self, uid: PartitionUId) {
+        self.buffer_size_tracking.mark_changed(uid).await;
+    }
+
     pub async fn lookup_spill_buffers(
         &self,
         expected_spill_total_bytes: i64,
     ) -> Result<HashMap<PartitionUId, Arc<B>>, anyhow::Error> {
         let rt = self.runtime_manager.clone();
         let sorted_tree_map = self
-            .buffer_manager
+            .buffer_size_tracking
             .merge(|uid| {
                 self.get_buffer(uid)
                     .ok()
@@ -197,7 +202,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
         buffer.clear(flight_id, flight_len)?;
         self.dec_used(flight_len as i64)?;
 
-        self.buffer_manager.mark_changed(uid).await;
+        self.mark_buffer_changed(uid).await;
 
         Ok(())
     }
@@ -216,8 +221,6 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
         let buffer = self
             .state
             .compute_if_absent(uid, || Arc::new(B::new(buf_opts)));
-
-        self.buffer_manager.mark_changed(uid_clone);
 
         buffer
     }
@@ -257,6 +260,10 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
 
         (fetched, fetched_size)
     }
+    #[cfg(test)]
+    pub async fn buffer_size_change_count(&self) -> usize {
+        self.buffer_size_tracking.get_change_count().await
+    }
 }
 
 #[async_trait]
@@ -274,8 +281,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
         buffer.append(blocks, ctx.data_size)?;
 
         // Mark as changed when data is appended
-        self.buffer_manager.mark_changed(uid).await;
-
+        self.mark_buffer_changed(uid).await;
         Ok(())
     }
     #[trace]
@@ -325,12 +331,10 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
                 }
             }
         }
-
         let mut used = 0;
         for removed_pid in _removed_list {
             // Mark as changed before removing
-            self.buffer_manager.mark_changed(removed_pid.clone()).await;
-
+            self.mark_buffer_changed(removed_pid.clone()).await;
             if let Some(entry) = self.state.remove(removed_pid) {
                 used += entry.1.total_size()?;
             }
@@ -449,7 +453,7 @@ mod test {
         let runtime = store.runtime_manager.clone();
 
         let uid = PartitionUId::new(&Default::default(), 0, 0);
-        let writing_view_ctx = create_writing_ctx_with_blocks(10, 10, uid.clone());
+        let writing_view_ctx = create_writing_ctx_with_blocks(10, 10, uid.clone(), false);
         let _ = runtime.wait(store.insert(writing_view_ctx));
 
         let default_single_read_size = 20;
@@ -645,6 +649,7 @@ mod test {
         _block_number: i32,
         single_block_size: i32,
         uid: PartitionUId,
+        enable_actual_size: bool,
     ) -> WritingViewContext {
         let mut data_blocks = vec![];
         for idx in 0..=9 {
@@ -657,7 +662,11 @@ mod test {
                 task_attempt_id: 0,
             });
         }
-        WritingViewContext::create_for_test(uid, data_blocks)
+        if enable_actual_size {
+            WritingViewContext::new(uid, data_blocks)
+        } else {
+            WritingViewContext::create_for_test(uid, data_blocks)
+        }
     }
 
     fn run_test_allocated_and_purge_for_memory<B: MemoryBuffer + Send + Sync + 'static>() {
@@ -894,5 +903,67 @@ mod test {
     fn test_block_id_filter_for_memory() {
         run_test_block_id_filter_for_memory::<DefaultMemoryBuffer>();
         run_test_block_id_filter_for_memory::<OptStagingMemoryBuffer>();
+    }
+
+    fn run_test_memory_store_operation_with_buffer_size_tracking<
+        B: MemoryBuffer + Send + Sync + 'static,
+    >() {
+        let store = MemoryStore::<B>::new(1024 * 1024);
+        let runtime = store.runtime_manager.clone();
+
+        // Create buffers with different shuffle_ids
+        let app_id = ApplicationId::from("test_app");
+        let uid1 = PartitionUId::new(&app_id, 1, 0);
+        let uid2 = PartitionUId::new(&app_id, 2, 0);
+        let uid3 = PartitionUId::new(&app_id, 3, 0);
+
+        // Insert data using helper function
+        let ctx1 = create_writing_ctx_with_blocks(1, 10, uid1.clone(), true);
+        let ctx2 = create_writing_ctx_with_blocks(1, 20, uid2.clone(), true);
+        let ctx3 = create_writing_ctx_with_blocks(1, 30, uid3.clone(), true);
+
+        runtime.wait(store.insert(ctx1)).unwrap();
+        runtime.wait(store.insert(ctx2)).unwrap();
+        runtime.wait(store.insert(ctx3)).unwrap();
+
+        // Verify all buffers are in spill candidates
+        let spill_candidates = runtime.wait(store.lookup_spill_buffers(600)).unwrap();
+        assert_eq!(
+            spill_candidates.len(),
+            3,
+            "Should have 3 spill candidates initially"
+        );
+
+        // Purge shuffle_id 3
+        let purge_ctx = PurgeDataContext::new(&PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(
+            app_id.clone(),
+            3,
+        ));
+        runtime.wait(store.purge(&purge_ctx)).unwrap();
+
+        // Verify purged buffer is not in spill candidates
+        let spill_candidates_after_purge = runtime.wait(store.lookup_spill_buffers(150)).unwrap();
+        assert_eq!(
+            spill_candidates_after_purge.len(),
+            1,
+            "Should have 1 spill candidates after purge"
+        );
+        assert!(
+            !spill_candidates_after_purge.contains_key(&uid3),
+            "Purged buffer should not be in candidates"
+        );
+
+        assert!(
+            !spill_candidates_after_purge.contains_key(&uid1),
+            "Purged buffer should not be in candidates"
+        );
+
+        // Verify remaining buffers are still there
+        assert!(spill_candidates_after_purge.contains_key(&uid2));
+    }
+    #[test]
+    fn test_memory_store_operation_with_buffer_size_tracking() {
+        run_test_memory_store_operation_with_buffer_size_tracking::<DefaultMemoryBuffer>();
+        run_test_memory_store_operation_with_buffer_size_tracking::<OptStagingMemoryBuffer>();
     }
 }

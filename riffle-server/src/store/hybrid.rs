@@ -503,10 +503,8 @@ impl HybridStore {
         };
         self.publish_spill_event(message).await?;
 
-        self.hot_store
-            .buffer_manager
-            .mark_changed(uid.clone())
-            .await;
+        self.hot_store.mark_buffer_changed(uid.clone()).await;
+
         Ok(flight_len)
     }
 
