@@ -16,6 +16,7 @@
 // under the License.
 
 pub mod alignment;
+pub mod buffer_size_tracking;
 pub mod hadoop;
 #[cfg(feature = "hdfs")]
 pub mod hdfs;
@@ -25,7 +26,6 @@ pub mod local;
 pub mod localfile;
 pub mod mem;
 pub mod memory;
-pub mod buffer_size_tracking;
 pub mod spill;
 pub mod test_utils;
 use crate::app_manager::request_context::{
