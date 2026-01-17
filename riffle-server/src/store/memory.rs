@@ -330,7 +330,6 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
                 }
             }
         }
-
         let mut used = 0;
         for removed_pid in _removed_list {
             // Mark as changed before removing
@@ -453,7 +452,7 @@ mod test {
         let runtime = store.runtime_manager.clone();
 
         let uid = PartitionUId::new(&Default::default(), 0, 0);
-        let writing_view_ctx = create_writing_ctx_with_blocks(10, 10, uid.clone());
+        let writing_view_ctx = create_writing_ctx_with_blocks(10, 10, uid.clone(), false);
         let _ = runtime.wait(store.insert(writing_view_ctx));
 
         let default_single_read_size = 20;
@@ -649,6 +648,7 @@ mod test {
         _block_number: i32,
         single_block_size: i32,
         uid: PartitionUId,
+        enable_actual_size: bool,
     ) -> WritingViewContext {
         let mut data_blocks = vec![];
         for idx in 0..=9 {
@@ -661,7 +661,11 @@ mod test {
                 task_attempt_id: 0,
             });
         }
-        WritingViewContext::create_for_test(uid, data_blocks)
+        if enable_actual_size {
+            WritingViewContext::new(uid, data_blocks)
+        } else {
+            WritingViewContext::create_for_test(uid, data_blocks)
+        }
     }
 
     fn run_test_allocated_and_purge_for_memory<B: MemoryBuffer + Send + Sync + 'static>() {
@@ -898,5 +902,73 @@ mod test {
     fn test_block_id_filter_for_memory() {
         run_test_block_id_filter_for_memory::<DefaultMemoryBuffer>();
         run_test_block_id_filter_for_memory::<OptStagingMemoryBuffer>();
+    }
+
+    #[test]
+    fn test_memory_store_purge_with_merge_manager() {
+        let store = MemoryStore::<DefaultMemoryBuffer>::new(1024 * 1024);
+        let runtime = store.runtime_manager.clone();
+        // Create buffers
+
+        let uid1 = PartitionUId::new(&Default::default(), 1, 0);
+        let uid2 = PartitionUId::new(&Default::default(), 2, 0);
+        let uid3 = PartitionUId::new(&Default::default(), 3, 0);
+
+        // Insert data
+        let ctx1 = create_writing_ctx_with_blocks(1, 10, uid1.clone(), true);
+        let ctx2 = create_writing_ctx_with_blocks(1, 20, uid2.clone(), true);
+        let ctx3 = create_writing_ctx_with_blocks(1, 30, uid3.clone(), true);
+
+        runtime.wait(store.insert(ctx1)).unwrap();
+        runtime.wait(store.insert(ctx2)).unwrap();
+        runtime.wait(store.insert(ctx3)).unwrap();
+
+        println!(
+            "buffer staging size: uid1: {}, uid2: {}, uid3: {}",
+            store.get_buffer_staging_size(&uid1).unwrap(),
+            store.get_buffer_staging_size(&uid2).unwrap(),
+            store.get_buffer_staging_size(&uid3).unwrap()
+        );
+
+        // Mark buffers as changed (simulating normal operations)
+        store.mark_buffer_changed(uid1.clone());
+        store.mark_buffer_changed(uid2.clone());
+        store.mark_buffer_changed(uid3.clone());
+
+        // Verify all buffers are in spill candidates
+        let spill_candidates = runtime.wait(store.lookup_spill_buffers(600)).unwrap();
+        assert_eq!(
+            spill_candidates.len(),
+            3,
+            "Should have 3 spill candidates initially"
+        );
+
+        // Purge one buffer
+        let purge_ctx = PurgeDataContext::new(&PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(
+            Default::default(),
+            3,
+        ));
+
+        runtime.wait(store.purge(&purge_ctx)).unwrap();
+
+        // Verify purged buffer is not in spill candidates
+        let spill_candidates_after_purge = runtime.wait(store.lookup_spill_buffers(150)).unwrap();
+        assert_eq!(
+            spill_candidates_after_purge.len(),
+            1,
+            "Should have 1 spill candidates after purge"
+        );
+        assert!(
+            !spill_candidates_after_purge.contains_key(&uid3),
+            "Purged buffer should not be in candidates"
+        );
+
+        assert!(
+            !spill_candidates_after_purge.contains_key(&uid1),
+            "Purged buffer should not be in candidates"
+        );
+
+        // Verify remaining buffers are still there
+        assert!(spill_candidates_after_purge.contains_key(&uid2));
     }
 }

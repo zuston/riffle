@@ -63,7 +63,6 @@ impl MergeOnReadBufferManager {
                 }
             }
         }
-
         base_map.clone()
     }
 
