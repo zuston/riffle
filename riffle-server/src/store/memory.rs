@@ -262,6 +262,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
 
         (fetched, fetched_size)
     }
+    #[cfg(test)]
     pub async fn buffer_size_change_count(&self) -> usize {
         self.buffer_size_tracking.get_change_count().await
     }
@@ -927,14 +928,6 @@ mod test {
         runtime.wait(store.insert(ctx1)).unwrap();
         runtime.wait(store.insert(ctx2)).unwrap();
         runtime.wait(store.insert(ctx3)).unwrap();
-
-        // Verify buffer staging sizes
-        println!(
-            "buffer staging size: uid1: {}, uid2: {}, uid3: {}",
-            store.get_buffer_staging_size(&uid1).unwrap(),
-            store.get_buffer_staging_size(&uid2).unwrap(),
-            store.get_buffer_staging_size(&uid3).unwrap()
-        );
 
         // Verify all buffers are in spill candidates
         let spill_candidates = runtime.wait(store.lookup_spill_buffers(600)).unwrap();
