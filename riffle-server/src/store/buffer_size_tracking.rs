@@ -5,21 +5,24 @@ use std::sync::Mutex;
 use std::sync::{Arc, RwLock};
 
 #[derive(Clone)]
-pub struct MergeOnReadBufferManager {
+pub struct BufferSizeTracking {
     // Base state - buffers sorted by staging size
     base_map: Arc<Mutex<BTreeMap<i64, Vec<PartitionUId>>>>,
     // The positions of partitions at the last merge
     positions: Arc<Mutex<HashMap<PartitionUId, i64>>>,
     // Set of partition IDs that changed since last merge
     changed_set: Arc<Mutex<HashSet<PartitionUId>>>,
+    // Function to get buffer by partition ID  
+    get_buffer: Arc<dyn Fn(&PartitionUId) -> Option<Arc<dyn MemoryBuffer + Send + Sync + 'static>> + Send + Sync>, 
 }
 
-impl MergeOnReadBufferManager {
+impl BufferSizeTracking {
     pub fn new() -> Self {
         Self {
             base_map: Arc::new(Mutex::new(BTreeMap::new())),
             positions: Arc::new(Mutex::new(HashMap::new())),
             changed_set: Arc::new(Mutex::new(HashSet::new())),
+            get_buffer: Arc::new(get_buffer),  
         }
     }
 
@@ -51,7 +54,7 @@ impl MergeOnReadBufferManager {
             }
 
             // Update with new size
-            if let Some(buffer) = get_buffer(&uid) {
+            if let Some(buffer) = (self.get_buffer)(&uid) {
                 if let Ok(staging_size) = buffer.staging_size() {
                     if staging_size > 0 {
                         positions.insert(uid.clone(), staging_size);
@@ -78,27 +81,13 @@ mod tests {
     use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
     use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
     use crate::store::mem::buffer::MemoryBuffer;
+    use crate::store::test_utils::create_blocks;
     use crate::store::Block;
     use std::sync::Arc;
 
-    fn create_blocks(start_block_idx: i32, cnt: i32, block_len: i32) -> Vec<Block> {
-        let mut blocks = vec![];
-        for idx in 0..cnt {
-            blocks.push(Block {
-                block_id: (start_block_idx + idx) as i64,
-                length: block_len,
-                uncompress_length: 0,
-                crc: 0,
-                data: Default::default(),
-                task_attempt_id: idx as i64,
-            });
-        }
-        return blocks;
-    }
-
     #[tokio::test]
     async fn test_mark_changed() {
-        let manager = MergeOnReadBufferManager::new();
+        let manager = BufferSizeTracking::new();
         let uid = PartitionUId::new(&Default::default(), 1, 0);
 
         // Initially no changes
@@ -115,7 +104,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge_with_default_buffers() {
-        let manager = MergeOnReadBufferManager::new();
+        let manager = BufferSizeTracking::new();
         let mut buffers = HashMap::new();
 
         // Create test buffers with DefaultMemoryBuffer
@@ -155,7 +144,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge_with_opt_buffers() {
-        let manager = MergeOnReadBufferManager::new();
+        let manager = BufferSizeTracking::new();
         let mut buffers = HashMap::new();
 
         // Create test buffers with OptStagingMemoryBuffer
@@ -194,7 +183,7 @@ mod tests {
     }
     #[tokio::test]
     async fn test_merge_removes_deleted_buffers() {
-        let manager = MergeOnReadBufferManager::new();
+        let manager = BufferSizeTracking::new();
         let uid = PartitionUId::new(&Default::default(), 3, 0);
 
         // Mark as changed
@@ -208,7 +197,7 @@ mod tests {
     }
     #[tokio::test]
     async fn test_concurrent_mark_changed() {
-        let manager = MergeOnReadBufferManager::new();
+        let manager = BufferSizeTracking::new();
         let mut handles = vec![];
 
         // Spawn 10 concurrent tasks

@@ -126,26 +126,12 @@ mod test {
     use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
     use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
     use crate::store::mem::buffer::MemoryBuffer;
+    use crate::store::test_utils::create_blocks;
     use crate::store::Block;
     use hashlink::LinkedHashMap;
     use std::collections::LinkedList;
     use std::ops::Deref;
     use std::sync::RwLock;
-
-    fn create_blocks(start_block_idx: i32, cnt: i32, block_len: i32) -> Vec<Block> {
-        let mut blocks = vec![];
-        for idx in 0..cnt {
-            blocks.push(Block {
-                block_id: (start_block_idx + idx) as i64,
-                length: block_len,
-                uncompress_length: 0,
-                crc: 0,
-                data: Default::default(),
-                task_attempt_id: idx as i64,
-            });
-        }
-        return blocks;
-    }
 
     fn create_block(block_len: i32, block_id: i64) -> Block {
         Block {

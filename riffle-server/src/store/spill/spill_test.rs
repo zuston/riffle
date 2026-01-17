@@ -141,6 +141,30 @@ pub mod tests {
         assert_eq!(0, snapshot.used());
         assert_eq!(0, snapshot.allocated());
 
+        // After purge, verify BufferSizeTracking cleaned up
+        let post_purge_candidates = store.hot_store.lookup_spill_buffers(100).await.unwrap();
+        assert_eq!(
+            post_purge_candidates.len(),
+            0,
+            "Should have no spill candidates after purge"
+        );
+        let final_sorted_map = store
+            .hot_store
+            .buffer_manager
+            .merge(|uid| {
+                store
+                    .hot_store
+                    .get_buffer(uid)
+                    .ok()
+                    .map(|b| b as Arc<dyn MemoryBuffer + Send + Sync>)
+            })
+            .await;
+
+        assert!(
+            final_sorted_map.is_empty(),
+            "Final merge should return empty map"
+        );
+
         Ok(())
     }
 
@@ -250,6 +274,13 @@ pub mod tests {
         store.hot_store.inc_used(9);
         let ctx = mock_writing_context(&application_id, shuffle_id, partition, 1, 9);
         let _ = store.insert(ctx).await;
+
+        // Verify BufferSizeTracking tracks the huge partition
+        let changed_count = store.hot_store.buffer_manager.get_changed_count().await;
+        assert!(
+            changed_count > 0,
+            "Huge partition should be marked as changed"
+        );
         // trigger the watermark spill. ratio:0.9 > threshold:0.8
         assert_eq!(1, store.get_spill_event_num()?);
 

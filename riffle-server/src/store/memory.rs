@@ -42,7 +42,7 @@ use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
 use crate::store::mem::buffer::{BufferOptions, BufferType, MemoryBuffer};
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::mem::ticket::TicketManager;
-use crate::store::merge_on_read_buffer_manager::MergeOnReadBufferManager;
+use crate::store::buffer_size_tracking::BufferSizeTracking;
 use crate::store::spill::SpillWritingViewContext;
 use anyhow::anyhow;
 use anyhow::Result;
@@ -61,7 +61,7 @@ pub struct MemoryStore<B: MemoryBuffer + Send + Sync + 'static = DefaultMemoryBu
     runtime_manager: RuntimeManager,
     ticket_manager: TicketManager,
     cfg: Option<MemoryStoreConfig>,
-    pub buffer_manager: Arc<MergeOnReadBufferManager>,
+    pub buffer_manager: Arc<BufferSizeTracking>,
 }
 
 unsafe impl<B: MemoryBuffer + Send + Sync> Send for MemoryStore<B> {}
@@ -86,7 +86,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
             ticket_manager,
             runtime_manager,
             cfg: None,
-            buffer_manager: Arc::new(MergeOnReadBufferManager::new()),
+            buffer_manager: Arc::new(BufferSizeTracking::new()),
         }
     }
 
@@ -112,7 +112,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
             ticket_manager,
             runtime_manager,
             cfg: Some(conf),
-            buffer_manager: Arc::new(MergeOnReadBufferManager::new()),
+            buffer_manager: Arc::new(BufferSizeTracking::new()),
         }
     }
 
@@ -904,17 +904,19 @@ mod test {
         run_test_block_id_filter_for_memory::<OptStagingMemoryBuffer>();
     }
 
-    #[test]
-    fn test_memory_store_purge_with_merge_manager() {
-        let store = MemoryStore::<DefaultMemoryBuffer>::new(1024 * 1024);
+    fn run_test_memory_store_operation_with_buffer_manager<
+        B: MemoryBuffer + Send + Sync + 'static,
+    >() {
+        let store = MemoryStore::<B>::new(1024 * 1024);
         let runtime = store.runtime_manager.clone();
-        // Create buffers
 
-        let uid1 = PartitionUId::new(&Default::default(), 1, 0);
-        let uid2 = PartitionUId::new(&Default::default(), 2, 0);
-        let uid3 = PartitionUId::new(&Default::default(), 3, 0);
+        // Create buffers with different shuffle_ids
+        let app_id = ApplicationId::from("test_app");
+        let uid1 = PartitionUId::new(&app_id, 1, 0);
+        let uid2 = PartitionUId::new(&app_id, 2, 0);
+        let uid3 = PartitionUId::new(&app_id, 3, 0);
 
-        // Insert data
+        // Insert data using helper function
         let ctx1 = create_writing_ctx_with_blocks(1, 10, uid1.clone(), true);
         let ctx2 = create_writing_ctx_with_blocks(1, 20, uid2.clone(), true);
         let ctx3 = create_writing_ctx_with_blocks(1, 30, uid3.clone(), true);
@@ -923,17 +925,13 @@ mod test {
         runtime.wait(store.insert(ctx2)).unwrap();
         runtime.wait(store.insert(ctx3)).unwrap();
 
+        // Verify buffer staging sizes
         println!(
             "buffer staging size: uid1: {}, uid2: {}, uid3: {}",
             store.get_buffer_staging_size(&uid1).unwrap(),
             store.get_buffer_staging_size(&uid2).unwrap(),
             store.get_buffer_staging_size(&uid3).unwrap()
         );
-
-        // Mark buffers as changed (simulating normal operations)
-        store.mark_buffer_changed(uid1.clone());
-        store.mark_buffer_changed(uid2.clone());
-        store.mark_buffer_changed(uid3.clone());
 
         // Verify all buffers are in spill candidates
         let spill_candidates = runtime.wait(store.lookup_spill_buffers(600)).unwrap();
@@ -943,12 +941,11 @@ mod test {
             "Should have 3 spill candidates initially"
         );
 
-        // Purge one buffer
+        // Purge shuffle_id 3
         let purge_ctx = PurgeDataContext::new(&PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(
-            Default::default(),
+            app_id.clone(),
             3,
         ));
-
         runtime.wait(store.purge(&purge_ctx)).unwrap();
 
         // Verify purged buffer is not in spill candidates
@@ -970,5 +967,10 @@ mod test {
 
         // Verify remaining buffers are still there
         assert!(spill_candidates_after_purge.contains_key(&uid2));
+    }
+    #[test]
+    fn test_memory_store_operation_with_buffer_manager() {
+        run_test_memory_store_operation_with_buffer_manager::<DefaultMemoryBuffer>();
+        run_test_memory_store_operation_with_buffer_manager::<OptStagingMemoryBuffer>();
     }
 }
