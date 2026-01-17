@@ -61,7 +61,7 @@ pub struct MemoryStore<B: MemoryBuffer + Send + Sync + 'static = DefaultMemoryBu
     runtime_manager: RuntimeManager,
     ticket_manager: TicketManager,
     cfg: Option<MemoryStoreConfig>,
-    buffer_manager: Arc<BufferSizeTracking>,
+    buffer_size_tracking: Arc<BufferSizeTracking>,
 }
 
 unsafe impl<B: MemoryBuffer + Send + Sync> Send for MemoryStore<B> {}
@@ -86,7 +86,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
             ticket_manager,
             runtime_manager,
             cfg: None,
-            buffer_manager: Arc::new(BufferSizeTracking::new()),
+            buffer_size_tracking: Arc::new(BufferSizeTracking::new()),
         }
     }
 
@@ -112,7 +112,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
             ticket_manager,
             runtime_manager,
             cfg: Some(conf),
-            buffer_manager: Arc::new(BufferSizeTracking::new()),
+            buffer_size_tracking: Arc::new(BufferSizeTracking::new()),
         }
     }
 
@@ -143,7 +143,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
 
     /// Mark a buffer as changed
     pub async fn mark_buffer_changed(&self, uid: PartitionUId) {
-        self.buffer_manager.mark_changed(uid).await;
+        self.buffer_size_tracking.mark_changed(uid).await;
     }
 
     pub async fn lookup_spill_buffers(
@@ -152,7 +152,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
     ) -> Result<HashMap<PartitionUId, Arc<B>>, anyhow::Error> {
         let rt = self.runtime_manager.clone();
         let sorted_tree_map = self
-            .buffer_manager
+            .buffer_size_tracking
             .merge(|uid| {
                 self.get_buffer(uid)
                     .ok()
@@ -262,8 +262,8 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
 
         (fetched, fetched_size)
     }
-    pub async fn get_buffer_size_tracking_changed_count(&self) -> usize {
-        self.buffer_manager.get_changed_count().await
+    pub async fn buffer_size_change_count(&self) -> usize {
+        self.buffer_size_tracking.get_change_count().await
     }
 }
 
@@ -283,7 +283,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
 
         // Mark as changed when data is appended
         self.mark_buffer_changed(uid).await;
-        // self.buffer_manager.mark_changed(uid).await;
+        // self.buffer_size_tracking.mark_changed(uid).await;
         Ok(())
     }
     #[trace]
@@ -907,7 +907,7 @@ mod test {
         run_test_block_id_filter_for_memory::<OptStagingMemoryBuffer>();
     }
 
-    fn run_test_memory_store_operation_with_buffer_manager<
+    fn run_test_memory_store_operation_with_buffer_size_tracking<
         B: MemoryBuffer + Send + Sync + 'static,
     >() {
         let store = MemoryStore::<B>::new(1024 * 1024);
@@ -972,8 +972,8 @@ mod test {
         assert!(spill_candidates_after_purge.contains_key(&uid2));
     }
     #[test]
-    fn test_memory_store_operation_with_buffer_manager() {
-        run_test_memory_store_operation_with_buffer_manager::<DefaultMemoryBuffer>();
-        run_test_memory_store_operation_with_buffer_manager::<OptStagingMemoryBuffer>();
+    fn test_memory_store_operation_with_buffer_size_tracking() {
+        run_test_memory_store_operation_with_buffer_size_tracking::<DefaultMemoryBuffer>();
+        run_test_memory_store_operation_with_buffer_size_tracking::<OptStagingMemoryBuffer>();
     }
 }

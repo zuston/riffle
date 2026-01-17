@@ -260,10 +260,7 @@ pub mod tests {
         let _ = store.insert(ctx).await;
 
         // Verify BufferSizeTracking tracks the huge partition
-        let changed_count = store
-            .hot_store
-            .get_buffer_size_tracking_changed_count()
-            .await;
+        let changed_count = store.hot_store.buffer_size_change_count().await;
         assert!(
             changed_count > 0,
             "Huge partition should be marked as changed"

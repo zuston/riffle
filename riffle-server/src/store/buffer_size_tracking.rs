@@ -66,7 +66,8 @@ impl BufferSizeTracking {
         base_map.clone()
     }
 
-    pub async fn get_changed_count(&self) -> usize {
+    #[cfg(test)]
+    pub async fn get_change_count(&self) -> usize {
         let changed_set = self.changed_set.lock().unwrap();
         changed_set.len()
     }
@@ -88,15 +89,15 @@ mod tests {
         let uid = PartitionUId::new(&Default::default(), 1, 0);
 
         // Initially no changes
-        assert_eq!(manager.get_changed_count().await, 0);
+        assert_eq!(manager.get_change_count().await, 0);
 
         // Mark as changed
         manager.mark_changed(uid.clone()).await;
-        assert_eq!(manager.get_changed_count().await, 1);
+        assert_eq!(manager.get_change_count().await, 1);
 
         // Mark same uid again - should still be 1 (set semantics)
         manager.mark_changed(uid.clone()).await;
-        assert_eq!(manager.get_changed_count().await, 1);
+        assert_eq!(manager.get_change_count().await, 1);
     }
 
     #[tokio::test]
@@ -118,7 +119,7 @@ mod tests {
         }
 
         // Verify all buffers are marked as changed
-        assert_eq!(manager.get_changed_count().await, 5);
+        assert_eq!(manager.get_change_count().await, 5);
 
         // Merge and verify sorted order
         let sorted_map = manager
@@ -136,7 +137,7 @@ mod tests {
         assert_eq!(sorted_map[&20].len(), 5);
 
         // Verify no changes after merge
-        assert_eq!(manager.get_changed_count().await, 0);
+        assert_eq!(manager.get_change_count().await, 0);
     }
 
     #[tokio::test]
@@ -158,7 +159,7 @@ mod tests {
         }
 
         // Verify all buffers are marked as changed
-        assert_eq!(manager.get_changed_count().await, 5);
+        assert_eq!(manager.get_change_count().await, 5);
 
         // Merge and verify sorted order
         let sorted_map = manager
@@ -176,7 +177,7 @@ mod tests {
         assert_eq!(sorted_map[&20].len(), 5);
 
         // Verify no changes after merge
-        assert_eq!(manager.get_changed_count().await, 0);
+        assert_eq!(manager.get_change_count().await, 0);
     }
     #[tokio::test]
     async fn test_merge_removes_deleted_buffers() {
@@ -213,6 +214,6 @@ mod tests {
         }
 
         // Verify all changes were recorded
-        assert_eq!(manager.get_changed_count().await, 10);
+        assert_eq!(manager.get_change_count().await, 10);
     }
 }
