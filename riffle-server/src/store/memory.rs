@@ -222,8 +222,6 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
             .state
             .compute_if_absent(uid, || Arc::new(B::new(buf_opts)));
 
-        self.mark_buffer_changed(uid_clone);
-
         buffer
     }
 
@@ -284,7 +282,6 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
 
         // Mark as changed when data is appended
         self.mark_buffer_changed(uid).await;
-        // self.buffer_size_tracking.mark_changed(uid).await;
         Ok(())
     }
     #[trace]
