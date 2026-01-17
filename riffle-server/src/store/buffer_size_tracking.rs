@@ -12,12 +12,6 @@ pub struct BufferSizeTracking {
     positions: Arc<Mutex<HashMap<PartitionUId, i64>>>,
     // Set of partition IDs that changed since last merge
     changed_set: Arc<Mutex<HashSet<PartitionUId>>>,
-    // Function to get buffer by partition ID
-    get_buffer: Arc<
-        dyn Fn(&PartitionUId) -> Option<Arc<dyn MemoryBuffer + Send + Sync + 'static>>
-            + Send
-            + Sync,
-    >,
 }
 
 impl BufferSizeTracking {
@@ -26,7 +20,6 @@ impl BufferSizeTracking {
             base_map: Arc::new(Mutex::new(BTreeMap::new())),
             positions: Arc::new(Mutex::new(HashMap::new())),
             changed_set: Arc::new(Mutex::new(HashSet::new())),
-            get_buffer: Arc::new(get_buffer),
         }
     }
 
@@ -58,7 +51,7 @@ impl BufferSizeTracking {
             }
 
             // Update with new size
-            if let Some(buffer) = (self.get_buffer)(&uid) {
+            if let Some(buffer) = (get_buffer)(&uid) {
                 if let Ok(staging_size) = buffer.staging_size() {
                     if staging_size > 0 {
                         positions.insert(uid.clone(), staging_size);
@@ -109,7 +102,7 @@ mod tests {
     #[tokio::test]
     async fn test_merge_with_default_buffers() {
         let manager = BufferSizeTracking::new();
-        let mut buffers = HashMap::new();
+        let mut buffers: HashMap<PartitionUId, Arc<DefaultMemoryBuffer>> = HashMap::new();
 
         // Create test buffers with DefaultMemoryBuffer
         for i in 0..5 {

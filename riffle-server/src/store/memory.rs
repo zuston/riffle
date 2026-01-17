@@ -51,9 +51,9 @@ use croaring::Treemap;
 use fastrace::trace;
 use fxhash::{FxBuildHasher, FxHasher};
 use log::{debug, info, warn};
+use std::mem;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-
 pub struct MemoryStore<B: MemoryBuffer + Send + Sync + 'static = DefaultMemoryBuffer> {
     memory_capacity: i64,
     state: DDashMap<PartitionUId, Arc<B>>,
@@ -61,7 +61,7 @@ pub struct MemoryStore<B: MemoryBuffer + Send + Sync + 'static = DefaultMemoryBu
     runtime_manager: RuntimeManager,
     ticket_manager: TicketManager,
     cfg: Option<MemoryStoreConfig>,
-    pub buffer_manager: Arc<BufferSizeTracking>,
+    buffer_manager: Arc<BufferSizeTracking>,
 }
 
 unsafe impl<B: MemoryBuffer + Send + Sync> Send for MemoryStore<B> {}
@@ -261,6 +261,9 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
         }
 
         (fetched, fetched_size)
+    }
+    pub async fn get_buffer_size_tracking_changed_count(&self) -> usize {
+        self.buffer_manager.get_changed_count().await
     }
 }
 

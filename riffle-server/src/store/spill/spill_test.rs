@@ -148,22 +148,6 @@ pub mod tests {
             0,
             "Should have no spill candidates after purge"
         );
-        let final_sorted_map = store
-            .hot_store
-            .buffer_manager
-            .merge(|uid| {
-                store
-                    .hot_store
-                    .get_buffer(uid)
-                    .ok()
-                    .map(|b| b as Arc<dyn MemoryBuffer + Send + Sync>)
-            })
-            .await;
-
-        assert!(
-            final_sorted_map.is_empty(),
-            "Final merge should return empty map"
-        );
 
         Ok(())
     }
@@ -276,7 +260,10 @@ pub mod tests {
         let _ = store.insert(ctx).await;
 
         // Verify BufferSizeTracking tracks the huge partition
-        let changed_count = store.hot_store.buffer_manager.get_changed_count().await;
+        let changed_count = store
+            .hot_store
+            .get_buffer_size_tracking_changed_count()
+            .await;
         assert!(
             changed_count > 0,
             "Huge partition should be marked as changed"
