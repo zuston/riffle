@@ -502,6 +502,9 @@ impl HybridStore {
             huge_partition_tag: OnceCell::new(),
         };
         self.publish_spill_event(message).await?;
+
+        self.hot_store.mark_buffer_changed(uid.clone()).await;
+
         Ok(flight_len)
     }
 
@@ -560,7 +563,8 @@ impl HybridStore {
 
         let buffers = self
             .hot_store
-            .lookup_spill_buffers(mem_expected_spill_bytes)?;
+            .lookup_spill_buffers(mem_expected_spill_bytes)
+            .await?;
         info!(
             "[Spill] Looked up all spill blocks that costs {}(ms). mem_expected_used: {}. mem_real_used: {}. mem_expected_spill_bytes: {}",
             timer.elapsed().as_millis(),
