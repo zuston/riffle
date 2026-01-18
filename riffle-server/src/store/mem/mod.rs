@@ -19,4 +19,6 @@ pub mod budget;
 pub mod buffer;
 pub mod capacity;
 pub mod ticket;
+pub mod tracking;
+
 pub use await_tree::InstrumentAwait;
