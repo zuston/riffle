@@ -150,7 +150,6 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
         &self,
         expected_spill_total_bytes: i64,
     ) -> Result<HashMap<PartitionUId, Arc<B>>, anyhow::Error> {
-        let rt = self.runtime_manager.clone();
         let sorted_tree_map = self
             .buffer_size_tracking
             .merge(|uid| {
