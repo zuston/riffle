@@ -16,7 +16,6 @@
 // under the License.
 
 pub mod alignment;
-pub mod buffer_size_tracking;
 pub mod hadoop;
 #[cfg(feature = "hdfs")]
 pub mod hdfs;
