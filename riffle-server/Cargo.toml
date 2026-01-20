@@ -61,6 +61,9 @@ deadlock-detection = ["parking_lot/deadlock_detection"]
 
 io-uring = ["dep:io-uring"]
 
+# io-uring based URPC implementation
+urpc-io-uring = ["dep:io-uring"]
+
 [dependencies]
 anyhow = { workspace = true }
 tokio = { workspace = true, features = ["full"] }

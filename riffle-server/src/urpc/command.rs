@@ -9,7 +9,7 @@ use crate::constant::StatusCode;
 use crate::metric::URPC_SEND_DATA_TRANSPORT_TIME;
 use crate::store::ResponseDataIndex::Local;
 use crate::store::{Block, DataBytes, LocalDataIndex, ResponseData};
-use crate::urpc::connection::Connection;
+use crate::urpc::connection::{Connection, UringCompatibleConnection};
 use crate::urpc::frame::Frame;
 use crate::urpc::shutdown::Shutdown;
 use crate::util;
@@ -44,10 +44,10 @@ impl Command {
         }
     }
 
-    pub async fn apply(
+    pub async fn apply<C: UringCompatibleConnection>(
         self,
         app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
+        conn: &mut C,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
         match self {
@@ -76,10 +76,10 @@ pub struct GetMemoryDataRequestCommand {
 }
 
 impl GetMemoryDataRequestCommand {
-    pub(crate) async fn apply(
+    pub(crate) async fn apply<C: UringCompatibleConnection>(
         &self,
         app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
+        conn: &mut C,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
         let timer = Instant::now();
@@ -242,10 +242,10 @@ pub struct ReadSegment {
 }
 
 impl GetLocalDataRequestV2Command {
-    pub(crate) async fn apply(
+    pub(crate) async fn apply<C: UringCompatibleConnection>(
         &self,
         app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
+        conn: &mut C,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
         let timer = Instant::now();
@@ -329,10 +329,10 @@ impl GetLocalDataRequestV2Command {
 }
 
 impl GetLocalDataRequestV3Command {
-    pub(crate) async fn apply(
+    pub(crate) async fn apply<C: UringCompatibleConnection>(
         &self,
         app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
+        conn: &mut C,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
         let timer = Instant::now();
@@ -418,10 +418,10 @@ impl GetLocalDataRequestV3Command {
 }
 
 impl GetLocalDataRequestCommand {
-    pub(crate) async fn apply(
+    pub(crate) async fn apply<C: UringCompatibleConnection>(
         &self,
         app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
+        conn: &mut C,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
         let timer = Instant::now();
@@ -530,10 +530,10 @@ pub struct GetLocalDataIndexRequestCommand {
 }
 
 impl GetLocalDataIndexRequestCommand {
-    pub(crate) async fn apply(
+    pub(crate) async fn apply<C: UringCompatibleConnection>(
         &self,
         app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
+        conn: &mut C,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
         let timer = Instant::now();
@@ -667,16 +667,19 @@ pub struct RpcResponseCommand {
     pub(crate) ret_msg: String,
 }
 
-async fn write_response(conn: &mut Connection, command: RpcResponseCommand) -> Result<()> {
+async fn write_response<C: UringCompatibleConnection>(
+    conn: &mut C,
+    command: RpcResponseCommand,
+) -> Result<()> {
     let frame = Frame::RpcResponse(command);
     conn.write_frame(&frame).await
 }
 
 impl SendDataRequestCommand {
-    async fn apply(
+    async fn apply<C: UringCompatibleConnection>(
         self,
         app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
+        conn: &mut C,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
         let timer = Instant::now();

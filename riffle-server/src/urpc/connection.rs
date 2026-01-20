@@ -1,5 +1,6 @@
 use bytes::{Buf, BytesMut};
 use std::io::Cursor;
+use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 use tokio::net::TcpStream;
 
@@ -9,6 +10,22 @@ use crate::urpc::frame::Frame;
 use anyhow::Result;
 
 const INITIAL_BUFFER_LENGTH: usize = 1024 * 1024;
+
+/// Trait for URPC connections supporting both TCP and io-uring backends.
+///
+/// This trait abstracts the common operations needed by the URPC protocol
+/// handler, allowing different transport implementations.
+#[async_trait::async_trait]
+pub trait UringCompatibleConnection {
+    /// Read a frame from the connection.
+    async fn read_frame(&mut self) -> Result<Option<Frame>, WorkerError>;
+
+    /// Write a frame to the connection.
+    async fn write_frame(&mut self, frame: &Frame) -> Result<()>;
+
+    /// Get the peer's socket address.
+    fn peer_addr(&self) -> Result<SocketAddr>;
+}
 
 #[derive(Debug)]
 pub struct Connection {
@@ -77,5 +94,20 @@ impl Connection {
                 }
             }
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl UringCompatibleConnection for Connection {
+    async fn read_frame(&mut self) -> Result<Option<Frame>, WorkerError> {
+        self.read_frame().await
+    }
+
+    async fn write_frame(&mut self, frame: &Frame) -> Result<()> {
+        self.write_frame(frame).await
+    }
+
+    fn peer_addr(&self) -> Result<SocketAddr> {
+        self.stream.peer_addr().map_err(|e| anyhow::anyhow!(e))
     }
 }

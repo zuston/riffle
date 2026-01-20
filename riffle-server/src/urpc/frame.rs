@@ -104,8 +104,18 @@ pub enum Frame {
 }
 
 impl Frame {
+    /// Write frame using a generic async writer (for TCPStream).
     pub async fn write(
         stream: &mut TcpStream,
+        frame: &Frame,
+        write_buf: &mut BytesMut,
+    ) -> Result<()> {
+        Self::write_async(stream, frame, write_buf).await
+    }
+
+    /// Generic async write method that works with any AsyncWriteExt + Unpin.
+    pub async fn write_async<W: tokio::io::AsyncWriteExt + Unpin>(
+        writer: &mut W,
         frame: &Frame,
         write_buf: &mut BytesMut,
     ) -> Result<()> {
@@ -133,19 +143,19 @@ impl Frame {
                 write_buf.put_i32(msg_bytes.len() as i32);
                 write_buf.put(msg_bytes);
 
-                stream.write_all(&write_buf.split()).await?;
+                writer.write_all(&write_buf.split()).await?;
 
                 // write all data
                 match data {
                     DataBytes::Direct(val) => {
-                        stream.write_all(val).await?;
+                        writer.write_all(val).await?;
                     }
                     DataBytes::Composed(val) => {
-                        stream.write_all(val.freeze().as_ref()).await?;
+                        writer.write_all(val.freeze().as_ref()).await?;
                     }
                     DataBytes::RawIO(raw) => {
                         send_file_full(
-                            stream,
+                            writer,
                             raw.raw_fd,
                             Some(raw.offset as i64),
                             raw.length as usize,
@@ -156,7 +166,7 @@ impl Frame {
                         })?;
                     }
                     DataBytes::RawPipe(pipe) => {
-                        system_libc::splice(stream, pipe).await.map_err(|e| {
+                        system_libc::splice(writer, pipe).await.map_err(|e| {
                             error!("Errors on getting localfile data by splice from pipe. length:{}. e: {}", pipe.length, &e);
                             e
                         })?;
@@ -199,11 +209,11 @@ impl Frame {
                     write_buf.put_i32(*storage_id as i32);
                 }
 
-                stream.write_all(&write_buf.split()).await?;
+                writer.write_all(&write_buf.split()).await?;
 
                 // write the all bytes
                 let data = index_bytes.freeze();
-                stream.write_all(&data).await?;
+                writer.write_all(&data).await?;
 
                 Ok(())
             }
@@ -234,10 +244,10 @@ impl Frame {
                 // write the data length
                 write_buf.put_i64(data_file_len);
 
-                stream.write_all(&write_buf.split()).await?;
+                writer.write_all(&write_buf.split()).await?;
                 // write the all bytes
                 let data = index_bytes.freeze();
-                stream.write_all(&data).await?;
+                writer.write_all(&data).await?;
 
                 Ok(())
             }
@@ -282,11 +292,11 @@ impl Frame {
                     write_buf.put_i64(segment.crc);
                     write_buf.put_i64(segment.task_attempt_id);
                 }
-                stream.write_all(&write_buf.split()).await?;
+                writer.write_all(&write_buf.split()).await?;
 
                 // data_bytes
                 for composed_byte in data_bytes_wrapper.always_composed().iter() {
-                    stream.write_all(&composed_byte).await?;
+                    writer.write_all(&composed_byte).await?;
                 }
                 Ok(())
             }
@@ -335,11 +345,11 @@ impl Frame {
                 // add is_end flag
                 write_buf.put_u8(mem_data.is_end as u8);
 
-                stream.write_all(&write_buf.split()).await?;
+                writer.write_all(&write_buf.split()).await?;
 
                 // data_bytes
                 for composed_byte in data_bytes_wrapper.always_composed().iter() {
-                    stream.write_all(&composed_byte).await?;
+                    writer.write_all(&composed_byte).await?;
                 }
 
                 Ok(())
@@ -363,7 +373,7 @@ impl Frame {
                 write_buf.put_i32(msg_bytes.len() as i32);
                 write_buf.put(msg_bytes);
 
-                stream.write_all(&write_buf.split()).await?;
+                writer.write_all(&write_buf.split()).await?;
                 Ok(())
             }
             _ => todo!(),
