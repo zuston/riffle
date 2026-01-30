@@ -3,11 +3,12 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, Semaphore};
 
 use crate::urpc::connection::Connection;
 use crate::urpc::shutdown::Shutdown;
+use crate::urpc::transport::{Transport, TransportListener, TransportStream};
 
 use crate::app_manager::AppManagerRef;
 use crate::await_tree::AWAIT_TREE_REGISTRY;
@@ -18,19 +19,18 @@ use crate::metric::{
 use crate::urpc::command::Command;
 use anyhow::Result;
 use await_tree::InstrumentAwait;
-use socket2::SockRef;
 use tracing::Instrument;
 
 const MAX_CONNECTIONS: usize = 40000;
 
-struct Listener {
-    listener: TcpListener,
+struct Listener<L: TransportListener> {
+    listener: L,
     limit_connections: Arc<Semaphore>,
     notify_shutdown: broadcast::Sender<()>,
     shutdown_complete_tx: mpsc::Sender<()>,
 }
 
-impl Listener {
+impl<L: TransportListener> Listener<L> {
     async fn run(&mut self, app_manager_ref: AppManagerRef) -> Result<()> {
         debug!("Accepting inbound connections");
 
@@ -65,16 +65,15 @@ impl Listener {
         }
     }
 
-    async fn accept(&mut self) -> Result<TcpStream> {
+    async fn accept(&mut self) -> Result<L::Stream> {
         let mut backoff = 1;
 
         loop {
             match self.listener.accept().await {
                 Ok((socket, _)) => {
                     // todo: fine-grained keep_alive options
-                    let sock_ref = SockRef::from(&socket);
-                    sock_ref.set_keepalive(true)?;
-                    sock_ref.set_nodelay(true)?;
+                    socket.set_keepalive(true)?;
+                    socket.set_nodelay(true)?;
                     return Ok(socket);
                 }
                 Err(err) => {
@@ -92,14 +91,14 @@ impl Listener {
 }
 
 #[derive(Debug)]
-struct Handler {
-    connection: Connection,
+struct Handler<S: TransportStream> {
+    connection: Connection<S>,
     shutdown: Shutdown,
     remote_addr: String,
     _shutdown_complete: mpsc::Sender<()>,
 }
 
-impl Handler {
+impl<S: TransportStream> Handler<S> {
     /// when the shutdown signal is received, the connection is processed
     /// util it reaches a safe state, at which point it is terminated
     async fn run(&mut self, app_manager_ref: AppManagerRef) -> Result<(), WorkerError> {
@@ -142,11 +141,18 @@ impl Handler {
     }
 }
 
-pub async fn run(listener: TcpListener, shutdown: impl Future, app_manager_ref: AppManagerRef) {
+/// Run the urpc server with the given transport listener
+pub async fn run_with_listener<L>(
+    listener: L,
+    shutdown: impl Future,
+    app_manager_ref: AppManagerRef,
+) where
+    L: TransportListener,
+{
     let (notify_shutdown, _) = broadcast::channel(1);
     let (shutdown_complete_tx, mut shutdown_complete_rx) = mpsc::channel(1);
 
-    let mut server = Listener {
+    let mut server = Listener::<L> {
         listener,
         limit_connections: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
         notify_shutdown,
@@ -176,6 +182,31 @@ pub async fn run(listener: TcpListener, shutdown: impl Future, app_manager_ref: 
     drop(shutdown_complete_tx);
 
     let _ = shutdown_complete_rx.recv().await;
+}
+
+/// Run the urpc server with standard tokio TcpListener (epoll)
+pub async fn run(listener: TcpListener, shutdown: impl Future, app_manager_ref: AppManagerRef) {
+    use crate::urpc::transport::epoll::EpollListener;
+
+    let epoll_listener = EpollListener::from_tcp_listener(listener);
+    run_with_listener(epoll_listener, shutdown, app_manager_ref).await;
+}
+
+#[cfg(all(feature = "io-uring", target_os = "linux"))]
+/// Run the urpc server with io-uring transport
+pub async fn run_uring(
+    addr: SocketAddr,
+    shutdown: impl Future,
+    app_manager_ref: AppManagerRef,
+) -> Result<()> {
+    use crate::urpc::transport::uring::{init_uring_engine, UringListener};
+
+    // Initialize io-uring engine with default 2 threads
+    init_uring_engine(2)?;
+
+    let listener = UringListener::bind(addr).await?;
+    run_with_listener(listener, shutdown, app_manager_ref).await;
+    Ok(())
 }
 
 #[cfg(test)]
