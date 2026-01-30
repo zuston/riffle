@@ -1,21 +1,29 @@
 use crate::urpc::command::GetLocalDataRequestCommand;
 use crate::urpc::frame::MessageType;
+use crate::urpc::transport::{Transport, TransportStream};
 use anyhow::Result;
 use bytes::{BufMut, Bytes, BytesMut};
 use std::net::SocketAddr;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 
-/// This is the simple urpc client, only for tests
-pub struct UrpcClient {
-    stream: TcpStream,
+/// Generic urpc client that works with any Transport
+pub struct UrpcClient<S: TransportStream> {
+    stream: S,
 }
 
-impl UrpcClient {
-    pub async fn connect(host: &str, port: usize) -> Result<Self> {
-        let addr = format!("{}:{}", host, port);
-        let stream = TcpStream::connect(addr).await?;
-        Ok(UrpcClient { stream })
+impl<S: TransportStream> UrpcClient<S> {
+    /// Create a new client from an existing stream
+    pub fn new(stream: S) -> Self {
+        Self { stream }
+    }
+
+    /// Get a reference to the underlying stream
+    pub fn stream_ref(&self) -> &S {
+        &self.stream
+    }
+
+    /// Get a mutable reference to the underlying stream
+    pub fn stream_mut(&mut self) -> &mut S {
+        &mut self.stream
     }
 
     async fn send(&mut self, data: &[u8]) -> Result<()> {
@@ -25,8 +33,8 @@ impl UrpcClient {
     }
 
     async fn recv(&mut self, buf: &mut [u8]) -> Result<usize> {
-        let n = self.stream.read(buf).await?;
-        Ok(n)
+        let n = self.stream.read_exact(buf).await?;
+        Ok(buf.len())
     }
 
     fn put_string(buf: &mut BytesMut, data: &str) -> Result<()> {
@@ -123,6 +131,40 @@ impl UrpcClient {
     }
 }
 
+/// Epoll-based urpc client
+pub type EpollUrpcClient = UrpcClient<crate::urpc::transport::epoll::EpollStream>;
+
+impl EpollUrpcClient {
+    /// Connect to a server using epoll transport
+    pub async fn connect(host: &str, port: usize) -> Result<Self> {
+        use crate::urpc::transport::epoll::{EpollStream, EpollTransport};
+        let addr = format!("{}:{}", host, port);
+        let stream = EpollTransport::connect(addr.parse()?).await?;
+        Ok(Self::new(stream))
+    }
+}
+
+#[cfg(all(feature = "io-uring", target_os = "linux"))]
+/// Io-uring based urpc client
+pub type UringUrpcClient = UrpcClient<crate::urpc::transport::uring::UringStream>;
+
+#[cfg(all(feature = "io-uring", target_os = "linux"))]
+impl UringUrpcClient {
+    /// Connect to a server using io-uring transport
+    pub async fn connect(host: &str, port: usize) -> Result<Self> {
+        use crate::urpc::transport::uring::{init_uring_engine, UringTransport};
+
+        // Ensure engine is initialized
+        if crate::urpc::transport::uring::get_engine().is_err() {
+            init_uring_engine(2)?;
+        }
+
+        let addr = format!("{}:{}", host, port);
+        let stream = UringTransport::connect(addr.parse()?).await?;
+        Ok(Self::new(stream))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::app_manager::application_identifier::ApplicationId;
@@ -132,7 +174,7 @@ mod tests {
     use crate::runtime::manager::RuntimeManager;
     use crate::server_state_manager::ServerStateManager;
     use crate::storage::StorageService;
-    use crate::urpc::client::UrpcClient;
+    use crate::urpc::client::EpollUrpcClient;
     use crate::urpc::command::GetLocalDataRequestCommand;
     use crate::util;
     use anyhow::Result;
@@ -174,7 +216,9 @@ mod tests {
 
         let rt = tokio::runtime::Runtime::new()?;
         let f = rt.block_on(async move {
-            let mut client = UrpcClient::connect("0.0.0.0", port as usize).await.unwrap();
+            let mut client = EpollUrpcClient::connect("0.0.0.0", port as usize)
+                .await
+                .unwrap();
             let command = GetLocalDataRequestCommand {
                 request_id: 0,
                 app_id: ApplicationId::mock().to_string(),
