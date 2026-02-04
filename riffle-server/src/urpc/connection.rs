@@ -1,26 +1,25 @@
 use bytes::{Buf, BytesMut};
 use std::io::Cursor;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
-use tokio::net::TcpStream;
 
 use crate::error::WorkerError;
 use crate::metric::URPC_REQUEST_PARSING_LATENCY;
 use crate::urpc::frame::Frame;
+use crate::urpc::transport::TransportStream;
 use anyhow::Result;
 
 const INITIAL_BUFFER_LENGTH: usize = 1024 * 1024;
 
 #[derive(Debug)]
-pub struct Connection {
-    stream: TcpStream,
+pub struct Connection<S: TransportStream> {
+    stream: S,
     read_buf: BytesMut,
     write_buf: BytesMut,
 }
 
-impl Connection {
-    pub fn new(socket: TcpStream) -> Self {
+impl<S: TransportStream> Connection<S> {
+    pub fn new(stream: S) -> Self {
         Connection {
-            stream: socket,
+            stream,
             read_buf: BytesMut::with_capacity(INITIAL_BUFFER_LENGTH),
             write_buf: BytesMut::with_capacity(INITIAL_BUFFER_LENGTH),
         }
@@ -77,5 +76,15 @@ impl Connection {
                 }
             }
         }
+    }
+
+    /// Get a reference to the underlying stream
+    pub fn stream_ref(&self) -> &S {
+        &self.stream
+    }
+
+    /// Get a mutable reference to the underlying stream
+    pub fn stream_mut(&mut self) -> &mut S {
+        &mut self.stream
     }
 }

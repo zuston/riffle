@@ -26,6 +26,9 @@ use tokio::sync::broadcast::{Receiver, Sender};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Server;
 
+#[cfg(all(feature = "io-uring", target_os = "linux"))]
+use crate::urpc::transport::uring::init_uring_engine;
+
 pub static GRPC_PARALLELISM: Lazy<NonZeroUsize> = Lazy::new(|| {
     let available_cores = std::thread::available_parallelism().unwrap();
     std::env::var("GRPC_PARALLELISM").map_or(available_cores, |v| {
@@ -61,8 +64,54 @@ impl DefaultRpcService {
         app_manager_ref: AppManagerRef,
     ) -> Result<()> {
         let urpc_port = config.urpc_port.unwrap();
-        info!("Starting urpc server with port:[{}] ......", urpc_port);
 
+        // Check if io-uring is enabled (only on Linux)
+        #[cfg(all(feature = "io-uring", target_os = "linux"))]
+        let io_uring_enable = config
+            .urpc_config
+            .as_ref()
+            .map(|c| c.io_uring_enable)
+            .unwrap_or(false);
+
+        #[cfg(not(all(feature = "io-uring", target_os = "linux")))]
+        let io_uring_enable = false;
+
+        if io_uring_enable {
+            #[cfg(all(feature = "io-uring", target_os = "linux"))]
+            {
+                info!(
+                    "Starting urpc server with io-uring on port:[{}] ......",
+                    urpc_port
+                );
+                let threads = config
+                    .urpc_config
+                    .as_ref()
+                    .map(|c| c.io_uring_threads)
+                    .unwrap_or(2);
+
+                // Initialize io-uring engine
+                init_uring_engine(threads)?;
+
+                return Self::_start_urpc_uring(urpc_port, tx, app_manager_ref);
+            }
+            #[cfg(not(all(feature = "io-uring", target_os = "linux")))]
+            {
+                panic!("io-uring feature is not enabled or not supported on this platform, cannot use io-uring transport");
+            }
+        }
+
+        info!(
+            "Starting urpc server with epoll on port:[{}] ......",
+            urpc_port
+        );
+        Self::_start_urpc_epoll(urpc_port, tx, app_manager_ref)
+    }
+
+    fn _start_urpc_epoll(
+        urpc_port: u16,
+        tx: Sender<()>,
+        app_manager_ref: AppManagerRef,
+    ) -> Result<()> {
         async fn shutdown(mut rx: Receiver<()>) -> Result<()> {
             if let Err(err) = rx.recv().await {
                 error!("Errors on stopping the urpc service, err: {:?}.", err);
@@ -84,7 +133,7 @@ impl DefaultRpcService {
                     .enable_all()
                     .build()
                     .unwrap()
-                    .block_on(urpc_serve(addr, shutdown(rx), app_manager));
+                    .block_on(urpc_serve_epoll(addr, shutdown(rx), app_manager));
             });
         }
 
@@ -103,10 +152,49 @@ impl DefaultRpcService {
                         .enable_all()
                         .build()
                         .unwrap()
-                        .block_on(urpc_serve(addr, shutdown(rx), app_manager));
+                        .block_on(urpc_serve_epoll(addr, shutdown(rx), app_manager));
                 });
             }
         }
+
+        Ok(())
+    }
+
+    #[cfg(all(feature = "io-uring", target_os = "linux"))]
+    fn _start_urpc_uring(
+        urpc_port: u16,
+        tx: Sender<()>,
+        app_manager_ref: AppManagerRef,
+    ) -> Result<()> {
+        use crate::urpc::transport::uring::UringListener;
+        use crate::urpc::transport::TransportListener;
+
+        async fn shutdown(mut rx: Receiver<()>) -> Result<()> {
+            if let Err(err) = rx.recv().await {
+                error!("Errors on stopping the urpc service, err: {:?}.", err);
+            } else {
+                debug!("urpc service has been graceful stopped.");
+            }
+            Ok(())
+        }
+
+        // For io-uring, we use a different runtime configuration
+        // io-uring is more efficient with fewer threads
+        let rx = tx.subscribe();
+        let app_manager = app_manager_ref.clone();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port);
+
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(std::cmp::max(URPC_PARALLELISM.get() / 2, 4))
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    let listener = UringListener::bind(addr).await.unwrap();
+                    urpc::server::run_with_listener(listener, shutdown(rx), app_manager).await;
+                });
+        });
 
         Ok(())
     }
@@ -242,7 +330,7 @@ impl DefaultRpcService {
     }
 }
 
-async fn urpc_serve(addr: SocketAddr, shutdown: impl Future, app_manager_ref: AppManagerRef) {
+async fn urpc_serve_epoll(addr: SocketAddr, shutdown: impl Future, app_manager_ref: AppManagerRef) {
     let sock = socket2::Socket::new(
         match addr {
             SocketAddr::V4(_) => socket2::Domain::IPV4,
