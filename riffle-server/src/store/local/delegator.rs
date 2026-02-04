@@ -229,11 +229,25 @@ impl LocalDiskDelegator {
                         self.mark_operation_abnormal();
                     }
                     error => {
-                        error!(
-                            "Errors on checking the disk:{} write+read. err: {:#?}",
-                            &self.inner.root, error
-                        );
-                        self.mark_corrupted()?;
+                        // Check if this is an ENOSPC (no space left on device) error
+                        let error_msg = error.to_string();
+                        let is_enospc = error_msg.contains("No space left on device")
+                            || error_msg.contains("ENOSPC")
+                            || error_msg.contains("Storage full");
+
+                        if is_enospc {
+                            warn!(
+                                "Disk {} has insufficient space. err: {:#?}",
+                                &self.inner.root, error
+                            );
+                            self.mark_space_insufficient();
+                        } else {
+                            error!(
+                                "Errors on checking the disk:{} write+read. err: {:#?}",
+                                &self.inner.root, error
+                            );
+                            self.mark_corrupted()?;
+                        }
                     }
                 },
                 Ok(_) => {
