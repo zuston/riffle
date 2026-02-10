@@ -30,6 +30,7 @@ use crate::util;
 use crate::util::{now_timestamp_as_millis, now_timestamp_as_sec};
 use anyhow::Result;
 use bytes::Bytes;
+use bytesize::ByteSize;
 use fxhash::FxHasher;
 use log::{error, info, warn};
 use parking_lot::RwLock;
@@ -211,6 +212,12 @@ impl App {
             && partition_size > self.partition_limit_threshold.get().as_u64()
             && !partition_meta.is_huge_partition()
         {
+            warn!(
+                "[{}] huge partition detected: size {} exceeds limit {}",
+                &ctx.uid,
+                ByteSize::b(partition_size),
+                ByteSize::b(self.partition_limit_threshold.get().as_u64()),
+            );
             partition_meta.mark_as_huge_partition();
             self.add_huge_partition_metric();
         }
@@ -218,6 +225,12 @@ impl App {
             && partition_size > self.partition_split_threshold.get().as_u64()
             && !partition_meta.is_split()
         {
+            warn!(
+                "[{}] partition-split happens: size {} exceeds limit {}",
+                &ctx.uid,
+                ByteSize::b(partition_size),
+                ByteSize::b(self.partition_split_threshold.get().as_u64())
+            );
             partition_meta.mark_as_split();
             self.partition_split_triggered.store(true, SeqCst);
         }
@@ -378,8 +391,8 @@ impl App {
                 if self.partition_limit_enable && partition_meta.is_huge_partition() {
                     let used = self.store.get_memory_buffer_size(&puid)?;
                     if used > partition_limit_threshold {
-                        info!("[{}] with huge partition (used/limited: {}/{}), it has been limited of writing speed",
-                            puid, used, partition_limit_threshold);
+                        info!("[{}] huge partition detected: mem-used {} exceeds limit {}, write speed is throttled",
+                            puid, ByteSize::b(used), ByteSize::b(partition_limit_threshold));
                         TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED.inc();
                         return Err(WorkerError::MEMORY_USAGE_LIMITED_BY_HUGE_PARTITION);
                     }
