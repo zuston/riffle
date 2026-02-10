@@ -10,6 +10,7 @@ use crate::urpc::command::{
     GetMemoryDataResponseCommand, GetMemoryDataResponseV2Command, ReadSegment, RpcResponseCommand,
     SendDataRequestCommand,
 };
+use crate::urpc::transport::TransportStream;
 use anyhow::{Error, Result};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use log::{error, warn};
@@ -18,12 +19,9 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 use std::io;
-use std::io::{Cursor, IoSlice};
+use std::io::Cursor;
 use strum_macros::EnumVariantNames;
-use tokio::io::{AsyncWriteExt, BufWriter, Interest};
-use tokio::net::unix::pipe;
-use tokio::net::TcpStream;
-use tracing::{debug, info};
+use tracing::debug;
 
 ///
 /// The encode urpc:
@@ -104,8 +102,8 @@ pub enum Frame {
 }
 
 impl Frame {
-    pub async fn write(
-        stream: &mut TcpStream,
+    pub async fn write<S: TransportStream>(
+        stream: &mut S,
         frame: &Frame,
         write_buf: &mut BytesMut,
     ) -> Result<()> {

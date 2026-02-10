@@ -484,6 +484,16 @@ pub struct Config {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct UrpcConfig {
     pub get_index_rpc_version: RpcVersion,
+    /// Enable io-uring for urpc network I/O
+    #[serde(default = "bool::default")]
+    pub io_uring_enable: bool,
+    /// Number of io-uring threads (only used when io_uring_enable is true)
+    #[serde(default = "as_default_urpc_io_uring_threads")]
+    pub io_uring_threads: usize,
+}
+
+fn as_default_urpc_io_uring_threads() -> usize {
+    2
 }
 
 fn as_default_get_memory_rpc_version() -> RpcVersion {
