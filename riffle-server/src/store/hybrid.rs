@@ -24,7 +24,7 @@ use crate::config::{Config, HybridStoreConfig, StorageType};
 use crate::error::WorkerError;
 use crate::metric::{
     GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES, GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES_OF_HUGE_PARTITION,
-    GAUGE_MEMORY_SPILL_TO_HDFS, GAUGE_MEMORY_SPILL_TO_LOCALFILE,
+    GAUGE_MEMORY_SPILL_LOOKUP_MILLIS, GAUGE_MEMORY_SPILL_TO_HDFS, GAUGE_MEMORY_SPILL_TO_LOCALFILE,
     MEMORY_BUFFER_SPILL_BATCH_SIZE_HISTOGRAM, TOTAL_MEMORY_SPILL_BYTES, TOTAL_MEMORY_SPILL_TO_HDFS,
     TOTAL_MEMORY_SPILL_TO_LOCALFILE,
 };
@@ -542,8 +542,13 @@ impl HybridStore {
         if ratio < self.config.memory_spill_high_watermark {
             return Ok(());
         }
-        info!("[Spill] Watermark spill is triggered. ratio: {}. mem_snapshot: {:?}. in_flight_bytes: {}. in_flight_bytes_of_huge_partition: {}",
-                    ratio, self.mem_snapshot()?, self.in_flight_bytes.load(Relaxed), self.in_flight_bytes_of_huge_partition.load(Relaxed));
+        info!(
+            "[spill] watermark spill triggered: ratio={:.4}, in_flight={}, in_flight_huge={}, snapshot={:?}",
+            ratio,
+            self.in_flight_bytes.load(Relaxed),
+            self.in_flight_bytes_of_huge_partition.load(Relaxed),
+            self.mem_snapshot()?
+        );
 
         let timer = Instant::now();
 
@@ -556,8 +561,12 @@ impl HybridStore {
         let mem_expected_spill_bytes = mem_real_used - mem_expected_used;
 
         if mem_expected_spill_bytes <= 0 {
-            warn!("[Spill] Invalid watermark spill due to expected_spill_bytes <= 0. mem_expected_used: {}. mem_real_used: {}. mem_expected_spill_bytes: {}",
-                mem_expected_used, mem_real_used, mem_expected_spill_bytes);
+            warn!(
+                "[spill] skip: expected_spill_bytes <= 0 (expected_used={}, real_used={}, expected_spill={})",
+                mem_expected_used,
+                mem_real_used,
+                mem_expected_spill_bytes
+            );
             return Ok(());
         }
 
@@ -565,13 +574,15 @@ impl HybridStore {
             .hot_store
             .lookup_spill_buffers(mem_expected_spill_bytes)
             .await?;
+        let lookup_time = timer.elapsed().as_millis();
         info!(
-            "[Spill] Looked up all spill blocks that costs {}(ms). mem_expected_used: {}. mem_real_used: {}. mem_expected_spill_bytes: {}",
-            timer.elapsed().as_millis(),
+            "[spill] candidates selected in {} ms (expected_used={}, real_used={}, target_spill={})",
+            lookup_time,
             mem_expected_used,
             mem_real_used,
             mem_expected_spill_bytes
         );
+        GAUGE_MEMORY_SPILL_LOOKUP_MILLIS.set(lookup_time as i64);
 
         let partition_num = buffers.len();
         let timer = Instant::now();
@@ -594,12 +605,12 @@ impl HybridStore {
             flushed_size += flushed;
         }
         info!(
-            "[Spill] Picked up {} partition blocks that should be async flushed with {}(bytes) that costs {}(ms). Spill events distribution: max={}(b), min={}(b)",
+            "[spill] async spill scheduled: partitions={}, total_bytes={}, cost={} ms, distribution(max={}, min={})",
             partition_num,
             flushed_size,
             timer.elapsed().as_millis(),
             flushed_max,
-            flushed_min,
+            flushed_min
         );
         Ok(())
     }
