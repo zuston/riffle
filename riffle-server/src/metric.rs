@@ -182,6 +182,14 @@ pub static GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES_OF_HUGE_PARTITION: Lazy<IntGauge> 
     .expect("")
 });
 
+pub static GAUGE_MEMORY_SPILL_LOOKUP_MILLIS: Lazy<IntGauge> = Lazy::new(|| {
+    IntGauge::new(
+        "memory_spill_lookup_millis",
+        "time spent (ms) looking up memory spill partitions",
+    )
+    .expect("")
+});
+
 pub static LATENCY_GENERAL: Lazy<IntGaugeVec> = Lazy::new(|| {
     register_int_gauge_vec!("latency_general", "latency_general", &["name", "quantile"]).unwrap()
 });
@@ -1328,6 +1336,10 @@ fn register_custom_metrics() {
 
     REGISTRY
         .register(Box::new(HARD_SPLIT_COUNTER.clone()))
+        .expect("");
+
+    REGISTRY
+        .register(Box::new(GAUGE_MEMORY_SPILL_LOOKUP_MILLIS.clone()))
         .expect("");
 }
 
