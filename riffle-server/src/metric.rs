@@ -694,9 +694,11 @@ pub static TOTAL_GRPC_REQUEST: Lazy<IntCounterVec> = Lazy::new(|| {
     .unwrap()
 });
 
-pub static GAUGE_GRPC_REQUEST_QUEUE_SIZE: Lazy<IntGauge> = Lazy::new(|| {
-    IntGauge::new("grpc_request_number", "current service request queue size").unwrap()
-});
+pub static GAUGE_URPC_REQUEST_QUEUE_SIZE: Lazy<IntGauge> =
+    Lazy::new(|| IntGauge::new("urpc_request_number", "urpc service request queue size").unwrap());
+
+pub static GAUGE_GRPC_REQUEST_QUEUE_SIZE: Lazy<IntGauge> =
+    Lazy::new(|| IntGauge::new("grpc_request_number", "grpc service request queue size").unwrap());
 
 pub static TOTAL_URING_SPLICE: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new("total_uring_splice_number", "total_uring_splice_number").expect("")
@@ -1079,6 +1081,10 @@ fn register_custom_metrics() {
 
     REGISTRY
         .register(Box::new(TOTAL_URPC_REQUEST.clone()))
+        .expect("");
+
+    REGISTRY
+        .register(Box::new(GAUGE_URPC_REQUEST_QUEUE_SIZE.clone()))
         .expect("");
 
     REGISTRY
