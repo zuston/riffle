@@ -1084,6 +1084,10 @@ fn register_custom_metrics() {
         .expect("");
 
     REGISTRY
+        .register(Box::new(GAUGE_URPC_REQUEST_QUEUE_SIZE.clone()))
+        .expect("");
+
+    REGISTRY
         .register(Box::new(GAUGE_GRPC_REQUEST_QUEUE_SIZE.clone()))
         .expect("");
 
