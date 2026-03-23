@@ -47,6 +47,11 @@ pub static HARD_SPLIT_ENABLED: Lazy<ClientConfigOption<bool>> = Lazy::new(|| {
         .with_description("whether to trigger partition hard split by the server")
 });
 
+pub static APP_HEARTBEAT_TIMEOUT_MINUTES: Lazy<ClientConfigOption<u64>> = Lazy::new(|| {
+    ClientConfigOption::key("spark.rss.riffle.appHeartbeatTimeoutMinutes")
+        .with_description("whether to set app heartbeat timeout")
+});
+
 #[derive(Debug, Clone, Default)]
 pub struct ClientRssConf {
     properties: HashMap<String, String>,

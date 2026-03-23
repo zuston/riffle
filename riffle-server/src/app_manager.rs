@@ -147,7 +147,9 @@ impl AppManager {
         ));
         let app_manager_ref_cloned = app_ref.clone();
 
-        runtime_manager.default_runtime.spawn_with_await_tree("App heartbeat checker", async move {
+        runtime_manager.default_runtime.spawn_with_await_tree(
+            "App heartbeat checker",
+            async move {
                 info!("Starting app heartbeat checker...");
                 loop {
                     // task1: find out heartbeat timeout apps
@@ -157,14 +159,8 @@ impl AppManager {
 
                     for item in app_manager_ref_cloned.apps.iter() {
                         let (key, app) = item.pair();
-                        let last_time = app.get_latest_heartbeat_time();
-                        let current = now_timestamp_as_sec();
-
-                        if current - last_time
-                            > (app_manager_ref_cloned.app_heartbeat_timeout_min * 60) as u64
-                        {
-                            info!("Detected app:{:?} heartbeat timeout. now: {:?}, latest heartbeat: {:?}. timeout threshold: {:?}(min)",
-                            key, current, last_time, app_manager_ref_cloned.app_heartbeat_timeout_min);
+                        if app.is_heartbeat_timeout() {
+                            info!("Detected {} heartbeat timeout", key);
                             if app_manager_ref_cloned
                                 .sender
                                 .send(PurgeEvent {
@@ -174,14 +170,15 @@ impl AppManager {
                                 .is_err()
                             {
                                 error!(
-                                "Errors on sending purge event when app: {} heartbeat timeout",
-                                key
-                            );
+                                    "Errors on sending purge event when app: {} heartbeat timeout",
+                                    key
+                                );
                             }
                         }
                     }
                 }
-        });
+            },
+        );
 
         let app_manager_cloned = app_ref.clone();
         runtime_manager

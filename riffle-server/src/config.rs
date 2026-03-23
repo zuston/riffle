@@ -617,7 +617,7 @@ fn as_default_app_config() -> AppConfig {
 }
 
 fn as_default_app_heartbeat_timeout_min() -> u32 {
-    5
+    10
 }
 
 // =========================================================
