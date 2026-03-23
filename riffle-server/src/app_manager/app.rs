@@ -78,6 +78,9 @@ pub struct App {
 
     // partition split triggered tag
     partition_split_triggered: AtomicBool,
+
+    // the threshold minutes of heartbeat timeout
+    heartbeat_timeout_minutes: u64,
 }
 
 impl App {
@@ -94,7 +97,7 @@ impl App {
         let app_options = config_options.clone();
         match store.register_app(RegisterAppContext {
             app_id: copy_app_id,
-            app_config_options: app_options,
+            app_config_options: app_options.clone(),
         }) {
             Err(error) => {
                 error!("Errors on registering app to store: {:#?}", error,);
@@ -128,7 +131,12 @@ impl App {
 
         let block_id_manager = get_block_id_manager(&config.app_config.block_id_manager_type);
 
-        info!("App=[{}]. {}. block_manager_type: {}. partition_limit/threshold/ratio: {}/{}/{}. partition_split/threshold: {}/{}",
+        let heartbeat_timeout_minutes = app_options
+            .client_configs
+            .get(&crate::client_configs::APP_HEARTBEAT_TIMEOUT_MINUTES)
+            .unwrap_or(config.app_config.app_heartbeat_timeout_min as u64);
+
+        info!("App=[{}]. {}. block_manager_type: {}. partition_limit/threshold/ratio: {}/{}/{}. partition_split/threshold: {}/{}. app_heartbeat_timeout_minutes: {}",
             &app_id,
             &config_options,
             &config.app_config.block_id_manager_type,
@@ -136,7 +144,8 @@ impl App {
             partition_limit_threshold.get(),
             partition_limit_mem_backpressure_ratio.get(),
             partition_split_enable,
-            partition_split_threshold.get()
+            partition_split_threshold.get(),
+            heartbeat_timeout_minutes
         );
 
         App {
@@ -159,6 +168,7 @@ impl App {
             reconf_manager: reconf_manager.clone(),
             partition_split_triggered: AtomicBool::new(false),
             partition_stats_manager: PartitionStatsManager::new(),
+            heartbeat_timeout_minutes,
         }
     }
 
@@ -174,8 +184,11 @@ impl App {
         self.partition_meta_infos.len()
     }
 
-    pub fn get_latest_heartbeat_time(&self) -> u64 {
-        self.latest_heartbeat_time.load(SeqCst)
+    pub fn is_heartbeat_timeout(&self) -> bool {
+        let latest_time = self.latest_heartbeat_time.load(SeqCst);
+        let now = now_timestamp_as_sec();
+        let timeout_seconds = self.heartbeat_timeout_minutes * 60;
+        now - latest_time > timeout_seconds
     }
 
     pub fn heartbeat(&self) -> anyhow::Result<()> {
