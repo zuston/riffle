@@ -131,12 +131,12 @@ impl App {
 
         let block_id_manager = get_block_id_manager(&config.app_config.block_id_manager_type);
 
-        let app_heartbeat_timeout_minutes = app_options
+        let heartbeat_timeout_minutes = app_options
             .client_configs
             .get(&crate::client_configs::APP_HEARTBEAT_TIMEOUT_MINUTES)
             .unwrap_or(config.app_config.app_heartbeat_timeout_min as u64);
 
-        info!("App=[{}]. {}. block_manager_type: {}. partition_limit/threshold/ratio: {}/{}/{}. partition_split/threshold: {}/{}",
+        info!("App=[{}]. {}. block_manager_type: {}. partition_limit/threshold/ratio: {}/{}/{}. partition_split/threshold: {}/{}. app_heartbeat_timeout_minutes: {}",
             &app_id,
             &config_options,
             &config.app_config.block_id_manager_type,
@@ -144,7 +144,8 @@ impl App {
             partition_limit_threshold.get(),
             partition_limit_mem_backpressure_ratio.get(),
             partition_split_enable,
-            partition_split_threshold.get()
+            partition_split_threshold.get(),
+            heartbeat_timeout_minutes
         );
 
         App {
@@ -167,7 +168,7 @@ impl App {
             reconf_manager: reconf_manager.clone(),
             partition_split_triggered: AtomicBool::new(false),
             partition_stats_manager: PartitionStatsManager::new(),
-            heartbeat_timeout_minutes: app_heartbeat_timeout_minutes,
+            heartbeat_timeout_minutes,
         }
     }
 
