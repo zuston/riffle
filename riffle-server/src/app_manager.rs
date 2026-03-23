@@ -236,6 +236,21 @@ impl AppManager {
             "App:{} don't exist when purging data, this should not happen",
             &app_id
         )))?;
+
+        // double-check
+        match reason {
+            PurgeReason::APP_LEVEL_HEARTBEAT_TIMEOUT(_) => {
+                if !app.is_heartbeat_timeout() {
+                    info!(
+                        "Skip purge for app [{}]: heartbeat is not timed out",
+                        &app_id
+                    );
+                    return Ok(());
+                }
+            }
+            _ => {}
+        }
+
         if shuffle_id_option.is_none() {
             self.apps.remove(&app_id);
             GAUGE_APP_NUMBER.dec();
@@ -367,6 +382,7 @@ pub(crate) mod test {
     use parking_lot::RwLock;
     use std::collections::HashMap;
     use std::sync::Arc;
+    use std::time::Duration;
 
     #[test]
     fn test_uid_hash() {
@@ -669,11 +685,12 @@ pub(crate) mod test {
             assert_eq!(40, app.total_received_data_size());
             assert_eq!(40, app.total_resident_data_size());
 
-            // case3: purge
+            // case3: purge (explicit unregister: heartbeat-timeout purge skips when heartbeat is fresh)
             runtime_manager
                 .wait(
-                    app_manager_ref
-                        .purge(&PurgeReason::APP_LEVEL_HEARTBEAT_TIMEOUT(app_id.to_owned())),
+                    app_manager_ref.purge(&PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(
+                        app_id.to_owned(),
+                    )),
                 )
                 .expect("");
 
@@ -683,6 +700,38 @@ pub(crate) mod test {
             assert_eq!(40, app.total_received_data_size());
             assert_eq!(0, app.total_resident_data_size());
         }
+    }
+
+    #[test]
+    fn app_timeout_then_heartbeat_should_skip_timeout_purge() {
+        let app_id = ApplicationId::mock();
+        let raw_app_id = app_id.to_string();
+
+        let runtime_manager: RuntimeManager = Default::default();
+        let mut config = mock_config();
+        config.app_config.app_heartbeat_timeout_min = 0;
+        let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
+        let storage = StorageService::init(&runtime_manager, &config, &reconf_manager);
+        let app_manager_ref =
+            AppManager::get_ref(runtime_manager.clone(), config, &storage, &reconf_manager).clone();
+        app_manager_ref
+            .register(raw_app_id.to_string(), 1, Default::default())
+            .unwrap();
+
+        let app = app_manager_ref.get_app(&app_id).unwrap();
+        std::thread::sleep(Duration::from_secs(1));
+        assert!(app.is_heartbeat_timeout());
+
+        app.heartbeat().unwrap();
+        assert!(!app.is_heartbeat_timeout());
+
+        runtime_manager
+            .wait(
+                app_manager_ref.purge(&PurgeReason::APP_LEVEL_HEARTBEAT_TIMEOUT(app_id.to_owned())),
+            )
+            .expect("");
+
+        assert!(app_manager_ref.get_app(&app_id).is_some());
     }
 
     #[test]
