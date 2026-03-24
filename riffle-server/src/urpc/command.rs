@@ -6,7 +6,9 @@ use crate::app_manager::request_context::{
 use crate::app_manager::AppManagerRef;
 use crate::config::RpcVersion;
 use crate::constant::StatusCode;
-use crate::metric::URPC_SEND_DATA_TRANSPORT_TIME;
+use crate::metric::{
+    RPC_BATCH_BYTES_OPERATION, RPC_BATCH_DATA_BYTES_HISTOGRAM, URPC_SEND_DATA_TRANSPORT_TIME,
+};
 use crate::store::ResponseDataIndex::Local;
 use crate::store::{Block, DataBytes, LocalDataIndex, ResponseData};
 use crate::urpc::connection::Connection;
@@ -762,6 +764,11 @@ impl SendDataRequestCommand {
             },
         };
         write_response(conn, response).await?;
+        if !insert_failure_occur {
+            RPC_BATCH_DATA_BYTES_HISTOGRAM
+                .with_label_values(&[&RPC_BATCH_BYTES_OPERATION::SEND_DATA.to_string()])
+                .observe(insert_len as f64);
+        }
         debug!(
             "[send_data] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}",
             timer.elapsed().as_millis(),
