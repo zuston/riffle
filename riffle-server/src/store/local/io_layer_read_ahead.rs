@@ -321,6 +321,7 @@ impl LocalIO for ReadAheadLayerWrapper {
         let (seq_millis, seq_tasks) =
             Self::delete_with_prefix(&self.sequential_load_tasks, prefix.as_str(), |k| k, |_| {});
         if seq_tasks > 0 {
+            READ_AHEAD_ACTIVE_TASKS.sub(seq_tasks as i64);
             READ_AHEAD_ACTIVE_TASKS_OF_SEQUENTIAL.sub(seq_tasks as i64);
         }
 
@@ -335,6 +336,7 @@ impl LocalIO for ReadAheadLayerWrapper {
             },
         );
         if plan_tasks > 0 {
+            READ_AHEAD_ACTIVE_TASKS.sub(plan_tasks as i64);
             READ_AHEAD_ACTIVE_TASKS_OF_READ_PLAN.sub(plan_tasks as i64);
         }
 
