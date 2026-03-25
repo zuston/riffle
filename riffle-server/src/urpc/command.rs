@@ -421,6 +421,30 @@ impl GetLocalDataRequestV3Command {
 }
 
 impl GetLocalDataRequestCommand {
+    pub fn new(
+        request_id: i64,
+        app_id: String,
+        shuffle_id: i32,
+        partition_id: i32,
+        partition_num_per_range: i32,
+        partition_num: i32,
+        offset: i64,
+        length: i32,
+        timestamp: i64,
+    ) -> Self {
+        Self {
+            request_id,
+            app_id,
+            shuffle_id,
+            partition_id,
+            partition_num_per_range,
+            partition_num,
+            offset,
+            length,
+            timestamp,
+        }
+    }
+
     pub(crate) async fn apply<S: TransportStream>(
         &self,
         app_manager_ref: AppManagerRef,

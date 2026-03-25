@@ -22,8 +22,8 @@ use bytes::BytesMut;
 use io_uring::{opcode, types::Fd, IoUring};
 use libc::{sa_family_t, sockaddr_in, sockaddr_in6, sockaddr_storage, socklen_t};
 use std::net::{SocketAddr, TcpListener as StdTcpListener};
-use std::os::fd::{FromRawFd, RawFd};
-use std::sync::mpsc;
+use std::os::fd::{AsRawFd as StdAsRawFd, RawFd};
+use std::sync::{mpsc, Arc, Mutex};
 use tokio::sync::oneshot;
 
 /// Global io-uring engine for network I/O
@@ -35,10 +35,11 @@ impl UringNetEngine {
     /// Create a new io-uring network engine with the specified number of threads
     pub fn new(threads: usize) -> Result<Self> {
         let (submission_tx, submission_rx) = mpsc::sync_channel::<UringOp>(4096);
+        let shared_rx = Arc::new(Mutex::new(submission_rx));
 
         // Spawn io-uring worker threads
         for i in 0..threads {
-            let rx = submission_rx.clone();
+            let rx = shared_rx.clone();
             std::thread::Builder::new()
                 .name(format!("riffle-uring-net-{}", i))
                 .spawn(move || {
@@ -81,7 +82,7 @@ pub fn init_uring_engine(threads: usize) -> Result<()> {
 }
 
 /// Get the global io-uring engine
-fn get_engine() -> Result<UringNetEngine> {
+pub(crate) fn get_engine() -> Result<UringNetEngine> {
     URING_ENGINE.with(|e| {
         e.borrow()
             .clone()
@@ -120,19 +121,19 @@ unsafe impl Send for UringOpType {}
 
 struct UringOp {
     op_type: UringOpType,
-    tx: oneshot::Sender<Result<i32>>,
+    tx: Option<oneshot::Sender<Result<i32>>>,
 }
 
 /// io-uring worker thread
 struct UringWorker {
-    rx: mpsc::Receiver<UringOp>,
+    rx: Arc<Mutex<mpsc::Receiver<UringOp>>>,
     uring: IoUring,
     pending: Vec<UringOp>,
     worker_id: usize,
 }
 
 impl UringWorker {
-    fn new(rx: mpsc::Receiver<UringOp>, worker_id: usize) -> Self {
+    fn new(rx: Arc<Mutex<mpsc::Receiver<UringOp>>>, worker_id: usize) -> Self {
         // Create io-uring instance with 1024 entries
         let uring = IoUring::new(1024).expect("Failed to create io-uring");
         Self {
@@ -147,7 +148,7 @@ impl UringWorker {
         loop {
             // Collect operations from channel
             while self.pending.len() < 1024 {
-                match self.rx.try_recv() {
+                match self.rx.lock().expect("poisoned uring rx lock").try_recv() {
                     Ok(op) => self.pending.push(op),
                     Err(mpsc::TryRecvError::Empty) => break,
                     Err(mpsc::TryRecvError::Disconnected) => {
@@ -189,7 +190,7 @@ impl UringWorker {
 
                         let user_data = self.pending.as_ptr() as u64 + submitted;
                         unsafe {
-                            if sq.push(sqe.user_data(user_data)).is_err() {
+                            if sq.push(&sqe.user_data(user_data)).is_err() {
                                 break;
                             }
                         }
@@ -212,14 +213,16 @@ impl UringWorker {
                 for cqe in cqes {
                     let idx = (cqe.user_data() - self.pending.as_ptr() as u64) as usize;
                     if idx < self.pending.len() {
-                        let op = &self.pending[idx];
+                        let op = &mut self.pending[idx];
                         let res = cqe.result();
                         let result = if res < 0 {
                             Err(anyhow!("io-uring operation failed: {}", res))
                         } else {
                             Ok(res)
                         };
-                        let _ = op.tx.send(result);
+                        if let Some(tx) = op.tx.take() {
+                            let _ = tx.send(result);
+                        }
                     }
                 }
 
@@ -281,7 +284,7 @@ impl Transport for UringTransport {
                 addr: Box::new(addr_storage),
                 addrlen: addr_len,
             },
-            tx,
+            tx: Some(tx),
         };
 
         engine.submit(op)?;
@@ -306,6 +309,12 @@ pub struct UringListener {
     engine: UringNetEngine,
 }
 
+impl UringListener {
+    pub async fn bind(addr: SocketAddr) -> Result<Self> {
+        UringTransport::bind(addr).await
+    }
+}
+
 #[async_trait]
 impl TransportListener for UringListener {
     type Stream = UringStream;
@@ -321,7 +330,7 @@ impl TransportListener for UringListener {
                 addr: Box::new(addr),
                 addrlen: Box::new(addrlen),
             },
-            tx,
+            tx: Some(tx),
         };
 
         self.engine.submit(op)?;
@@ -387,7 +396,7 @@ impl TransportStream for UringStream {
                 buf: ptr,
                 len,
             },
-            tx,
+            tx: Some(tx),
         };
 
         self.engine.submit(op)?;
@@ -415,7 +424,7 @@ impl TransportStream for UringStream {
                     buf: buf[written..].as_ptr(),
                     len: buf.len() - written,
                 },
-                tx,
+                tx: Some(tx),
             };
 
             self.engine.submit(op)?;
@@ -445,7 +454,7 @@ impl TransportStream for UringStream {
                     buf: buf[read..].as_mut_ptr(),
                     len: buf.len() - read,
                 },
-                tx,
+                tx: Some(tx),
             };
 
             self.engine.submit(op)?;
@@ -512,7 +521,7 @@ impl Drop for UringStream {
     fn drop(&mut self) {
         let _ = self.engine.submit(UringOp {
             op_type: UringOpType::Close { fd: self.fd },
-            tx: oneshot::channel().0,
+            tx: Some(oneshot::channel().0),
         });
     }
 }

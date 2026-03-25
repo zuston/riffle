@@ -18,7 +18,7 @@ use crate::metric::MetricService;
 use crate::runtime::manager::RuntimeManager;
 use crate::server_state_manager::ServerStateManager;
 use crate::storage::StorageService;
-use crate::urpc::client::UrpcClient;
+use crate::urpc::client::EpollUrpcClient;
 use crate::urpc::command::GetLocalDataRequestCommand;
 use bytes::{Buf, Bytes, BytesMut};
 use croaring::{JvmLegacy, Treemap};
@@ -85,9 +85,9 @@ pub async fn shuffle_testing(config: &Config, app_ref: AppManagerRef) -> anyhow:
                 panic!("Failed to connect: {}", e);
             }
         };
-    let mut urpc_client = match urpc_port {
+    let mut urpc_client: Option<EpollUrpcClient> = match urpc_port {
         None => None,
-        Some(port) => Some(UrpcClient::connect("0.0.0.0", port as usize).await?),
+        Some(port) => Some(EpollUrpcClient::connect("0.0.0.0", port as usize).await?),
     };
 
     let app_id = ApplicationId::mock();
