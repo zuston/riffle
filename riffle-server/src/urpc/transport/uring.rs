@@ -21,6 +21,7 @@ use async_trait::async_trait;
 use bytes::BytesMut;
 use io_uring::{opcode, types::Fd, IoUring};
 use libc::{sa_family_t, sockaddr_in, sockaddr_in6, sockaddr_storage, socklen_t};
+use once_cell::sync::OnceCell;
 use std::net::{SocketAddr, TcpListener as StdTcpListener};
 use std::os::fd::{AsRawFd as StdAsRawFd, RawFd};
 use std::sync::{mpsc, Arc, Mutex};
@@ -67,27 +68,24 @@ impl Clone for UringNetEngine {
     }
 }
 
-// Thread-local or global engine instance
-thread_local! {
-    static URING_ENGINE: std::cell::RefCell<Option<UringNetEngine>> = const { std::cell::RefCell::new(None) };
-}
+// Process-wide engine instance shared across runtime threads.
+static URING_ENGINE: OnceCell<Arc<UringNetEngine>> = OnceCell::new();
 
 /// Initialize the global io-uring network engine
 pub fn init_uring_engine(threads: usize) -> Result<()> {
-    let engine = UringNetEngine::new(threads)?;
-    URING_ENGINE.with(|e| {
-        *e.borrow_mut() = Some(engine);
-    });
+    let _ = URING_ENGINE.get_or_try_init(|| {
+        let engine = UringNetEngine::new(threads)?;
+        Ok(Arc::new(engine))
+    })?;
     Ok(())
 }
 
 /// Get the global io-uring engine
-pub(crate) fn get_engine() -> Result<UringNetEngine> {
-    URING_ENGINE.with(|e| {
-        e.borrow()
-            .clone()
-            .ok_or_else(|| anyhow!("io-uring engine not initialized"))
-    })
+pub(crate) fn get_engine() -> Result<Arc<UringNetEngine>> {
+    URING_ENGINE
+        .get()
+        .cloned()
+        .ok_or_else(|| anyhow!("io-uring engine not initialized"))
 }
 
 /// Operation types for io-uring
@@ -306,7 +304,7 @@ impl Transport for UringTransport {
 pub struct UringListener {
     fd: RawFd,
     _listener: StdTcpListener,
-    engine: UringNetEngine,
+    engine: Arc<UringNetEngine>,
 }
 
 impl UringListener {
@@ -367,7 +365,7 @@ impl TransportListener for UringListener {
 
 pub struct UringStream {
     fd: RawFd,
-    engine: UringNetEngine,
+    engine: Arc<UringNetEngine>,
     read_buf: Option<BytesMut>,
 }
 
