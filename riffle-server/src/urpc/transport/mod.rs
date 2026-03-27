@@ -19,6 +19,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use bytes::BytesMut;
 use std::net::SocketAddr;
+use std::os::fd::AsRawFd as StdAsRawFd;
+use tokio::net::TcpStream;
 
 pub mod epoll;
 
@@ -54,6 +56,12 @@ pub trait TransportListener: Send + Sync + 'static {
 /// This is needed for sendfile/splice operations
 pub trait AsRawFd {
     fn as_raw_fd(&self) -> std::os::fd::RawFd;
+}
+
+impl AsRawFd for TcpStream {
+    fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        StdAsRawFd::as_raw_fd(self)
+    }
 }
 
 /// Transport stream trait for reading/writing data

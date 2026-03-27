@@ -80,7 +80,7 @@ pub struct EpollStream {
 
 impl AsRawFd for EpollStream {
     fn as_raw_fd(&self) -> RawFd {
-        self.inner.as_raw_fd()
+        StdAsRawFd::as_raw_fd(&self.inner)
     }
 }
 

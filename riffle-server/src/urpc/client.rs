@@ -4,16 +4,34 @@ use crate::urpc::transport::{Transport, TransportStream};
 use anyhow::Result;
 use bytes::{BufMut, Bytes, BytesMut};
 use std::net::SocketAddr;
+use std::time::Duration;
 
 /// Generic urpc client that works with any Transport
 pub struct UrpcClient<S: TransportStream> {
     stream: S,
+    request_timeout: Option<Duration>,
 }
 
 impl<S: TransportStream> UrpcClient<S> {
     /// Create a new client from an existing stream
     pub fn new(stream: S) -> Self {
-        Self { stream }
+        Self {
+            stream,
+            request_timeout: None,
+        }
+    }
+
+    /// Configure a per-request timeout for RPC operations.
+    /// When set, each `get_local_shuffle_data` call will fail fast if the whole request
+    /// does not finish within the given duration.
+    pub fn with_request_timeout(mut self, timeout: Duration) -> Self {
+        self.request_timeout = Some(timeout);
+        self
+    }
+
+    /// Update per-request timeout after client creation.
+    pub fn set_request_timeout(&mut self, timeout: Option<Duration>) {
+        self.request_timeout = timeout;
     }
 
     /// Get a reference to the underlying stream
@@ -98,6 +116,19 @@ impl<S: TransportStream> UrpcClient<S> {
         &mut self,
         req: GetLocalDataRequestCommand,
     ) -> Result<Bytes> {
+        if let Some(timeout) = self.request_timeout {
+            return tokio::time::timeout(timeout, self.get_local_shuffle_data_inner(req))
+                .await
+                .map_err(|_| anyhow::anyhow!("urpc request timed out after {:?}", timeout))?;
+        }
+
+        self.get_local_shuffle_data_inner(req).await
+    }
+
+    async fn get_local_shuffle_data_inner(
+        &mut self,
+        req: GetLocalDataRequestCommand,
+    ) -> Result<Bytes> {
         // compose the request
         // for a simulation client, there is no need to introduce the shared buffer
         let mut body_buffer = BytesMut::new();
@@ -142,6 +173,12 @@ impl EpollUrpcClient {
         let stream = EpollTransport::connect(addr.parse()?).await?;
         Ok(Self::new(stream))
     }
+
+    /// Connect and set a per-request timeout.
+    pub async fn connect_with_timeout(host: &str, port: usize, timeout: Duration) -> Result<Self> {
+        let client = Self::connect(host, port).await?;
+        Ok(client.with_request_timeout(timeout))
+    }
 }
 
 #[cfg(all(feature = "io-uring", target_os = "linux"))]
@@ -162,6 +199,12 @@ impl UringUrpcClient {
         let addr = format!("{}:{}", host, port);
         let stream = UringTransport::connect(addr.parse()?).await?;
         Ok(Self::new(stream))
+    }
+
+    /// Connect and set a per-request timeout.
+    pub async fn connect_with_timeout(host: &str, port: usize, timeout: Duration) -> Result<Self> {
+        let client = Self::connect(host, port).await?;
+        Ok(client.with_request_timeout(timeout))
     }
 }
 
