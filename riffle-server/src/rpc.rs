@@ -20,6 +20,8 @@ use once_cell::sync::Lazy;
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::{Receiver, Sender};
@@ -27,7 +29,7 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Server;
 
 #[cfg(all(feature = "io-uring", target_os = "linux"))]
-use crate::urpc::transport::uring::init_uring_engine;
+use crate::urpc::transport::uring::{init_uring_engine, set_current_engine_index};
 
 pub static GRPC_PARALLELISM: Lazy<NonZeroUsize> = Lazy::new(|| {
     let available_cores = std::thread::available_parallelism().unwrap();
@@ -87,7 +89,7 @@ impl DefaultRpcService {
                     .urpc_config
                     .as_ref()
                     .map(|c| c.io_uring_threads)
-                    .unwrap_or(2);
+                    .unwrap_or(0);
 
                 // Initialize io-uring engine
                 init_uring_engine(threads)?;
@@ -185,8 +187,30 @@ impl DefaultRpcService {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port);
 
         std::thread::spawn(move || {
+            let core_ids = core_affinity::get_core_ids().unwrap_or_default();
+            let worker_threads = std::cmp::max(URPC_PARALLELISM.get() / 2, 4);
+            let worker_threads = if core_ids.is_empty() {
+                worker_threads
+            } else {
+                std::cmp::min(worker_threads, core_ids.len())
+            };
+            let next_core = Arc::new(AtomicUsize::new(0));
+            let core_ids_for_hook = Arc::new(core_ids);
+            let next_core_for_hook = next_core.clone();
+
             tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(std::cmp::max(URPC_PARALLELISM.get() / 2, 4))
+                .worker_threads(worker_threads)
+                .on_thread_start(move || {
+                    if !core_ids_for_hook.is_empty() {
+                        let idx = next_core_for_hook.fetch_add(1, Ordering::Relaxed)
+                            % core_ids_for_hook.len();
+                        core_affinity::set_for_current(core_ids_for_hook[idx]);
+                        set_current_engine_index(idx);
+                    } else {
+                        let idx = next_core_for_hook.fetch_add(1, Ordering::Relaxed);
+                        set_current_engine_index(idx);
+                    }
+                })
                 .enable_all()
                 .build()
                 .unwrap()

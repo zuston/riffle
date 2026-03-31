@@ -189,12 +189,7 @@ pub type UringUrpcClient = UrpcClient<crate::urpc::transport::uring::UringStream
 impl UringUrpcClient {
     /// Connect to a server using io-uring transport
     pub async fn connect(host: &str, port: usize) -> Result<Self> {
-        use crate::urpc::transport::uring::{init_uring_engine, UringTransport};
-
-        // Ensure engine is initialized
-        if crate::urpc::transport::uring::get_engine().is_err() {
-            init_uring_engine(2)?;
-        }
+        use crate::urpc::transport::uring::UringTransport;
 
         let addr = format!("{}:{}", host, port);
         let stream = UringTransport::connect(addr.parse()?).await?;

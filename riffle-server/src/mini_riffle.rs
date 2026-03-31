@@ -19,6 +19,8 @@ use crate::runtime::manager::RuntimeManager;
 use crate::server_state_manager::ServerStateManager;
 use crate::storage::StorageService;
 use crate::urpc::client::EpollUrpcClient;
+#[cfg(all(feature = "io-uring", target_os = "linux"))]
+use crate::urpc::client::UringUrpcClient;
 use crate::urpc::command::GetLocalDataRequestCommand;
 use bytes::{Buf, Bytes, BytesMut};
 use croaring::{JvmLegacy, Treemap};
@@ -27,6 +29,43 @@ use std::time::Duration;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::oneshot;
 use tonic::transport::Channel;
+
+/// URPC client matching the server transport (epoll vs io-uring).
+enum ShuffleUrpcConn {
+    Epoll(EpollUrpcClient),
+    #[cfg(all(feature = "io-uring", target_os = "linux"))]
+    Uring(UringUrpcClient),
+}
+
+impl ShuffleUrpcConn {
+    async fn get_local_shuffle_data(
+        &mut self,
+        req: GetLocalDataRequestCommand,
+    ) -> anyhow::Result<Bytes> {
+        match self {
+            Self::Epoll(c) => c.get_local_shuffle_data(req).await,
+            #[cfg(all(feature = "io-uring", target_os = "linux"))]
+            Self::Uring(c) => c.get_local_shuffle_data(req).await,
+        }
+    }
+}
+
+#[inline]
+fn urpc_server_uses_io_uring(config: &Config) -> bool {
+    #[cfg(all(feature = "io-uring", target_os = "linux"))]
+    {
+        config
+            .urpc_config
+            .as_ref()
+            .map(|c| c.io_uring_enable)
+            .unwrap_or(false)
+    }
+    #[cfg(not(all(feature = "io-uring", target_os = "linux")))]
+    {
+        let _ = config;
+        false
+    }
+}
 
 /// The entrypoint to start the mini riffle server.
 pub async fn start(config: &Config) -> anyhow::Result<AppManagerRef> {
@@ -85,9 +124,28 @@ pub async fn shuffle_testing(config: &Config, app_ref: AppManagerRef) -> anyhow:
                 panic!("Failed to connect: {}", e);
             }
         };
-    let mut urpc_client: Option<EpollUrpcClient> = match urpc_port {
+    let mut urpc_client: Option<ShuffleUrpcConn> = match urpc_port {
         None => None,
-        Some(port) => Some(EpollUrpcClient::connect("0.0.0.0", port as usize).await?),
+        Some(port) => {
+            #[cfg(all(feature = "io-uring", target_os = "linux"))]
+            {
+                if urpc_server_uses_io_uring(config) {
+                    Some(ShuffleUrpcConn::Uring(
+                        UringUrpcClient::connect("0.0.0.0", port as usize).await?,
+                    ))
+                } else {
+                    Some(ShuffleUrpcConn::Epoll(
+                        EpollUrpcClient::connect("0.0.0.0", port as usize).await?,
+                    ))
+                }
+            }
+            #[cfg(not(all(feature = "io-uring", target_os = "linux")))]
+            {
+                Some(ShuffleUrpcConn::Epoll(
+                    EpollUrpcClient::connect("0.0.0.0", port as usize).await?,
+                ))
+            }
+        }
     };
 
     let app_id = ApplicationId::mock();

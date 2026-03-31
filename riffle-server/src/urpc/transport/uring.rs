@@ -15,16 +15,26 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use super::{AsRawFd, Transport, TransportListener, TransportStream};
+//! uRPC transport: **io_uring for `accept(2)` only**; connected sockets use Tokio `TcpStream` for
+//! read/write (same I/O model as the epoll transport). This avoids sharing one io_uring worker
+//! between listen-accept and per-connection I/O, which was fragile in practice.
+
+use super::{AsRawFd as UrpcAsRawFd, Transport, TransportListener, TransportStream};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::BytesMut;
+use core_affinity::CoreId;
 use io_uring::{opcode, types::Fd, IoUring};
-use libc::{sa_family_t, sockaddr_in, sockaddr_in6, sockaddr_storage, socklen_t};
+use libc::{sockaddr_storage, socklen_t};
 use once_cell::sync::OnceCell;
-use std::net::{SocketAddr, TcpListener as StdTcpListener};
-use std::os::fd::{AsRawFd as StdAsRawFd, RawFd};
-use std::sync::{mpsc, Arc, Mutex};
+use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::net::{SocketAddr, TcpListener};
+use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+use std::sync::{mpsc, Arc};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream as TokioTcpStream;
 use tokio::sync::oneshot;
 
 /// Global io-uring engine for network I/O
@@ -33,20 +43,21 @@ pub struct UringNetEngine {
 }
 
 impl UringNetEngine {
-    /// Create a new io-uring network engine with the specified number of threads
-    pub fn new(threads: usize) -> Result<Self> {
+    /// One dedicated thread owns a single `IoUring`, matching
+    /// [tcp_simple](https://github.com/espoal/uring_examples/blob/main/examples/tcp_simple/src/main.rs):
+    /// `submit_and_wait(1)` then read one CQE. Each engine is a separate ring + worker; optional
+    /// `core` pins that worker to a CPU when affinity is available.
+    pub fn new(engine_index: usize, core: Option<CoreId>) -> Result<Self> {
         let (submission_tx, submission_rx) = mpsc::sync_channel::<UringOp>(4096);
-        let shared_rx = Arc::new(Mutex::new(submission_rx));
 
-        // Spawn io-uring worker threads
-        for i in 0..threads {
-            let rx = shared_rx.clone();
-            std::thread::Builder::new()
-                .name(format!("riffle-uring-net-{}", i))
-                .spawn(move || {
-                    UringWorker::new(rx, i).run();
-                })?;
-        }
+        std::thread::Builder::new()
+            .name(format!("riffle-uring-net-{engine_index}"))
+            .spawn(move || {
+                if let Some(c) = core {
+                    core_affinity::set_for_current(c);
+                }
+                uring_worker_loop(submission_rx);
+            })?;
 
         Ok(Self { submission_tx })
     }
@@ -68,167 +79,190 @@ impl Clone for UringNetEngine {
     }
 }
 
-// Process-wide engine instance shared across runtime threads.
-static URING_ENGINE: OnceCell<Arc<UringNetEngine>> = OnceCell::new();
+/// Process-wide per-core engine registry.
+static URING_ENGINE_REGISTRY: OnceCell<Arc<UringEngineRegistry>> = OnceCell::new();
 
-/// Initialize the global io-uring network engine
+thread_local! {
+    static URING_ENGINE_INDEX: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+struct UringEngineRegistry {
+    engines: Vec<Arc<UringNetEngine>>,
+}
+
+impl UringEngineRegistry {
+    /// Spawns `engine_count` rings (one OS thread + `IoUring` each). When `core_ids` is non-empty,
+    /// worker `i` is pinned to `core_ids[i]` (one logical core per engine for `i < core_ids.len()`).
+    fn new(engine_count: usize, core_ids: Vec<CoreId>) -> Result<Self> {
+        let n = std::cmp::max(engine_count, 1);
+        let mut engines = Vec::with_capacity(n);
+        for i in 0..n {
+            let core = core_ids.get(i).copied();
+            engines.push(Arc::new(UringNetEngine::new(i, core)?));
+        }
+        Ok(Self { engines })
+    }
+
+    fn get_engine_for_current_thread(&self) -> Arc<UringNetEngine> {
+        let idx = if let Some(engine_idx) = URING_ENGINE_INDEX.with(|cell| cell.get()) {
+            engine_idx % self.engines.len()
+        } else {
+            // Fallback when thread affinity is not set.
+            let mut hasher = DefaultHasher::new();
+            std::thread::current().id().hash(&mut hasher);
+            (hasher.finish() as usize) % self.engines.len()
+        };
+        self.engines[idx].clone()
+    }
+}
+
+/// Logical CPU count for sizing the engine pool: affinity list when present, else
+/// [`std::thread::available_parallelism`].
+fn logical_cpu_count() -> usize {
+    match core_affinity::get_core_ids() {
+        Some(ids) if !ids.is_empty() => ids.len(),
+        _ => std::thread::available_parallelism()
+            .map(|p| p.get())
+            .unwrap_or(1),
+    }
+}
+
+/// `threads`: `0` = one engine per logical CPU (see [`logical_cpu_count`]); `> 0` caps the number
+/// of engines at `threads` (still at least one).
 pub fn init_uring_engine(threads: usize) -> Result<()> {
-    let _ = URING_ENGINE.get_or_try_init(|| {
-        let engine = UringNetEngine::new(threads)?;
-        Ok(Arc::new(engine))
+    let core_ids = core_affinity::get_core_ids().unwrap_or_default();
+    let logical = logical_cpu_count().max(1);
+    let engine_count = if threads == 0 {
+        logical
+    } else {
+        logical.min(threads.max(1)).max(1)
+    };
+    let _ = URING_ENGINE_REGISTRY.get_or_try_init(|| {
+        let registry = UringEngineRegistry::new(engine_count, core_ids)?;
+        Ok::<Arc<UringEngineRegistry>, anyhow::Error>(Arc::new(registry))
     })?;
     Ok(())
 }
 
+pub(crate) fn set_current_engine_index(idx: usize) {
+    URING_ENGINE_INDEX.with(|cell| cell.set(Some(idx)));
+}
+
 /// Get the global io-uring engine
 pub(crate) fn get_engine() -> Result<Arc<UringNetEngine>> {
-    URING_ENGINE
+    URING_ENGINE_REGISTRY
         .get()
-        .cloned()
+        .map(|registry| registry.get_engine_for_current_thread())
         .ok_or_else(|| anyhow!("io-uring engine not initialized"))
 }
 
-/// Operation types for io-uring
 enum UringOpType {
+    /// Non-blocking listen socket: idle accept completes with `-EAGAIN` and is re-submitted in the
+    /// worker. Real peer addresses are taken from the kernel via `sockaddr_storage` (not null).
     Accept {
         fd: RawFd,
         addr: Box<sockaddr_storage>,
         addrlen: Box<socklen_t>,
     },
-    Connect {
-        fd: RawFd,
-        addr: Box<sockaddr_storage>,
-        addrlen: socklen_t,
-    },
-    Recv {
-        fd: RawFd,
-        buf: *mut u8,
-        len: usize,
-    },
-    Send {
-        fd: RawFd,
-        buf: *const u8,
-        len: usize,
-    },
-    Close {
-        fd: RawFd,
-    },
 }
 
 unsafe impl Send for UringOpType {}
+
+/// Kernel returns negative errno in io_uring CQE `result` for many ops.
+#[inline]
+fn cqe_result_is_would_block(res: i32) -> bool {
+    if res >= 0 {
+        return false;
+    }
+    let e = -res;
+    e == libc::EAGAIN as i32 || e == libc::EWOULDBLOCK as i32
+}
+
+fn set_socket_nonblocking(fd: RawFd) -> Result<()> {
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL, 0) };
+    if flags < 0 {
+        return Err(anyhow!("fcntl(F_GETFL) failed on fd {}", fd));
+    }
+    if unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+        return Err(anyhow!("fcntl(F_SETFL, O_NONBLOCK) failed on fd {}", fd));
+    }
+    Ok(())
+}
 
 struct UringOp {
     op_type: UringOpType,
     tx: Option<oneshot::Sender<Result<i32>>>,
 }
 
-/// io-uring worker thread
-struct UringWorker {
-    rx: Arc<Mutex<mpsc::Receiver<UringOp>>>,
-    uring: IoUring,
-    pending: Vec<UringOp>,
-    worker_id: usize,
+fn push_sqe(uring: &mut IoUring, op_type: &UringOpType, user_data: u64) {
+    let sqe = build_sqe(op_type).user_data(user_data);
+    let mut sq = uring.submission();
+    unsafe {
+        sq.push(&sqe).expect("submission queue is full");
+    }
 }
 
-impl UringWorker {
-    fn new(rx: Arc<Mutex<mpsc::Receiver<UringOp>>>, worker_id: usize) -> Self {
-        // Create io-uring instance with 1024 entries
-        let uring = IoUring::new(1024).expect("Failed to create io-uring");
-        Self {
-            rx,
-            uring,
-            pending: Vec::with_capacity(1024),
-            worker_id,
-        }
+fn build_sqe(op_type: &UringOpType) -> io_uring::squeue::Entry {
+    match op_type {
+        UringOpType::Accept { fd, addr, addrlen } => opcode::Accept::new(
+            Fd(*fd),
+            addr.as_ref() as *const _ as *mut _,
+            addrlen.as_ref() as *const _ as *mut _,
+        )
+        .flags(libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC)
+        .build(),
     }
+}
 
-    fn run(mut self) {
-        loop {
-            // Collect operations from channel
-            while self.pending.len() < 1024 {
-                match self.rx.lock().expect("poisoned uring rx lock").try_recv() {
-                    Ok(op) => self.pending.push(op),
-                    Err(mpsc::TryRecvError::Empty) => break,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        if self.pending.is_empty() {
-                            return;
-                        }
-                        break;
-                    }
-                }
+/// Multiplexed `Accept` loop: many SQEs may be in flight so one listener spinning on `-EAGAIN`
+/// does not block other accepts on the same ring.
+fn uring_worker_loop(rx: mpsc::Receiver<UringOp>) {
+    let mut uring = IoUring::new(1024).expect("Failed to create io-uring");
+    let mut pending: HashMap<u64, UringOp> = HashMap::new();
+    let mut next_id: u64 = 1;
+
+    loop {
+        while let Ok(op) = rx.try_recv() {
+            let id = next_id;
+            next_id += 1;
+            push_sqe(&mut uring, &op.op_type, id);
+            pending.insert(id, op);
+        }
+
+        if pending.is_empty() {
+            let op = match rx.recv() {
+                Ok(o) => o,
+                Err(_) => break,
+            };
+            let id = next_id;
+            next_id += 1;
+            push_sqe(&mut uring, &op.op_type, id);
+            pending.insert(id, op);
+        }
+
+        match uring.submit_and_wait(1) {
+            Err(e) if e.raw_os_error() == Some(libc::EINTR) => continue,
+            Err(e) => panic!("io_uring submit_and_wait failed: {e}"),
+            Ok(_) => {}
+        }
+
+        let cqes: Vec<_> = uring.completion().collect();
+        for cqe in cqes {
+            let id = cqe.user_data();
+            let r = cqe.result();
+
+            let Some(op) = pending.get(&id) else {
+                continue;
+            };
+
+            if cqe_result_is_would_block(r) {
+                push_sqe(&mut uring, &op.op_type, id);
+                continue;
             }
 
-            // Submit operations to io-uring
-            if !self.pending.is_empty() {
-                let mut submitted = 0;
-                {
-                    let mut sq = self.uring.submission();
-                    for op in &self.pending {
-                        let sqe = match &op.op_type {
-                            UringOpType::Accept { fd, addr, addrlen } => opcode::Accept::new(
-                                Fd(*fd),
-                                addr.as_ref() as *const _ as *mut _,
-                                addrlen.as_ref() as *const _ as *mut _,
-                            )
-                            .build(),
-                            UringOpType::Connect { fd, addr, addrlen } => opcode::Connect::new(
-                                Fd(*fd),
-                                addr.as_ref() as *const _ as *const _,
-                                *addrlen,
-                            )
-                            .build(),
-                            UringOpType::Recv { fd, buf, len } => {
-                                opcode::Recv::new(Fd(*fd), *buf, *len as u32).build()
-                            }
-                            UringOpType::Send { fd, buf, len } => {
-                                opcode::Send::new(Fd(*fd), *buf, *len as u32).build()
-                            }
-                            UringOpType::Close { fd } => opcode::Close::new(Fd(*fd)).build(),
-                        };
-
-                        let user_data = self.pending.as_ptr() as u64 + submitted;
-                        unsafe {
-                            if sq.push(&sqe.user_data(user_data)).is_err() {
-                                break;
-                            }
-                        }
-                        submitted += 1;
-                    }
-                }
-
-                if submitted > 0 {
-                    self.uring.submit().expect("Failed to submit sqes");
-                }
-            }
-
-            // Wait for completions
-            if !self.pending.is_empty() {
-                self.uring
-                    .submit_and_wait(1)
-                    .expect("Failed to wait for completions");
-
-                let cqes: Vec<_> = self.uring.completion().collect();
-                for cqe in cqes {
-                    let idx = (cqe.user_data() - self.pending.as_ptr() as u64) as usize;
-                    if idx < self.pending.len() {
-                        let op = &mut self.pending[idx];
-                        let res = cqe.result();
-                        let result = if res < 0 {
-                            Err(anyhow!("io-uring operation failed: {}", res))
-                        } else {
-                            Ok(res)
-                        };
-                        if let Some(tx) = op.tx.take() {
-                            let _ = tx.send(result);
-                        }
-                    }
-                }
-
-                // Remove completed operations
-                self.pending.clear();
-            } else {
-                // No pending operations, sleep a bit
-                std::thread::sleep(std::time::Duration::from_millis(1));
+            let mut op = pending.remove(&id).expect("pending op");
+            if let Some(tx) = op.tx.take() {
+                let _ = tx.send(Ok(r));
             }
         }
     }
@@ -243,68 +277,27 @@ impl Transport for UringTransport {
     type Stream = UringStream;
 
     async fn bind(addr: SocketAddr) -> Result<Self::Listener> {
-        let std_listener = StdTcpListener::bind(addr)?;
-        std_listener.set_nonblocking(true)?;
-        let fd = std_listener.as_raw_fd();
+        // Use TcpListener directly (same as epoll transport). The non-blocking mode is
+        // set after binding so the fd stays valid while stored in UringListener.
+        let listener = TcpListener::bind(addr)?;
+        listener.set_nonblocking(true)?;
+        let fd = listener.as_raw_fd();
 
-        Ok(UringListener {
-            fd,
-            _listener: std_listener,
-            engine: get_engine()?,
-        })
+        Ok(UringListener { fd, listener })
     }
 
     async fn connect(addr: SocketAddr) -> Result<Self::Stream> {
-        let engine = get_engine()?;
-
-        // Create socket
-        let domain = match addr {
-            SocketAddr::V4(_) => libc::AF_INET,
-            SocketAddr::V6(_) => libc::AF_INET6,
-        };
-        let fd = unsafe { libc::socket(domain, libc::SOCK_STREAM, 0) };
-        if fd < 0 {
-            return Err(anyhow!("Failed to create socket"));
-        }
-
-        // Set non-blocking
-        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL, 0) };
-        unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
-
-        // Prepare address
-        let (addr_storage, addr_len) = socket_addr_to_storage(addr);
-
-        // Submit connect operation
-        let (tx, rx) = oneshot::channel();
-        let op = UringOp {
-            op_type: UringOpType::Connect {
-                fd,
-                addr: Box::new(addr_storage),
-                addrlen: addr_len,
-            },
-            tx: Some(tx),
-        };
-
-        engine.submit(op)?;
-        let result = rx.await.map_err(|_| anyhow!("Operation cancelled"))??;
-
-        if result < 0 {
-            unsafe { libc::close(fd) };
-            return Err(anyhow!("Connect failed: {}", result));
-        }
-
-        Ok(UringStream {
-            fd,
-            engine,
-            read_buf: None,
-        })
+        let stream = TokioTcpStream::connect(addr)
+            .await
+            .map_err(|e| anyhow!("TcpStream::connect failed: {e}"))?;
+        stream.set_nodelay(true)?;
+        Ok(UringStream { inner: stream })
     }
 }
 
 pub struct UringListener {
     fd: RawFd,
-    _listener: StdTcpListener,
-    engine: Arc<UringNetEngine>,
+    listener: TcpListener,
 }
 
 impl UringListener {
@@ -318,8 +311,8 @@ impl TransportListener for UringListener {
     type Stream = UringStream;
 
     async fn accept(&self) -> Result<(Self::Stream, SocketAddr)> {
-        let mut addr: sockaddr_storage = unsafe { std::mem::zeroed() };
-        let mut addrlen: socklen_t = std::mem::size_of::<sockaddr_storage>() as socklen_t;
+        let addr: sockaddr_storage = unsafe { std::mem::zeroed() };
+        let addrlen: socklen_t = std::mem::size_of::<sockaddr_storage>() as socklen_t;
 
         let (tx, rx) = oneshot::channel();
         let op = UringOp {
@@ -331,7 +324,7 @@ impl TransportListener for UringListener {
             tx: Some(tx),
         };
 
-        self.engine.submit(op)?;
+        get_engine()?.submit(op)?;
         let result = rx.await.map_err(|_| anyhow!("Operation cancelled"))??;
 
         if result < 0 {
@@ -339,251 +332,74 @@ impl TransportListener for UringListener {
         }
 
         let client_fd = result;
+        if let Err(e) = set_socket_nonblocking(client_fd) {
+            unsafe {
+                libc::close(client_fd);
+            }
+            return Err(e);
+        }
 
-        // Get peer address
-        let peer_addr = unsafe {
-            let mut peer_addr: sockaddr_storage = std::mem::zeroed();
-            let mut peer_len = std::mem::size_of::<sockaddr_storage>() as socklen_t;
-            libc::getpeername(client_fd, &mut peer_addr as *mut _ as *mut _, &mut peer_len);
-            storage_to_socket_addr(&peer_addr)
-        };
+        let std_stream = unsafe { std::net::TcpStream::from_raw_fd(client_fd) };
+        let inner = TokioTcpStream::from_std(std_stream)
+            .map_err(|e| anyhow!("TcpStream::from_std failed: {e}"))?;
+        inner.set_nodelay(true)?;
+        let peer_addr = inner.peer_addr()?;
 
-        Ok((
-            UringStream {
-                fd: client_fd,
-                engine: self.engine.clone(),
-                read_buf: None,
-            },
-            peer_addr,
-        ))
+        Ok((UringStream { inner }, peer_addr))
     }
 
     fn local_addr(&self) -> Result<SocketAddr> {
-        Ok(self._listener.local_addr()?)
+        Ok(self.listener.local_addr()?)
     }
 }
 
 pub struct UringStream {
-    fd: RawFd,
-    engine: Arc<UringNetEngine>,
-    read_buf: Option<BytesMut>,
+    inner: TokioTcpStream,
 }
 
-impl AsRawFd for UringStream {
+impl UrpcAsRawFd for UringStream {
     fn as_raw_fd(&self) -> RawFd {
-        self.fd
+        std::os::fd::AsRawFd::as_raw_fd(&self.inner)
     }
 }
 
 #[async_trait]
 impl TransportStream for UringStream {
     async fn read_buf(&mut self, buf: &mut BytesMut) -> Result<usize> {
-        // Ensure we have capacity
-        if buf.capacity() - buf.len() < 4096 {
-            buf.reserve(4096);
-        }
-
-        let spare = buf.spare_capacity_mut();
-        let ptr = spare.as_mut_ptr() as *mut u8;
-        let len = spare.len();
-
-        let (tx, rx) = oneshot::channel();
-        let op = UringOp {
-            op_type: UringOpType::Recv {
-                fd: self.fd,
-                buf: ptr,
-                len,
-            },
-            tx: Some(tx),
-        };
-
-        self.engine.submit(op)?;
-        let result = rx.await.map_err(|_| anyhow!("Operation cancelled"))??;
-
-        if result < 0 {
-            return Err(anyhow!("Recv failed: {}", result));
-        }
-
-        let n = result as usize;
-        unsafe {
-            buf.set_len(buf.len() + n);
-        }
-
+        let n = self.inner.read_buf(buf).await?;
         Ok(n)
     }
 
     async fn write_all(&mut self, buf: &[u8]) -> Result<()> {
-        let mut written = 0;
-        while written < buf.len() {
-            let (tx, rx) = oneshot::channel();
-            let op = UringOp {
-                op_type: UringOpType::Send {
-                    fd: self.fd,
-                    buf: buf[written..].as_ptr(),
-                    len: buf.len() - written,
-                },
-                tx: Some(tx),
-            };
-
-            self.engine.submit(op)?;
-            let result = rx.await.map_err(|_| anyhow!("Operation cancelled"))??;
-
-            if result < 0 {
-                return Err(anyhow!("Send failed: {}", result));
-            }
-
-            written += result as usize;
-        }
+        self.inner.write_all(buf).await?;
         Ok(())
     }
 
     async fn flush(&mut self) -> Result<()> {
-        // io-uring operations are already async, no explicit flush needed
+        self.inner.flush().await?;
         Ok(())
     }
 
     async fn read_exact(&mut self, buf: &mut [u8]) -> Result<()> {
-        let mut read = 0;
-        while read < buf.len() {
-            let (tx, rx) = oneshot::channel();
-            let op = UringOp {
-                op_type: UringOpType::Recv {
-                    fd: self.fd,
-                    buf: buf[read..].as_mut_ptr(),
-                    len: buf.len() - read,
-                },
-                tx: Some(tx),
-            };
-
-            self.engine.submit(op)?;
-            let result = rx.await.map_err(|_| anyhow!("Operation cancelled"))??;
-
-            if result < 0 {
-                return Err(anyhow!("Recv failed: {}", result));
-            }
-
-            if result == 0 {
-                return Err(anyhow!("Connection closed"));
-            }
-
-            read += result as usize;
-        }
+        self.inner.read_exact(buf).await?;
         Ok(())
     }
 
     fn peer_addr(&self) -> Result<SocketAddr> {
-        unsafe {
-            let mut peer_addr: sockaddr_storage = std::mem::zeroed();
-            let mut peer_len = std::mem::size_of::<sockaddr_storage>() as socklen_t;
-            libc::getpeername(self.fd, &mut peer_addr as *mut _ as *mut _, &mut peer_len);
-            Ok(storage_to_socket_addr(&peer_addr))
-        }
+        Ok(self.inner.peer_addr()?)
     }
 
     fn set_keepalive(&self, keepalive: bool) -> Result<()> {
-        let opt: libc::c_int = if keepalive { 1 } else { 0 };
-        let ret = unsafe {
-            libc::setsockopt(
-                self.fd,
-                libc::SOL_SOCKET,
-                libc::SO_KEEPALIVE,
-                &opt as *const _ as *const libc::c_void,
-                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-            )
-        };
-        if ret < 0 {
-            return Err(anyhow!("Failed to set keepalive"));
-        }
+        use socket2::SockRef;
+        let sock_ref = SockRef::from(&self.inner);
+        sock_ref.set_keepalive(keepalive)?;
         Ok(())
     }
 
     fn set_nodelay(&self, nodelay: bool) -> Result<()> {
-        let opt: libc::c_int = if nodelay { 1 } else { 0 };
-        let ret = unsafe {
-            libc::setsockopt(
-                self.fd,
-                libc::IPPROTO_TCP,
-                libc::TCP_NODELAY,
-                &opt as *const _ as *const libc::c_void,
-                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-            )
-        };
-        if ret < 0 {
-            return Err(anyhow!("Failed to set nodelay"));
-        }
+        use socket2::SockRef;
+        let sock_ref = SockRef::from(&self.inner);
+        sock_ref.set_nodelay(nodelay)?;
         Ok(())
-    }
-}
-
-impl Drop for UringStream {
-    fn drop(&mut self) {
-        let _ = self.engine.submit(UringOp {
-            op_type: UringOpType::Close { fd: self.fd },
-            tx: Some(oneshot::channel().0),
-        });
-    }
-}
-
-// Helper functions
-fn socket_addr_to_storage(addr: SocketAddr) -> (sockaddr_storage, socklen_t) {
-    let mut storage: sockaddr_storage = unsafe { std::mem::zeroed() };
-    let len = match addr {
-        SocketAddr::V4(v4) => {
-            let addr_in = sockaddr_in {
-                sin_family: libc::AF_INET as sa_family_t,
-                sin_port: v4.port().to_be(),
-                sin_addr: unsafe { std::mem::transmute(v4.ip().octets()) },
-                sin_zero: [0; 8],
-            };
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    &addr_in as *const _ as *const u8,
-                    &mut storage as *mut _ as *mut u8,
-                    std::mem::size_of::<sockaddr_in>(),
-                );
-            }
-            std::mem::size_of::<sockaddr_in>() as socklen_t
-        }
-        SocketAddr::V6(v6) => {
-            let addr_in6 = sockaddr_in6 {
-                sin6_family: libc::AF_INET6 as sa_family_t,
-                sin6_port: v6.port().to_be(),
-                sin6_flowinfo: v6.flowinfo(),
-                sin6_addr: unsafe { std::mem::transmute(v6.ip().octets()) },
-                sin6_scope_id: v6.scope_id(),
-            };
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    &addr_in6 as *const _ as *const u8,
-                    &mut storage as *mut _ as *mut u8,
-                    std::mem::size_of::<sockaddr_in6>(),
-                );
-            }
-            std::mem::size_of::<sockaddr_in6>() as socklen_t
-        }
-    };
-    (storage, len)
-}
-
-unsafe fn storage_to_socket_addr(storage: &sockaddr_storage) -> SocketAddr {
-    match storage.ss_family as i32 {
-        libc::AF_INET => {
-            let addr_in = &*(storage as *const _ as *const sockaddr_in);
-            let ip = std::net::Ipv4Addr::from(u32::from_be(addr_in.sin_addr.s_addr as u32));
-            let port = u16::from_be(addr_in.sin_port);
-            SocketAddr::V4(std::net::SocketAddrV4::new(ip, port))
-        }
-        libc::AF_INET6 => {
-            let addr_in6 = &*(storage as *const _ as *const sockaddr_in6);
-            let ip = std::net::Ipv6Addr::from(addr_in6.sin6_addr.s6_addr);
-            let port = u16::from_be(addr_in6.sin6_port);
-            SocketAddr::V6(std::net::SocketAddrV6::new(
-                ip,
-                port,
-                addr_in6.sin6_flowinfo,
-                addr_in6.sin6_scope_id,
-            ))
-        }
-        _ => panic!("Unknown address family"),
     }
 }

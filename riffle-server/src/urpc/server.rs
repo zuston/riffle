@@ -196,8 +196,7 @@ pub async fn run_uring(
 ) -> Result<()> {
     use crate::urpc::transport::uring::{init_uring_engine, UringListener};
 
-    // Initialize io-uring engine with default 2 threads
-    init_uring_engine(2)?;
+    init_uring_engine(0)?;
 
     let listener = UringListener::bind(addr).await?;
     run_with_listener(listener, shutdown, app_manager_ref).await;
