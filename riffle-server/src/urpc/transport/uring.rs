@@ -125,17 +125,12 @@ impl UringEngineRegistry {
         self.engines[0].clone()
     }
 
-    fn get_stream_engine(&self) -> Arc<UringNetEngine> {
+    fn get_stream_engine_for_key(&self, key: u64) -> Arc<UringNetEngine> {
         if self.engines.len() == 1 {
             return self.engines[0].clone();
         }
-        let idx = if let Some(engine_idx) = URING_ENGINE_INDEX.with(|cell| cell.get()) {
-            1 + (engine_idx % (self.engines.len() - 1))
-        } else {
-            let mut hasher = DefaultHasher::new();
-            std::thread::current().id().hash(&mut hasher);
-            1 + ((hasher.finish() as usize) % (self.engines.len() - 1))
-        };
+        // Reserve engine 0 for Accept; spread stream I/O across remaining engines.
+        let idx = 1 + ((key as usize) % (self.engines.len() - 1));
         self.engines[idx].clone()
     }
 }
@@ -187,10 +182,10 @@ pub(crate) fn get_accept_engine() -> Result<Arc<UringNetEngine>> {
         .ok_or_else(|| anyhow!("io-uring engine not initialized"))
 }
 
-pub(crate) fn get_stream_engine() -> Result<Arc<UringNetEngine>> {
+pub(crate) fn get_stream_engine_for_key(key: u64) -> Result<Arc<UringNetEngine>> {
     URING_ENGINE_REGISTRY
         .get()
-        .map(|registry| registry.get_stream_engine())
+        .map(|registry| registry.get_stream_engine_for_key(key))
         .ok_or_else(|| anyhow!("io-uring engine not initialized"))
 }
 
@@ -261,13 +256,8 @@ fn set_socket_nodelay(fd: RawFd) -> Result<()> {
 fn get_peer_addr(fd: RawFd) -> Result<SocketAddr> {
     let mut addr: sockaddr_storage = unsafe { std::mem::zeroed() };
     let mut addrlen = std::mem::size_of::<sockaddr_storage>() as socklen_t;
-    let ret = unsafe {
-        libc::getpeername(
-            fd,
-            &mut addr as *mut _ as *mut libc::sockaddr,
-            &mut addrlen,
-        )
-    };
+    let ret =
+        unsafe { libc::getpeername(fd, &mut addr as *mut _ as *mut libc::sockaddr, &mut addrlen) };
     if ret < 0 {
         return Err(anyhow!("getpeername failed on fd {}", fd));
     }
@@ -458,10 +448,11 @@ impl Transport for UringTransport {
         // Convert to raw fd. UringStream manages fd lifetime via Drop.
         let fd = std_stream.as_raw_fd();
         let _ = std_stream.into_raw_fd(); // Prevents drop from closing fd
+        let stream_engine = get_stream_engine_for_key(fd as u64)?;
         Ok(UringStream {
             fd,
             peer,
-            engine: get_stream_engine()?,
+            engine: stream_engine,
         })
     }
 }
@@ -512,12 +503,13 @@ impl TransportListener for UringListener {
         set_socket_nonblocking(client_fd)?;
         set_socket_nodelay(client_fd)?;
         let peer_addr = get_peer_addr(client_fd)?;
+        let stream_engine = get_stream_engine_for_key(client_fd as u64)?;
 
         Ok((
             UringStream {
                 fd: client_fd,
                 peer: peer_addr,
-                engine: get_stream_engine()?,
+                engine: stream_engine,
             },
             peer_addr,
         ))
