@@ -148,6 +148,11 @@ awaitility = { workspace = true }
 criterion = { workspace = true }
 nix = { workspace = true }
 
+# Integration tests (e.g. `tests/uring_simple.rs`) are separate crates and do not inherit optional
+# deps from the library; link `io_uring` only on Linux where the test runs.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+io-uring = { workspace = true }
+
 [profile.dev]
 # re-enable debug assertions when pprof-rs fixed the reports for misaligned pointer dereferences
 #   https://github.com/rust-lang/rust/pull/98112/
@@ -160,3 +165,7 @@ harness = false
 [[bench]]
 name = "proto_encode"
 harness = false
+
+[[test]]
+name = "uring_simple"
+required-features = ["io-uring"]

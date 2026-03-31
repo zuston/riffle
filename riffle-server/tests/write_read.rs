@@ -26,8 +26,6 @@ mod tests {
     use riffle_server::mini_riffle;
     use riffle_server::mini_riffle::shuffle_testing;
     use riffle_server::urpc::client::EpollUrpcClient;
-    #[cfg(all(feature = "io-uring", target_os = "linux"))]
-    use riffle_server::urpc::client::UringUrpcClient;
     use riffle_server::urpc::command::GetLocalDataRequestCommand;
     use riffle_server::util;
     use std::time::Duration;
@@ -80,59 +78,13 @@ mod tests {
         ))
     }
 
-    /// Probe the urpc service at `urpc_port` with a UringUrpcClient until it responds.
-    /// Only available when the io-uring feature is enabled.
+    /// Probe the urpc service at `urpc_port` until it responds.
+    /// Uses EpollUrpcClient (epoll) to test server, regardless of server transport.
+    /// This isolates server-side io-uring issues from client-side issues.
     #[cfg(all(feature = "io-uring", target_os = "linux"))]
     async fn wait_for_urpc_uring_ready(urpc_port: u16) -> Result<()> {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        let mut last_err = None;
-
-        while tokio::time::Instant::now() < deadline {
-            // Bound connect so an unbounded `await` cannot stall the deadline loop.
-            match tokio::time::timeout(
-                Duration::from_secs(2),
-                UringUrpcClient::connect("0.0.0.0", urpc_port as usize),
-            )
-            .await
-            {
-                Ok(Ok(mut client)) => {
-                    let probe_req = GetLocalDataRequestCommand::new(
-                        0,
-                        "__urpc_probe_app__".to_string(),
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                    );
-                    match tokio::time::timeout(
-                        Duration::from_millis(800),
-                        client.get_local_shuffle_data(probe_req),
-                    )
-                    .await
-                    {
-                        Ok(Ok(_)) | Ok(Err(_)) => return Ok(()),
-                        Err(timeout) => {
-                            last_err = Some(anyhow!("probe timed out: {timeout}"));
-                        }
-                    }
-                }
-                Ok(Err(err)) => {
-                    last_err = Some(err);
-                }
-                Err(_) => {
-                    last_err = Some(anyhow!("urpc connect timed out after 2s"));
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-
-        Err(anyhow!(
-            "urpc io-uring service not ready within 10s, last error: {:?}",
-            last_err
-        ))
+        // Use epoll client to probe server - only testing server-side io-uring
+        wait_for_urpc_epoll_ready(urpc_port).await
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

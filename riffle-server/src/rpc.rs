@@ -201,15 +201,16 @@ impl DefaultRpcService {
             tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(worker_threads)
                 .on_thread_start(move || {
-                    if !core_ids_for_hook.is_empty() {
-                        let idx = next_core_for_hook.fetch_add(1, Ordering::Relaxed)
+                    // Always set a deterministic engine index for the thread.
+                    let idx = if !core_ids_for_hook.is_empty() {
+                        let core_idx = next_core_for_hook.fetch_add(1, Ordering::Relaxed)
                             % core_ids_for_hook.len();
-                        core_affinity::set_for_current(core_ids_for_hook[idx]);
-                        set_current_engine_index(idx);
+                        core_affinity::set_for_current(core_ids_for_hook[core_idx]);
+                        core_idx
                     } else {
-                        let idx = next_core_for_hook.fetch_add(1, Ordering::Relaxed);
-                        set_current_engine_index(idx);
-                    }
+                        next_core_for_hook.fetch_add(1, Ordering::Relaxed)
+                    };
+                    set_current_engine_index(idx);
                 })
                 .enable_all()
                 .build()
