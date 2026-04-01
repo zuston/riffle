@@ -166,14 +166,10 @@ fn uring_reference_worker_loop(rx: mpsc::Receiver<PendingOp>) {
     }
 }
 
-/// Same bind sequence as `UringTransport::bind`: `TcpListener::bind` + `set_nonblocking(true)`.
+/// Same bind sequence as `UringTransport::bind`: `TcpListener::bind` in blocking mode.
 /// (No extra `libc::listen` — `TcpListener::bind` already listens.)
 fn bind_uring_style(addr: SocketAddr) -> TcpListener {
-    let listener = TcpListener::bind(addr).expect("bind failed");
-    listener
-        .set_nonblocking(true)
-        .expect("set_nonblocking failed");
-    listener
+    TcpListener::bind(addr).expect("bind failed")
 }
 
 #[test]

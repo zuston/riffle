@@ -150,7 +150,8 @@ mod tests {
         let grpc_port = util::find_available_port().expect("free grpc port") as i32;
         let urpc_port = util::find_available_port().expect("free urpc port");
 
-        let mut config = Config::create_mem_localfile_config(grpc_port, "2G".to_string(), temp_path);
+        let mut config =
+            Config::create_mem_localfile_config(grpc_port, "2G".to_string(), temp_path);
         config.urpc_port = Some(urpc_port);
         config.http_port = util::find_available_port().expect("free http port");
         config.urpc_config = Some(UrpcConfig {
@@ -238,9 +239,12 @@ mod tests {
                     0,
                     0,
                 );
-                let _ = tokio::time::timeout(Duration::from_secs(3), client.get_local_shuffle_data(req))
-                    .await
-                    .map_err(|e| anyhow!("single client seq timeout at req={i}: {e}"))?;
+                let _ = tokio::time::timeout(
+                    Duration::from_secs(3),
+                    client.get_local_shuffle_data(req),
+                )
+                .await
+                .map_err(|e| anyhow!("single client seq timeout at req={i}: {e}"))?;
             }
         }
 
@@ -264,12 +268,10 @@ mod tests {
                 0,
                 0,
             );
-            let _ = tokio::time::timeout(
-                Duration::from_secs(1),
-                client.get_local_shuffle_data(req),
-            )
-                .await
-                .map_err(|e| anyhow!("timeout path hangs unexpectedly: {e}"))?;
+            let _ =
+                tokio::time::timeout(Duration::from_secs(1), client.get_local_shuffle_data(req))
+                    .await
+                    .map_err(|e| anyhow!("timeout path hangs unexpectedly: {e}"))?;
         }
 
         Ok(())

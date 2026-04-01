@@ -202,7 +202,8 @@ pub(crate) fn get_stream_engine_for_key(key: u64) -> Result<Arc<UringNetEngine>>
 }
 
 enum UringOpType {
-    /// Non-blocking listen socket: idle accept completes with `-EAGAIN` and is re-submitted.
+    /// Listener accept op. For blocking listeners, this stays pending in kernel until a new
+    /// connection arrives.
     Accept {
         fd: RawFd,
         addr: Box<sockaddr_storage>,
@@ -543,9 +544,8 @@ impl Transport for UringTransport {
     type Stream = UringStream;
 
     async fn bind(addr: SocketAddr) -> Result<Self::Listener> {
-        // Keep listener non-blocking so Accept can complete with `-EAGAIN` and be re-submitted.
+        // Keep listener in blocking mode so accept does not spin on -EAGAIN when idle.
         let listener = TcpListener::bind(addr)?;
-        listener.set_nonblocking(true)?;
         let fd = listener.as_raw_fd();
 
         Ok(UringListener { fd, listener })
