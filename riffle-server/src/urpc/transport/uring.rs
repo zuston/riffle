@@ -27,7 +27,7 @@ use bytes::BytesMut;
 use core_affinity::CoreId;
 use io_uring::{opcode, types::Fd, IoUring};
 use libc::{sockaddr_storage, socklen_t};
-use log::{debug, warn};
+use log::{debug, info, warn};
 use once_cell::sync::OnceCell;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
@@ -36,11 +36,14 @@ use std::net::{SocketAddr, TcpListener};
 use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
+use std::time::{Duration, Instant};
 use tokio::net::TcpStream as TokioTcpStream;
 use tokio::sync::oneshot;
 
 /// Max bytes per `IORING_OP_READ` / `IORING_OP_WRITE` SQE (balance copy vs syscall batching).
 const IO_URING_RW_CHUNK: usize = 256 * 1024;
+const SUBMIT_BLOCK_WARN_THRESHOLD: Duration = Duration::from_millis(20);
+const WORKER_STATS_LOG_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Global io-uring engine for network I/O
 pub struct UringNetEngine {
@@ -61,7 +64,7 @@ impl UringNetEngine {
                 if let Some(c) = core {
                     core_affinity::set_for_current(c);
                 }
-                uring_worker_loop(submission_rx);
+                uring_worker_loop(engine_index, submission_rx);
             })?;
 
         Ok(Self { submission_tx })
@@ -69,9 +72,18 @@ impl UringNetEngine {
 
     /// Submit an operation to the io-uring engine
     fn submit(&self, op: UringOp) -> Result<()> {
+        let start = Instant::now();
         self.submission_tx
             .send(op)
             .map_err(|_| anyhow!("io-uring engine stopped"))?;
+        let blocked = start.elapsed();
+        if blocked >= SUBMIT_BLOCK_WARN_THRESHOLD {
+            warn!(
+                "io-uring submit blocked for {:?}, sender thread_id={:?}",
+                blocked,
+                std::thread::current().id()
+            );
+        }
         Ok(())
     }
 }
@@ -288,11 +300,42 @@ struct UringOp {
     notify: Option<UringNotify>,
 }
 
-fn push_sqe(uring: &mut IoUring, op_type: &UringOpType, user_data: u64) {
+fn push_sqe(uring: &mut IoUring, op_type: &UringOpType, user_data: u64) -> bool {
     let sqe = build_sqe(op_type).user_data(user_data);
     let mut sq = uring.submission();
-    unsafe {
-        sq.push(&sqe).expect("submission queue is full");
+    unsafe { sq.push(&sqe).is_ok() }
+}
+
+#[derive(Default)]
+struct WorkerStats {
+    sq_full_retries: u64,
+    submit_calls: u64,
+    cqe_total: u64,
+    write_eagain_resubmits: u64,
+    pending_high_watermark: usize,
+}
+
+impl WorkerStats {
+    fn note_pending(&mut self, pending: usize) {
+        if pending > self.pending_high_watermark {
+            self.pending_high_watermark = pending;
+        }
+    }
+
+    fn maybe_log(&self, engine_index: usize, pending_now: usize, last_log_at: Instant) {
+        if last_log_at.elapsed() < WORKER_STATS_LOG_INTERVAL {
+            return;
+        }
+        info!(
+            "io-uring worker stats: engine={}, pending_now={}, pending_high_watermark={}, submit_calls={}, cqe_total={}, sq_full_retries={}, write_eagain_resubmits={}",
+            engine_index,
+            pending_now,
+            self.pending_high_watermark,
+            self.submit_calls,
+            self.cqe_total,
+            self.sq_full_retries,
+            self.write_eagain_resubmits
+        );
     }
 }
 
@@ -322,98 +365,173 @@ fn build_sqe(op_type: &UringOpType) -> io_uring::squeue::Entry {
 }
 
 /// Multiplexed loop: many SQEs may be in flight (accept, read, write on non-blocking fds).
-fn uring_worker_loop(rx: mpsc::Receiver<UringOp>) {
-    let mut uring = IoUring::new(1024).expect("Failed to create io-uring");
-    let mut pending: HashMap<u64, UringOp> = HashMap::new();
-    let mut next_id: u64 = 1;
-
-    loop {
-        while let Ok(op) = rx.try_recv() {
-            let id = next_id;
-            next_id += 1;
-            push_sqe(&mut uring, &op.op_type, id);
-            pending.insert(id, op);
-        }
-
-        if pending.is_empty() {
-            let op = match rx.recv() {
-                Ok(o) => o,
-                Err(_) => break,
-            };
-            let id = next_id;
-            next_id += 1;
-            push_sqe(&mut uring, &op.op_type, id);
-            pending.insert(id, op);
-        }
-
-        match uring.submit_and_wait(1) {
-            Err(e) if e.raw_os_error() == Some(libc::EINTR) => continue,
-            Err(e) => panic!("io_uring submit_and_wait failed: {e}"),
-            Ok(_) => {}
-        }
-
-        let cqes: Vec<_> = uring.completion().collect();
-        for cqe in cqes {
-            let id = cqe.user_data();
-            let r = cqe.result();
-
-            let Some(op) = pending.get(&id) else {
-                if !URING_PENDING_MISS_WARNED.swap(true, Ordering::Relaxed) {
-                    warn!(
-                        "io-uring completion miss: user_data={} not found in pending map",
-                        id
-                    );
-                }
-                continue;
-            };
-
-            if cqe_result_is_would_block(r) {
-                if matches!(op.op_type, UringOpType::Write { .. }) {
-                    debug!("io-uring write would-block, re-submit with same user_data={id}");
-                }
-                push_sqe(&mut uring, &op.op_type, id);
-                continue;
-            }
-
-            if r < 0 {
-                let is_accept = matches!(&op.op_type, UringOpType::Accept { .. });
-                let mut op = pending.remove(&id).expect("pending op");
-                match op.notify.take() {
-                    Some(UringNotify::Int(tx)) => {
-                        if is_accept {
-                            let _ = tx.send(Ok(r));
-                        } else {
-                            let _ = tx.send(Err(anyhow!("io_uring op failed: errno {}", -r)));
-                        }
-                    }
-                    Some(UringNotify::Read(tx)) => {
-                        let _ = tx.send(Err(anyhow!("read failed: errno {}", -r)));
-                    }
-                    None => {}
-                }
-                continue;
-            }
-
-            let mut op = pending.remove(&id).expect("pending op");
-            match (op.notify.take(), op.op_type) {
-                (Some(UringNotify::Int(tx)), UringOpType::Accept { .. }) => {
-                    let _ = tx.send(Ok(r));
-                }
-                (Some(UringNotify::Int(tx)), UringOpType::Write { .. }) => {
-                    let _ = tx.send(Ok(r));
-                }
-                (Some(UringNotify::Read(tx)), UringOpType::Read { mut buf, .. }) => {
-                    if r == 0 {
-                        buf.clear();
-                    } else {
-                        buf.truncate(r as usize);
-                    }
-                    let _ = tx.send(Ok(buf));
-                }
-                _ => {}
-            }
+fn push_with_submit_retry(
+    uring: &mut IoUring,
+    op_type: &UringOpType,
+    user_data: u64,
+    stats: &mut WorkerStats,
+) {
+    while !push_sqe(uring, op_type, user_data) {
+        stats.sq_full_retries += 1;
+        stats.submit_calls += 1;
+        if let Err(e) = uring.submit() {
+            warn!("io-uring submit failed while handling sq-full retry: {}", e);
+            continue;
         }
     }
+}
+
+struct UringWorker {
+    engine_index: usize,
+    uring: IoUring,
+    pending: HashMap<u64, UringOp>,
+    next_id: u64,
+    stats: WorkerStats,
+    last_log_at: Instant,
+}
+
+impl UringWorker {
+    fn new(engine_index: usize) -> Self {
+        Self {
+            engine_index,
+            uring: IoUring::new(1024).expect("Failed to create io-uring"),
+            pending: HashMap::new(),
+            next_id: 1,
+            stats: WorkerStats::default(),
+            last_log_at: Instant::now(),
+        }
+    }
+
+    fn enqueue_op(&mut self, op: UringOp) {
+        let id = self.next_id;
+        self.next_id += 1;
+        push_with_submit_retry(&mut self.uring, &op.op_type, id, &mut self.stats);
+        self.pending.insert(id, op);
+        self.stats.note_pending(self.pending.len());
+    }
+
+    fn drain_submission_channel(&mut self, rx: &mpsc::Receiver<UringOp>) -> bool {
+        let mut drained = false;
+        while let Ok(op) = rx.try_recv() {
+            self.enqueue_op(op);
+            drained = true;
+        }
+        drained
+    }
+
+    fn process_completions(&mut self) {
+        let cqes: Vec<_> = self.uring.completion().collect();
+        self.stats.cqe_total += cqes.len() as u64;
+        for cqe in cqes {
+            self.handle_completion(cqe.user_data(), cqe.result());
+        }
+    }
+
+    fn handle_completion(&mut self, id: u64, result: i32) {
+        let Some(op) = self.pending.get(&id) else {
+            if !URING_PENDING_MISS_WARNED.swap(true, Ordering::Relaxed) {
+                warn!(
+                    "io-uring completion miss: user_data={} not found in pending map",
+                    id
+                );
+            }
+            return;
+        };
+
+        if cqe_result_is_would_block(result) {
+            if matches!(op.op_type, UringOpType::Write { .. }) {
+                self.stats.write_eagain_resubmits += 1;
+                debug!("io-uring write would-block, re-submit with same user_data={id}");
+            }
+            push_with_submit_retry(&mut self.uring, &op.op_type, id, &mut self.stats);
+            return;
+        }
+
+        if result < 0 {
+            self.notify_error(id, result);
+            return;
+        }
+
+        self.notify_success(id, result);
+    }
+
+    fn notify_error(&mut self, id: u64, result: i32) {
+        let is_accept = matches!(
+            self.pending.get(&id).map(|op| &op.op_type),
+            Some(UringOpType::Accept { .. })
+        );
+        let mut op = self.pending.remove(&id).expect("pending op");
+        match op.notify.take() {
+            Some(UringNotify::Int(tx)) => {
+                if is_accept {
+                    let _ = tx.send(Ok(result));
+                } else {
+                    let _ = tx.send(Err(anyhow!("io_uring op failed: errno {}", -result)));
+                }
+            }
+            Some(UringNotify::Read(tx)) => {
+                let _ = tx.send(Err(anyhow!("read failed: errno {}", -result)));
+            }
+            None => {}
+        }
+    }
+
+    fn notify_success(&mut self, id: u64, result: i32) {
+        let mut op = self.pending.remove(&id).expect("pending op");
+        match (op.notify.take(), op.op_type) {
+            (Some(UringNotify::Int(tx)), UringOpType::Accept { .. }) => {
+                let _ = tx.send(Ok(result));
+            }
+            (Some(UringNotify::Int(tx)), UringOpType::Write { .. }) => {
+                let _ = tx.send(Ok(result));
+            }
+            (Some(UringNotify::Read(tx)), UringOpType::Read { mut buf, .. }) => {
+                if result == 0 {
+                    buf.clear();
+                } else {
+                    buf.truncate(result as usize);
+                }
+                let _ = tx.send(Ok(buf));
+            }
+            _ => {}
+        }
+    }
+
+    fn maybe_log(&mut self) {
+        self.stats
+            .maybe_log(self.engine_index, self.pending.len(), self.last_log_at);
+        if self.last_log_at.elapsed() >= WORKER_STATS_LOG_INTERVAL {
+            self.last_log_at = Instant::now();
+        }
+    }
+
+    fn run(mut self, rx: mpsc::Receiver<UringOp>) {
+        loop {
+            self.drain_submission_channel(&rx);
+
+            if self.pending.is_empty() {
+                let op = match rx.recv() {
+                    Ok(o) => o,
+                    Err(_) => break,
+                };
+                self.enqueue_op(op);
+            }
+
+            self.stats.submit_calls += 1;
+            match self.uring.submit_and_wait(1) {
+                Err(e) if e.raw_os_error() == Some(libc::EINTR) => continue,
+                Err(e) => panic!("io_uring submit_and_wait failed: {e}"),
+                Ok(_) => {}
+            }
+
+            self.process_completions();
+            self.maybe_log();
+        }
+    }
+}
+
+fn uring_worker_loop(engine_index: usize, rx: mpsc::Receiver<UringOp>) {
+    UringWorker::new(engine_index).run(rx);
 }
 
 /// io-uring based transport
@@ -595,6 +713,7 @@ impl TransportStream for UringStream {
             // Loop until the entire chunk is sent (handle short writes from Send).
             let mut offset = 0;
             while offset < chunk.len() {
+                let submit_start = Instant::now();
                 let (tx, rx) = oneshot::channel();
                 let remaining = &chunk[offset..];
                 let op = UringOp {
@@ -606,6 +725,17 @@ impl TransportStream for UringStream {
                 };
                 self.engine.submit(op)?;
                 let r = rx.await.map_err(|_| anyhow!("Operation cancelled"))??;
+                let wait_elapsed = submit_start.elapsed();
+                if wait_elapsed >= Duration::from_secs(1) {
+                    warn!(
+                        "io-uring write completion slow: fd={}, chunk_len={}, offset={}, wait={:?}, result={}",
+                        fd,
+                        chunk.len(),
+                        offset,
+                        wait_elapsed,
+                        r
+                    );
+                }
                 debug!(
                     "io-uring write completion: fd={}, chunk_len={}, offset={}, result={}",
                     fd,
