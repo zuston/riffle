@@ -706,21 +706,18 @@ impl TransportStream for UringStream {
 
     async fn write_all(&mut self, mut buf: &[u8]) -> Result<()> {
         while !buf.is_empty() {
-            let take = buf.len().min(IO_URING_RW_CHUNK);
-            let chunk = buf[..take].to_vec();
+            let take = buf.len().min(std::u32::MAX as usize);
+            let payload = buf[..take].to_vec();
+            let mut offset = 0usize;
             let fd = self.fd;
 
-            // Loop until the entire chunk is sent (handle short writes from Send).
-            let mut offset = 0;
-            while offset < chunk.len() {
+            // Prefer one io_uring send for the whole frame; only retry unsent tail on short write.
+            while offset < payload.len() {
                 let submit_start = Instant::now();
+                let remaining = payload[offset..].to_vec();
                 let (tx, rx) = oneshot::channel();
-                let remaining = &chunk[offset..];
                 let op = UringOp {
-                    op_type: UringOpType::Write {
-                        fd,
-                        buf: remaining.to_vec(),
-                    },
+                    op_type: UringOpType::Write { fd, buf: remaining },
                     notify: Some(UringNotify::Int(tx)),
                 };
                 self.engine.submit(op)?;
@@ -730,33 +727,30 @@ impl TransportStream for UringStream {
                     warn!(
                         "io-uring write completion slow: fd={}, chunk_len={}, offset={}, wait={:?}, result={}",
                         fd,
-                        chunk.len(),
+                        take,
                         offset,
                         wait_elapsed,
                         r
                     );
                 }
-                debug!(
-                    "io-uring write completion: fd={}, chunk_len={}, offset={}, result={}",
-                    fd,
-                    chunk.len(),
-                    offset,
-                    r
-                );
-                if r < 0 {
+                if r <= 0 {
+                    if r == 0 {
+                        warn!(
+                            "io-uring write returned 0: fd={}, chunk_len={}, offset={}",
+                            fd, take, offset
+                        );
+                        return Err(anyhow!("write returned 0 (peer closed)"));
+                    }
                     return Err(anyhow!("write failed: {}", r));
                 }
+
                 let n = r as usize;
-                if n == 0 {
-                    warn!(
-                        "io-uring write returned 0: fd={}, chunk_len={}, offset={}",
-                        fd,
-                        chunk.len(),
-                        offset
-                    );
-                    return Err(anyhow!("write returned 0 (peer closed)"));
-                }
                 offset += n;
+
+                debug!(
+                    "io-uring write completion: fd={}, chunk_len={}, offset={}, result={}",
+                    fd, take, offset, r
+                );
             }
             buf = &buf[take..];
         }
