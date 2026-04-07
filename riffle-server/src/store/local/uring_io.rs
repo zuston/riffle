@@ -410,22 +410,35 @@ impl LocalIO for UringIo {
         let byte_size = options.data.len();
         let bufs = options.data.always_bytes();
         let buf_len = bufs.len();
-        let slices = bufs
-            .iter()
-            .map(|x| IoSlice::new(x.as_ref()))
-            .collect::<Vec<_>>();
 
         let path = self.with_root(path);
         let path = Path::new(&path);
-        let mut file = OpenOptions::new().append(true).create(true).open(path)?;
+        let mut open_options = OpenOptions::new();
+        open_options.create(true);
+        if options.append && options.offset.is_none() {
+            open_options.append(true);
+        } else {
+            open_options.write(true);
+            if !options.append {
+                open_options.truncate(true);
+            }
+        }
+        let file = open_options.open(path)?;
         let raw_fd = file.as_raw_fd();
+        let io_uring_offset = match (options.append, options.offset) {
+            // For buffered append, io_uring writev should use current file position
+            // (same behavior as writev with offset = -1).
+            (true, None) => u64::MAX,
+            (_, Some(offset)) => offset,
+            (_, None) => 0,
+        };
 
         let mut ctx = UringIoCtx {
             tx,
             io_type: UringIoType::WriteV,
             addr: RawFileAddress {
                 file: RawFile(raw_fd),
-                offset: options.offset.unwrap_or(0),
+                offset: io_uring_offset,
             },
             w_bufs: bufs,
             w_iovecs: Vec::with_capacity(buf_len),
@@ -697,6 +710,87 @@ pub mod tests {
                 file.read_exact(&mut buf)?;
                 assert_eq!(buf.as_slice(), expected.as_ref());
                 // still keep file
+                std::mem::forget(file);
+            }
+            _ => panic!("Expected direct bytes or raw IO"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_uring_buffer_append_without_offset() -> anyhow::Result<()> {
+        use crate::store::DataBytes;
+        use bytes::Bytes;
+        use tempdir::TempDir;
+
+        let temp_dir = TempDir::new("test_write_append_none")?;
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+
+        let r_runtime = create_runtime(1, "r");
+        let w_runtime = create_runtime(2, "w");
+
+        let sync_io_engine =
+            SyncLocalIO::new(&r_runtime, &w_runtime, temp_path.as_str(), None, None);
+        let uring_io_engine = UringIoEngineBuilder::new().build(sync_io_engine)?;
+
+        let first = b"append-first-";
+        let second = b"append-second";
+
+        w_runtime.block_on(async {
+            uring_io_engine
+                .write(
+                    "test_file_append_none",
+                    crate::store::local::options::WriteOptions {
+                        append: true,
+                        offset: None,
+                        data: DataBytes::Direct(Bytes::from(&first[..])),
+                    },
+                )
+                .await
+                .unwrap();
+        });
+        w_runtime.block_on(async {
+            uring_io_engine
+                .write(
+                    "test_file_append_none",
+                    crate::store::local::options::WriteOptions {
+                        append: true,
+                        offset: None,
+                        data: DataBytes::Direct(Bytes::from(&second[..])),
+                    },
+                )
+                .await
+                .unwrap();
+        });
+
+        let result = r_runtime.block_on(async {
+            uring_io_engine
+                .read(
+                    "test_file_append_none",
+                    crate::store::local::read_options::ReadOptions {
+                        io_mode: IoMode::SENDFILE,
+                        task_id: 0,
+                        read_range: crate::store::local::read_options::ReadRange::ALL,
+                        ahead_options: None,
+                    },
+                )
+                .await
+                .unwrap()
+        });
+
+        let mut expected = BytesMut::new();
+        expected.put(first.as_ref());
+        expected.put(second.as_ref());
+
+        match result {
+            DataBytes::Direct(bytes) => assert_eq!(bytes.as_ref(), expected.as_ref()),
+            DataBytes::RawIO(raw_io) => {
+                let mut buf = vec![0u8; raw_io.length as usize];
+                let mut file = unsafe { std::fs::File::from_raw_fd(raw_io.raw_fd) };
+                file.seek(std::io::SeekFrom::Start(raw_io.offset))?;
+                file.read_exact(&mut buf)?;
+                assert_eq!(buf.as_slice(), expected.as_ref());
                 std::mem::forget(file);
             }
             _ => panic!("Expected direct bytes or raw IO"),
