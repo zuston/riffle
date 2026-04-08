@@ -40,6 +40,9 @@ use std::{
 };
 use tokio::sync::oneshot;
 
+/// Linux kernel limit on the number of iovec entries per writev call.
+pub(crate) const UIO_MAXIOV: usize = 1024;
+
 /// Builder for io_uring based I/O engine.
 #[derive(Debug)]
 pub struct UringIoEngineBuilder {
@@ -404,12 +407,8 @@ impl LocalIO for UringIo {
     }
 
     async fn write(&self, path: &str, options: WriteOptions) -> anyhow::Result<(), WorkerError> {
-        let (tx, rx) = oneshot::channel();
-        let tag = options.data.len();
-        let shard = &self.write_txs[tag % self.write_txs.len()];
         let byte_size = options.data.len();
         let bufs = options.data.always_bytes();
-        let buf_len = bufs.len();
 
         let path = self.with_root(path);
         let path = Path::new(&path);
@@ -433,20 +432,7 @@ impl LocalIO for UringIo {
             (_, None) => 0,
         };
 
-        let mut ctx = UringIoCtx {
-            tx,
-            io_type: UringIoType::WriteV,
-            addr: RawFileAddress {
-                file: RawFile(raw_fd),
-                offset: io_uring_offset,
-            },
-            w_bufs: bufs,
-            w_iovecs: Vec::with_capacity(buf_len),
-            r_bufs: vec![],
-            splice_pipe: None,
-        };
-        ctx.w_iovecs = ctx
-            .w_bufs
+        let all_iovecs: Vec<iovec> = bufs
             .iter()
             .map(|b| iovec {
                 iov_base: b.as_ptr() as *mut _,
@@ -454,16 +440,51 @@ impl LocalIO for UringIo {
             })
             .collect();
 
-        let _ = shard.send(ctx);
-        let written_bytes = match rx.await {
-            Ok(res) => res,
-            Err(e) => Err(WorkerError::Other(anyhow::Error::from(e))),
-        }?;
-        if (byte_size != written_bytes) {
+        let mut total_written: usize = 0;
+        for chunk in all_iovecs.chunks(UIO_MAXIOV) {
+            let (tx, rx) = oneshot::channel();
+            let shard = &self.write_txs[byte_size % self.write_txs.len()];
+
+            let chunk_bytes: usize = chunk.iter().map(|v| v.iov_len).sum();
+            let batch_offset = if io_uring_offset == u64::MAX {
+                u64::MAX
+            } else {
+                io_uring_offset + total_written as u64
+            };
+
+            let ctx = UringIoCtx {
+                tx,
+                io_type: UringIoType::WriteV,
+                addr: RawFileAddress {
+                    file: RawFile(raw_fd),
+                    offset: batch_offset,
+                },
+                w_bufs: vec![],
+                w_iovecs: chunk.to_vec(),
+                r_bufs: vec![],
+                splice_pipe: None,
+            };
+
+            let _ = shard.send(ctx);
+            let written = match rx.await {
+                Ok(res) => res,
+                Err(e) => Err(WorkerError::Other(anyhow::Error::from(e))),
+            }?;
+            if written != chunk_bytes {
+                return Err(WorkerError::Other(anyhow!(
+                    "Unexpected io write. expected/written: {}/{}",
+                    chunk_bytes,
+                    written
+                )));
+            }
+            total_written += written;
+        }
+
+        if total_written != byte_size {
             return Err(WorkerError::Other(anyhow!(
-                "Unexpected io write. expected/written: {}/{}",
+                "Unexpected total io write. expected/written: {}/{}",
                 byte_size,
-                written_bytes
+                total_written
             )));
         }
         Ok(())
@@ -841,6 +862,78 @@ pub mod tests {
                 .unwrap()
         });
         Ok(result)
+    }
+
+    #[test]
+    fn test_uring_writev_exceeding_uio_maxiov() -> anyhow::Result<()> {
+        use crate::store::local::uring_io::UIO_MAXIOV;
+        use crate::store::DataBytes;
+        use bytes::Bytes;
+        use tempdir::TempDir;
+
+        let temp_dir = TempDir::new("test_writev_exceed_maxiov")?;
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+
+        let r_runtime = create_runtime(1, "r");
+        let w_runtime = create_runtime(2, "w");
+
+        let sync_io_engine =
+            SyncLocalIO::new(&r_runtime, &w_runtime, temp_path.as_str(), None, None);
+        let uring_io_engine = UringIoEngineBuilder::new().build(sync_io_engine)?;
+
+        let num_bufs = UIO_MAXIOV + 500;
+        let mut segments = Vec::with_capacity(num_bufs);
+        let mut expected = BytesMut::new();
+        for i in 0..num_bufs {
+            let chunk = Bytes::from(format!("block-{:06}", i));
+            expected.put(chunk.as_ref());
+            segments.push(chunk);
+        }
+        let total_len = segments.iter().map(|b| b.len()).sum::<usize>();
+
+        // write with offset (simulating direct_io_append_enable path)
+        let write_options = crate::store::local::options::WriteOptions {
+            append: true,
+            offset: Some(0),
+            data: DataBytes::Composed(ComposedBytes::from(segments, total_len)),
+        };
+
+        w_runtime.block_on(async {
+            uring_io_engine
+                .write("test_exceed_maxiov", write_options)
+                .await
+                .unwrap();
+        });
+
+        // read back and verify
+        let read_options = crate::store::local::read_options::ReadOptions {
+            io_mode: IoMode::SENDFILE,
+            task_id: 0,
+            read_range: crate::store::local::read_options::ReadRange::ALL,
+            ahead_options: None,
+        };
+
+        let result = r_runtime.block_on(async {
+            uring_io_engine
+                .read("test_exceed_maxiov", read_options)
+                .await
+                .unwrap()
+        });
+
+        match result {
+            DataBytes::Direct(bytes) => assert_eq!(bytes.as_ref(), expected.as_ref()),
+            DataBytes::RawIO(raw_io) => {
+                let mut buf = vec![0u8; raw_io.length as usize];
+                let mut file = unsafe { std::fs::File::from_raw_fd(raw_io.raw_fd) };
+                file.seek(std::io::SeekFrom::Start(raw_io.offset))?;
+                file.read_exact(&mut buf)?;
+                assert_eq!(buf.as_slice(), expected.as_ref());
+                std::mem::forget(file);
+            }
+            _ => panic!("Expected direct bytes or raw IO"),
+        }
+
+        Ok(())
     }
 
     #[test]
