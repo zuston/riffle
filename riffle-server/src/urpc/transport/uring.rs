@@ -25,7 +25,12 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::BytesMut;
 use core_affinity::CoreId;
-use io_uring::{opcode, types::Fd, IoUring};
+use crossbeam_channel as chan;
+use io_uring::{
+    opcode,
+    types::{Fd, SubmitArgs, Timespec},
+    IoUring,
+};
 use libc::{sockaddr_storage, socklen_t};
 use log::{debug, info, warn};
 use once_cell::sync::OnceCell;
@@ -35,7 +40,7 @@ use std::hash::{Hash, Hasher};
 use std::net::{SocketAddr, TcpListener};
 use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::TcpStream as TokioTcpStream;
 use tokio::sync::oneshot;
@@ -47,7 +52,7 @@ const WORKER_STATS_LOG_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Global io-uring engine for network I/O
 pub struct UringNetEngine {
-    submission_tx: mpsc::SyncSender<UringOp>,
+    submission_tx: chan::Sender<UringOp>,
 }
 
 impl UringNetEngine {
@@ -56,7 +61,7 @@ impl UringNetEngine {
     /// `submit_and_wait(1)` then read one CQE. Each engine is a separate ring + worker; optional
     /// `core` pins that worker to a CPU when affinity is available.
     pub fn new(engine_index: usize, core: Option<CoreId>) -> Result<Self> {
-        let (submission_tx, submission_rx) = mpsc::sync_channel::<UringOp>(4096);
+        let (submission_tx, submission_rx) = chan::bounded::<UringOp>(4096);
 
         std::thread::Builder::new()
             .name(format!("riffle-uring-net-{engine_index}"))
@@ -411,7 +416,7 @@ impl UringWorker {
         self.stats.note_pending(self.pending.len());
     }
 
-    fn drain_submission_channel(&mut self, rx: &mpsc::Receiver<UringOp>) -> bool {
+    fn drain_submission_channel(&mut self, rx: &chan::Receiver<UringOp>) -> bool {
         let mut drained = false;
         while let Ok(op) = rx.try_recv() {
             self.enqueue_op(op);
@@ -508,7 +513,7 @@ impl UringWorker {
         }
     }
 
-    fn run(mut self, rx: mpsc::Receiver<UringOp>) {
+    fn run(mut self, rx: chan::Receiver<UringOp>) {
         loop {
             self.drain_submission_channel(&rx);
 
@@ -521,22 +526,24 @@ impl UringWorker {
             }
 
             self.stats.submit_calls += 1;
-            match self.uring.submit() {
+            // Timeout caps the blocking wait so the worker wakes up to drain
+            // the submission channel even when all inflight SQEs are slow Recvs.
+            let timeout = Timespec::new().nsec(1_000_000); // 1 ms
+            let args = SubmitArgs::new().timespec(&timeout);
+            match self.uring.submitter().submit_with_args(1, &args) {
                 Err(e) if e.raw_os_error() == Some(libc::EINTR) => continue,
-                Err(e) => panic!("io_uring submit failed: {e}"),
+                Err(e) if e.raw_os_error() == Some(libc::ETIME) => {}
+                Err(e) => panic!("io_uring submit_and_wait failed: {e}"),
                 Ok(_) => {}
             }
 
-            // todo: replace sleep-poll with eventfd wakeup to avoid 1ms latency penalty
-            if self.process_completions() == 0 {
-                std::thread::sleep(Duration::from_millis(1));
-            }
+            self.process_completions();
             self.maybe_log();
         }
     }
 }
 
-fn uring_worker_loop(engine_index: usize, rx: mpsc::Receiver<UringOp>) {
+fn uring_worker_loop(engine_index: usize, rx: chan::Receiver<UringOp>) {
     UringWorker::new(engine_index).run(rx);
 }
 
