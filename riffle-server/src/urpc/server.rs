@@ -105,6 +105,12 @@ impl Handler {
     /// util it reaches a safe state, at which point it is terminated
     async fn run(&mut self, app_manager_ref: AppManagerRef) -> Result<(), WorkerError> {
         let await_registry = AWAIT_TREE_REGISTRY.clone();
+        let await_root = await_registry
+            .register(format!(
+                "urpc connection with remote client: {}",
+                &self.remote_addr
+            ))
+            .await;
         while !self.shutdown.is_shutdown() {
             let maybe_frame = tokio::select! {
                 res = self.connection.read_frame() => res?,
@@ -118,16 +124,9 @@ impl Handler {
                 None => return Ok(()),
             };
 
-            // metric collector for the urpc request
             let tracker = RequestMetricTracker::new(&frame);
             tracker.start();
 
-            let await_root = await_registry
-                .register(format!(
-                    "urpc connection with remote client: {}",
-                    &self.remote_addr
-                ))
-                .await;
             await_root
                 .instrument(Command::from_frame(frame)?.apply(
                     app_manager_ref.clone(),
