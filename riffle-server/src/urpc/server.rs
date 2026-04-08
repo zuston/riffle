@@ -55,14 +55,18 @@ impl Listener {
                 remote_addr: addr.to_string(),
             };
 
-            tokio::spawn(async move {
+            let await_registry = AWAIT_TREE_REGISTRY.clone();
+            let await_root = await_registry
+                .register(format!("urpc connection with remote client: {}", addr))
+                .await;
+            tokio::spawn(await_root.instrument(async move {
                 URPC_CONNECTION_NUMBER.inc();
                 if let Err(error) = handler.run(app_manager).await {
                     error!("Errors on handling the request. {:#?}", error);
                 }
                 drop(permit);
                 URPC_CONNECTION_NUMBER.dec();
-            });
+            }));
         }
     }
 
@@ -104,13 +108,6 @@ impl Handler {
     /// when the shutdown signal is received, the connection is processed
     /// util it reaches a safe state, at which point it is terminated
     async fn run(&mut self, app_manager_ref: AppManagerRef) -> Result<(), WorkerError> {
-        let await_registry = AWAIT_TREE_REGISTRY.clone();
-        let await_root = await_registry
-            .register(format!(
-                "urpc connection with remote client: {}",
-                &self.remote_addr
-            ))
-            .await;
         while !self.shutdown.is_shutdown() {
             let maybe_frame = tokio::select! {
                 res = self.connection.read_frame() => res?,
@@ -127,12 +124,13 @@ impl Handler {
             let tracker = RequestMetricTracker::new(&frame);
             tracker.start();
 
-            await_root
-                .instrument(Command::from_frame(frame)?.apply(
+            Command::from_frame(frame)?
+                .apply(
                     app_manager_ref.clone(),
                     &mut self.connection,
                     &mut self.shutdown,
-                ))
+                )
+                .instrument_await("handling request...")
                 .await?;
         }
         Ok(())
