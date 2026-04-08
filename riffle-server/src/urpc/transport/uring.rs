@@ -420,12 +420,14 @@ impl UringWorker {
         drained
     }
 
-    fn process_completions(&mut self) {
+    fn process_completions(&mut self) -> usize {
         let cqes: Vec<_> = self.uring.completion().collect();
-        self.stats.cqe_total += cqes.len() as u64;
+        let count = cqes.len();
+        self.stats.cqe_total += count as u64;
         for cqe in cqes {
             self.handle_completion(cqe.user_data(), cqe.result());
         }
+        count
     }
 
     fn handle_completion(&mut self, id: u64, result: i32) {
@@ -519,13 +521,16 @@ impl UringWorker {
             }
 
             self.stats.submit_calls += 1;
-            match self.uring.submit_and_wait(1) {
+            match self.uring.submit() {
                 Err(e) if e.raw_os_error() == Some(libc::EINTR) => continue,
-                Err(e) => panic!("io_uring submit_and_wait failed: {e}"),
+                Err(e) => panic!("io_uring submit failed: {e}"),
                 Ok(_) => {}
             }
 
-            self.process_completions();
+            // todo: replace sleep-poll with eventfd wakeup to avoid 1ms latency penalty
+            if self.process_completions() == 0 {
+                std::thread::sleep(Duration::from_millis(1));
+            }
             self.maybe_log();
         }
     }
