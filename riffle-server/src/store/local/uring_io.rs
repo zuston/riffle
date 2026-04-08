@@ -432,25 +432,25 @@ impl LocalIO for UringIo {
             (_, None) => 0,
         };
 
-        let all_iovecs: Vec<iovec> = bufs
-            .iter()
-            .map(|b| iovec {
-                iov_base: b.as_ptr() as *mut _,
-                iov_len: b.len(),
-            })
-            .collect();
-
         let mut total_written: usize = 0;
-        for chunk in all_iovecs.chunks(UIO_MAXIOV) {
+        for buf_chunk in bufs.chunks(UIO_MAXIOV) {
             let (tx, rx) = oneshot::channel();
             let shard = &self.write_txs[byte_size % self.write_txs.len()];
 
-            let chunk_bytes: usize = chunk.iter().map(|v| v.iov_len).sum();
+            let chunk_bytes: usize = buf_chunk.iter().map(|b| b.len()).sum();
             let batch_offset = if io_uring_offset == u64::MAX {
                 u64::MAX
             } else {
                 io_uring_offset + total_written as u64
             };
+
+            let chunk_iovecs: Vec<iovec> = buf_chunk
+                .iter()
+                .map(|b| iovec {
+                    iov_base: b.as_ptr() as *mut _,
+                    iov_len: b.len(),
+                })
+                .collect();
 
             let ctx = UringIoCtx {
                 tx,
@@ -460,7 +460,7 @@ impl LocalIO for UringIo {
                     offset: batch_offset,
                 },
                 w_bufs: vec![],
-                w_iovecs: chunk.to_vec(),
+                w_iovecs: chunk_iovecs,
                 r_bufs: vec![],
                 splice_pipe: None,
             };
