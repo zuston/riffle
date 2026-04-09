@@ -162,10 +162,6 @@ debug-assertions = false
 name = "conf_bytestring"
 harness = false
 
-[[bench]]
-name = "proto_encode"
-harness = false
-
 [[test]]
 name = "uring_simple"
 required-features = ["io-uring"]
