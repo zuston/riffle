@@ -142,10 +142,6 @@ impl UringEngineRegistry {
         self.engines[idx].clone()
     }
 
-    fn get_accept_engine(&self) -> Arc<UringNetEngine> {
-        self.engines[0].clone()
-    }
-
     fn get_stream_engine_for_key(&self, key: u64) -> Arc<UringNetEngine> {
         if self.engines.len() == 1 {
             return self.engines[0].clone();
@@ -214,13 +210,6 @@ pub(crate) fn get_engine() -> Result<Arc<UringNetEngine>> {
         .ok_or_else(|| anyhow!("io-uring engine not initialized"))
 }
 
-pub(crate) fn get_accept_engine() -> Result<Arc<UringNetEngine>> {
-    URING_ENGINE_REGISTRY
-        .get()
-        .map(|registry| registry.get_accept_engine())
-        .ok_or_else(|| anyhow!("io-uring engine not initialized"))
-}
-
 pub(crate) fn get_stream_engine_for_key(key: u64) -> Result<Arc<UringNetEngine>> {
     URING_ENGINE_REGISTRY
         .get()
@@ -248,9 +237,11 @@ enum UringOpType {
         fd: RawFd,
         buf: Vec<u8>,
     },
+    /// One logical `write_all` chunk: worker retries short sends / EAGAIN until `sent == buf.len()`.
     Write {
         fd: RawFd,
         buf: Vec<u8>,
+        sent: usize,
     },
 }
 
@@ -394,8 +385,10 @@ fn build_sqe(op_type: &UringOpType) -> io_uring::squeue::Entry {
             let ptr = buf.as_ptr() as *mut u8;
             opcode::Recv::new(Fd(*fd), ptr, len).build()
         }
-        UringOpType::Write { fd, buf } => {
-            opcode::Send::new(Fd(*fd), buf.as_ptr(), buf.len() as u32).build()
+        UringOpType::Write { fd, buf, sent } => {
+            let rest = &buf[*sent..];
+            let n = rest.len().min(u32::MAX as usize) as u32;
+            opcode::Send::new(Fd(*fd), rest.as_ptr(), n).build()
         }
     }
 }
@@ -466,6 +459,67 @@ impl UringWorker {
     }
 
     fn handle_completion(&mut self, id: u64, result: i32) {
+        let is_write = matches!(
+            self.pending.get(&id).map(|o| &o.op_type),
+            Some(UringOpType::Write { .. })
+        );
+        if is_write {
+            if cqe_result_is_would_block(result) {
+                let Some(op) = self.pending.get_mut(&id) else {
+                    return;
+                };
+                self.stats.write_eagain_resubmits += 1;
+                debug!("io-uring write would-block, re-submit with same user_data={id}");
+                push_with_submit_retry(&mut self.uring, &op.op_type, id, &mut self.stats);
+                return;
+            }
+            if result < 0 {
+                self.notify_error(id, result);
+                return;
+            }
+            if result == 0 {
+                // Send with len>0 must not complete with 0; otherwise we would resubmit forever.
+                warn!(
+                    "io-uring Send CQE result=0 with pending payload (user_data={}), failing op",
+                    id
+                );
+                self.notify_error(id, -(libc::ECONNRESET as i32));
+                return;
+            }
+            let mut write_corrupt = false;
+            {
+                let Some(op) = self.pending.get_mut(&id) else {
+                    return;
+                };
+                if let UringOpType::Write { buf, sent, .. } = &mut op.op_type {
+                    *sent += result as usize;
+                    if *sent > buf.len() {
+                        warn!(
+                            "io-uring Send over-reported bytes: sent={} buf_len={} (user_data={})",
+                            sent,
+                            buf.len(),
+                            id
+                        );
+                        write_corrupt = true;
+                    } else if *sent < buf.len() {
+                        push_with_submit_retry(&mut self.uring, &op.op_type, id, &mut self.stats);
+                        return;
+                    }
+                } else {
+                    return;
+                }
+            }
+            if write_corrupt {
+                self.notify_error(id, -(libc::EIO as i32));
+                return;
+            }
+            let mut op = self.pending.remove(&id).expect("pending op");
+            if let Some(UringNotify::Int(tx)) = op.notify.take() {
+                let _ = tx.send(Ok(0));
+            }
+            return;
+        }
+
         let Some(op) = self.pending.get(&id) else {
             if !URING_PENDING_MISS_WARNED.swap(true, Ordering::Relaxed) {
                 warn!(
@@ -477,10 +531,6 @@ impl UringWorker {
         };
 
         if cqe_result_is_would_block(result) {
-            if matches!(op.op_type, UringOpType::Write { .. }) {
-                self.stats.write_eagain_resubmits += 1;
-                debug!("io-uring write would-block, re-submit with same user_data={id}");
-            }
             push_with_submit_retry(&mut self.uring, &op.op_type, id, &mut self.stats);
             return;
         }
@@ -518,9 +568,6 @@ impl UringWorker {
         let mut op = self.pending.remove(&id).expect("pending op");
         match (op.notify.take(), op.op_type) {
             (Some(UringNotify::Int(tx)), UringOpType::Accept { .. }) => {
-                let _ = tx.send(Ok(result));
-            }
-            (Some(UringNotify::Int(tx)), UringOpType::Write { .. }) => {
                 let _ = tx.send(Ok(result));
             }
             (Some(UringNotify::Read(tx)), UringOpType::Read { mut buf, .. }) => {
@@ -780,55 +827,38 @@ impl TransportStream for UringStream {
         Ok(n)
     }
 
-    async fn write_all(&mut self, mut buf: &[u8]) -> Result<()> {
-        while !buf.is_empty() {
-            let take = buf.len().min(std::u32::MAX as usize);
-            let payload = buf[..take].to_vec();
-            let mut offset = 0usize;
-            let fd = self.fd;
-
-            // Prefer one io_uring send for the whole frame; only retry unsent tail on short write.
-            while offset < payload.len() {
-                let submit_start = Instant::now();
-                let remaining = payload[offset..].to_vec();
-                let (tx, rx) = oneshot::channel();
-                let op = UringOp {
-                    op_type: UringOpType::Write { fd, buf: remaining },
-                    notify: Some(UringNotify::Int(tx)),
-                };
-                self.engine.submit(op)?;
-                let r = rx.await.map_err(|_| anyhow!("Operation cancelled"))??;
-                let wait_elapsed = submit_start.elapsed();
-                if wait_elapsed >= Duration::from_secs(1) {
-                    warn!(
-                        "io-uring write completion slow: fd={}, chunk_len={}, offset={}, wait={:?}, result={}",
-                        fd,
-                        take,
-                        offset,
-                        wait_elapsed,
-                        r
-                    );
-                }
-                if r <= 0 {
-                    if r == 0 {
-                        warn!(
-                            "io-uring write returned 0: fd={}, chunk_len={}, offset={}",
-                            fd, take, offset
-                        );
-                        return Err(anyhow!("write returned 0 (peer closed)"));
-                    }
-                    return Err(anyhow!("write failed: {}", r));
-                }
-
-                let n = r as usize;
-                offset += n;
-
-                debug!(
-                    "io-uring write completion: fd={}, chunk_len={}, offset={}, result={}",
-                    fd, take, offset, r
+    async fn write_all(&mut self, buf: &[u8]) -> Result<()> {
+        let fd = self.fd;
+        for chunk in buf.chunks(u32::MAX as usize) {
+            if chunk.is_empty() {
+                continue;
+            }
+            let submit_start = Instant::now();
+            let (tx, rx) = oneshot::channel();
+            let op = UringOp {
+                op_type: UringOpType::Write {
+                    fd,
+                    buf: chunk.to_vec(),
+                    sent: 0,
+                },
+                notify: Some(UringNotify::Int(tx)),
+            };
+            self.engine.submit(op)?;
+            rx.await.map_err(|_| anyhow!("Operation cancelled"))??;
+            let wait_elapsed = submit_start.elapsed();
+            if wait_elapsed >= Duration::from_secs(1) {
+                warn!(
+                    "io-uring write completion slow: fd={}, chunk_len={}, wait={:?}",
+                    fd,
+                    chunk.len(),
+                    wait_elapsed
                 );
             }
-            buf = &buf[take..];
+            debug!(
+                "io-uring write finished: fd={}, chunk_len={}",
+                fd,
+                chunk.len()
+            );
         }
         Ok(())
     }

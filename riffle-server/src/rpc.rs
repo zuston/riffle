@@ -29,7 +29,7 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Server;
 
 #[cfg(all(feature = "io-uring", target_os = "linux"))]
-use crate::urpc::transport::uring::{init_uring_engine, set_current_engine_index};
+use crate::urpc::transport::uring::set_current_engine_index;
 
 pub static GRPC_PARALLELISM: Lazy<NonZeroUsize> = Lazy::new(|| {
     let available_cores = std::thread::available_parallelism().unwrap();
@@ -85,15 +85,6 @@ impl DefaultRpcService {
                     "Starting urpc server with io-uring on port:[{}] ......",
                     urpc_port
                 );
-                let threads = config
-                    .urpc_config
-                    .as_ref()
-                    .map(|c| c.io_uring_threads)
-                    .unwrap_or(0);
-
-                // Initialize io-uring engine
-                init_uring_engine(threads)?;
-
                 return Self::_start_urpc_uring(urpc_port, tx, app_manager_ref);
             }
             #[cfg(not(all(feature = "io-uring", target_os = "linux")))]
@@ -181,25 +172,29 @@ impl DefaultRpcService {
             Ok(())
         }
 
-        // io-uring mode with thread-per-core model (mode 2):
-        // Each thread has its own private io_uring ring and SO_REUSEPORT listener.
-        // This eliminates cross-thread contention and enables kernel-level load balancing.
-        let core_ids = core_affinity::get_core_ids().unwrap_or_default();
-        for core_id in core_ids {
+        // Thread-per-core: one private io_uring ring + SO_REUSEPORT listener per logical core.
+        // If affinity is unavailable (empty/None), still start exactly one unpinned worker;
+        // otherwise urpc would listen on no threads and all RPC (including writes) hang.
+        let core_plan: Vec<Option<core_affinity::CoreId>> =
+            match core_affinity::get_core_ids() {
+                Some(ids) if !ids.is_empty() => ids.into_iter().map(Some).collect(),
+                _ => vec![None],
+            };
+
+        for core_opt in core_plan {
             let rx = tx.subscribe();
             let app_manager = app_manager_ref.clone();
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port);
 
             std::thread::spawn(move || {
-                // Bind to specific core
-                core_affinity::set_for_current(core_id);
+                if let Some(core_id) = core_opt {
+                    core_affinity::set_for_current(core_id);
+                }
 
-                // Create private io_uring engine for this thread
-                let engine = create_private_uring_engine(Some(core_id))
+                let engine = create_private_uring_engine(core_opt)
                     .expect("Failed to create private engine");
                 set_private_engine(engine);
 
-                // Create listener with SO_REUSEPORT for kernel load balancing
                 let listener = UringListener::bind_with_reuse_port(addr)
                     .expect("Failed to bind with reuse port");
 
