@@ -168,8 +168,9 @@ impl DefaultRpcService {
         tx: Sender<()>,
         app_manager_ref: AppManagerRef,
     ) -> Result<()> {
-        use crate::urpc::transport::uring::UringListener;
-        use crate::urpc::transport::TransportListener;
+        use crate::urpc::transport::uring::{
+            create_private_uring_engine, set_private_engine, UringListener,
+        };
 
         async fn shutdown(mut rx: Receiver<()>) -> Result<()> {
             if let Err(err) = rx.recv().await {
@@ -180,46 +181,37 @@ impl DefaultRpcService {
             Ok(())
         }
 
-        // For io-uring, we use a different runtime configuration
-        // io-uring is more efficient with fewer threads
-        let rx = tx.subscribe();
-        let app_manager = app_manager_ref.clone();
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port);
+        // io-uring mode with thread-per-core model (mode 2):
+        // Each thread has its own private io_uring ring and SO_REUSEPORT listener.
+        // This eliminates cross-thread contention and enables kernel-level load balancing.
+        let core_ids = core_affinity::get_core_ids().unwrap_or_default();
+        for core_id in core_ids {
+            let rx = tx.subscribe();
+            let app_manager = app_manager_ref.clone();
+            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port);
 
-        std::thread::spawn(move || {
-            let core_ids = core_affinity::get_core_ids().unwrap_or_default();
-            let worker_threads = std::cmp::max(URPC_PARALLELISM.get() / 2, 4);
-            let worker_threads = if core_ids.is_empty() {
-                worker_threads
-            } else {
-                std::cmp::min(worker_threads, core_ids.len())
-            };
-            let next_core = Arc::new(AtomicUsize::new(0));
-            let core_ids_for_hook = Arc::new(core_ids);
-            let next_core_for_hook = next_core.clone();
+            std::thread::spawn(move || {
+                // Bind to specific core
+                core_affinity::set_for_current(core_id);
 
-            tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(worker_threads)
-                .on_thread_start(move || {
-                    // Always set a deterministic engine index for the thread.
-                    let idx = if !core_ids_for_hook.is_empty() {
-                        let core_idx = next_core_for_hook.fetch_add(1, Ordering::Relaxed)
-                            % core_ids_for_hook.len();
-                        core_affinity::set_for_current(core_ids_for_hook[core_idx]);
-                        core_idx
-                    } else {
-                        next_core_for_hook.fetch_add(1, Ordering::Relaxed)
-                    };
-                    set_current_engine_index(idx);
-                })
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(async {
-                    let listener = UringListener::bind(addr).await.unwrap();
-                    urpc::server::run_with_listener(listener, shutdown(rx), app_manager).await;
-                });
-        });
+                // Create private io_uring engine for this thread
+                let engine = create_private_uring_engine(Some(core_id))
+                    .expect("Failed to create private engine");
+                set_private_engine(engine);
+
+                // Create listener with SO_REUSEPORT for kernel load balancing
+                let listener = UringListener::bind_with_reuse_port(addr)
+                    .expect("Failed to bind with reuse port");
+
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(async {
+                        urpc::server::run_with_listener(listener, shutdown(rx), app_manager).await;
+                    });
+            });
+        }
 
         Ok(())
     }

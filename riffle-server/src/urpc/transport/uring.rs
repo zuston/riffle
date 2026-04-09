@@ -37,7 +37,8 @@ use once_cell::sync::OnceCell;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::net::{SocketAddr, TcpListener};
+use std::net::SocketAddr;
+use std::net::TcpListener as StdTcpListener;
 use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -107,6 +108,9 @@ static URING_PENDING_MISS_WARNED: AtomicBool = AtomicBool::new(false);
 
 thread_local! {
     static URING_ENGINE_INDEX: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    // Thread-local private engine for thread-per-core mode (mode 2)
+    // Use RefCell because Arc is not Copy
+    static URING_PRIVATE_ENGINE: std::cell::RefCell<Option<Arc<UringNetEngine>>> = const { std::cell::RefCell::new(None) };
 }
 
 struct UringEngineRegistry {
@@ -184,8 +188,26 @@ pub(crate) fn set_current_engine_index(idx: usize) {
     URING_ENGINE_INDEX.with(|cell| cell.set(Some(idx)));
 }
 
-/// Get the global io-uring engine
+/// Set a private engine for the current thread (thread-per-core mode).
+/// This bypasses the global engine registry.
+pub fn set_private_engine(engine: Arc<UringNetEngine>) {
+    URING_PRIVATE_ENGINE.with(|cell| *cell.borrow_mut() = Some(engine));
+}
+
+/// Clear the private engine for the current thread.
+#[allow(dead_code)]
+pub fn clear_private_engine() {
+    URING_PRIVATE_ENGINE.with(|cell| *cell.borrow_mut() = None);
+}
+
+/// Get the io-uring engine for the current thread.
+/// First checks for a private engine (thread-per-core mode), then falls back to global registry.
 pub(crate) fn get_engine() -> Result<Arc<UringNetEngine>> {
+    // Check for private engine first (mode 2: thread-per-core)
+    if let Some(engine) = URING_PRIVATE_ENGINE.with(|cell| cell.borrow().clone()) {
+        return Ok(engine);
+    }
+    // Fall back to global registry (mode 1: shared engines)
     URING_ENGINE_REGISTRY
         .get()
         .map(|registry| registry.get_engine_for_current_thread())
@@ -204,6 +226,14 @@ pub(crate) fn get_stream_engine_for_key(key: u64) -> Result<Arc<UringNetEngine>>
         .get()
         .map(|registry| registry.get_stream_engine_for_key(key))
         .ok_or_else(|| anyhow!("io-uring engine not initialized"))
+}
+
+/// Create a private io-uring engine for thread-per-core mode.
+/// This engine is not registered in the global registry and is owned by the calling thread.
+pub fn create_private_uring_engine(core_id: Option<CoreId>) -> Result<Arc<UringNetEngine>> {
+    let engine_index = core_id.map(|c| c.id).unwrap_or(0);
+    let engine = UringNetEngine::new(engine_index, core_id)?;
+    Ok(Arc::new(engine))
 }
 
 enum UringOpType {
@@ -557,7 +587,7 @@ impl Transport for UringTransport {
 
     async fn bind(addr: SocketAddr) -> Result<Self::Listener> {
         // Keep listener in blocking mode so accept does not spin on -EAGAIN when idle.
-        let listener = TcpListener::bind(addr)?;
+        let listener = StdTcpListener::bind(addr)?;
         let fd = listener.as_raw_fd();
 
         Ok(UringListener { fd, listener })
@@ -589,12 +619,42 @@ impl Transport for UringTransport {
 
 pub struct UringListener {
     fd: RawFd,
-    listener: TcpListener,
+    listener: StdTcpListener,
 }
 
 impl UringListener {
     pub async fn bind(addr: SocketAddr) -> Result<Self> {
         UringTransport::bind(addr).await
+    }
+
+    /// Bind with SO_REUSEPORT for multi-thread load balancing.
+    /// Each thread can bind to the same address and kernel distributes connections.
+    pub fn bind_with_reuse_port(addr: SocketAddr) -> Result<Self> {
+        let sock = socket2::Socket::new(
+            match addr {
+                SocketAddr::V4(_) => socket2::Domain::IPV4,
+                SocketAddr::V6(_) => socket2::Domain::IPV6,
+            },
+            socket2::Type::STREAM,
+            None,
+        )
+        .map_err(|e| anyhow!("socket2::Socket::new failed: {e}"))?;
+
+        sock.set_reuse_address(true)
+            .map_err(|e| anyhow!("set_reuse_address failed: {e}"))?;
+        #[cfg(not(target_arch = "aarch64"))]
+        sock.set_reuse_port(true)
+            .map_err(|e| anyhow!("set_reuse_port failed: {e}"))?;
+
+        sock.bind(&addr.into())
+            .map_err(|e| anyhow!("socket2::Socket::bind failed: {e}"))?;
+        sock.listen(8192)
+            .map_err(|e| anyhow!("socket2::Socket::listen failed: {e}"))?;
+
+        let listener: StdTcpListener = sock.into();
+        let fd = listener.as_raw_fd();
+
+        Ok(UringListener { fd, listener })
     }
 }
 
@@ -606,8 +666,9 @@ impl TransportListener for UringListener {
         let addr: sockaddr_storage = unsafe { std::mem::zeroed() };
         let addrlen: socklen_t = std::mem::size_of::<sockaddr_storage>() as socklen_t;
 
-        // Accept always runs on dedicated engine 0.
-        let engine = get_accept_engine()?;
+        // Use the engine associated with current thread (for thread-per-core model).
+        // In multi-thread mode with SO_REUSEPORT, each thread has its own engine.
+        let engine = get_engine()?;
 
         let (tx, rx) = oneshot::channel();
         let op = UringOp {
@@ -633,7 +694,10 @@ impl TransportListener for UringListener {
         set_socket_nonblocking(client_fd)?;
         set_socket_nodelay(client_fd)?;
         let peer_addr = get_peer_addr(client_fd)?;
-        let stream_engine = get_stream_engine_for_key(client_fd as u64)?;
+
+        // Use the same engine for stream I/O (thread-per-core model)
+        // to keep connection handling on the same core where it was accepted.
+        let stream_engine = get_engine()?;
 
         Ok((
             UringStream {
