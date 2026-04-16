@@ -1,3 +1,4 @@
+use crate::app_manager::app::App;
 use crate::app_manager::application_identifier::ApplicationId;
 use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::request_context::{
@@ -21,6 +22,7 @@ use bytes::Bytes;
 use croaring::{JvmLegacy, Treemap};
 use log::{debug, error, info};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::time::Instant;
 
 #[derive(Debug)]
@@ -53,12 +55,36 @@ impl Command {
         shutdown: &mut Shutdown,
     ) -> Result<()> {
         match self {
-            Command::Send(req) => req.apply(app_manager_ref, conn, shutdown).await?,
-            Command::GetMem(req) => req.apply(app_manager_ref, conn, shutdown).await?,
-            Command::GetLocalIndex(req) => req.apply(app_manager_ref, conn, shutdown).await?,
-            Command::GetLocalData(req) => req.apply(app_manager_ref, conn, shutdown).await?,
-            Command::GetLocalDataV2(req) => req.apply(app_manager_ref, conn, shutdown).await?,
-            Command::GetLocalDataV3(req) => req.apply(app_manager_ref, conn, shutdown).await?,
+            Command::Send(req) => {
+                req.apply(app_manager_ref, conn, shutdown)
+                    .instrument_await("applying the command of [Send]")
+                    .await?
+            }
+            Command::GetMem(req) => {
+                req.apply(app_manager_ref, conn, shutdown)
+                    .instrument_await("applying the command of [GetMemory]")
+                    .await?
+            }
+            Command::GetLocalIndex(req) => {
+                req.apply(app_manager_ref, conn, shutdown)
+                    .instrument_await("applying the command of [GetLocalIndex]")
+                    .await?
+            }
+            Command::GetLocalData(req) => {
+                req.apply(app_manager_ref, conn, shutdown)
+                    .instrument_await("applying the command of [GetLocalData]")
+                    .await?
+            }
+            Command::GetLocalDataV2(req) => {
+                req.apply(app_manager_ref, conn, shutdown)
+                    .instrument_await("applying the command of [GetLocalDataV2]")
+                    .await?
+            }
+            Command::GetLocalDataV3(req) => {
+                req.apply(app_manager_ref, conn, shutdown)
+                    .instrument_await("applying the command of [GetLocalDataV3]")
+                    .await?
+            }
             _ => {}
         }
         Ok(())
@@ -101,7 +127,9 @@ impl GetMemoryDataRequestCommand {
                 status_code: StatusCode::NO_REGISTER.into(),
                 ret_msg: "No such app in server side".to_string(),
             };
-            write_response(conn, response).await?;
+            write_response(conn, response)
+                .instrument_await("writing the response...")
+                .await?;
             return Ok(());
         }
 
@@ -124,9 +152,12 @@ impl GetMemoryDataRequestCommand {
             _ => ctx,
         };
 
-        let result = app.select(ctx).await;
-        let mut read_length = 0;
+        let read_timer = Instant::now();
+        let result = app.select(ctx).instrument_await("selecting...").await;
+        let read_elapsed = read_timer.elapsed().as_millis();
 
+        let write_timer = Instant::now();
+        let mut read_length = 0;
         let rpc_version = &app.app_config_options.get_memory_data_urpc_version;
         match rpc_version {
             RpcVersion::V1 => {
@@ -148,7 +179,9 @@ impl GetMemoryDataRequestCommand {
                     }
                 };
                 let frame = Frame::GetMemoryDataResponse(response);
-                conn.write_frame(&frame).await?;
+                conn.write_frame(&frame)
+                    .instrument_await("writing the V1 response...")
+                    .await?;
             }
             _ => {
                 let response = match result {
@@ -169,18 +202,24 @@ impl GetMemoryDataRequestCommand {
                     }
                 };
                 let frame = Frame::GetMemoryDataV2Response(response);
-                conn.write_frame(&frame).await?;
+                conn.write_frame(&frame)
+                    .instrument_await("writing the V2 response...")
+                    .await?;
             }
         }
-
+        let write_elapsed = write_timer.elapsed().as_millis();
+        let thread_label = util::current_thread_label();
         info!(
-            "[get_memory_data][{:?}] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}.",
+            "[get_memory_data][{:?}] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}. read cost {}(ms) and socket_write cost {}(ms), thread_label: {}",
             rpc_version,
             timer.elapsed().as_millis(),
             read_length,
             app_id,
             shuffle_id,
             partition_id,
+            read_elapsed,
+            write_elapsed,
+            thread_label,
         );
         Ok(())
     }
@@ -285,6 +324,7 @@ impl GetLocalDataRequestV2Command {
             RpcType::URPC,
         );
         let mut len = 0;
+        let read_timer = Instant::now();
         let command = match app
             .select(ctx)
             .instrument_await(format!("getting local shuffle data for app:{}", &app_id))
@@ -315,16 +355,24 @@ impl GetLocalDataRequestV2Command {
                 }
             }
         };
+        let read_elapsed = read_timer.elapsed().as_millis();
 
+        let write_timer = Instant::now();
         let frame = Frame::GetLocalDataResponse(command);
-        conn.write_frame(&frame).await?;
+        conn.write_frame(&frame)
+            .instrument_await("writing the response...")
+            .await?;
+        let write_elapsed = write_timer.elapsed().as_millis();
+
         info!(
-            "[get_local_data_v2] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
+            "[get_local_data_v2] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}. read cost {}(ms) and socket_write cost {}(ms)",
             timer.elapsed().as_millis(),
             len,
             app_id,
             shuffle_id,
             partition_id,
+            read_elapsed,
+            write_elapsed,
         );
         Ok(())
     }
@@ -406,7 +454,9 @@ impl GetLocalDataRequestV3Command {
         };
 
         let frame = Frame::GetLocalDataResponse(command);
-        conn.write_frame(&frame).await?;
+        conn.write_frame(&frame)
+            .instrument_await("writing the response...")
+            .await?;
         info!(
             "[get_local_data_v3] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
             timer.elapsed().as_millis(),
@@ -491,7 +541,9 @@ impl GetLocalDataRequestCommand {
         };
 
         let frame = Frame::GetLocalDataResponse(command);
-        conn.write_frame(&frame).await?;
+        conn.write_frame(&frame)
+            .instrument_await("writing the response...")
+            .await?;
         info!(
             "[get_local_data] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
             timer.elapsed().as_millis(),
@@ -623,7 +675,9 @@ impl GetLocalDataIndexRequestCommand {
                 Frame::GetLocalDataIndexV2Response(command)
             }
         };
-        conn.write_frame(&frame).await?;
+        conn.write_frame(&frame)
+            .instrument_await("writing the response...")
+            .await?;
         info!(
             "[get_local_index] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
             timer.elapsed().as_millis(),
@@ -721,29 +775,15 @@ impl SendDataRequestCommand {
             Ok(len) => len,
         };
 
-        let mut insert_failure_occur = false;
-        let mut insert_failure_message = None;
-
-        let mut insert_len = 0;
-        let blocks = self.blocks;
-        for block in blocks {
-            let partition_id = block.0;
-            let partition_blocks = block.1;
-            let uid = PartitionUId::new(&application_id, shuffle_id, partition_id);
-            let ctx = WritingViewContext::new(uid, partition_blocks);
-            match app.insert(ctx).await {
-                Ok(size) => insert_len += size as i64,
-                Err(e) => {
-                    let msg = format!(
-                        "Errors on inserting data for app: {:?}. error:{:#?}",
-                        &app_id, e
-                    );
-                    error!("{}", &msg);
-                    insert_failure_occur = true;
-                    insert_failure_message = Some(msg);
-                }
-            }
-        }
+        let (insert_len, insert_failure_occur, insert_failure_message) = Self::send_data_insert(
+            Arc::clone(&app),
+            application_id,
+            shuffle_id,
+            app_id,
+            self.blocks,
+        )
+        .instrument_await(format!("inserting partition blocks for app:{}", app_id))
+        .await;
         let _ = app.move_allocated_used_from_budget(insert_len);
         let unused = ticket_len - insert_len;
         if unused > 0 {
@@ -763,7 +803,9 @@ impl SendDataRequestCommand {
                 ret_msg: "".to_string(),
             },
         };
-        write_response(conn, response).await?;
+        write_response(conn, response)
+            .instrument_await(format!("writing response for app:{}", &app_id))
+            .await?;
         if !insert_failure_occur {
             RPC_BATCH_DATA_BYTES_HISTOGRAM
                 .with_label_values(&[&RPC_BATCH_BYTES_OPERATION::SEND_DATA.to_string()])
@@ -777,5 +819,37 @@ impl SendDataRequestCommand {
             shuffle_id,
         );
         Ok(())
+    }
+
+    /// Inserts all partition blocks for send_data; isolated for await-tree visibility.
+    async fn send_data_insert(
+        app: Arc<App>,
+        application_id: ApplicationId,
+        shuffle_id: i32,
+        app_id: &str,
+        blocks: HashMap<i32, Vec<Block>>,
+    ) -> (i64, bool, Option<String>) {
+        let mut insert_failure_occur = false;
+        let mut insert_failure_message = None;
+        let mut insert_len = 0i64;
+
+        for (partition_id, partition_blocks) in blocks {
+            let uid = PartitionUId::new(&application_id, shuffle_id, partition_id);
+            let ctx = WritingViewContext::new(uid, partition_blocks);
+            match app.insert(ctx).await {
+                Ok(size) => insert_len += size as i64,
+                Err(e) => {
+                    let msg = format!(
+                        "Errors on inserting data for app: {:?}. error:{:#?}",
+                        &app_id, e
+                    );
+                    error!("{}", &msg);
+                    insert_failure_occur = true;
+                    insert_failure_message = Some(msg);
+                }
+            }
+        }
+
+        (insert_len, insert_failure_occur, insert_failure_message)
     }
 }
