@@ -152,9 +152,12 @@ impl GetMemoryDataRequestCommand {
             _ => ctx,
         };
 
+        let read_timer = Instant::now();
         let result = app.select(ctx).instrument_await("selecting...").await;
-        let mut read_length = 0;
+        let read_elapsed = read_timer.elapsed().as_millis();
 
+        let write_timer = Instant::now();
+        let mut read_length = 0;
         let rpc_version = &app.app_config_options.get_memory_data_urpc_version;
         match rpc_version {
             RpcVersion::V1 => {
@@ -204,15 +207,17 @@ impl GetMemoryDataRequestCommand {
                     .await?;
             }
         }
-
+        let write_elapsed = write_timer.elapsed().as_millis();
         info!(
-            "[get_memory_data][{:?}] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}.",
+            "[get_memory_data][{:?}] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}. read cost {}(ms) and socket_write cost {}(ms)",
             rpc_version,
             timer.elapsed().as_millis(),
             read_length,
             app_id,
             shuffle_id,
             partition_id,
+            read_elapsed,
+            write_elapsed,
         );
         Ok(())
     }
@@ -317,6 +322,7 @@ impl GetLocalDataRequestV2Command {
             RpcType::URPC,
         );
         let mut len = 0;
+        let read_timer = Instant::now();
         let command = match app
             .select(ctx)
             .instrument_await(format!("getting local shuffle data for app:{}", &app_id))
@@ -347,18 +353,24 @@ impl GetLocalDataRequestV2Command {
                 }
             }
         };
+        let read_elapsed = read_timer.elapsed().as_millis();
 
+        let write_timer = Instant::now();
         let frame = Frame::GetLocalDataResponse(command);
         conn.write_frame(&frame)
             .instrument_await("writing the response...")
             .await?;
+        let write_elapsed = write_timer.elapsed().as_millis();
+
         info!(
-            "[get_local_data_v2] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
+            "[get_local_data_v2] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}. read cost {}(ms) and socket_write cost {}(ms)",
             timer.elapsed().as_millis(),
             len,
             app_id,
             shuffle_id,
             partition_id,
+            read_elapsed,
+            write_elapsed,
         );
         Ok(())
     }
