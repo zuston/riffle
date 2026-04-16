@@ -17,7 +17,7 @@
 
 [package]
 name = "riffle-server"
-version = "0.21.0"
+version = "0.22.0"
 edition = "2021"
 
 [profile.release]
