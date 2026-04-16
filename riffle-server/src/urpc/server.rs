@@ -22,7 +22,7 @@ use await_tree::InstrumentAwait;
 use socket2::SockRef;
 use tracing::Instrument;
 
-const MAX_CONNECTIONS: usize = 40000;
+const MAX_CONNECTIONS: usize = 200000;
 
 struct Listener {
     listener: TcpListener,
