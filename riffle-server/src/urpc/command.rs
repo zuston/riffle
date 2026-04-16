@@ -208,8 +208,9 @@ impl GetMemoryDataRequestCommand {
             }
         }
         let write_elapsed = write_timer.elapsed().as_millis();
+        let thread_label = util::current_thread_label();
         info!(
-            "[get_memory_data][{:?}] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}. read cost {}(ms) and socket_write cost {}(ms)",
+            "[get_memory_data][{:?}] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}. read cost {}(ms) and socket_write cost {}(ms), thread_label: {}",
             rpc_version,
             timer.elapsed().as_millis(),
             read_length,
@@ -218,6 +219,7 @@ impl GetMemoryDataRequestCommand {
             partition_id,
             read_elapsed,
             write_elapsed,
+            thread_label,
         );
         Ok(())
     }
