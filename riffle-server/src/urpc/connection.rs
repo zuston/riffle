@@ -7,6 +7,7 @@ use crate::error::WorkerError;
 use crate::metric::URPC_REQUEST_PARSING_LATENCY;
 use crate::urpc::frame::Frame;
 use anyhow::Result;
+use await_tree::InstrumentAwait;
 
 const INITIAL_BUFFER_LENGTH: usize = 1024 * 1024;
 
@@ -47,8 +48,13 @@ impl Connection {
     }
 
     pub async fn write_frame(&mut self, frame: &Frame) -> Result<()> {
-        Frame::write(&mut self.stream, frame, &mut self.write_buf).await?;
-        self.stream.flush().await?;
+        Frame::write(&mut self.stream, frame, &mut self.write_buf)
+            .instrument_await("writing frame...")
+            .await?;
+        self.stream
+            .flush()
+            .instrument_await("flushing frame...")
+            .await?;
         Ok(())
     }
 

@@ -29,6 +29,16 @@ use bytesize::ByteSize;
 
 const WORKER_IP: &str = "WORKER_IP";
 
+/// Label for the OS thread that runs the current Tokio task. Tokio maps each worker to a
+/// dedicated OS thread, so `ThreadId` distinguishes which worker polled this future.
+pub fn current_thread_label() -> String {
+    let t = std::thread::current();
+    match t.name() {
+        Some(name) if !name.is_empty() => format!("{:?} ({})", t.id(), name),
+        _ => format!("{:?}", t.id()),
+    }
+}
+
 pub fn get_local_ip() -> Result<IpAddr, std::io::Error> {
     let ip = std::env::var(WORKER_IP);
     if ip.is_ok() {
