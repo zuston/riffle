@@ -8,7 +8,7 @@ use crate::app_manager::request_context::{
     RequireBufferContext, ShuffleResult, WritingViewContext,
 };
 use crate::block_id_manager::{get_block_id_manager, BlockIdManager};
-use crate::client_configs::HARD_SPLIT_ENABLED;
+use crate::client_configs::{HARD_SPLIT_ENABLED, UNIFFLE_CLIENT_REASSIGN_ENABLED};
 use crate::config::Config;
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::config_ref::{ByteString, ConfigOption};
@@ -371,13 +371,10 @@ impl App {
         let app_id = &ctx.uid.app_id;
         let shuffle_id = &ctx.uid.shuffle_id;
 
-        if self
-            .app_config_options
-            .client_configs
-            .get(&HARD_SPLIT_ENABLED)
-            .unwrap_or(false)
-            // TODO: If the store is corrupted and only a single replica exists, fail the job fast instead of performing a hard split.
-            && !self.store.is_healthy().await?
+        // fast reassign to another healthy riffle server when the unhealthy storage is detected and the hard split is enabled.
+        if self.app_config_options.client_configs.get(&HARD_SPLIT_ENABLED).unwrap_or(false)
+            && !self.store.is_healthy().await? // TODO: If the store is corrupted and only a single replica exists, fail the job fast instead of performing a hard split.
+            && self.app_config_options.client_configs.get(&UNIFFLE_CLIENT_REASSIGN_ENABLED).unwrap_or(false)
         {
             warn!(
                 "Hard split is activated for [{}] due to the unhealthy storage",
