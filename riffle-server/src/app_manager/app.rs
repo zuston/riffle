@@ -542,7 +542,9 @@ mod tests {
     use crate::app_manager::application_identifier::ApplicationId;
     use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::request_context::RequireBufferContext;
-    use crate::client_configs::{ClientRssConf, HARD_SPLIT_ENABLED};
+    use crate::client_configs::{
+        ClientRssConf, HARD_SPLIT_ENABLED, UNIFFLE_CLIENT_REASSIGN_ENABLED,
+    };
     use crate::config::StorageType;
     use crate::config::StorageType::LOCALFILE;
     use crate::config_reconfigure::ReconfigurableConfManager;
@@ -559,11 +561,15 @@ mod tests {
     use tokio::runtime;
 
     #[test]
-    fn partition_split_by_storage() -> anyhow::Result<()> {
+    fn hard_split_by_storage() -> anyhow::Result<()> {
         let app_id = ApplicationId::YARN(1, 1, 1);
 
         let mut hmap = HashMap::new();
         hmap.insert(HARD_SPLIT_ENABLED.get_key(), "true".to_string());
+        hmap.insert(
+            UNIFFLE_CLIENT_REASSIGN_ENABLED.get_key(),
+            "true".to_string(),
+        );
         let conf = ClientRssConf::from(hmap);
         let options = AppConfigOptions::new(DataDistribution::NORMAL, 1, None, conf);
 
