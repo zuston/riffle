@@ -371,7 +371,8 @@ impl App {
         let app_id = &ctx.uid.app_id;
         let shuffle_id = &ctx.uid.shuffle_id;
 
-        // fast reassign to another healthy riffle server when the unhealthy storage is detected and the hard split is enabled.
+        // Quickly reassign partitions to another healthy riffle server once unhealthy storage is detected and hard split is enabled.
+        // This behavior depends on the Uniffle client having the partition reassignment mechanism enabled.
         if self.app_config_options.client_configs.get(&HARD_SPLIT_ENABLED).unwrap_or(false)
             && !self.store.is_healthy().await? // TODO: If the store is corrupted and only a single replica exists, fail the job fast instead of performing a hard split.
             && self.app_config_options.client_configs.get(&UNIFFLE_CLIENT_REASSIGN_ENABLED).unwrap_or(false)
