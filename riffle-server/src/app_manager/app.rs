@@ -8,7 +8,7 @@ use crate::app_manager::request_context::{
     RequireBufferContext, ShuffleResult, WritingViewContext,
 };
 use crate::block_id_manager::{get_block_id_manager, BlockIdManager};
-use crate::client_configs::HARD_SPLIT_ENABLED;
+use crate::client_configs::{HARD_SPLIT_ENABLED, UNIFFLE_CLIENT_REASSIGN_ENABLED};
 use crate::config::Config;
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::config_ref::{ByteString, ConfigOption};
@@ -371,13 +371,11 @@ impl App {
         let app_id = &ctx.uid.app_id;
         let shuffle_id = &ctx.uid.shuffle_id;
 
-        if self
-            .app_config_options
-            .client_configs
-            .get(&HARD_SPLIT_ENABLED)
-            .unwrap_or(false)
-            // TODO: If the store is corrupted and only a single replica exists, fail the job fast instead of performing a hard split.
-            && !self.store.is_healthy().await?
+        // Quickly reassign partitions to another healthy riffle server once unhealthy storage is detected and hard split is enabled.
+        // This behavior depends on the Uniffle client having the partition reassignment mechanism enabled.
+        if self.app_config_options.client_configs.get(&HARD_SPLIT_ENABLED).unwrap_or(false)
+            && !self.store.is_healthy().await? // TODO: If the store is corrupted and only a single replica exists, fail the job fast instead of performing a hard split.
+            && self.app_config_options.client_configs.get(&UNIFFLE_CLIENT_REASSIGN_ENABLED).unwrap_or(false)
         {
             warn!(
                 "Hard split is activated for [{}] due to the unhealthy storage",
@@ -544,7 +542,9 @@ mod tests {
     use crate::app_manager::application_identifier::ApplicationId;
     use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::request_context::RequireBufferContext;
-    use crate::client_configs::{ClientRssConf, HARD_SPLIT_ENABLED};
+    use crate::client_configs::{
+        ClientRssConf, HARD_SPLIT_ENABLED, UNIFFLE_CLIENT_REASSIGN_ENABLED,
+    };
     use crate::config::StorageType;
     use crate::config::StorageType::LOCALFILE;
     use crate::config_reconfigure::ReconfigurableConfManager;
@@ -561,11 +561,15 @@ mod tests {
     use tokio::runtime;
 
     #[test]
-    fn partition_split_by_storage() -> anyhow::Result<()> {
+    fn hard_split_by_storage() -> anyhow::Result<()> {
         let app_id = ApplicationId::YARN(1, 1, 1);
 
         let mut hmap = HashMap::new();
         hmap.insert(HARD_SPLIT_ENABLED.get_key(), "true".to_string());
+        hmap.insert(
+            UNIFFLE_CLIENT_REASSIGN_ENABLED.get_key(),
+            "true".to_string(),
+        );
         let conf = ClientRssConf::from(hmap);
         let options = AppConfigOptions::new(DataDistribution::NORMAL, 1, None, conf);
 

@@ -52,6 +52,14 @@ pub static APP_HEARTBEAT_TIMEOUT_MINUTES: Lazy<ClientConfigOption<u64>> = Lazy::
         .with_description("whether to set app heartbeat timeout")
 });
 
+// the option from uniffle client side.
+// https://github.com/apache/uniffle/blob/6acfd53d69b70625f595014ec1e6b0f1a52d9073/common/src/main/java/org/apache/uniffle/common/config/RssClientConf.java#L274
+pub static UNIFFLE_CLIENT_REASSIGN_ENABLED: Lazy<ClientConfigOption<bool>> = Lazy::new(|| {
+    ClientConfigOption::key("spark.rss.client.reassign.enabled")
+        .default_value(false) // todo: should align with the uniffle client default value
+        .with_description("whether to trigger partition reassignment by the server")
+});
+
 #[derive(Debug, Clone, Default)]
 pub struct ClientRssConf {
     properties: HashMap<String, String>,
