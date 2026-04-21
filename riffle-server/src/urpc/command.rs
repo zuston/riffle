@@ -15,6 +15,7 @@ use crate::store::{Block, DataBytes, LocalDataIndex, ResponseData};
 use crate::urpc::connection::Connection;
 use crate::urpc::frame::Frame;
 use crate::urpc::shutdown::Shutdown;
+use crate::urpc::transport::TransportStream;
 use crate::util;
 use anyhow::Result;
 use await_tree::InstrumentAwait;
@@ -48,10 +49,10 @@ impl Command {
         }
     }
 
-    pub async fn apply(
+    pub async fn apply<S: TransportStream>(
         self,
         app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
+        conn: &mut Connection<S>,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
         match self {
@@ -104,10 +105,10 @@ pub struct GetMemoryDataRequestCommand {
 }
 
 impl GetMemoryDataRequestCommand {
-    pub(crate) async fn apply(
+    pub(crate) async fn apply<S: TransportStream>(
         &self,
         app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
+        conn: &mut Connection<S>,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
         let timer = Instant::now();
@@ -283,10 +284,10 @@ pub struct ReadSegment {
 }
 
 impl GetLocalDataRequestV2Command {
-    pub(crate) async fn apply(
+    pub(crate) async fn apply<S: TransportStream>(
         &self,
         app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
+        conn: &mut Connection<S>,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
         let timer = Instant::now();
@@ -379,10 +380,10 @@ impl GetLocalDataRequestV2Command {
 }
 
 impl GetLocalDataRequestV3Command {
-    pub(crate) async fn apply(
+    pub(crate) async fn apply<S: TransportStream>(
         &self,
         app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
+        conn: &mut Connection<S>,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
         let timer = Instant::now();
@@ -470,10 +471,34 @@ impl GetLocalDataRequestV3Command {
 }
 
 impl GetLocalDataRequestCommand {
-    pub(crate) async fn apply(
+    pub fn new(
+        request_id: i64,
+        app_id: String,
+        shuffle_id: i32,
+        partition_id: i32,
+        partition_num_per_range: i32,
+        partition_num: i32,
+        offset: i64,
+        length: i32,
+        timestamp: i64,
+    ) -> Self {
+        Self {
+            request_id,
+            app_id,
+            shuffle_id,
+            partition_id,
+            partition_num_per_range,
+            partition_num,
+            offset,
+            length,
+            timestamp,
+        }
+    }
+
+    pub(crate) async fn apply<S: TransportStream>(
         &self,
         app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
+        conn: &mut Connection<S>,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
         let timer = Instant::now();
@@ -584,10 +609,10 @@ pub struct GetLocalDataIndexRequestCommand {
 }
 
 impl GetLocalDataIndexRequestCommand {
-    pub(crate) async fn apply(
+    pub(crate) async fn apply<S: TransportStream>(
         &self,
         app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
+        conn: &mut Connection<S>,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
         let timer = Instant::now();
@@ -723,16 +748,19 @@ pub struct RpcResponseCommand {
     pub(crate) ret_msg: String,
 }
 
-async fn write_response(conn: &mut Connection, command: RpcResponseCommand) -> Result<()> {
+async fn write_response<S: TransportStream>(
+    conn: &mut Connection<S>,
+    command: RpcResponseCommand,
+) -> Result<()> {
     let frame = Frame::RpcResponse(command);
     conn.write_frame(&frame).await
 }
 
 impl SendDataRequestCommand {
-    async fn apply(
+    async fn apply<S: TransportStream>(
         self,
         app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
+        conn: &mut Connection<S>,
         shutdown: &mut Shutdown,
     ) -> Result<()> {
         let timer = Instant::now();

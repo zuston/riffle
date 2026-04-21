@@ -1,21 +1,47 @@
 use crate::urpc::command::GetLocalDataRequestCommand;
 use crate::urpc::frame::MessageType;
+use crate::urpc::transport::{Transport, TransportStream};
 use anyhow::Result;
 use bytes::{BufMut, Bytes, BytesMut};
 use std::net::SocketAddr;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use std::time::Duration;
 
-/// This is the simple urpc client, only for tests
-pub struct UrpcClient {
-    stream: TcpStream,
+/// Generic urpc client that works with any Transport
+pub struct UrpcClient<S: TransportStream> {
+    stream: S,
+    request_timeout: Option<Duration>,
 }
 
-impl UrpcClient {
-    pub async fn connect(host: &str, port: usize) -> Result<Self> {
-        let addr = format!("{}:{}", host, port);
-        let stream = TcpStream::connect(addr).await?;
-        Ok(UrpcClient { stream })
+impl<S: TransportStream> UrpcClient<S> {
+    /// Create a new client from an existing stream
+    pub fn new(stream: S) -> Self {
+        Self {
+            stream,
+            request_timeout: None,
+        }
+    }
+
+    /// Configure a per-request timeout for RPC operations.
+    /// When set, each `get_local_shuffle_data` call will fail fast if the whole request
+    /// does not finish within the given duration.
+    pub fn with_request_timeout(mut self, timeout: Duration) -> Self {
+        self.request_timeout = Some(timeout);
+        self
+    }
+
+    /// Update per-request timeout after client creation.
+    pub fn set_request_timeout(&mut self, timeout: Option<Duration>) {
+        self.request_timeout = timeout;
+    }
+
+    /// Get a reference to the underlying stream
+    pub fn stream_ref(&self) -> &S {
+        &self.stream
+    }
+
+    /// Get a mutable reference to the underlying stream
+    pub fn stream_mut(&mut self) -> &mut S {
+        &mut self.stream
     }
 
     async fn send(&mut self, data: &[u8]) -> Result<()> {
@@ -25,8 +51,8 @@ impl UrpcClient {
     }
 
     async fn recv(&mut self, buf: &mut [u8]) -> Result<usize> {
-        let n = self.stream.read(buf).await?;
-        Ok(n)
+        let n = self.stream.read_exact(buf).await?;
+        Ok(buf.len())
     }
 
     fn put_string(buf: &mut BytesMut, data: &str) -> Result<()> {
@@ -90,6 +116,19 @@ impl UrpcClient {
         &mut self,
         req: GetLocalDataRequestCommand,
     ) -> Result<Bytes> {
+        if let Some(timeout) = self.request_timeout {
+            return tokio::time::timeout(timeout, self.get_local_shuffle_data_inner(req))
+                .await
+                .map_err(|_| anyhow::anyhow!("urpc request timed out after {:?}", timeout))?;
+        }
+
+        self.get_local_shuffle_data_inner(req).await
+    }
+
+    async fn get_local_shuffle_data_inner(
+        &mut self,
+        req: GetLocalDataRequestCommand,
+    ) -> Result<Bytes> {
         // compose the request
         // for a simulation client, there is no need to introduce the shared buffer
         let mut body_buffer = BytesMut::new();
@@ -123,6 +162,47 @@ impl UrpcClient {
     }
 }
 
+/// Epoll-based urpc client
+pub type EpollUrpcClient = UrpcClient<crate::urpc::transport::epoll::EpollStream>;
+
+impl EpollUrpcClient {
+    /// Connect to a server using epoll transport
+    pub async fn connect(host: &str, port: usize) -> Result<Self> {
+        use crate::urpc::transport::epoll::{EpollStream, EpollTransport};
+        let addr = format!("{}:{}", host, port);
+        let stream = EpollTransport::connect(addr.parse()?).await?;
+        Ok(Self::new(stream))
+    }
+
+    /// Connect and set a per-request timeout.
+    pub async fn connect_with_timeout(host: &str, port: usize, timeout: Duration) -> Result<Self> {
+        let client = Self::connect(host, port).await?;
+        Ok(client.with_request_timeout(timeout))
+    }
+}
+
+#[cfg(all(feature = "io-uring", target_os = "linux"))]
+/// Io-uring based urpc client
+pub type UringUrpcClient = UrpcClient<crate::urpc::transport::uring::UringStream>;
+
+#[cfg(all(feature = "io-uring", target_os = "linux"))]
+impl UringUrpcClient {
+    /// Connect to a server using io-uring transport
+    pub async fn connect(host: &str, port: usize) -> Result<Self> {
+        use crate::urpc::transport::uring::UringTransport;
+
+        let addr = format!("{}:{}", host, port);
+        let stream = UringTransport::connect(addr.parse()?).await?;
+        Ok(Self::new(stream))
+    }
+
+    /// Connect and set a per-request timeout.
+    pub async fn connect_with_timeout(host: &str, port: usize, timeout: Duration) -> Result<Self> {
+        let client = Self::connect(host, port).await?;
+        Ok(client.with_request_timeout(timeout))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::app_manager::application_identifier::ApplicationId;
@@ -132,7 +212,7 @@ mod tests {
     use crate::runtime::manager::RuntimeManager;
     use crate::server_state_manager::ServerStateManager;
     use crate::storage::StorageService;
-    use crate::urpc::client::UrpcClient;
+    use crate::urpc::client::EpollUrpcClient;
     use crate::urpc::command::GetLocalDataRequestCommand;
     use crate::util;
     use anyhow::Result;
@@ -174,7 +254,9 @@ mod tests {
 
         let rt = tokio::runtime::Runtime::new()?;
         let f = rt.block_on(async move {
-            let mut client = UrpcClient::connect("0.0.0.0", port as usize).await.unwrap();
+            let mut client = EpollUrpcClient::connect("0.0.0.0", port as usize)
+                .await
+                .unwrap();
             let command = GetLocalDataRequestCommand {
                 request_id: 0,
                 app_id: ApplicationId::mock().to_string(),
