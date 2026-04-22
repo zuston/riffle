@@ -484,6 +484,10 @@ pub struct Config {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct UrpcConfig {
     pub get_index_rpc_version: RpcVersion,
+
+    // todo: experimental feature to reduce the peek memory usage, especially on the large-scale active connections
+    #[serde(default = "bool::default")]
+    pub streaming_parse_enabled: bool,
 }
 
 fn as_default_get_memory_rpc_version() -> RpcVersion {
@@ -838,6 +842,7 @@ mod test {
 
         [urpc_config]
         get_index_rpc_version = "V2"
+        streaming_parse_enabled = true
 
         [memory_store]
         capacity = "1024M"
@@ -879,6 +884,14 @@ mod test {
         assert_eq!(
             RpcVersion::V2,
             decoded.urpc_config.as_ref().unwrap().get_index_rpc_version
+        );
+        assert_eq!(
+            true,
+            decoded
+                .urpc_config
+                .as_ref()
+                .unwrap()
+                .streaming_parse_enabled
         );
 
         // check the app config.

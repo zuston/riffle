@@ -40,14 +40,16 @@ pub struct Connection {
     stream: TcpStream,
     read_buf: BytesMut,
     write_buf: BytesMut,
+    streaming_parse_enabled: bool,
 }
 
 impl Connection {
-    pub fn new(socket: TcpStream) -> Self {
+    pub fn new(socket: TcpStream, streaming_parse_enabled: bool) -> Self {
         Connection {
             stream: socket,
             read_buf: BytesMut::with_capacity(INITIAL_READ_BUFFER_LENGTH),
             write_buf: BytesMut::with_capacity(INITIAL_WRITE_BUFFER_LENGTH),
+            streaming_parse_enabled,
         }
     }
 
@@ -249,14 +251,16 @@ impl Connection {
 
     pub async fn read_frame(&mut self) -> Result<Option<Frame>, WorkerError> {
         loop {
-            if let Some(header) = self.parse_frame_header()? {
-                if header.message_type == MessageType::SendShuffleData {
-                    let timer = Instant::now();
-                    let frame = self.read_send_shuffle_data_frame(header).await?;
-                    URPC_REQUEST_PARSING_LATENCY
-                        .with_label_values(&[&format!("{}", &frame)])
-                        .observe(timer.elapsed().as_secs_f64());
-                    return Ok(Some(frame));
+            if self.streaming_parse_enabled {
+                if let Some(header) = self.parse_frame_header()? {
+                    if header.message_type == MessageType::SendShuffleData {
+                        let timer = Instant::now();
+                        let frame = self.read_send_shuffle_data_frame(header).await?;
+                        URPC_REQUEST_PARSING_LATENCY
+                            .with_label_values(&[&format!("{}", &frame)])
+                            .observe(timer.elapsed().as_secs_f64());
+                        return Ok(Some(frame));
+                    }
                 }
             }
 
@@ -476,7 +480,7 @@ mod tests {
         client.write_all(&send_frame).await?;
         client.write_all(&local_frame).await?;
 
-        let mut conn = Connection::new(server);
+        let mut conn = Connection::new(server, true);
 
         let frame = conn.read_frame().await?.expect("send frame");
         match frame {
@@ -502,6 +506,28 @@ mod tests {
         }
 
         assert!(conn.read_buf.capacity() <= INITIAL_READ_BUFFER_LENGTH);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn send_shuffle_data_streaming_parse_can_be_disabled() -> Result<()> {
+        let payload = vec![3u8; 8 * 1024];
+        let send_frame = build_send_shuffle_data_frame(&payload);
+
+        let (mut client, server) = connected_streams().await?;
+        client.write_all(&send_frame).await?;
+
+        let mut conn = Connection::new(server, false);
+        let frame = conn.read_frame().await?.expect("send frame");
+
+        match frame {
+            Frame::SendShuffleData(req) => {
+                let blocks = req.blocks.get(&11).expect("partition");
+                assert_eq!(payload.as_slice(), blocks[0].data.as_ref());
+            }
+            other => panic!("unexpected frame: {other:?}"),
+        }
+
         Ok(())
     }
 }
