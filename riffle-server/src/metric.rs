@@ -77,6 +77,24 @@ const RPC_BATCH_BYTES_BUCKETS: &[f64] = &[
     ByteSize::gb(10).as_u64() as f64,
 ];
 
+/// Buckets for uRPC per-connection `BytesMut` capacity (read/write buffers).
+const URPC_BUFFER_CAPACITY_BUCKETS: &[f64] = &[
+    ByteSize::kb(8).as_u64() as f64,
+    ByteSize::kb(16).as_u64() as f64,
+    ByteSize::kb(32).as_u64() as f64,
+    ByteSize::kb(64).as_u64() as f64,
+    ByteSize::kb(128).as_u64() as f64,
+    ByteSize::kb(256).as_u64() as f64,
+    ByteSize::kb(512).as_u64() as f64,
+    ByteSize::mb(1).as_u64() as f64,
+    ByteSize::mb(2).as_u64() as f64,
+    ByteSize::mb(4).as_u64() as f64,
+    ByteSize::mb(8).as_u64() as f64,
+    ByteSize::mb(16).as_u64() as f64,
+    ByteSize::mb(32).as_u64() as f64,
+    ByteSize::mb(64).as_u64() as f64,
+];
+
 #[allow(non_camel_case_types)]
 #[derive(strum_macros::Display)]
 pub enum RPC_BATCH_BYTES_OPERATION {
@@ -402,6 +420,15 @@ pub static URPC_GET_LOCALFILE_DATA_TRANSPORT_TIME: Lazy<Histogram> = Lazy::new(|
 
 pub static URPC_CONNECTION_NUMBER: Lazy<IntGauge> =
     Lazy::new(|| IntGauge::new("urpc_connection_number", "urpc_connection_number").expect(""));
+
+pub static URPC_CONNECTION_BUFFER_CAPACITY_BYTES: Lazy<HistogramVec> = Lazy::new(|| {
+    let opts = histogram_opts!(
+        "urpc_connection_buffer_capacity_bytes",
+        "uRPC connection BytesMut capacity in bytes (read/write) after frame I/O",
+        Vec::from(URPC_BUFFER_CAPACITY_BUCKETS)
+    );
+    register_histogram_vec_with_registry!(opts, &["buffer"], REGISTRY).unwrap()
+});
 
 pub static PURGE_FAILED_COUNTER: Lazy<IntCounter> = Lazy::new(|| {
     IntCounter::new("purge_failed_count", "purge_failed_count").expect("metric should be created")
