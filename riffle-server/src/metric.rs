@@ -79,6 +79,9 @@ const RPC_BATCH_BYTES_BUCKETS: &[f64] = &[
 
 /// Buckets for uRPC per-connection `BytesMut` capacity (read/write buffers).
 const URPC_BUFFER_CAPACITY_BUCKETS: &[f64] = &[
+    ByteSize::b(512).as_u64() as f64,
+    ByteSize::kib(1).as_u64() as f64,
+    ByteSize::kib(2).as_u64() as f64,
     ByteSize::kb(8).as_u64() as f64,
     ByteSize::kb(16).as_u64() as f64,
     ByteSize::kb(32).as_u64() as f64,
