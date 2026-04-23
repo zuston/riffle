@@ -2,3 +2,5 @@
 .DS_Store
 .idea
 riffle-server/src/grpc/protobuf/uniffle.rs
+# CocoIndex Code (ccc)
+/.cocoindex_code/
