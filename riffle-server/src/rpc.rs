@@ -77,7 +77,6 @@ impl DefaultRpcService {
             let rx = tx.subscribe();
             let app_manager = app_manager_ref.clone();
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port);
-
             std::thread::spawn(move || {
                 tokio::runtime::Builder::new_multi_thread()
                     .worker_threads(std::cmp::max(URPC_PARALLELISM.get(), 16))
@@ -96,7 +95,6 @@ impl DefaultRpcService {
 
                 let app_manager = app_manager_ref.clone();
                 let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port);
-
                 std::thread::spawn(move || {
                     core_affinity::set_for_current(core_id);
                     tokio::runtime::Builder::new_current_thread()

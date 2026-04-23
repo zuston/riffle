@@ -34,6 +34,12 @@ struct Listener {
 impl Listener {
     async fn run(&mut self, app_manager_ref: AppManagerRef) -> Result<()> {
         debug!("Accepting inbound connections");
+        let streaming_parse_enabled = app_manager_ref
+            .get_config()
+            .urpc_config
+            .as_ref()
+            .map(|c| c.streaming_parse_enabled)
+            .unwrap_or(false);
 
         loop {
             let app_manager = app_manager_ref.clone();
@@ -49,7 +55,7 @@ impl Listener {
             debug!("Accepted connection from client: {}", &addr);
 
             let mut handler = Handler {
-                connection: Connection::new(socket),
+                connection: Connection::new(socket, streaming_parse_enabled),
                 shutdown: Shutdown::new(self.notify_shutdown.subscribe()),
                 _shutdown_complete: self.shutdown_complete_tx.clone(),
                 remote_addr: addr.to_string(),
