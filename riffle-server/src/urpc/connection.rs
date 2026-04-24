@@ -6,7 +6,7 @@ use tokio::net::TcpStream;
 
 use crate::error::WorkerError;
 use crate::error::WorkerError::STREAM_INCORRECT;
-use crate::metric::URPC_REQUEST_PARSING_LATENCY;
+use crate::metric::{URPC_CONNECTION_BUFFER_CAPACITY_BYTES, URPC_REQUEST_PARSING_LATENCY};
 use crate::store::Block;
 use crate::urpc::command::SendDataRequestCommand;
 use crate::urpc::frame::Frame;
@@ -63,6 +63,18 @@ impl Connection {
         if self.write_buf.is_empty() && self.write_buf.capacity() > WRITE_BUFFER_SHRINK_THRESHOLD {
             self.write_buf = BytesMut::with_capacity(INITIAL_WRITE_BUFFER_LENGTH);
         }
+    }
+
+    fn observe_read_buffer_capacity(&self) {
+        URPC_CONNECTION_BUFFER_CAPACITY_BYTES
+            .with_label_values(&["read"])
+            .observe(self.read_buf.capacity() as f64);
+    }
+
+    fn observe_write_buffer_capacity(&self) {
+        URPC_CONNECTION_BUFFER_CAPACITY_BYTES
+            .with_label_values(&["write"])
+            .observe(self.write_buf.capacity() as f64);
     }
 
     fn parse_frame_header(&self) -> Result<Option<FrameHeader>, WorkerError> {
@@ -246,6 +258,7 @@ impl Connection {
             .instrument_await("flushing frame...")
             .await?;
         self.maybe_reset_write_buffer();
+        self.observe_write_buffer_capacity();
         Ok(())
     }
 
@@ -259,6 +272,7 @@ impl Connection {
                         URPC_REQUEST_PARSING_LATENCY
                             .with_label_values(&[&format!("{}", &frame)])
                             .observe(timer.elapsed().as_secs_f64());
+                        self.observe_read_buffer_capacity();
                         return Ok(Some(frame));
                     }
                 }
@@ -267,6 +281,7 @@ impl Connection {
             // Attempt to parse a frame from the buffered data. If enough data
             // has been buffered, the frame is returned.
             if let Some(frame) = self.parse_frame()? {
+                self.observe_read_buffer_capacity();
                 return Ok(Some(frame));
             }
 
@@ -281,6 +296,7 @@ impl Connection {
                 // there is, this means that the peer closed the socket while
                 // sending a frame.
                 if self.read_buf.is_empty() {
+                    self.observe_read_buffer_capacity();
                     return Ok(None);
                 } else {
                     return Err(WorkerError::STREAM_ABNORMAL);
@@ -401,9 +417,11 @@ fn read_u8(src: &mut Cursor<&[u8]>) -> Result<u8, WorkerError> {
 #[cfg(test)]
 mod tests {
     use super::{Connection, HEADER_LEN, INITIAL_READ_BUFFER_LENGTH, READ_BUFFER_SHRINK_THRESHOLD};
+    use crate::metric::REGISTRY;
     use crate::urpc::frame::{Frame, MessageType};
     use anyhow::Result;
     use bytes::{BufMut, BytesMut};
+    use prometheus::{Encoder, TextEncoder};
     use tokio::io::AsyncWriteExt;
     use tokio::net::{TcpListener, TcpStream};
 
@@ -528,6 +546,28 @@ mod tests {
             other => panic!("unexpected frame: {other:?}"),
         }
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn buffer_capacity_histogram_registered_after_read_frame() -> Result<()> {
+        let payload = vec![3u8; 8 * 1024];
+        let send_frame = build_send_shuffle_data_frame(&payload);
+        let (mut client, server) = connected_streams().await?;
+        client.write_all(&send_frame).await?;
+        drop(client);
+
+        let mut conn = Connection::new(server, false);
+        let _ = conn.read_frame().await?;
+
+        let metric_families = REGISTRY.gather();
+        let mut encoded = Vec::new();
+        TextEncoder::new()
+            .encode(&metric_families, &mut encoded)
+            .expect("encode metrics");
+        let text = String::from_utf8(encoded).expect("utf8 metrics");
+        assert!(text.contains("urpc_connection_buffer_capacity_bytes"));
+        assert!(text.contains("buffer=\"read\""));
         Ok(())
     }
 }
