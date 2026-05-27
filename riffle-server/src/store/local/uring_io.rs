@@ -442,6 +442,7 @@ impl LocalIO for UringIo {
         }
         let file = open_options.open(path)?;
         let raw_fd = file.as_raw_fd();
+        let file_len = file.metadata()?.len();
         let io_uring_offset = match (options.append, options.offset) {
             // For buffered append, io_uring writev should use current file position
             // (same behavior as writev with offset = -1).
@@ -450,8 +451,8 @@ impl LocalIO for UringIo {
             (_, None) => 0,
         };
         let rollback_len = match (options.append, options.offset) {
-            (true, Some(offset)) => offset,
-            (true, None) => file.metadata()?.len(),
+            (true, Some(offset)) => file_len.min(offset),
+            (true, None) => file_len,
             (false, _) => 0,
         };
 
