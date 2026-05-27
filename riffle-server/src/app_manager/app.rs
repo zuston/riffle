@@ -371,18 +371,31 @@ impl App {
         let app_id = &ctx.uid.app_id;
         let shuffle_id = &ctx.uid.shuffle_id;
 
-        // Quickly reassign partitions to another healthy riffle server once unhealthy storage is detected and hard split is enabled.
-        // This behavior depends on the Uniffle client having the partition reassignment mechanism enabled.
-        if self.app_config_options.client_configs.get(&HARD_SPLIT_ENABLED).unwrap_or(false)
-            && !self.store.is_healthy().await? // TODO: If the store is corrupted and only a single replica exists, fail the job fast instead of performing a hard split.
-            && self.app_config_options.client_configs.get(&UNIFFLE_CLIENT_REASSIGN_ENABLED).unwrap_or(false)
-        {
+        let hard_split_enabled = self
+            .app_config_options
+            .client_configs
+            .get(&HARD_SPLIT_ENABLED)
+            .unwrap_or(false);
+        if hard_split_enabled && !self.store.is_healthy().await? {
+            let client_reassign_enabled = self
+                .app_config_options
+                .client_configs
+                .get(&UNIFFLE_CLIENT_REASSIGN_ENABLED)
+                .unwrap_or(false);
+            if client_reassign_enabled {
+                warn!(
+                    "Hard split is activated for [{}] due to the unhealthy storage",
+                    &app_id.to_string()
+                );
+                HARD_SPLIT_COUNTER.inc();
+                return Err(WorkerError::HARD_SPLIT_BY_UNHEALTHY_STORAGE);
+            }
+
             warn!(
-                "Hard split is activated for [{}] due to the unhealthy storage",
+                "Rejecting buffer request for [{}] because storage is unhealthy and client reassignment is disabled",
                 &app_id.to_string()
             );
-            HARD_SPLIT_COUNTER.inc();
-            return Err(WorkerError::HARD_SPLIT_BY_UNHEALTHY_STORAGE);
+            return Err(WorkerError::STORAGE_UNHEALTHY);
         }
 
         let mut partition_split_candidates = HashSet::new();
@@ -630,6 +643,28 @@ mod tests {
             }
             _ => {
                 panic!("Should throw exception")
+            }
+        }
+
+        let mut hmap = HashMap::new();
+        hmap.insert(HARD_SPLIT_ENABLED.get_key(), "true".to_string());
+        let conf = ClientRssConf::from(hmap);
+        let options = AppConfigOptions::new(DataDistribution::NORMAL, 1, None, conf);
+        let app_without_reassign = App::from(
+            app_id.to_string(),
+            options,
+            hybrid_storage.clone(),
+            RuntimeManager::from(Default::default()),
+            &config,
+            &reconf_manager,
+        );
+
+        match runtime.block_on(async { app_without_reassign.require_buffer(ctx.clone()).await }) {
+            Err(WorkerError::STORAGE_UNHEALTHY) => {
+                // pass
+            }
+            _ => {
+                panic!("Should reject buffer request")
             }
         }
 
