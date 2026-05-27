@@ -400,6 +400,24 @@ impl UringIo {
     }
 }
 
+fn rollback_partial_write(
+    file: &std::fs::File,
+    path: &Path,
+    rollback_len: u64,
+    cause: WorkerError,
+) -> WorkerError {
+    if let Err(rollback_err) = file.set_len(rollback_len).and_then(|_| file.sync_all()) {
+        return WorkerError::Other(anyhow!(
+            "io_uring write failed and rollback to {} bytes for {} failed: {}. original error: {}",
+            rollback_len,
+            path.display(),
+            rollback_err,
+            cause
+        ));
+    }
+    cause
+}
+
 #[async_trait::async_trait]
 impl LocalIO for UringIo {
     async fn create(&self, path: &str, options: CreateOptions) -> anyhow::Result<(), WorkerError> {
@@ -430,6 +448,11 @@ impl LocalIO for UringIo {
             (true, None) => u64::MAX,
             (_, Some(offset)) => offset,
             (_, None) => 0,
+        };
+        let rollback_len = match (options.append, options.offset) {
+            (true, Some(offset)) => offset,
+            (true, None) => file.metadata()?.len(),
+            (false, _) => 0,
         };
 
         let mut total_written: usize = 0;
@@ -469,13 +492,15 @@ impl LocalIO for UringIo {
             let written = match rx.await {
                 Ok(res) => res,
                 Err(e) => Err(WorkerError::Other(anyhow::Error::from(e))),
-            }?;
+            }
+            .map_err(|e| rollback_partial_write(&file, path, rollback_len, e))?;
             if written != chunk_bytes {
-                return Err(WorkerError::Other(anyhow!(
+                let err = WorkerError::Other(anyhow!(
                     "Unexpected io write. expected/written: {}/{}",
                     chunk_bytes,
                     written
-                )));
+                ));
+                return Err(rollback_partial_write(&file, path, rollback_len, err));
             }
             total_written += written;
         }
@@ -623,6 +648,7 @@ impl LocalIO for UringIo {
 
 #[cfg(test)]
 pub mod tests {
+    use crate::error::WorkerError;
     use crate::runtime::manager::create_runtime;
     use crate::runtime::RuntimeRef;
     use crate::store::local::read_options::IoMode;
@@ -932,6 +958,78 @@ pub mod tests {
             }
             _ => panic!("Expected direct bytes or raw IO"),
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_uring_writev_rolls_back_completed_chunks_on_later_failure() -> anyhow::Result<()> {
+        use crate::store::local::uring_io::UIO_MAXIOV;
+        use bytes::Bytes;
+        use tempdir::TempDir;
+
+        let temp_dir = TempDir::new("test_writev_partial_failure")?;
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        let file_name = "test_partial_failure";
+        let file_path = temp_dir.path().join(file_name);
+        let prefix = b"existing-data";
+        std::fs::write(&file_path, prefix)?;
+
+        let r_runtime = create_runtime(1, "r");
+        let w_runtime = create_runtime(2, "w");
+        let sync_io_engine =
+            SyncLocalIO::new(&r_runtime, &w_runtime, temp_path.as_str(), None, None);
+
+        let (read_tx, _read_rx) = std::sync::mpsc::sync_channel(1);
+        let (write_tx, write_rx) = std::sync::mpsc::sync_channel(2);
+        let uring_io_engine = super::UringIo {
+            root: temp_path,
+            read_txs: std::sync::Arc::new(vec![read_tx]),
+            write_txs: std::sync::Arc::new(vec![write_tx]),
+            sync_local_io: sync_io_engine,
+        };
+
+        let writer = std::thread::spawn(move || {
+            let first = write_rx.recv().unwrap();
+            let written = unsafe {
+                libc::pwritev(
+                    first.addr.file.0,
+                    first.w_iovecs.as_ptr(),
+                    first.w_iovecs.len() as i32,
+                    first.addr.offset as libc::off_t,
+                )
+            };
+            assert!(
+                written >= 0,
+                "pwritev failed: {}",
+                std::io::Error::last_os_error()
+            );
+            first.tx.send(Ok(written as usize)).unwrap();
+
+            let second = write_rx.recv().unwrap();
+            second
+                .tx
+                .send(Err(WorkerError::RAW_IO_ERR(-libc::ENOSPC)))
+                .unwrap();
+        });
+
+        let num_bufs = UIO_MAXIOV + 1;
+        let mut segments = Vec::with_capacity(num_bufs);
+        for i in 0..num_bufs {
+            segments.push(Bytes::from(vec![(i % 251) as u8 + 1]));
+        }
+        let total_len = segments.iter().map(|b| b.len()).sum::<usize>();
+        let write_options = crate::store::local::options::WriteOptions {
+            append: true,
+            offset: Some(prefix.len() as u64),
+            data: DataBytes::Composed(ComposedBytes::from(segments, total_len)),
+        };
+
+        let result =
+            w_runtime.block_on(async { uring_io_engine.write(file_name, write_options).await });
+        assert!(result.is_err());
+        writer.join().unwrap();
+        assert_eq!(std::fs::read(file_path)?, prefix);
 
         Ok(())
     }
