@@ -29,8 +29,48 @@ use std::sync::Arc;
 use std::time::Instant;
 use std::{fs, io};
 
-static IO_BUFFER_POOL: Lazy<IoBufferPool> =
+pub(crate) static IO_BUFFER_POOL: Lazy<IoBufferPool> =
     Lazy::new(|| IoBufferPool::new(ALIGN * 1024 * 4, 64 * 4));
+
+pub(crate) struct DirectAppendPlan {
+    pub next_offset: u64,
+    pub batch_bytes: Vec<Bytes>,
+    pub total_len: usize,
+}
+
+pub(crate) fn prepare_direct_append(
+    raw_path: &str,
+    written_bytes: usize,
+    raw_data: DataBytes,
+) -> Result<DirectAppendPlan, Error> {
+    let path = Path::new(raw_path);
+    let file_len = match fs::metadata(path) {
+        Ok(metadata) => metadata.len(),
+        Err(_) => 0,
+    };
+    let (next_offset, remain_bytes) = if file_len != written_bytes as u64 {
+        let left = align_down(ALIGN, written_bytes);
+        let remaining_bytes =
+            inner_direct_read(raw_path, left as u64, (written_bytes - left) as u64)?;
+        (left as u64, Some(remaining_bytes))
+    } else {
+        (file_len, None)
+    };
+    let mut batch_bytes = match raw_data {
+        DataBytes::Direct(bytes) => vec![bytes],
+        DataBytes::Composed(composed) => composed.to_vec(),
+        _ => todo!(),
+    };
+    if let Some(remain_bytes) = remain_bytes {
+        batch_bytes.insert(0, remain_bytes);
+    }
+    let total_len = batch_bytes.iter().map(|b| b.len()).sum();
+    Ok(DirectAppendPlan {
+        next_offset,
+        batch_bytes,
+        total_len,
+    })
+}
 
 #[derive(Clone)]
 pub struct SyncLocalIO {
@@ -89,31 +129,11 @@ impl SyncLocalIO {
             .write_runtime_ref
             .spawn_blocking(move || {
                 let path = Path::new(&raw_path);
-                let file_len = match fs::metadata(&path) {
-                    Ok(metadata) => {
-                        let len = metadata.len();
-                        len
-                    }
-                    Err(_) => 0,
-                };
-                let (mut next_offset, remain_bytes) = if file_len != written_bytes as u64 {
-                    let left = align_down(ALIGN, written_bytes);
-                    // todo: will only read 4k, but will use 16M io_buffer, it should be optimized
-                    let remaining_bytes =
-                        inner_direct_read(&raw_path, left as u64, (written_bytes - left) as u64)?;
-                    (left as u64, Some(remaining_bytes))
-                } else {
-                    (file_len, None)
-                };
-                let mut batch_bytes = match raw_data {
-                    DataBytes::Direct(bytes) => vec![bytes],
-                    DataBytes::Composed(composed) => composed.to_vec(),
-                    _ => todo!(),
-                };
-                if let Some(remain_bytes) = remain_bytes {
-                    batch_bytes.insert(0, remain_bytes);
-                }
-                let total_len = batch_bytes.iter().map(|b| b.len()).sum::<usize>();
+                let DirectAppendPlan {
+                    next_offset,
+                    batch_bytes,
+                    total_len,
+                } = prepare_direct_append(&raw_path, written_bytes, raw_data)?;
 
                 let mut opts = OpenOptions::new();
                 opts.create(true).write(true);
