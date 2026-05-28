@@ -16,20 +16,26 @@ use crate::error::WorkerError;
 use crate::metric::TOTAL_URING_SPLICE;
 use crate::raw_pipe::RawPipe;
 use crate::store::local::options::{CreateOptions, WriteOptions};
+use crate::bits::align_up;
+use crate::store::alignment::ALIGN;
 use crate::store::local::read_options::{IoMode, ReadOptions, ReadRange};
-use crate::store::local::sync_io::SyncLocalIO;
+use crate::store::local::sync_io::{
+    prepare_direct_append, DirectAppendPlan, SyncLocalIO, IO_BUFFER_POOL,
+};
 use crate::store::local::{FileStat, LocalIO};
 use crate::store::DataBytes;
 use anyhow::anyhow;
-use bytes::BytesMut;
-use clap::builder::Str;
+use bytes::{Bytes, BytesMut};
 use core_affinity::CoreId;
+use log::debug;
 use io_uring::types::Fd;
 use io_uring::{opcode, squeue, IoUring};
 use libc::{fcntl, iovec, F_SETPIPE_SZ};
 use std::fs::OpenOptions;
-use std::io::{Bytes, IoSlice};
+use std::fs::File;
 use std::os::fd::{AsRawFd, FromRawFd};
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::thread::sleep;
 use std::time::Duration;
@@ -229,6 +235,8 @@ impl UringIoEngineBuilder {
 enum UringIoType {
     Read,
     WriteV,
+    /// Single aligned write for O_DIRECT append.
+    Write,
     // data zero-copy to socket for read
     Splice,
 }
@@ -344,6 +352,12 @@ impl UringIoEngineShard {
                         .build()
                         .into()
                     }
+                    UringIoType::Write => {
+                        self.write_inflight += 1;
+                        opcode::Write::new(fd, ctx.r_bufs[0].ptr, ctx.r_bufs[0].len as _)
+                            .offset(ctx.addr.offset)
+                            .build()
+                    }
                     UringIoType::Splice => {
                         self.read_inflight += 1;
                         let pipe = ctx.splice_pipe.as_ref().unwrap();
@@ -369,7 +383,7 @@ impl UringIoEngineShard {
 
                 match ctx.io_type {
                     UringIoType::Read => self.read_inflight -= 1,
-                    UringIoType::WriteV => self.write_inflight -= 1,
+                    UringIoType::WriteV | UringIoType::Write => self.write_inflight -= 1,
                     UringIoType::Splice => self.read_inflight -= 1,
                 }
 
@@ -398,6 +412,159 @@ impl UringIo {
     fn with_root(&self, path: &str) -> String {
         format!("{}/{}", self.root, path)
     }
+
+    async fn uring_write_at(
+        &self,
+        raw_fd: i32,
+        buf_addr: usize,
+        len: usize,
+        offset: u64,
+    ) -> anyhow::Result<usize, WorkerError> {
+        let (tx, rx) = oneshot::channel();
+        let shard = &self.write_txs[(offset as usize + len) % self.write_txs.len()];
+
+        let ctx = UringIoCtx {
+            tx,
+            io_type: UringIoType::Write,
+            addr: RawFileAddress {
+                file: RawFile(raw_fd),
+                offset,
+            },
+            w_bufs: vec![],
+            w_iovecs: vec![],
+            r_bufs: vec![RawBuf {
+                ptr: buf_addr as *mut u8,
+                len,
+            }],
+            splice_pipe: None,
+        };
+
+        let _ = shard.send(ctx);
+        match rx.await {
+            Ok(res) => res,
+            Err(e) => Err(WorkerError::Other(anyhow::Error::from(e))),
+        }
+    }
+
+    async fn fill_buffer_and_uring_write(
+        &self,
+        raw_fd: i32,
+        io_buffer: &mut [u8],
+        buffer_size: usize,
+        chained_bytes: Vec<Bytes>,
+        offset: usize,
+    ) -> anyhow::Result<usize, WorkerError> {
+        let mut next_offset = offset;
+        let mut written_len = 0;
+        let mut buffer_len = 0;
+
+        for bytes in chained_bytes {
+            let mut bytes_offset = 0;
+            while bytes_offset < bytes.len() {
+                let remaining_bytes = bytes.len() - bytes_offset;
+                let available_space = buffer_size - buffer_len;
+
+                let copy_length = remaining_bytes.min(available_space);
+                io_buffer[buffer_len..(buffer_len + copy_length)]
+                    .copy_from_slice(&bytes[bytes_offset..bytes_offset + copy_length]);
+                buffer_len += copy_length;
+                bytes_offset += copy_length;
+
+                if buffer_len == buffer_size {
+                    debug!(
+                        "Buffer filled with length: {}. next_offset: {}",
+                        buffer_len, next_offset
+                    );
+                    let written = self
+                        .uring_write_at(
+                            raw_fd,
+                            io_buffer.as_ptr() as usize,
+                            buffer_len,
+                            next_offset as u64,
+                        )
+                        .await?;
+                    if written != buffer_len {
+                        return Err(WorkerError::Other(anyhow!(
+                            "Unexpected direct io write. expected/written: {}/{}",
+                            buffer_len,
+                            written
+                        )));
+                    }
+                    next_offset += buffer_len;
+                    written_len += buffer_len;
+                    buffer_len = 0;
+                }
+            }
+        }
+
+        written_len += buffer_len;
+        if buffer_len > 0 {
+            let up = align_up(ALIGN, buffer_len);
+            let written = self
+                .uring_write_at(raw_fd, io_buffer.as_ptr() as usize, up, next_offset as u64)
+                .await?;
+            if written != up {
+                return Err(WorkerError::Other(anyhow!(
+                    "Unexpected direct io tail write. expected/written: {}/{}",
+                    up,
+                    written
+                )));
+            }
+            debug!(
+                "Buffer partially filled with length: {}. next_offset: {}",
+                buffer_len, next_offset
+            );
+        }
+        Ok(written_len)
+    }
+
+    async fn append_with_direct_io(
+        &self,
+        path: &str,
+        written_bytes: usize,
+        raw_data: DataBytes,
+    ) -> anyhow::Result<(), WorkerError> {
+        let raw_path = self.with_root(path);
+        let DirectAppendPlan {
+            next_offset,
+            batch_bytes,
+            total_len,
+        } = prepare_direct_append(&raw_path, written_bytes, raw_data)
+            .map_err(|e| WorkerError::Other(anyhow!(e)))?;
+
+        let path = Path::new(&raw_path);
+        let mut opts = OpenOptions::new();
+        opts.create(true).write(true);
+        #[cfg(target_os = "linux")]
+        {
+            opts.custom_flags(libc::O_DIRECT | libc::O_NOATIME);
+        }
+        let file = opts
+            .open(path)
+            .map_err(|e| WorkerError::Other(anyhow!(e)))?;
+        let raw_fd = file.as_raw_fd();
+
+        let mut io_buffer = IO_BUFFER_POOL.acquire();
+        let written = self
+            .fill_buffer_and_uring_write(
+                raw_fd,
+                &mut io_buffer,
+                IO_BUFFER_POOL.buffer_size(),
+                batch_bytes,
+                next_offset as usize,
+            )
+            .await?;
+        if written != total_len {
+            return Err(WorkerError::Other(anyhow!(
+                "Errors on direct appending. expected: {}, actual: {}",
+                total_len,
+                written
+            )));
+        }
+        file.sync_all()
+            .map_err(|e| WorkerError::Other(anyhow!(e)))?;
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -407,6 +574,13 @@ impl LocalIO for UringIo {
     }
 
     async fn write(&self, path: &str, options: WriteOptions) -> anyhow::Result<(), WorkerError> {
+        if options.is_append() && options.is_direct_io() {
+            let written_bytes = options.offset.unwrap() as usize;
+            return self
+                .append_with_direct_io(path, written_bytes, options.data)
+                .await;
+        }
+
         let byte_size = options.data.len();
         let bufs = options.data.always_bytes();
 
@@ -677,7 +851,7 @@ pub mod tests {
         let write_data_3 = b"hello world";
         let write_options = crate::store::local::options::WriteOptions {
             append: true,
-            offset: Some(write_data_1.len() as _),
+            offset: None,
             data: DataBytes::Composed(ComposedBytes::from(
                 vec![
                     Bytes::from(&write_data_2[..]),
@@ -836,6 +1010,7 @@ pub mod tests {
         let uring_io_engine = UringIoEngineBuilder::new().build(sync_io_engine)?;
         // 1. write
         println!("writing...");
+        let content_len = content.len();
         let write_options = crate::store::local::options::WriteOptions {
             append: true,
             offset: Some(0),
@@ -852,7 +1027,7 @@ pub mod tests {
         let read_options = crate::store::local::read_options::ReadOptions {
             io_mode: IoMode::SPLICE,
             task_id: 0,
-            read_range: crate::store::local::read_options::ReadRange::ALL,
+            read_range: crate::store::local::read_options::ReadRange::RANGE(0, content_len as u64),
             ahead_options: None,
         };
         let result = r_runtime.block_on(async {
@@ -905,11 +1080,11 @@ pub mod tests {
                 .unwrap();
         });
 
-        // read back and verify
+        // read back and verify (logical length, not alignment-padded file size)
         let read_options = crate::store::local::read_options::ReadOptions {
             io_mode: IoMode::SENDFILE,
             task_id: 0,
-            read_range: crate::store::local::read_options::ReadRange::ALL,
+            read_range: crate::store::local::read_options::ReadRange::RANGE(0, total_len as u64),
             ahead_options: None,
         };
 
@@ -932,6 +1107,109 @@ pub mod tests {
             }
             _ => panic!("Expected direct bytes or raw IO"),
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_uring_direct_io_append() -> anyhow::Result<()> {
+        use crate::bits::align_up;
+        use crate::store::alignment::ALIGN;
+        use crate::store::local::options::WriteOptions;
+        use crate::store::local::read_options::ReadRange;
+        use bytes::{BufMut, Bytes, BytesMut};
+        use std::fs;
+        use tempdir::TempDir;
+
+        let temp_dir = TempDir::new("test_uring_direct_io")?;
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+
+        let r_runtime = create_runtime(1, "r");
+        let w_runtime = create_runtime(2, "w");
+
+        let sync_io_engine =
+            SyncLocalIO::new(&r_runtime, &w_runtime, temp_path.as_str(), None, None);
+        let uring_io_engine = UringIoEngineBuilder::new().build(sync_io_engine)?;
+
+        let data_file_name = "1.data";
+        let mut written_data = BytesMut::new();
+        written_data.extend_from_slice(&vec![b'x'; 3]);
+        written_data.extend_from_slice(&vec![b'y'; 2]);
+        written_data.extend_from_slice(&vec![b'z'; 5]);
+        let written_data = written_data.freeze();
+
+        w_runtime.block_on(async {
+            uring_io_engine
+                .write(
+                    data_file_name,
+                    WriteOptions::with_append_of_direct_io(written_data.clone().into(), 0),
+                )
+                .await
+                .unwrap();
+            uring_io_engine
+                .write(
+                    data_file_name,
+                    WriteOptions::with_append_of_direct_io(written_data.clone().into(), 10),
+                )
+                .await
+                .unwrap();
+            uring_io_engine
+                .write(
+                    data_file_name,
+                    WriteOptions::with_append_of_direct_io(
+                        Bytes::from(vec![b'a'; 4096 + 10]).into(),
+                        20,
+                    ),
+                )
+                .await
+                .unwrap();
+        });
+
+        let read_options = crate::store::local::read_options::ReadOptions::default()
+            .with_read_range(ReadRange::RANGE(3, 3))
+            .with_io_mode(IoMode::DIRECT_IO);
+        let data_1 = r_runtime
+            .block_on(async {
+                uring_io_engine
+                    .read(data_file_name, read_options)
+                    .await
+                    .unwrap()
+            })
+            .freeze();
+        assert_eq!(vec![b'y', b'y', b'z'], data_1);
+
+        let read_options = crate::store::local::read_options::ReadOptions::default()
+            .with_io_mode(IoMode::DIRECT_IO)
+            .with_read_range(ReadRange::RANGE(11, 4));
+        let data_2 = r_runtime
+            .block_on(async {
+                uring_io_engine
+                    .read(data_file_name, read_options)
+                    .await
+                    .unwrap()
+            })
+            .freeze();
+        assert_eq!(vec![b'x', b'x', b'y', b'y'], data_2);
+
+        let read_options = crate::store::local::read_options::ReadOptions::default()
+            .with_io_mode(IoMode::DIRECT_IO)
+            .with_read_range(ReadRange::RANGE(19, 2));
+        let data_3 = r_runtime
+            .block_on(async {
+                uring_io_engine
+                    .read(data_file_name, read_options)
+                    .await
+                    .unwrap()
+            })
+            .freeze();
+        assert_eq!(vec![b'z', b'a'], data_3);
+
+        assert_eq!(
+            align_up(ALIGN, 10 + 10 + 4096 + 10) as u64,
+            fs::metadata(format!("{}/{}", &temp_path, &data_file_name))
+                .unwrap()
+                .len()
+        );
 
         Ok(())
     }
