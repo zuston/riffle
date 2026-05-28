@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::bits::align_up;
 use crate::error::WorkerError;
 use crate::metric::TOTAL_URING_SPLICE;
 use crate::raw_pipe::RawPipe;
-use crate::store::local::options::{CreateOptions, WriteOptions};
-use crate::bits::align_up;
 use crate::store::alignment::ALIGN;
+use crate::store::local::options::{CreateOptions, WriteOptions};
 use crate::store::local::read_options::{IoMode, ReadOptions, ReadRange};
 use crate::store::local::sync_io::{
     prepare_direct_append, DirectAppendPlan, SyncLocalIO, IO_BUFFER_POOL,
@@ -27,12 +27,12 @@ use crate::store::DataBytes;
 use anyhow::anyhow;
 use bytes::{Bytes, BytesMut};
 use core_affinity::CoreId;
-use log::debug;
 use io_uring::types::Fd;
 use io_uring::{opcode, squeue, IoUring};
 use libc::{fcntl, iovec, F_SETPIPE_SZ};
-use std::fs::OpenOptions;
+use log::debug;
 use std::fs::File;
+use std::fs::OpenOptions;
 use std::os::fd::{AsRawFd, FromRawFd};
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::OpenOptionsExt;
