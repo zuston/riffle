@@ -32,6 +32,7 @@ use std::{fs, io};
 pub(crate) static IO_BUFFER_POOL: Lazy<IoBufferPool> =
     Lazy::new(|| IoBufferPool::new(ALIGN * 1024 * 4, 64 * 4));
 
+#[derive(Debug)]
 pub(crate) struct DirectAppendPlan {
     pub next_offset: u64,
     pub batch_bytes: Vec<Bytes>,

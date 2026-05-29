@@ -781,7 +781,7 @@ mod test {
     use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::purge_event::PurgeReason;
     use crate::error::WorkerError;
-    use crate::store::index_codec::{IndexBlock, IndexCodec};
+    use crate::store::index_codec::{IndexBlock, IndexCodec, INDEX_BLOCK_SIZE};
     use crate::store::local::LocalDiskStorage;
     use crate::store::{Block, ResponseData, ResponseDataIndex, Store};
     use bytes::{Buf, Bytes, BytesMut};
