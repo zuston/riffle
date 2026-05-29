@@ -264,14 +264,12 @@ fn main() -> anyhow::Result<()> {
             }
             Box::new(NodeUpdateAction::new(instance, status, tags))
         }
-        Commands::Add { instance, tag } => Box::new(TagAction::new(
-            instance,
-            TagOperation::Add(tag),
-        )),
-        Commands::Delete { instance, tag } => Box::new(TagAction::new(
-            instance,
-            TagOperation::Delete(tag),
-        )),
+        Commands::Add { instance, tag } => {
+            Box::new(TagAction::new(instance, TagOperation::Add(tag)))
+        }
+        Commands::Delete { instance, tag } => {
+            Box::new(TagAction::new(instance, TagOperation::Delete(tag)))
+        }
         Commands::Kill {
             force,
             instance,
