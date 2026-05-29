@@ -48,6 +48,15 @@ pub(crate) fn prepare_direct_append(
         Ok(metadata) => metadata.len(),
         Err(_) => 0,
     };
+    if written_bytes == 0 && file_len > 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!(
+                "Refuse to direct-append at offset 0 to non-empty file: {}, len: {}",
+                raw_path, file_len
+            ),
+        ));
+    }
     let (next_offset, remain_bytes) = if file_len != written_bytes as u64 {
         let left = align_down(ALIGN, written_bytes);
         let remaining_bytes =
@@ -535,7 +544,9 @@ mod test {
     use crate::store::alignment::io_bytes::IoBuffer;
     use crate::store::local::options::WriteOptions;
     use crate::store::local::read_options::{IoMode, ReadOptions, ReadRange};
-    use crate::store::local::sync_io::{fill_buffer_and_write, SyncLocalIO, ALIGN};
+    use crate::store::local::sync_io::{
+        fill_buffer_and_write, prepare_direct_append, SyncLocalIO, ALIGN,
+    };
     use crate::store::local::LocalIO;
     use bytes::{Bytes, BytesMut};
     use std::fs;
@@ -764,6 +775,20 @@ mod test {
                 .unwrap()
                 .len()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_direct_append_rejects_zero_offset_for_non_empty_file() -> anyhow::Result<()> {
+        let temp_dir = tempdir::TempDir::new("test_direct_append_rejects_zero_offset")?;
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        let file_path = format!("{}/{}", &temp_path, "1.data");
+        fs::write(&file_path, vec![b'x'; ALIGN])?;
+
+        let err = prepare_direct_append(&file_path, 0, Bytes::from(vec![b'y'; 1]).into())
+            .expect_err("zero-offset direct append to a non-empty file must fail");
+        assert_eq!(std::io::ErrorKind::AlreadyExists, err.kind());
 
         Ok(())
     }

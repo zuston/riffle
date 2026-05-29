@@ -40,7 +40,7 @@ use std::ops::Deref;
 use std::path::Path;
 use std::str::FromStr;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -64,6 +64,7 @@ use crate::util::get_crc;
 use dashmap::mapref::entry::Entry;
 use futures::AsyncReadExt;
 use fxhash::FxHasher;
+use std::io::{Read, Seek, SeekFrom};
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -82,6 +83,16 @@ impl From<LocalDiskDelegator> for PartitionCoordinator {
         Self {
             disk: value,
             pointer: Default::default(),
+            write_lock: Arc::new(Default::default()),
+        }
+    }
+}
+
+impl PartitionCoordinator {
+    fn new(disk: LocalDiskDelegator, pointer: u64) -> Self {
+        Self {
+            disk,
+            pointer: Arc::new(AtomicU64::new(pointer)),
             write_lock: Arc::new(Default::default()),
         }
     }
@@ -262,7 +273,9 @@ impl LocalFileStore {
             Entry::Vacant(e) => {
                 parent_dir_is_created = false;
                 let disk = self.select_disk(&uid)?;
-                let obj = e.insert_entry(Arc::new(PartitionCoordinator::from(disk)));
+                let pointer =
+                    Self::recover_partition_pointer(&disk, &data_file_path, &index_file_path)?;
+                let obj = e.insert_entry(Arc::new(PartitionCoordinator::new(disk, pointer)));
                 obj.get().clone()
             }
             Entry::Occupied(v) => v.get().clone(),
@@ -416,6 +429,84 @@ impl LocalFileStore {
         LOCALFILE_GET_DATA_RPC_SIZE_HISTOGRAM
             .with_label_values(&[bucket])
             .observe(size as f64);
+    }
+
+    fn metadata_len_if_exists(path: &str) -> Result<Option<u64>, WorkerError> {
+        match fs::metadata(path) {
+            Ok(metadata) => Ok(Some(metadata.len())),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    fn recover_partition_pointer(
+        local_disk: &LocalDiskDelegator,
+        data_file_path: &str,
+        index_file_path: &str,
+    ) -> Result<u64, WorkerError> {
+        let root = local_disk.root();
+        let raw_data_file_path = format!("{}/{}", root, data_file_path);
+        let raw_index_file_path = format!("{}/{}", root, index_file_path);
+
+        let data_file_len = Self::metadata_len_if_exists(&raw_data_file_path)?.unwrap_or(0);
+        let Some(index_file_len) = Self::metadata_len_if_exists(&raw_index_file_path)? else {
+            if data_file_len > 0 {
+                return Err(WorkerError::Other(anyhow!(
+                    "Refuse to append to non-empty data file without index. data path: {}, len: {}",
+                    raw_data_file_path,
+                    data_file_len
+                )));
+            }
+            return Ok(0);
+        };
+
+        if index_file_len == 0 {
+            if data_file_len > 0 {
+                return Err(WorkerError::Other(anyhow!(
+                    "Refuse to append to non-empty data file with empty index. data path: {}, len: {}",
+                    raw_data_file_path,
+                    data_file_len
+                )));
+            }
+            return Ok(0);
+        }
+
+        if index_file_len % INDEX_BLOCK_SIZE as u64 != 0 {
+            return Err(WorkerError::Other(anyhow!(
+                "Index file length is not aligned to index block size. index path: {}, len: {}",
+                raw_index_file_path,
+                index_file_len
+            )));
+        }
+
+        let mut index_file = fs::File::open(&raw_index_file_path)?;
+        index_file.seek(SeekFrom::Start(index_file_len - INDEX_BLOCK_SIZE as u64))?;
+        let mut last_index_block = vec![0; INDEX_BLOCK_SIZE];
+        index_file.read_exact(&mut last_index_block)?;
+        let last_index_block = IndexCodec::decode(Bytes::from(last_index_block))?;
+        let logical_len = last_index_block
+            .offset
+            .checked_add(last_index_block.length as i64)
+            .filter(|len| *len >= 0)
+            .ok_or_else(|| {
+                WorkerError::Other(anyhow!(
+                    "Recovered invalid logical data length from index. index path: {}, offset: {}, length: {}",
+                    raw_index_file_path,
+                    last_index_block.offset,
+                    last_index_block.length
+                ))
+            })? as u64;
+
+        if data_file_len < logical_len {
+            return Err(WorkerError::Other(anyhow!(
+                "Data file is shorter than recovered logical length. data path: {}, data len: {}, logical len: {}",
+                raw_data_file_path,
+                data_file_len,
+                logical_len
+            )));
+        }
+
+        Ok(logical_len)
     }
 }
 
@@ -682,6 +773,8 @@ mod test {
         PurgeDataContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext, RpcType,
         WritingViewContext,
     };
+    use crate::config::LocalfileStoreConfig;
+    use crate::runtime::manager::RuntimeManager;
     use crate::store::localfile::LocalFileStore;
 
     use crate::app_manager::application_identifier::ApplicationId;
@@ -880,6 +973,41 @@ mod test {
             false,
             runtime.wait(tokio::fs::try_exists(format!("{}/{}", &temp_path, &app_id)))?
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn direct_append_recovers_pointer_after_store_recreation() -> anyhow::Result<()> {
+        let temp_dir =
+            tempdir::TempDir::new("direct_append_recovers_pointer_after_store_recreation")?;
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        let config = LocalfileStoreConfig::new(vec![temp_path]);
+        let runtime_manager = RuntimeManager::default();
+        let runtime = runtime_manager.clone();
+        let uid = PartitionUId::new(&Default::default(), 0, 0);
+        let block_len = b"hello world!hello china!".len();
+
+        let local_store = LocalFileStore::from(config.clone(), runtime_manager.clone());
+        runtime.wait(local_store.insert(create_writing_ctx_by_uid(&uid)))?;
+
+        let recovered_store = LocalFileStore::from(config, runtime_manager);
+        runtime.wait(recovered_store.insert(create_writing_ctx_by_uid(&uid)))?;
+
+        let reading_index_view_ctx = ReadingIndexViewContext {
+            partition_id: uid.clone(),
+        };
+        let result = runtime.wait(recovered_store.get_index(reading_index_view_ctx))?;
+        let ResponseDataIndex::Local(data) = result;
+        assert_eq!((block_len * 4) as i64, data.data_file_len);
+
+        let mut index = data.index_data.freeze();
+        assert_eq!(INDEX_BLOCK_SIZE * 4, index.len());
+        for expected_offset in [0, block_len, block_len * 2, block_len * 3] {
+            assert_eq!(expected_offset as i64, index.get_i64());
+            assert_eq!(block_len as i32, index.get_i32());
+            index.advance(INDEX_BLOCK_SIZE - 12);
+        }
 
         Ok(())
     }
