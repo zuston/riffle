@@ -281,8 +281,11 @@ capacity = 1G
 ## Cluster Inspection and Maintenance with SQL
 
 Riffle provides an elegant way to inspect and maintain your clusters directly from the command line using riffle-ctl.
-You can execute SQL queries against the coordinator to retrieve information about active or historical applications, 
-or even decommission specific servers based on your criteria.
+You can execute SQL queries against the coordinator to retrieve information about active or historical applications,
+update server status, or manage server tags based on your criteria.
+
+When `--instance` is omitted, `update`, `add`, and `delete` run in pipeline mode: they read JSON lines from stdin
+(each line must contain `ip` and `http_port`), which works naturally with `query -p`.
 
 ### Query Applications
 ```shell
@@ -290,7 +293,48 @@ or even decommission specific servers based on your criteria.
 ./riffle-ctl query --coordinator http://xxxx:21001 --sql "select * from historical_apps"
 ```
 
-### Identify and Decommission Servers
+### Update Server Status
+
+Single instance:
+
+```shell
+./riffle-ctl update -i 192.168.1.1:19998 --status unhealthy
+```
+
+Pipeline mode (batch update by SQL filter):
+
 ```shell
 ./riffle-ctl query -c http://xx:21001 -s "select * from instances where tags like '%sata%'" -p | ./riffle-ctl update --status unhealthy
+```
+
+### Manage Tags
+
+Tags can be updated at runtime via the admin HTTP API. Built-in tags (such as `ss_v4`, `ss_v5`, `GRPC`) are always
+retained and cannot be removed.
+
+Replace tags on a single instance:
+
+```shell
+./riffle-ctl update -i 192.168.1.1:19998 --tags a1,a2
+```
+
+Add or delete a tag on a single instance:
+
+```shell
+./riffle-ctl add -i 192.168.1.1:19998 --tag a1
+./riffle-ctl delete -i 192.168.1.1:19998 --tag a1
+```
+
+Pipeline mode (batch tag operations):
+
+```shell
+./riffle-ctl query -c http://xx:21001 -s "select * from instances where tags like '%sata%'" -p | ./riffle-ctl update --tags a1,a2
+./riffle-ctl query -c http://xx:21001 -s "select * from instances where tags like '%sata%'" -p | ./riffle-ctl add --tag new_label
+./riffle-ctl query -c http://xx:21001 -s "select * from instances where tags like '%sata%'" -p | ./riffle-ctl delete --tag old_label
+```
+
+Status and tags can also be updated together:
+
+```shell
+./riffle-ctl update -i 192.168.1.1:19998 --status unhealthy --tags a1,a2
 ```

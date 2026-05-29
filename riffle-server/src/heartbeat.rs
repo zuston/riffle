@@ -8,16 +8,11 @@ use crate::health_service::HealthService;
 use crate::metric::SERVICE_IS_HEALTHY;
 use crate::runtime::manager::RuntimeManager;
 use crate::server_state_manager::ServerStateManager;
+use crate::service_tags_manager::SERVICE_TAGS_MANAGER_REF;
 use await_tree::InstrumentAwait;
 use log::{error, info};
-use std::collections::HashSet;
 use std::time::Duration;
 use tonic::transport::{Channel, Error};
-
-const LEGACY_VERSION_TAG: &str = "ss_v4";
-const VERSION_TAG: &str = "ss_v5";
-const GRPC_TAG: &str = "GRPC";
-const URPC_TAG: &str = "GRPC_NETTY";
 
 pub struct HeartbeatTask;
 
@@ -35,7 +30,6 @@ impl HeartbeatTask {
         let server_state_manager = server_state_manager.clone();
 
         let coordinator_quorum = config.coordinator_quorum.clone();
-        let specified_tags = config.tags.clone().unwrap_or(vec![]);
 
         let grpc_port = config.grpc_port;
         let urpc_port = config.urpc_port.unwrap_or(0);
@@ -76,16 +70,10 @@ impl HeartbeatTask {
             panic!("No active coordinator server found");
         }
 
-        // Initialize service tags
-        let mut service_tags = HashSet::new();
-        service_tags.insert(String::from(LEGACY_VERSION_TAG));
-        service_tags.insert(String::from(VERSION_TAG));
-        service_tags.insert(String::from(GRPC_TAG));
-        if urpc_port > 0 {
-            service_tags.insert(String::from(URPC_TAG));
-        }
-        service_tags.extend(specified_tags);
-        info!("Service tags: {:?}", &service_tags);
+        let service_tags_manager = SERVICE_TAGS_MANAGER_REF
+            .get()
+            .expect("ServiceTagsManager must be initialized before heartbeat task");
+        info!("Service tags: {:?}", service_tags_manager.all_tags());
 
         runtime_manager.default_runtime.spawn_with_await_tree(
             "Heartbeat task with multi coordinators",
@@ -119,7 +107,7 @@ impl HeartbeatTask {
                         pre_allocated_memory: memory_snapshot.allocated(),
                         available_memory: memory_snapshot.available(),
                         event_num_in_flush: memory_spill_event_num,
-                        tags: service_tags.iter().cloned().collect(),
+                        tags: service_tags_manager.all_tags(),
                         is_healthy: Some(healthy),
                         status: server_state.into(),
                         storage_info: Default::default(),

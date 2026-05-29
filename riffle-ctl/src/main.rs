@@ -12,6 +12,7 @@ use crate::actions::hdfs_append::HdfsAppendAction;
 use crate::actions::kill_action::KillAction;
 use crate::actions::postgres_server::PostgresServerAction;
 use crate::actions::query::{OutputFormat, QueryAction};
+use crate::actions::tag_action::{TagAction, TagOperation};
 use crate::actions::update_action::NodeUpdateAction;
 use crate::actions::{Action, ValidateAction};
 use clap::{Parser, Subcommand};
@@ -108,13 +109,29 @@ enum Commands {
         pipeline: bool,
     },
     #[command(
-        about = "Update server status to make it decommission/unhealthy (pipeline mode supported)"
+        about = "Update server status or tags to make it decommission/unhealthy (pipeline mode supported)"
     )]
     Update {
         #[arg(short, long)]
         instance: Option<String>,
         #[arg(short, long)]
-        status: ServerState,
+        status: Option<ServerState>,
+        #[arg(long, value_delimiter = ',')]
+        tags: Option<Vec<String>>,
+    },
+    #[command(about = "Add a tag to riffle server (pipeline mode supported)")]
+    Add {
+        #[arg(short, long)]
+        instance: Option<String>,
+        #[arg(long)]
+        tag: String,
+    },
+    #[command(about = "Delete a tag from riffle server (pipeline mode supported)")]
+    Delete {
+        #[arg(short, long)]
+        instance: Option<String>,
+        #[arg(long)]
+        tag: String,
     },
     #[command(about = "Kill riffle server")]
     Kill {
@@ -237,7 +254,24 @@ fn main() -> anyhow::Result<()> {
             Box::new(QueryAction::new(sql, table_format, coordinator_http_url))
         }
 
-        Commands::Update { instance, status } => Box::new(NodeUpdateAction::new(instance, status)),
+        Commands::Update {
+            instance,
+            status,
+            tags,
+        } => {
+            if status.is_none() && tags.is_none() {
+                panic!("Either --status or --tags must be specified for update command");
+            }
+            Box::new(NodeUpdateAction::new(instance, status, tags))
+        }
+        Commands::Add { instance, tag } => Box::new(TagAction::new(
+            instance,
+            TagOperation::Add(tag),
+        )),
+        Commands::Delete { instance, tag } => Box::new(TagAction::new(
+            instance,
+            TagOperation::Delete(tag),
+        )),
         Commands::Kill {
             force,
             instance,
