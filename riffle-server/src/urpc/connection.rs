@@ -111,7 +111,9 @@ impl Connection {
         }
 
         while self.read_buf.len() < expected_len {
-            self.read_more_into_buffer().await?;
+            if self.read_more_into_buffer().await? == 0 {
+                return Err(WorkerError::STREAM_ABNORMAL);
+            }
         }
         Ok(())
     }
@@ -547,6 +549,28 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn streaming_parse_returns_error_when_peer_closes_mid_frame() -> Result<()> {
+        let mut frame_header = BytesMut::with_capacity(HEADER_LEN);
+        frame_header.put_i32(0);
+        frame_header.put_u8(MessageType::SendShuffleData as u8);
+        frame_header.put_i32(8);
+
+        let (mut client, server) = connected_streams().await?;
+        client.write_all(&frame_header).await?;
+        drop(client);
+
+        let mut conn = Connection::new(server, true);
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(200), conn.read_frame()).await;
+
+        match result {
+            Ok(Err(crate::error::WorkerError::STREAM_ABNORMAL)) => Ok(()),
+            Ok(other) => panic!("unexpected read result: {other:?}"),
+            Err(_) => panic!("streaming parser hung after peer closed mid-frame"),
+        }
     }
 
     #[tokio::test]
