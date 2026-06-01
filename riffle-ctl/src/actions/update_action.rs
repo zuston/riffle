@@ -2,24 +2,25 @@ use crate::actions::kill_action::{
     read_batch_items, run_batch_action, BatchActionItem, KillTarget,
 };
 use crate::actions::Action;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use riffle_server::grpc::protobuf::uniffle::shuffle_server_internal_client::ShuffleServerInternalClient;
-use riffle_server::grpc::protobuf::uniffle::{CancelDecommissionRequest, DecommissionRequest};
 use riffle_server::server_state_manager::ServerState;
 use serde::{Deserialize, Serialize};
-use std::io;
-use std::str::FromStr;
 
 pub struct NodeUpdateAction {
     ip_and_port: Option<String>,
-    target_status: ServerState,
+    target_status: Option<ServerState>,
+    target_tags: Option<Vec<String>>,
 }
 
 impl NodeUpdateAction {
-    pub fn new(instance: Option<String>, target_status: ServerState) -> Self {
+    pub fn new(
+        instance: Option<String>,
+        target_status: Option<ServerState>,
+        target_tags: Option<Vec<String>>,
+    ) -> Self {
         Self {
             ip_and_port: instance,
             target_status,
+            target_tags,
         }
     }
 }
@@ -44,24 +45,32 @@ impl From<Vec<&str>> for NodeUpdateInfo {
     }
 }
 
-async fn update_remote_server_status(
+async fn update_remote_server(
     update_info: &NodeUpdateInfo,
-    target_status: ServerState,
+    target_status: Option<ServerState>,
+    target_tags: Option<Vec<String>>,
 ) -> anyhow::Result<()> {
-    let ip = update_info.ip.clone();
-    let http_port = update_info.http_port;
-    let grpc_port = update_info.grpc_port;
+    let mut query_parts = vec![];
+    if let Some(status) = target_status {
+        query_parts.push(format!("update_state={}", status));
+    }
+    if let Some(tags) = target_tags {
+        query_parts.push(format!("update_tags={}", tags.join(",")));
+    }
+    if query_parts.is_empty() {
+        return Err(anyhow::anyhow!("No update operation specified"));
+    }
 
     let url = format!(
-        "http://{}:{}/admin?update_state={}",
-        ip.as_str(),
-        http_port,
-        target_status
+        "http://{}:{}/admin?{}",
+        update_info.ip.as_str(),
+        update_info.http_port,
+        query_parts.join("&")
     );
     let resp = reqwest::get(url).await?;
     if !resp.status().is_success() {
         Err(anyhow::anyhow!(
-            "Failed to update remote server status: {}",
+            "Failed to update remote server: {}",
             resp.text().await?
         ))
     } else {
@@ -80,9 +89,12 @@ impl Action for NodeUpdateAction {
     async fn act(&self) -> anyhow::Result<()> {
         if self.ip_and_port.is_none() {
             let items = read_batch_items::<NodeUpdateInfo>()?;
-            run_batch_action("Kill", items, |item| {
-                let status = self.target_status.clone();
-                async move { update_remote_server_status(&item, status).await }
+            let status = self.target_status.clone();
+            let tags = self.target_tags.clone();
+            run_batch_action("Update", items, |item| {
+                let status = status.clone();
+                let tags = tags.clone();
+                async move { update_remote_server(&item, status, tags).await }
             })
             .await?;
             return Ok(());
@@ -93,8 +105,12 @@ impl Action for NodeUpdateAction {
         if splits.len() != 2 {
             panic!("Illegal [id:http_port]={:?}", self.ip_and_port);
         }
-        update_remote_server_status(&NodeUpdateInfo::from(splits), self.target_status.clone())
-            .await?;
+        update_remote_server(
+            &NodeUpdateInfo::from(splits),
+            self.target_status.clone(),
+            self.target_tags.clone(),
+        )
+        .await?;
 
         Ok(())
     }
