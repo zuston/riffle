@@ -41,6 +41,7 @@ use crate::panic_hook::set_panic_hook;
 use crate::rpc::DefaultRpcService;
 use crate::runtime::manager::RuntimeManager;
 use crate::server_state_manager::{ServerStateManager, SERVER_STATE_MANAGER_REF};
+use crate::service_tags_manager::{ServiceTagsManager, SERVICE_TAGS_MANAGER_REF};
 use crate::storage::StorageService;
 use crate::store::Store;
 use crate::tracing::FastraceWrapper;
@@ -75,6 +76,7 @@ pub mod lazy_initializer;
 #[cfg(not(feature = "logforth"))]
 mod log_service;
 pub mod server_state_manager;
+pub mod service_tags_manager;
 
 #[cfg(feature = "logforth")]
 mod logforth_service;
@@ -215,6 +217,9 @@ fn main() -> Result<()> {
 
     let server_state_manager = ServerStateManager::new(&app_manager_ref, &config);
     let _ = SERVER_STATE_MANAGER_REF.set(server_state_manager.clone());
+
+    let service_tags_manager = ServiceTagsManager::new(&config);
+    let _ = SERVICE_TAGS_MANAGER_REF.set(service_tags_manager);
 
     MetricService::init(&config, runtime_manager.clone());
     FastraceWrapper::init(config.clone());
