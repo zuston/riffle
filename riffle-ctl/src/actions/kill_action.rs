@@ -1,8 +1,8 @@
 use crate::actions::Action;
 use anyhow::Result;
 use async_trait::async_trait;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use log::info;
+use console::Term;
+use log::{debug, info};
 use riffle_server::server_state_manager::ServerState;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -54,16 +54,21 @@ async fn do_kill(ip: &str, http_port: usize, force: bool) -> Result<()> {
         http_port,
         if force { "=force" } else { "" },
     );
-    info!("Executing http request with url: {}", &url);
+    debug!("Executing http request with url: {}", &url);
     let resp = reqwest::get(url).await?;
-    if !resp.status().is_success() {
-        Err(anyhow::anyhow!(
-            "Failed to request kill operation: {}",
-            resp.text().await?
-        ))
-    } else {
-        Ok(())
+    let status = resp.status();
+    let body = resp.text().await?;
+    if !status.is_success() {
+        return Err(anyhow::anyhow!(
+            "Failed to request kill operation: status={status}, body={body}"
+        ));
     }
+    if body.trim() != "OK" {
+        return Err(anyhow::anyhow!(
+            "Failed to request kill operation: status={status}, body={body}"
+        ));
+    }
+    Ok(())
 }
 
 /// the returned value is the tag to indicate whether to continue wait
@@ -137,6 +142,84 @@ pub trait BatchActionItem: Sized + DeserializeOwned {
     fn key(&self) -> String;
 }
 
+fn batch_progress_bar_width() -> usize {
+    80_usize.saturating_sub(18)
+}
+
+fn format_batch_bar_line(prefix: &str, pos: u64, len: u64, width: usize) -> String {
+    let filled = if len == 0 {
+        0
+    } else {
+        ((pos as u128 * width as u128) / len as u128) as usize
+    };
+    let filled = filled.min(width);
+    format!(
+        "{prefix} {bar} {pos}/{len}",
+        prefix = prefix,
+        bar = format!("{}{}", "█".repeat(filled), "░".repeat(width - filled)),
+        pos = pos,
+        len = len,
+    )
+}
+
+fn batch_progress_message(total: u64, fail: u64, success: u64, len: u64, width: usize) -> String {
+    format!(
+        "{}\n{}\n{}",
+        format_batch_bar_line("Total  ", total, len, width),
+        format_batch_bar_line("Fail   ", fail, len, width),
+        format_batch_bar_line("Success", success, len, width),
+    )
+}
+
+const BATCH_PROGRESS_LINES: usize = 3;
+
+struct BatchProgressDisplay {
+    term: Term,
+    len: u64,
+    bar_width: usize,
+    last_lines: usize,
+}
+
+impl BatchProgressDisplay {
+    fn new(len: u64) -> Self {
+        Self {
+            term: Term::stderr(),
+            len,
+            bar_width: batch_progress_bar_width(),
+            last_lines: 0,
+        }
+    }
+
+    fn update(&mut self, done: u64, fail: u64, success: u64) -> io::Result<()> {
+        if !self.term.is_term() {
+            return Ok(());
+        }
+        debug_assert_eq!(done, fail + success);
+
+        let msg = batch_progress_message(done, fail, success, self.len, self.bar_width);
+        let lines: Vec<&str> = msg.lines().collect();
+        debug_assert_eq!(lines.len(), BATCH_PROGRESS_LINES);
+        let line_count = lines.len();
+
+        if self.last_lines > 0 {
+            self.term.clear_last_lines(self.last_lines)?;
+        }
+        for line in lines {
+            self.term.write_line(line)?;
+        }
+        self.last_lines = line_count;
+        Ok(())
+    }
+
+    fn finish(&mut self) -> io::Result<()> {
+        if self.last_lines > 0 && self.term.is_term() {
+            self.term.write_line("")?;
+            self.last_lines = 0;
+        }
+        Ok(())
+    }
+}
+
 pub async fn run_batch_action<T, F, Fut>(
     action_name: &str,
     items: Vec<T>,
@@ -147,40 +230,34 @@ where
     F: FnMut(T) -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<()>>,
 {
-    let multi_progress = MultiProgress::new();
-
-    let total_pb = multi_progress.add(ProgressBar::new(items.len() as u64));
-    total_pb
-        .set_style(ProgressStyle::default_bar().template("{prefix:.bold} {wide_bar} {pos}/{len}")?);
-    total_pb.set_prefix("Total  ");
-
-    let fail_pb = multi_progress.add(ProgressBar::new(items.len() as u64));
-    fail_pb
-        .set_style(ProgressStyle::default_bar().template("{prefix:.bold} {wide_bar} {pos}/{len}")?);
-    fail_pb.set_prefix("Fail   ");
-
-    let success_pb = multi_progress.add(ProgressBar::new(items.len() as u64));
-    success_pb
-        .set_style(ProgressStyle::default_bar().template("{prefix:.bold} {wide_bar} {pos}/{len}")?);
-    success_pb.set_prefix("Success");
+    let len = items.len() as u64;
+    let mut progress = BatchProgressDisplay::new(len);
+    progress.update(0, 0, 0)?;
 
     let mut failed_keys = vec![];
-    for item in &items {
+    let mut fail = 0_u64;
+    let mut success = 0_u64;
+
+    for (idx, item) in items.iter().enumerate() {
         match action_fn(item.clone()).await {
-            Ok(_) => success_pb.inc(1),
+            Ok(_) => success += 1,
             Err(_) => {
-                fail_pb.inc(1);
+                fail += 1;
                 failed_keys.push(item.key());
             }
         }
-        total_pb.inc(1);
+        let done = (idx + 1) as u64;
+        progress.update(done, fail, success)?;
     }
 
-    total_pb.finish();
-    success_pb.finish();
-    fail_pb.finish();
+    progress.finish()?;
 
-    println!("\nTotal: {}. Failed: {}", items.len(), failed_keys.len());
+    println!(
+        "Total: {}. Success: {}. Failed: {}",
+        items.len(),
+        success,
+        failed_keys.len()
+    );
     if !failed_keys.is_empty() {
         println!("Failed list: {:?}", failed_keys);
     }
@@ -192,11 +269,12 @@ pub fn read_batch_items<T: BatchActionItem>() -> Result<Vec<T>> {
     let stdin = io::stdin();
     let mut items = vec![];
     for line in stdin.lock().lines() {
-        let line = line?;
-        if line.is_empty() {
-            break;
+        let line = line?.trim().to_string();
+        if line.is_empty() || line == "[" || line == "]" {
+            continue;
         }
-        let item: T = serde_json::from_str(&line)?;
+        let line = line.trim_end_matches(',');
+        let item: T = serde_json::from_str(line)?;
         items.push(item);
     }
     Ok(items)
