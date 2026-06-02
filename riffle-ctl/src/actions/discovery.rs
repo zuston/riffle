@@ -3,6 +3,7 @@ use futures::future::try_join_all;
 use riffle_server::historical_apps::HistoricalAppInfo;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::str::FromStr;
 use strum_macros::Display;
 
@@ -136,6 +137,24 @@ impl Discovery {
         self.fetch_from_node_api("/apps?format=Json").await
     }
 
+    pub async fn count_running_apps_per_node(&self) -> Result<HashMap<(String, usize), usize>> {
+        let server_infos = self.list_nodes().await?;
+        let mut future_list = vec![];
+        for info in server_infos {
+            let ip = info.ip.clone();
+            let http_port = info.http_port;
+            let future = async move { fetch_running_app_count(ip, http_port).await };
+            future_list.push(tokio::spawn(future));
+        }
+        let results = try_join_all(future_list)
+            .await
+            .map_err(|x| anyhow!("Error happened. err: {}", x))?;
+        Ok(results
+            .into_iter()
+            .filter_map(Result::ok)
+            .collect::<HashMap<_, _>>())
+    }
+
     pub async fn list_historical_apps(&self) -> Result<Vec<HistoricalAppInfo>> {
         self.fetch_from_node_api("/apps/history").await
     }
@@ -172,6 +191,25 @@ impl Discovery {
             .collect::<Vec<T>>();
         Ok(all_apps)
     }
+}
+
+async fn fetch_running_app_count(
+    ip: String,
+    http_port: usize,
+) -> Result<((String, usize), usize), reqwest::Error> {
+    let number_url = format!("http://{}:{}/apps/number", &ip, http_port);
+    if let Ok(response) = reqwest::get(&number_url).await {
+        if response.status().is_success() {
+            if let Ok(count) = response.json::<usize>().await {
+                return Ok(((ip, http_port), count));
+            }
+        }
+    }
+
+    let apps_url = format!("http://{}:{}/apps?format=Json", &ip, http_port);
+    let response = reqwest::get(&apps_url).await?;
+    let apps = response.json::<Vec<ActiveAppInfo>>().await?;
+    Ok(((ip, http_port), apps.len()))
 }
 
 #[cfg(test)]

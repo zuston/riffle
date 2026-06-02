@@ -49,13 +49,13 @@ pub struct TableInstance {
 
     pub total_memory: String,
     pub used_memory: String,
-    pub event_num_in_flush: usize,
+    pub running_apps: usize,
     pub tags: String,
     pub status: ServerStatus,
 }
 
-impl From<&ServerInfo> for TableInstance {
-    fn from(info: &ServerInfo) -> Self {
+impl From<(&ServerInfo, usize)> for TableInstance {
+    fn from((info, running_apps): (&ServerInfo, usize)) -> Self {
         Self {
             ip: info.ip.to_string(),
             grpc_port: info.grpc_port,
@@ -63,7 +63,7 @@ impl From<&ServerInfo> for TableInstance {
             http_port: info.http_port as i32,
             total_memory: HumanBytes(info.total_memory as u64).to_string(),
             used_memory: HumanBytes(info.used_memory as u64).to_string(),
-            event_num_in_flush: info.event_num_in_flush,
+            running_apps,
             tags: info
                 .tags
                 .iter()
@@ -123,9 +123,16 @@ impl SessionContextExtend {
 
     async fn register_instances(&self) -> Result<()> {
         let instances = self.discovery.list_nodes().await?;
+        let running_apps = self.discovery.count_running_apps_per_node().await?;
         let instances = instances
             .iter()
-            .map(|x| x.into())
+            .map(|info| {
+                let running_apps = running_apps
+                    .get(&(info.ip.clone(), info.http_port))
+                    .copied()
+                    .unwrap_or(0);
+                (info, running_apps).into()
+            })
             .collect::<Vec<TableInstance>>();
         self.register(instances, INSTANCES_TABLE_NAME)?;
         Ok(())
