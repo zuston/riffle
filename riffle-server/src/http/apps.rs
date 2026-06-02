@@ -158,6 +158,24 @@ impl Handler for AppsHandler {
     }
 }
 
+#[derive(Default)]
+pub struct AppsNumberHandler {}
+impl Handler for AppsNumberHandler {
+    fn get_route_method(&self) -> RouteMethod {
+        RouteMethod::new().get(number_handler)
+    }
+
+    fn get_route_path(&self) -> String {
+        "/apps/number".to_string()
+    }
+}
+
+#[handler]
+async fn number_handler() -> Json<usize> {
+    let manager_ref = APP_MANAGER_REF.get().unwrap();
+    Json(manager_ref.get_app_count())
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 enum FormatType {
     Json,
