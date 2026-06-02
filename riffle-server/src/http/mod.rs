@@ -33,7 +33,7 @@ use crate::runtime::manager::RuntimeManager;
 
 use crate::app_manager::AppManagerRef;
 use crate::http::admin::AdminHandler;
-use crate::http::apps::AppsHandler;
+use crate::http::apps::{AppsHandler, AppsNumberHandler};
 use crate::http::historical_apps::HistoricalAppsHandler;
 use crate::http::profile_heap::ProfileHeapHandler;
 use log::info;
@@ -74,6 +74,7 @@ fn new_server() -> Box<PoemHTTPServer> {
     server.register_handler(MetricsHTTPHandler::default());
     server.register_handler(AwaitTreeHandler::default());
     server.register_handler(AppsHandler::default());
+    server.register_handler(AppsNumberHandler::default());
     server.register_handler(HistoricalAppsHandler::default());
     server.register_handler(AdminHandler::default());
 
