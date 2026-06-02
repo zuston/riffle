@@ -217,7 +217,13 @@ impl Action for QueryAction {
                 df.write_json(absolute_file_path, DataFrameWriteOptions::new(), None)
                     .await?;
                 let contents = fs::read_to_string(absolute_file_path)?;
-                println!("{}", contents);
+                for line in contents.lines() {
+                    let line = line.trim();
+                    if line.is_empty() || line == "[" || line == "]" {
+                        continue;
+                    }
+                    println!("{}", line.trim_end_matches(','));
+                }
             }
         }
         Ok(())
