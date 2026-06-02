@@ -5266,6 +5266,7 @@ dependencies = [
  "bytes 1.10.1",
  "bytesize",
  "clap",
+ "console",
  "csv",
  "dashmap 5.5.3",
  "datafusion",

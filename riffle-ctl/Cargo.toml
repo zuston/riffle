@@ -18,6 +18,7 @@ serde_json = { workspace = true }
 datafusion = { workspace = true }
 csv = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
+console = "0.15.11"
 indicatif = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
