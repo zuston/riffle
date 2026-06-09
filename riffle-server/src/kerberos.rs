@@ -23,7 +23,7 @@ impl KerberosTask {
         runtime_manager
             .clone()
             .default_runtime
-            .spawn_with_await_tree("Kerbero updater", async move {
+            .spawn_with_await_tree("kerberos ticket updater", async move {
                 let principal = &conf.principal;
                 let keytab = &conf.keytab_path;
                 loop {
