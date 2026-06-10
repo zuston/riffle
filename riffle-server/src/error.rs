@@ -100,6 +100,9 @@ pub enum WorkerError {
     #[error("HDFS has been unhealthy.")]
     HDFS_UNHEALTHY,
 
+    #[error("Storage is not healthy")]
+    STORAGE_UNHEALTHY,
+
     #[error("future execution timeout. error: {0}")]
     FUTURE_EXEC_TIMEOUT(anyhow::Error),
 
