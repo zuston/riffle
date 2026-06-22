@@ -49,13 +49,13 @@ pub struct TableInstance {
 
     pub total_memory: String,
     pub used_memory: String,
-    pub running_apps: usize,
+    pub running_apps: Option<usize>,
     pub tags: String,
     pub status: ServerStatus,
 }
 
-impl From<(&ServerInfo, usize)> for TableInstance {
-    fn from((info, running_apps): (&ServerInfo, usize)) -> Self {
+impl From<(&ServerInfo, Option<usize>)> for TableInstance {
+    fn from((info, running_apps): (&ServerInfo, Option<usize>)) -> Self {
         Self {
             ip: info.ip.to_string(),
             grpc_port: info.grpc_port,
@@ -130,7 +130,7 @@ impl SessionContextExtend {
                 let running_apps = running_apps
                     .get(&(info.ip.clone(), info.http_port))
                     .copied()
-                    .unwrap_or(0);
+                    .flatten();
                 (info, running_apps).into()
             })
             .collect::<Vec<TableInstance>>();

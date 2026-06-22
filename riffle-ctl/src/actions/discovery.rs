@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use futures::future::try_join_all;
+use futures::stream::{self, StreamExt};
 use riffle_server::historical_apps::HistoricalAppInfo;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -99,6 +100,8 @@ fn default_jetty_port() -> usize {
     0
 }
 
+const RUNNING_APP_COUNT_FETCH_CONCURRENCY: usize = 16;
+
 fn raw_tags<S>(values: &Vec<String>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
@@ -137,22 +140,30 @@ impl Discovery {
         self.fetch_from_node_api("/apps?format=Json").await
     }
 
-    pub async fn count_running_apps_per_node(&self) -> Result<HashMap<(String, usize), usize>> {
+    pub async fn count_running_apps_per_node(
+        &self,
+    ) -> Result<HashMap<(String, usize), Option<usize>>> {
         let server_infos = self.list_nodes().await?;
-        let mut future_list = vec![];
-        for info in server_infos {
-            let ip = info.ip.clone();
-            let http_port = info.http_port;
-            let future = async move { fetch_running_app_count(ip, http_port).await };
-            future_list.push(tokio::spawn(future));
-        }
-        let results = try_join_all(future_list)
-            .await
-            .map_err(|x| anyhow!("Error happened. err: {}", x))?;
-        Ok(results
-            .into_iter()
-            .filter_map(Result::ok)
-            .collect::<HashMap<_, _>>())
+        let results = stream::iter(server_infos.into_iter())
+            .map(|info| async move {
+                let ip = info.ip;
+                let http_port = info.http_port;
+                let key = (ip.clone(), http_port);
+                match fetch_running_app_count(ip.clone(), http_port).await {
+                    Ok((key, count)) => (key, Some(count)),
+                    Err(err) => {
+                        eprintln!(
+                            "Failed to fetch running app count from {}:{}: {}",
+                            ip, http_port, err
+                        );
+                        (key, None)
+                    }
+                }
+            })
+            .buffer_unordered(RUNNING_APP_COUNT_FETCH_CONCURRENCY)
+            .collect::<Vec<_>>()
+            .await;
+        Ok(results.into_iter().collect::<HashMap<_, _>>())
     }
 
     pub async fn list_historical_apps(&self) -> Result<Vec<HistoricalAppInfo>> {
@@ -193,22 +204,54 @@ impl Discovery {
     }
 }
 
-async fn fetch_running_app_count(
-    ip: String,
-    http_port: usize,
-) -> Result<((String, usize), usize), reqwest::Error> {
+async fn fetch_running_app_count(ip: String, http_port: usize) -> Result<((String, usize), usize)> {
     let number_url = format!("http://{}:{}/apps/number", &ip, http_port);
-    if let Ok(response) = reqwest::get(&number_url).await {
-        if response.status().is_success() {
-            if let Ok(count) = response.json::<usize>().await {
-                return Ok(((ip, http_port), count));
+    let number_error = match reqwest::get(&number_url).await {
+        Ok(response) => {
+            let status = response.status();
+            if status.is_success() {
+                match response.json::<usize>().await {
+                    Ok(count) => {
+                        return Ok(((ip, http_port), count));
+                    }
+                    Err(err) => Some(format!("failed to parse response: {}", err)),
+                }
+            } else {
+                Some(format!("returned status {}", status))
             }
         }
-    }
+        Err(err) => Some(format!("request failed: {}", err)),
+    };
 
     let apps_url = format!("http://{}:{}/apps?format=Json", &ip, http_port);
-    let response = reqwest::get(&apps_url).await?;
-    let apps = response.json::<Vec<ActiveAppInfo>>().await?;
+    let response = reqwest::get(&apps_url).await.map_err(|err| {
+        anyhow!(
+            "{} failed: {}; fallback {} failed: {}",
+            number_url,
+            number_error.as_deref().unwrap_or("unknown error"),
+            apps_url,
+            err
+        )
+    })?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(anyhow!(
+            "{} failed: {}; fallback {} returned status {}",
+            number_url,
+            number_error.as_deref().unwrap_or("unknown error"),
+            apps_url,
+            status
+        ));
+    }
+    let apps = response.json::<Vec<ActiveAppInfo>>().await.map_err(|err| {
+        anyhow!(
+            "{} failed: {}; fallback {} response parse failed: {}",
+            number_url,
+            number_error.as_deref().unwrap_or("unknown error"),
+            apps_url,
+            err
+        )
+    })?;
     Ok(((ip, http_port), apps.len()))
 }
 
