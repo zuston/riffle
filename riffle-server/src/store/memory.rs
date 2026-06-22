@@ -107,7 +107,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
 
         MemoryStore {
             state: DDashMap::default(),
-            budget: MemoryBudget::new(capacity.as_u64() as i64),
+            budget,
             memory_capacity: capacity.as_u64() as i64,
             ticket_manager,
             runtime_manager,
@@ -429,6 +429,7 @@ mod test {
         WritingViewContext,
     };
 
+    use crate::config::MemoryStoreConfig;
     use crate::store::memory::MemoryStore;
     use crate::store::ResponseData::Mem;
 
@@ -437,10 +438,12 @@ mod test {
     use bytes::BytesMut;
     use core::panic;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use crate::app_manager::application_identifier::ApplicationId;
     use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::purge_event::PurgeReason;
+    use crate::runtime::manager::RuntimeManager;
     use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
     use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
     use crate::store::mem::buffer::MemoryBuffer;
@@ -698,6 +701,32 @@ mod test {
     fn test_allocated_and_purge_for_memory() {
         run_test_allocated_and_purge_for_memory::<DefaultMemoryBuffer>();
         run_test_allocated_and_purge_for_memory::<OptStagingMemoryBuffer>();
+    }
+
+    fn run_test_timeout_ticket_releases_allocated_for_configured_store<
+        B: MemoryBuffer + Send + Sync + 'static,
+    >() {
+        let mut conf = MemoryStoreConfig::from("1M".to_string(), 0);
+        conf.buffer_ticket_check_interval_sec = 1;
+        let store: MemoryStore<B> = MemoryStore::from(conf, RuntimeManager::default());
+        let runtime = store.runtime_manager.clone();
+
+        let app_id = ApplicationId::from("application_timeout_ticket");
+        let uid = PartitionUId::new(&app_id, 0, 0);
+        runtime
+            .wait(store.require_buffer(RequireBufferContext::create_for_test(uid, 10000)))
+            .expect("require buffer should succeed");
+
+        assert_eq!(10000, store.budget.snapshot().allocated());
+
+        awaitility::at_most(Duration::from_secs(3))
+            .until(|| store.budget.snapshot().allocated() == 0);
+    }
+
+    #[test]
+    fn test_timeout_ticket_releases_allocated_for_configured_store() {
+        run_test_timeout_ticket_releases_allocated_for_configured_store::<DefaultMemoryBuffer>();
+        run_test_timeout_ticket_releases_allocated_for_configured_store::<OptStagingMemoryBuffer>();
     }
 
     fn run_test_purge<B: MemoryBuffer + Send + Sync + 'static>() -> Result<()> {
