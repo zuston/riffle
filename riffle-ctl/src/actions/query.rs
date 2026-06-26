@@ -223,6 +223,9 @@ impl Action for QueryAction {
                 let absolute_file_path = file_path.to_str().unwrap();
                 df.write_json(absolute_file_path, DataFrameWriteOptions::new(), None)
                     .await?;
+                if !file_path.exists() {
+                    return Ok(());
+                }
                 let contents = fs::read_to_string(absolute_file_path)?;
                 for line in contents.lines() {
                     let line = line.trim();
@@ -319,6 +322,23 @@ mod tests {
             .unwrap();
         let df = context.sql("select * from active_apps").await.unwrap();
         df.show().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_query_json_output_with_empty_result() {
+        use crate::actions::query::{OutputFormat, QueryAction};
+        use crate::actions::Action;
+
+        let port = riffle_server::util::find_available_port().unwrap();
+        let _coordinator = crate::actions::discovery::tests::FakeCoordinator::new(port as i32).await;
+        let coordinator_url = format!("http://localhost:{}", port);
+
+        let action = QueryAction::new(
+            "select * from instances where ip = 'no-such-host'".to_string(),
+            OutputFormat::JSON,
+            coordinator_url,
+        );
+        action.act().await.unwrap();
     }
 
     #[tokio::test]
