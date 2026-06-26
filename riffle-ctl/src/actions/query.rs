@@ -330,7 +330,8 @@ mod tests {
         use crate::actions::Action;
 
         let port = riffle_server::util::find_available_port().unwrap();
-        let _coordinator = crate::actions::discovery::tests::FakeCoordinator::new(port as i32).await;
+        let _coordinator =
+            crate::actions::discovery::tests::FakeCoordinator::new(port as i32).await;
         let coordinator_url = format!("http://localhost:{}", port);
 
         let action = QueryAction::new(
