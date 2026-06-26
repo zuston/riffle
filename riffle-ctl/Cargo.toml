@@ -11,7 +11,8 @@ path = "src/main.rs"
 hdrs_append = ["riffle-server/hdrs"]
 
 [dependencies]
-riffle-server = { workspace = true }
+# Keep ctl independent from hdrs/libhdfs so it does not require libjvm.so at runtime.
+riffle-server = { workspace = true, default-features = false, features = ["logforth", "hdfs"] }
 tokio = { workspace = true, features = ["full"] }
 clap = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
