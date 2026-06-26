@@ -103,7 +103,19 @@ More detailed could be found dev/integration/README.md
 
 ## Build
 
-`cargo build --release`
+```shell
+cargo build --release -p riffle-server
+cargo build --release -p riffle-coordinator
+cargo build --release -p riffle-ctl
+```
+
+`riffle-ctl` is built separately from `riffle-server` so ctl does not link `libhdfs`/`libjvm.so`.
+Use `hdrs` only when building `riffle-server`:
+
+```shell
+cargo build --release -p riffle-server --features hdrs,logforth,memory-prof
+cargo build --release -p riffle-ctl
+```
 
 ## Run
 
