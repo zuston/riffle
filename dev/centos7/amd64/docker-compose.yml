@@ -12,4 +12,4 @@ services:
       - ./../../../target-docker:/R1/target:rw
 #    environment:
 #      RUSTFLAGS: "-C target-cpu=skylake"
-    command: "bash -c 'source ~/.bashrc && cd /R1 && cargo build --features hdrs,logforth,memory-prof --release'"
+    command: "bash -c 'source ~/.bashrc && cd /R1 && cargo build --release -p riffle-server --features hdrs,logforth,memory-prof && cargo build --release -p riffle-coordinator && cargo build --release -p riffle-ctl'"
