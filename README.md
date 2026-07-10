@@ -279,7 +279,7 @@ To validate the effectiveness of this throttle mechanism, the disk-bench command
 You can apply pressure to the system using the following command:
 
 ```shell
-./riffle-ctl disk-append-bench --dir /data1/bench --batch-number 100 --concurrency 200 --write-size 10M --disk-throughput 100M -t
+./riffle-ctl bench disk append --dir /data1/bench --batch-number 100 --concurrency 200 --write-size 10M --disk-throughput 100M --throttle
 ```
 
 To enable this feature, add the following configuration to your config.toml file.
@@ -296,8 +296,19 @@ Riffle provides an elegant way to inspect and maintain your clusters directly fr
 You can execute SQL queries against the coordinator to retrieve information about active or historical applications,
 update server status, or manage server tags based on your criteria.
 
-When `--instance` is omitted, `update`, `add`, and `delete` run in pipeline mode: they read JSON lines from stdin
-(each line must contain `ip` and `http_port`), which works naturally with `query -p`.
+Command shape follows noun-verb groups:
+
+```text
+riffle-ctl query ...
+riffle-ctl instance { kill | status set | tag { set | add | delete } }
+riffle-ctl bench { disk { append | read | profile } | hdfs append }
+riffle-ctl inspect file-check ...
+riffle-ctl config init ...
+```
+
+When `--instance` is omitted, `instance status set` and `instance tag {set|add|delete}` run in pipeline mode:
+they read JSON lines from stdin (each line must contain `ip` and `http_port`), which works naturally with
+`query --format json`.
 
 ### Query Applications
 ```shell
@@ -310,13 +321,14 @@ When `--instance` is omitted, `update`, `add`, and `delete` run in pipeline mode
 Single instance:
 
 ```shell
-./riffle-ctl update -i 192.168.1.1:19998 --status unhealthy
+./riffle-ctl instance status set -i 192.168.1.1:19998 --status unhealthy
 ```
 
 Pipeline mode (batch update by SQL filter):
 
 ```shell
-./riffle-ctl query -c http://xx:21001 -s "select * from instances where tags like '%sata%'" -p | ./riffle-ctl update --status unhealthy
+./riffle-ctl query -c http://xx:21001 -s "select * from instances where tags like '%sata%'" --format json \
+  | ./riffle-ctl instance status set --status unhealthy
 ```
 
 ### Manage Tags
@@ -327,26 +339,23 @@ retained and cannot be removed.
 Replace tags on a single instance:
 
 ```shell
-./riffle-ctl update -i 192.168.1.1:19998 --tags a1,a2
+./riffle-ctl instance tag set -i 192.168.1.1:19998 --tags a1,a2
 ```
 
 Add or delete a tag on a single instance:
 
 ```shell
-./riffle-ctl add -i 192.168.1.1:19998 --tag a1
-./riffle-ctl delete -i 192.168.1.1:19998 --tag a1
+./riffle-ctl instance tag add -i 192.168.1.1:19998 --tag a1
+./riffle-ctl instance tag delete -i 192.168.1.1:19998 --tag a1
 ```
 
 Pipeline mode (batch tag operations):
 
 ```shell
-./riffle-ctl query -c http://xx:21001 -s "select * from instances where tags like '%sata%'" -p | ./riffle-ctl update --tags a1,a2
-./riffle-ctl query -c http://xx:21001 -s "select * from instances where tags like '%sata%'" -p | ./riffle-ctl add --tag new_label
-./riffle-ctl query -c http://xx:21001 -s "select * from instances where tags like '%sata%'" -p | ./riffle-ctl delete --tag old_label
-```
-
-Status and tags can also be updated together:
-
-```shell
-./riffle-ctl update -i 192.168.1.1:19998 --status unhealthy --tags a1,a2
+./riffle-ctl query -c http://xx:21001 -s "select * from instances where tags like '%sata%'" --format json \
+  | ./riffle-ctl instance tag set --tags a1,a2
+./riffle-ctl query -c http://xx:21001 -s "select * from instances where tags like '%sata%'" --format json \
+  | ./riffle-ctl instance tag add --tag new_label
+./riffle-ctl query -c http://xx:21001 -s "select * from instances where tags like '%sata%'" --format json \
+  | ./riffle-ctl instance tag delete --tag old_label
 ```
