@@ -2,7 +2,7 @@ use crate::actions::discovery::{Discovery, ServerInfo, ServerStatus};
 use crate::actions::Action;
 use crate::meta;
 use anyhow::Result;
-use clap::builder::Str;
+use clap::ValueEnum;
 use csv::Writer;
 use datafusion::arrow;
 use datafusion::arrow::csv::reader::Format;
@@ -219,9 +219,11 @@ impl SessionContextExtend {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
 pub enum OutputFormat {
-    TABLE,
-    JSON,
+    #[default]
+    Table,
+    Json,
 }
 
 pub struct QueryAction {
@@ -265,10 +267,10 @@ impl Action for QueryAction {
         .await?;
         let df = context.sql(sql).await?;
         match &self.format {
-            OutputFormat::TABLE => {
+            OutputFormat::Table => {
                 df.show().await?;
             }
-            OutputFormat::JSON => {
+            OutputFormat::Json => {
                 let temp_dir = tempfile::tempdir().unwrap();
                 let file_path = temp_dir.path().join("output.json");
                 let absolute_file_path = file_path.to_str().unwrap();
@@ -888,7 +890,7 @@ mod tests {
 
         let action = QueryAction::new(
             "select * from instances where ip = 'no-such-host'".to_string(),
-            OutputFormat::JSON,
+            OutputFormat::Json,
             coordinator_url,
         );
         action.act().await.unwrap();
