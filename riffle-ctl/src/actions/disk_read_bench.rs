@@ -1,6 +1,5 @@
 use crate::actions::disk_append_bench::{DiskAppendBenchAction, FILE_PREFIX};
 use crate::actions::Action;
-use crate::Commands::DiskAppendBench;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::info;
 use riffle_server::config::{IoLimiterConfig, ReadAheadConfig};
