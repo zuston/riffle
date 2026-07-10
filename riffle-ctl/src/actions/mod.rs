@@ -21,7 +21,6 @@ pub mod disk_profiler;
 pub mod disk_read_bench;
 pub mod hdfs_append;
 pub mod kill_action;
-pub mod postgres_server;
 pub mod query;
 pub mod tag_action;
 pub mod update_action;

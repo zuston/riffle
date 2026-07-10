@@ -35,9 +35,6 @@ dashmap = { workspace = true }
 strum = { workspace = true }
 strum_macros = { workspace = true }
 
-pgwire = { workspace = true }
-datafusion-postgres = { workspace = true }
-
 sqlparser = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }

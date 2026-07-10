@@ -10,7 +10,6 @@ use crate::actions::disk_profiler::DiskProfiler;
 use crate::actions::disk_read_bench::DiskReadBenchAction;
 use crate::actions::hdfs_append::HdfsAppendAction;
 use crate::actions::kill_action::KillAction;
-use crate::actions::postgres_server::PostgresServerAction;
 use crate::actions::query::{OutputFormat, QueryAction};
 use crate::actions::tag_action::{TagAction, TagOperation};
 use crate::actions::update_action::NodeUpdateAction;
@@ -33,17 +32,6 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(
-        about = "Expose postgres protocol server to query instances/active_apps/historical_apps table"
-    )]
-    PostgresServer {
-        #[arg(short, long)]
-        coordinator_http_url: String,
-        #[arg(long, default_value = "0.0.0.0")]
-        host: String,
-        #[arg(long, default_value = "29999")]
-        port: usize,
-    },
     DiskReadBench {
         #[arg(short, long)]
         dir: String,
@@ -181,11 +169,6 @@ fn main() -> anyhow::Result<()> {
 
     let command = args.command.unwrap();
     let action: Box<dyn Action> = match command {
-        Commands::PostgresServer {
-            coordinator_http_url,
-            host,
-            port,
-        } => Box::new(PostgresServerAction::new(coordinator_http_url, host, port)),
         Commands::DiskReadBench {
             dir,
             read_size,
@@ -290,7 +273,6 @@ fn main() -> anyhow::Result<()> {
             total_size.as_str(),
             batch_size.as_str(),
         )),
-        _ => panic!("Unknown command"),
     };
 
     let rt = Runtime::new()?;
