@@ -34,18 +34,11 @@ struct Listener {
 impl Listener {
     async fn run(&mut self, app_manager_ref: AppManagerRef) -> Result<()> {
         debug!("Accepting inbound connections");
-        let streaming_parse_enabled = app_manager_ref
-            .get_config()
-            .urpc_config
-            .as_ref()
+        let urpc_config = app_manager_ref.get_config().urpc_config.as_ref();
+        let streaming_parse_enabled = urpc_config
             .map(|c| c.streaming_parse_enabled)
             .unwrap_or(false);
-        let write_mode = app_manager_ref
-            .get_config()
-            .urpc_config
-            .as_ref()
-            .map(|c| c.write_mode)
-            .unwrap_or_default();
+        let write_mode = urpc_config.map(|c| c.write_mode).unwrap_or_default();
 
         loop {
             let app_manager = app_manager_ref.clone();
