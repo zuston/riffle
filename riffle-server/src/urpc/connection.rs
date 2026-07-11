@@ -1,3 +1,4 @@
+use crate::config::UrpcWriteMode;
 use bytes::{Buf, Bytes, BytesMut};
 use std::io::Cursor;
 use std::time::Instant;
@@ -41,15 +42,25 @@ pub struct Connection {
     read_buf: BytesMut,
     write_buf: BytesMut,
     streaming_parse_enabled: bool,
+    write_mode: UrpcWriteMode,
 }
 
 impl Connection {
     pub fn new(socket: TcpStream, streaming_parse_enabled: bool) -> Self {
+        Self::new_with_write_mode(socket, streaming_parse_enabled, UrpcWriteMode::default())
+    }
+
+    pub fn new_with_write_mode(
+        socket: TcpStream,
+        streaming_parse_enabled: bool,
+        write_mode: UrpcWriteMode,
+    ) -> Self {
         Connection {
             stream: socket,
             read_buf: BytesMut::with_capacity(INITIAL_READ_BUFFER_LENGTH),
             write_buf: BytesMut::with_capacity(INITIAL_WRITE_BUFFER_LENGTH),
             streaming_parse_enabled,
+            write_mode,
         }
     }
 
@@ -252,9 +263,14 @@ impl Connection {
     }
 
     pub async fn write_frame(&mut self, frame: &Frame) -> Result<()> {
-        Frame::write(&mut self.stream, frame, &mut self.write_buf)
-            .instrument_await("writing frame...")
-            .await?;
+        Frame::write_with_mode(
+            &mut self.stream,
+            frame,
+            &mut self.write_buf,
+            self.write_mode,
+        )
+        .instrument_await("writing frame...")
+        .await?;
         self.stream
             .flush()
             .instrument_await("flushing frame...")

@@ -488,6 +488,23 @@ pub struct UrpcConfig {
     // todo: experimental feature to reduce the peek memory usage, especially on the large-scale active connections
     #[serde(default = "bool::default")]
     pub streaming_parse_enabled: bool,
+
+    #[serde(default)]
+    pub write_mode: UrpcWriteMode,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(non_camel_case_types)]
+pub enum UrpcWriteMode {
+    VECTORED,
+    FREEZE,
+    CHUNKED,
+}
+
+impl Default for UrpcWriteMode {
+    fn default() -> Self {
+        UrpcWriteMode::VECTORED
+    }
 }
 
 fn as_default_get_memory_rpc_version() -> RpcVersion {
@@ -810,6 +827,7 @@ impl Config {
 mod test {
     use crate::config::{
         as_default_app_heartbeat_timeout_min, Config, RpcVersion, RuntimeConfig, StorageType,
+        UrpcConfig, UrpcWriteMode,
     };
     use bytesize::ByteSize;
     use std::str::FromStr;
@@ -843,6 +861,7 @@ mod test {
         [urpc_config]
         get_index_rpc_version = "V2"
         streaming_parse_enabled = true
+        write_mode = "FREEZE"
 
         [memory_store]
         capacity = "1024M"
@@ -893,6 +912,10 @@ mod test {
                 .unwrap()
                 .streaming_parse_enabled
         );
+        assert_eq!(
+            UrpcWriteMode::FREEZE,
+            decoded.urpc_config.as_ref().unwrap().write_mode
+        );
 
         // check the app config.
         assert_eq!(
@@ -915,5 +938,11 @@ mod test {
         // check labels of metrics
         let metrics_labels = decoded.metrics.unwrap().labels;
         assert_eq!(2, metrics_labels.unwrap().len());
+    }
+
+    #[test]
+    fn urpc_write_mode_defaults_to_vectored() {
+        let config: UrpcConfig = toml::from_str("get_index_rpc_version = \"V1\"").unwrap();
+        assert_eq!(UrpcWriteMode::VECTORED, config.write_mode);
     }
 }

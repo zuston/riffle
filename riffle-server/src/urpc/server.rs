@@ -40,6 +40,12 @@ impl Listener {
             .as_ref()
             .map(|c| c.streaming_parse_enabled)
             .unwrap_or(false);
+        let write_mode = app_manager_ref
+            .get_config()
+            .urpc_config
+            .as_ref()
+            .map(|c| c.write_mode)
+            .unwrap_or_default();
 
         loop {
             let app_manager = app_manager_ref.clone();
@@ -55,7 +61,11 @@ impl Listener {
             debug!("Accepted connection from client: {}", &addr);
 
             let mut handler = Handler {
-                connection: Connection::new(socket, streaming_parse_enabled),
+                connection: Connection::new_with_write_mode(
+                    socket,
+                    streaming_parse_enabled,
+                    write_mode,
+                ),
                 shutdown: Shutdown::new(self.notify_shutdown.subscribe()),
                 _shutdown_complete: self.shutdown_complete_tx.clone(),
                 remote_addr: addr.to_string(),
