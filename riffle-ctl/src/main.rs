@@ -11,8 +11,8 @@ use crate::actions::disk_read_bench::DiskReadBenchAction;
 use crate::actions::hdfs_append::HdfsAppendAction;
 use crate::actions::kill_action::KillAction;
 use crate::actions::query::{OutputFormat, QueryAction};
+use crate::actions::status_action::StatusAction;
 use crate::actions::tag_action::{TagAction, TagOperation};
-use crate::actions::update_action::NodeUpdateAction;
 use crate::actions::{Action, ValidateAction};
 use clap::{Parser, Subcommand};
 use log::{info, LevelFilter};
@@ -78,9 +78,9 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum InstanceCommands {
-    /// Set instance status and/or replace tags
+    /// Set instance status or replace tags
     #[command(
-        after_help = "Examples:\n  riffle-ctl instance set --instance 192.168.1.1:19998 --status unhealthy\n  riffle-ctl instance set --instance 192.168.1.1:19998 --status unhealthy --tags sata,maintenance\n  riffle-ctl query --coordinator production --sql \"select * from instances\" --json | riffle-ctl instance set --status unhealthy"
+        after_help = "Examples:\n  riffle-ctl instance set --instance 192.168.1.1:19998 --status unhealthy\n  riffle-ctl instance set --instance 192.168.1.1:19998 --tags sata,maintenance\n  riffle-ctl query --coordinator production --sql \"select * from instances\" --json | riffle-ctl instance set --status unhealthy"
     )]
     Set(SetInstanceArgs),
     /// Add a tag to an instance
@@ -116,7 +116,7 @@ enum InstanceCommands {
 }
 
 #[derive(clap::Args)]
-#[group(required = true, multiple = true)]
+#[group(required = true, multiple = false)]
 struct SetInstanceArgs {
     #[arg(short, long)]
     status: Option<ServerState>,
@@ -294,13 +294,31 @@ fn build_action(command: Commands) -> anyhow::Result<Box<dyn Action>> {
 
         Commands::Instance {
             instance,
-            command: InstanceCommands::Set(SetInstanceArgs { status, tags }),
+            command:
+                InstanceCommands::Set(SetInstanceArgs {
+                    status: Some(status),
+                    tags: None,
+                }),
+        } => Box::new(StatusAction::new(instance, status)),
+
+        Commands::Instance {
+            instance,
+            command:
+                InstanceCommands::Set(SetInstanceArgs {
+                    status: None,
+                    tags: Some(tags),
+                }),
         } => {
-            if tags.as_ref().is_some_and(Vec::is_empty) {
+            if tags.is_empty() {
                 anyhow::bail!("--tags must not be empty");
             }
-            Box::new(NodeUpdateAction::new(instance, status, tags))
+            Box::new(TagAction::new(instance, TagOperation::Update(tags)))
         }
+
+        Commands::Instance {
+            command: InstanceCommands::Set(_),
+            ..
+        } => unreachable!("set arguments are validated by clap"),
 
         Commands::Instance {
             instance,
@@ -310,7 +328,7 @@ fn build_action(command: Commands) -> anyhow::Result<Box<dyn Action>> {
         Commands::Instance {
             instance,
             command: InstanceCommands::Remove { tag },
-        } => Box::new(TagAction::new(instance, TagOperation::Delete(tag))),
+        } => Box::new(TagAction::new(instance, TagOperation::Remove(tag))),
 
         Commands::Bench {
             command:
@@ -478,8 +496,6 @@ mod tests {
             "riffle-ctl",
             "instance",
             "set",
-            "--status",
-            "unhealthy",
             "--tags",
             "sata,maintenance",
         ])
@@ -489,7 +505,7 @@ mod tests {
             Commands::Instance {
                 instance: None,
                 command: InstanceCommands::Set(SetInstanceArgs {
-                    status: Some(ServerState::UNHEALTHY),
+                    status: None,
                     tags: Some(tags),
                 }),
             } if tags == vec!["sata".to_string(), "maintenance".to_string()]
@@ -508,8 +524,18 @@ mod tests {
     }
 
     #[test]
-    fn instance_set_requires_a_change() {
+    fn instance_set_requires_exactly_one_change() {
         assert!(Args::try_parse_from(["riffle-ctl", "instance", "set"]).is_err());
+        assert!(Args::try_parse_from([
+            "riffle-ctl",
+            "instance",
+            "set",
+            "--status",
+            "unhealthy",
+            "--tags",
+            "sata",
+        ])
+        .is_err());
     }
 
     #[test]
