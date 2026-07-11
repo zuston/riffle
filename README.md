@@ -300,15 +300,14 @@ Command shape follows noun-verb groups:
 
 ```text
 riffle-ctl query ...
-riffle-ctl instance { kill | status set | tag { set | add | delete } }
+riffle-ctl instance { set | add | remove | kill }
 riffle-ctl bench { disk { append | read | profile } | hdfs append }
-riffle-ctl inspect file-check ...
+riffle-ctl inspect file ...
 riffle-ctl config init ...
 ```
 
-When `--instance` is omitted, `instance status set` and `instance tag {set|add|delete}` run in pipeline mode:
-they read JSON lines from stdin (each line must contain `ip` and `http_port`), which works naturally with
-`query --format json`.
+When `--instance` is omitted, `instance {set|add|remove|kill}` runs in pipeline mode. These commands read JSON
+lines from stdin (each line must contain `ip` and `http_port`), which works naturally with `query --json`.
 
 ### Query Applications
 ```shell
@@ -321,14 +320,14 @@ they read JSON lines from stdin (each line must contain `ip` and `http_port`), w
 Single instance:
 
 ```shell
-./riffle-ctl instance status set -i 192.168.1.1:19998 --status unhealthy
+./riffle-ctl instance set --instance 192.168.1.1:19998 --status unhealthy
 ```
 
 Pipeline mode (batch update by SQL filter):
 
 ```shell
-./riffle-ctl query -c http://xx:21001 -s "select * from instances where tags like '%sata%'" --format json \
-  | ./riffle-ctl instance status set --status unhealthy
+./riffle-ctl query --coordinator http://xx:21001 --sql "select * from instances where tags like '%sata%'" --json \
+  | ./riffle-ctl instance set --status unhealthy
 ```
 
 ### Manage Tags
@@ -339,23 +338,5 @@ retained and cannot be removed.
 Replace tags on a single instance:
 
 ```shell
-./riffle-ctl instance tag set -i 192.168.1.1:19998 --tags a1,a2
-```
-
-Add or delete a tag on a single instance:
-
-```shell
-./riffle-ctl instance tag add -i 192.168.1.1:19998 --tag a1
-./riffle-ctl instance tag delete -i 192.168.1.1:19998 --tag a1
-```
-
-Pipeline mode (batch tag operations):
-
-```shell
-./riffle-ctl query -c http://xx:21001 -s "select * from instances where tags like '%sata%'" --format json \
-  | ./riffle-ctl instance tag set --tags a1,a2
-./riffle-ctl query -c http://xx:21001 -s "select * from instances where tags like '%sata%'" --format json \
-  | ./riffle-ctl instance tag add --tag new_label
-./riffle-ctl query -c http://xx:21001 -s "select * from instances where tags like '%sata%'" --format json \
-  | ./riffle-ctl instance tag delete --tag old_label
+./riffle-ctl instance set --instance 192.168.1.1:19998 --tags a1,a2
 ```
