@@ -11,8 +11,8 @@ use crate::actions::disk_read_bench::DiskReadBenchAction;
 use crate::actions::hdfs_append::HdfsAppendAction;
 use crate::actions::kill_action::KillAction;
 use crate::actions::query::{OutputFormat, QueryAction};
+use crate::actions::status_action::StatusAction;
 use crate::actions::tag_action::{TagAction, TagOperation};
-use crate::actions::update_action::NodeUpdateAction;
 use crate::actions::{Action, ValidateAction};
 use clap::{Parser, Subcommand};
 use log::{info, LevelFilter};
@@ -23,7 +23,8 @@ use tokio::runtime::Runtime;
 #[derive(Parser)]
 #[command(
     version,
-    about = "Riffle cluster ops, benchmarks, and local data inspection"
+    about = "Riffle cluster ops, benchmarks, and local data inspection",
+    after_help = "Examples:\n  riffle-ctl query --coordinator http://127.0.0.1:21001 --sql \"select * from instances\"\n  riffle-ctl instance set --instance 192.168.1.1:19998 --status unhealthy\n  riffle-ctl bench disk profile --dir /data1/bench"
 )]
 #[command(arg_required_else_help = true)]
 struct Args {
@@ -34,17 +35,27 @@ struct Args {
 #[derive(Subcommand)]
 enum Commands {
     /// Query instances/active_apps/historical_apps
+    #[command(
+        after_help = "Examples:\n  riffle-ctl query --coordinator http://127.0.0.1:21001 --sql \"select * from active_apps\"\n  riffle-ctl query --coordinator production --sql \"select * from instances\" --json"
+    )]
     Query {
         #[arg(short, long)]
         sql: String,
+        /// Coordinator URL or configured cluster ID
         #[arg(short, long)]
-        coordinator_http_url: String,
-        /// Output format: table for humans, json for scripts/pipelines
-        #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
-        format: OutputFormat,
+        coordinator: String,
+        /// Emit JSON for scripts and pipelines
+        #[arg(long)]
+        json: bool,
     },
     /// Manage riffle-server instances
+    #[command(
+        after_help = "Examples:\n  riffle-ctl instance set --instance 192.168.1.1:19998 --status unhealthy\n  riffle-ctl instance add --instance 192.168.1.1:19998 --tag production\n  riffle-ctl instance kill --instance 192.168.1.1:19998 --force"
+    )]
     Instance {
+        /// Target instance. Omit to read targets as JSON from stdin.
+        #[arg(short, long, global = true, value_name = "IP:HTTP_PORT")]
+        instance: Option<String>,
         #[command(subcommand)]
         command: InstanceCommands,
     },
@@ -67,12 +78,34 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum InstanceCommands {
+    /// Set instance status or replace tags
+    #[command(
+        after_help = "Examples:\n  riffle-ctl instance set --instance 192.168.1.1:19998 --status unhealthy\n  riffle-ctl instance set --instance 192.168.1.1:19998 --tags sata,maintenance\n  riffle-ctl query --coordinator production --sql \"select * from instances\" --json | riffle-ctl instance set --status unhealthy"
+    )]
+    Set(SetInstanceArgs),
+    /// Add a tag to an instance
+    #[command(
+        after_help = "Examples:\n  riffle-ctl instance add --instance 192.168.1.1:19998 --tag production\n  riffle-ctl query --coordinator production --sql \"select * from instances\" --json | riffle-ctl instance add --tag production"
+    )]
+    Add {
+        #[arg(long)]
+        tag: String,
+    },
+    /// Remove a tag from an instance
+    #[command(
+        after_help = "Examples:\n  riffle-ctl instance remove --instance 192.168.1.1:19998 --tag deprecated\n  riffle-ctl query --coordinator production --sql \"select * from instances\" --json | riffle-ctl instance remove --tag deprecated"
+    )]
+    Remove {
+        #[arg(long)]
+        tag: String,
+    },
     /// Kill a riffle-server instance
+    #[command(
+        after_help = "Examples:\n  riffle-ctl instance kill --instance 192.168.1.1:19998\n  riffle-ctl instance kill --instance 192.168.1.1:19998 --force\n  riffle-ctl instance kill --instance 192.168.1.1:19998 --interval-secs 5 --timeout-secs 120"
+    )]
     Kill {
         #[arg(short, long, default_value = "false")]
         force: bool,
-        #[arg(short, long)]
-        instance: Option<String>,
         /// Interval between kill attempts (seconds). 0 means disabled.
         #[arg(long, default_value = "0")]
         interval_secs: u64,
@@ -80,52 +113,15 @@ enum InstanceCommands {
         #[arg(long, default_value = "0")]
         timeout_secs: u64,
     },
-    /// Manage instance status
-    Status {
-        #[command(subcommand)]
-        command: StatusCommands,
-    },
-    /// Manage instance tags
-    Tag {
-        #[command(subcommand)]
-        command: TagCommands,
-    },
 }
 
-#[derive(Subcommand)]
-enum StatusCommands {
-    /// Set instance status (pipeline mode supported)
-    Set {
-        #[arg(short, long)]
-        instance: Option<String>,
-        #[arg(short, long)]
-        status: ServerState,
-    },
-}
-
-#[derive(Subcommand)]
-enum TagCommands {
-    /// Replace instance tags (pipeline mode supported)
-    Set {
-        #[arg(short, long)]
-        instance: Option<String>,
-        #[arg(long, required = true, value_delimiter = ',')]
-        tags: Vec<String>,
-    },
-    /// Add a tag (pipeline mode supported)
-    Add {
-        #[arg(short, long)]
-        instance: Option<String>,
-        #[arg(long)]
-        tag: String,
-    },
-    /// Delete a tag (pipeline mode supported)
-    Delete {
-        #[arg(short, long)]
-        instance: Option<String>,
-        #[arg(long)]
-        tag: String,
-    },
+#[derive(clap::Args)]
+#[group(required = true, multiple = false)]
+struct SetInstanceArgs {
+    #[arg(short, long)]
+    status: Option<ServerState>,
+    #[arg(long, value_delimiter = ',')]
+    tags: Option<Vec<String>>,
 }
 
 #[derive(Subcommand)]
@@ -145,6 +141,9 @@ enum BenchCommands {
 #[derive(Subcommand)]
 enum DiskBenchCommands {
     /// Benchmark disk append via the riffle IO scheduler
+    #[command(
+        after_help = "Example:\n  riffle-ctl bench disk append --dir /data1/bench --batch-number 100 --concurrency 200 --write-size 10M --disk-throughput 100M --throttle"
+    )]
     Append {
         #[arg(long)]
         dir: String,
@@ -161,6 +160,9 @@ enum DiskBenchCommands {
         throttle: bool,
     },
     /// Benchmark disk reads via the riffle IO stack
+    #[command(
+        after_help = "Example:\n  riffle-ctl bench disk read --dir /data1/bench --read-size 1M --batch-number 100 --concurrency 32 --read-ahead"
+    )]
     Read {
         #[arg(short, long)]
         dir: String,
@@ -173,10 +175,13 @@ enum DiskBenchCommands {
         /// Enable read-ahead layer
         #[arg(long)]
         read_ahead: bool,
-        #[arg(short, long)]
+        #[arg(short, long, default_value = "0")]
         sleep_millis_per_batch: usize,
     },
     /// Profile disk throughput across block sizes and concurrency
+    #[command(
+        after_help = "Example:\n  riffle-ctl bench disk profile --dir /data1/bench --min-block-size 4KB --max-block-size 64MB --min-concurrency 1 --max-concurrency 16 --test-duration-secs 10"
+    )]
     Profile {
         #[arg(short, long)]
         dir: String,
@@ -196,6 +201,9 @@ enum DiskBenchCommands {
 #[derive(Subcommand)]
 enum HdfsBenchCommands {
     /// HDFS append write test
+    #[command(
+        after_help = "Example:\n  riffle-ctl bench hdfs append --file-path hdfs://namenode/riffle/bench.data --total-size 10G --batch-size 4M"
+    )]
     Append {
         #[arg(short, long)]
         file_path: String,
@@ -209,20 +217,24 @@ enum HdfsBenchCommands {
 #[derive(Subcommand)]
 enum InspectCommands {
     /// Check index/data file length consistency and per-block CRC
-    FileCheck {
+    #[command(
+        after_help = "Example:\n  riffle-ctl inspect file --index-file /data/shuffle/index --data-file /data/shuffle/data"
+    )]
+    File {
         #[arg(short, long)]
-        index_file_path: String,
+        index_file: String,
         #[arg(short, long)]
-        data_file_path: String,
+        data_file: String,
     },
 }
 
 #[derive(Subcommand)]
 enum ConfigCommands {
     /// Initialize cluster-id to coordinator-url mapping
+    #[command(after_help = "Example:\n  riffle-ctl config init --file ./clusters.toml")]
     Init {
         #[arg(short, long)]
-        config: String,
+        file: String,
     },
 }
 
@@ -230,44 +242,46 @@ fn main() -> anyhow::Result<()> {
     logforth::builder()
         .dispatch(|d| {
             d.filter(LevelFilter::Info)
-                .append(append::Stdout::default())
+                .append(append::Stderr::default())
         })
         .apply();
 
     let args = Args::parse();
     if let Commands::Config {
-        command: ConfigCommands::Init { config },
+        command: ConfigCommands::Init { file },
     } = &args.command
     {
-        meta::Metadata::create(None, config.as_str());
+        meta::Metadata::create(None, file.as_str());
         info!("Succeed to setup config path");
         return Ok(());
     }
 
     let action = build_action(args.command)?;
     let rt = Runtime::new()?;
-    rt.block_on(async {
-        if let Err(e) = action.act().await {
-            println!("Error: {}", e);
-        }
-    });
-
-    Ok(())
+    rt.block_on(action.act())
 }
 
 fn build_action(command: Commands) -> anyhow::Result<Box<dyn Action>> {
     let action: Box<dyn Action> = match command {
         Commands::Query {
             sql,
-            coordinator_http_url,
-            format,
-        } => Box::new(QueryAction::new(sql, format, coordinator_http_url)),
+            coordinator,
+            json,
+        } => Box::new(QueryAction::new(
+            sql,
+            if json {
+                OutputFormat::Json
+            } else {
+                OutputFormat::Table
+            },
+            coordinator,
+        )),
 
         Commands::Instance {
+            instance,
             command:
                 InstanceCommands::Kill {
                     force,
-                    instance,
                     interval_secs,
                     timeout_secs,
                 },
@@ -279,17 +293,21 @@ fn build_action(command: Commands) -> anyhow::Result<Box<dyn Action>> {
         )),
 
         Commands::Instance {
+            instance,
             command:
-                InstanceCommands::Status {
-                    command: StatusCommands::Set { instance, status },
-                },
-        } => Box::new(NodeUpdateAction::new(instance, Some(status), None)),
+                InstanceCommands::Set(SetInstanceArgs {
+                    status: Some(status),
+                    tags: None,
+                }),
+        } => Box::new(StatusAction::new(instance, status)),
 
         Commands::Instance {
+            instance,
             command:
-                InstanceCommands::Tag {
-                    command: TagCommands::Set { instance, tags },
-                },
+                InstanceCommands::Set(SetInstanceArgs {
+                    status: None,
+                    tags: Some(tags),
+                }),
         } => {
             if tags.is_empty() {
                 anyhow::bail!("--tags must not be empty");
@@ -298,18 +316,19 @@ fn build_action(command: Commands) -> anyhow::Result<Box<dyn Action>> {
         }
 
         Commands::Instance {
-            command:
-                InstanceCommands::Tag {
-                    command: TagCommands::Add { instance, tag },
-                },
+            command: InstanceCommands::Set(_),
+            ..
+        } => unreachable!("set arguments are validated by clap"),
+
+        Commands::Instance {
+            instance,
+            command: InstanceCommands::Add { tag },
         } => Box::new(TagAction::new(instance, TagOperation::Add(tag))),
 
         Commands::Instance {
-            command:
-                InstanceCommands::Tag {
-                    command: TagCommands::Delete { instance, tag },
-                },
-        } => Box::new(TagAction::new(instance, TagOperation::Delete(tag))),
+            instance,
+            command: InstanceCommands::Remove { tag },
+        } => Box::new(TagAction::new(instance, TagOperation::Remove(tag))),
 
         Commands::Bench {
             command:
@@ -395,14 +414,172 @@ fn build_action(command: Commands) -> anyhow::Result<Box<dyn Action>> {
 
         Commands::Inspect {
             command:
-                InspectCommands::FileCheck {
-                    index_file_path,
-                    data_file_path,
+                InspectCommands::File {
+                    index_file,
+                    data_file,
                 },
-        } => Box::new(ValidateAction::new(index_file_path, data_file_path)),
+        } => Box::new(ValidateAction::new(index_file, data_file)),
 
         Commands::Config { .. } => unreachable!("config commands are handled before build_action"),
     };
 
     Ok(action)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn parse_query_json_command() {
+        let args = Args::try_parse_from([
+            "riffle-ctl",
+            "query",
+            "--coordinator",
+            "production",
+            "--sql",
+            "select * from instances",
+            "--json",
+        ])
+        .unwrap();
+
+        assert!(matches!(
+            args.command,
+            Commands::Query {
+                coordinator,
+                json: true,
+                ..
+            } if coordinator == "production"
+        ));
+    }
+
+    #[test]
+    fn parse_instance_selector_before_or_after_subcommand() {
+        for argv in [
+            vec![
+                "riffle-ctl",
+                "instance",
+                "--instance",
+                "192.168.1.1:19998",
+                "set",
+                "--status",
+                "unhealthy",
+            ],
+            vec![
+                "riffle-ctl",
+                "instance",
+                "set",
+                "--status",
+                "unhealthy",
+                "--instance",
+                "192.168.1.1:19998",
+            ],
+        ] {
+            let args = Args::try_parse_from(argv).unwrap();
+            assert!(matches!(
+                args.command,
+                Commands::Instance {
+                    instance: Some(instance),
+                    command: InstanceCommands::Set(SetInstanceArgs {
+                        status: Some(ServerState::UNHEALTHY),
+                        ..
+                    }),
+                } if instance == "192.168.1.1:19998"
+            ));
+        }
+    }
+
+    #[test]
+    fn parse_instance_pipeline_commands() {
+        let set = Args::try_parse_from([
+            "riffle-ctl",
+            "instance",
+            "set",
+            "--tags",
+            "sata,maintenance",
+        ])
+        .unwrap();
+        assert!(matches!(
+            set.command,
+            Commands::Instance {
+                instance: None,
+                command: InstanceCommands::Set(SetInstanceArgs {
+                    status: None,
+                    tags: Some(tags),
+                }),
+            } if tags == vec!["sata".to_string(), "maintenance".to_string()]
+        ));
+
+        let remove =
+            Args::try_parse_from(["riffle-ctl", "instance", "remove", "--tag", "deprecated"])
+                .unwrap();
+        assert!(matches!(
+            remove.command,
+            Commands::Instance {
+                instance: None,
+                command: InstanceCommands::Remove { tag },
+            } if tag == "deprecated"
+        ));
+    }
+
+    #[test]
+    fn instance_set_requires_exactly_one_change() {
+        assert!(Args::try_parse_from(["riffle-ctl", "instance", "set"]).is_err());
+        assert!(Args::try_parse_from([
+            "riffle-ctl",
+            "instance",
+            "set",
+            "--status",
+            "unhealthy",
+            "--tags",
+            "sata",
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn parse_simplified_inspect_and_config_commands() {
+        let inspect = Args::try_parse_from([
+            "riffle-ctl",
+            "inspect",
+            "file",
+            "--index-file",
+            "/data/index",
+            "--data-file",
+            "/data/data",
+        ])
+        .unwrap();
+        assert!(matches!(
+            inspect.command,
+            Commands::Inspect {
+                command: InspectCommands::File { .. },
+            }
+        ));
+
+        let config =
+            Args::try_parse_from(["riffle-ctl", "config", "init", "--file", "clusters.toml"])
+                .unwrap();
+        assert!(matches!(
+            config.command,
+            Commands::Config {
+                command: ConfigCommands::Init { file },
+            } if file == "clusters.toml"
+        ));
+    }
+
+    #[test]
+    fn help_includes_examples() {
+        let command = Args::command();
+        let mut set_command = command
+            .find_subcommand("instance")
+            .unwrap()
+            .find_subcommand("set")
+            .unwrap()
+            .clone();
+        let help = set_command.render_long_help().to_string();
+
+        assert!(help.contains("Examples:"));
+        assert!(help.contains("riffle-ctl instance set"));
+    }
 }

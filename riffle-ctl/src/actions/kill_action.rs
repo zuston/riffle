@@ -1,12 +1,12 @@
 use crate::actions::Action;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use console::Term;
 use log::{debug, info};
 use riffle_server::server_state_manager::ServerState;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, IsTerminal};
 use std::str::FromStr;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -267,6 +267,12 @@ where
 
 pub fn read_batch_items<T: BatchActionItem>() -> Result<Vec<T>> {
     let stdin = io::stdin();
+    if stdin.is_terminal() {
+        return Err(anyhow!(
+            "No instance specified. Pass --instance <IP:HTTP_PORT> or pipe JSON targets to stdin"
+        ));
+    }
+
     let mut items = vec![];
     for line in stdin.lock().lines() {
         let line = line?.trim().to_string();
