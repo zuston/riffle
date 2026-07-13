@@ -30,7 +30,7 @@ impl From<Vec<&str>> for TagTarget {
 pub enum TagOperation {
     Update(Vec<String>),
     Add(String),
-    Delete(String),
+    Remove(String),
 }
 
 pub struct TagAction {
@@ -51,7 +51,7 @@ async fn apply_tag_operation(target: &TagTarget, operation: &TagOperation) -> an
     let query = match operation {
         TagOperation::Update(tags) => format!("update_tags={}", tags.join(",")),
         TagOperation::Add(tag) => format!("add_tag={}", tag),
-        TagOperation::Delete(tag) => format!("delete_tag={}", tag),
+        TagOperation::Remove(tag) => format!("delete_tag={}", tag),
     };
     let url = format!(
         "http://{}:{}/admin?{}",
