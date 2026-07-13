@@ -1,3 +1,4 @@
+use crate::config::UrpcWriteMode;
 use crate::error::WorkerError;
 use crate::error::WorkerError::{STREAM_INCOMPLETE, STREAM_INCORRECT};
 use crate::store::ResponseData::Mem;
@@ -17,10 +18,9 @@ use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
-use std::io;
 use std::io::{Cursor, IoSlice};
 use strum_macros::EnumVariantNames;
-use tokio::io::{AsyncWriteExt, BufWriter, Interest};
+use tokio::io::AsyncWriteExt;
 use tokio::net::unix::pipe;
 use tokio::net::TcpStream;
 use tracing::{debug, info};
@@ -65,6 +65,7 @@ pub enum MessageType {
 }
 
 const HEADER_LEN: usize = 4 + 1 + 4;
+const MAX_WRITE_VECTORS: usize = 64;
 
 #[derive(Debug, strum_macros::Display)]
 pub enum Frame {
@@ -109,6 +110,15 @@ impl Frame {
         frame: &Frame,
         write_buf: &mut BytesMut,
     ) -> Result<()> {
+        Self::write_with_mode(stream, frame, write_buf, UrpcWriteMode::default()).await
+    }
+
+    pub async fn write_with_mode(
+        stream: &mut TcpStream,
+        frame: &Frame,
+        write_buf: &mut BytesMut,
+        write_mode: UrpcWriteMode,
+    ) -> Result<()> {
         match frame {
             Frame::GetLocalDataResponse(resp) => {
                 debug!("gotten the localfile data response");
@@ -136,32 +146,7 @@ impl Frame {
                 stream.write_all(&write_buf.split()).await?;
 
                 // write all data
-                match data {
-                    DataBytes::Direct(val) => {
-                        stream.write_all(val).await?;
-                    }
-                    DataBytes::Composed(val) => {
-                        stream.write_all(val.freeze().as_ref()).await?;
-                    }
-                    DataBytes::RawIO(raw) => {
-                        send_file_full(
-                            stream,
-                            raw.raw_fd,
-                            Some(raw.offset as i64),
-                            raw.length as usize,
-                        )
-                        .await.map_err(|e| {
-                            error!("Errors on getting localfile data by sendfile. off:{}. length:{}. e: {}", raw.offset, raw.length, &e);
-                            e
-                        })?;
-                    }
-                    DataBytes::RawPipe(pipe) => {
-                        system_libc::splice(stream, pipe).await.map_err(|e| {
-                            error!("Errors on getting localfile data by splice from pipe. length:{}. e: {}", pipe.length, &e);
-                            e
-                        })?;
-                    }
-                }
+                write_data_bytes(stream, data, write_mode).await?;
 
                 Ok(())
             }
@@ -285,9 +270,7 @@ impl Frame {
                 stream.write_all(&write_buf.split()).await?;
 
                 // data_bytes
-                for composed_byte in data_bytes_wrapper.always_composed().iter() {
-                    stream.write_all(&composed_byte).await?;
-                }
+                write_data_bytes(stream, data_bytes_wrapper, write_mode).await?;
                 Ok(())
             }
             Frame::GetMemoryDataV2Response(resp) => {
@@ -338,9 +321,7 @@ impl Frame {
                 stream.write_all(&write_buf.split()).await?;
 
                 // data_bytes
-                for composed_byte in data_bytes_wrapper.always_composed().iter() {
-                    stream.write_all(&composed_byte).await?;
-                }
+                write_data_bytes(stream, data_bytes_wrapper, write_mode).await?;
 
                 Ok(())
             }
@@ -658,6 +639,126 @@ impl Frame {
     }
 }
 
+async fn write_data_bytes(
+    stream: &mut TcpStream,
+    data: &DataBytes,
+    write_mode: UrpcWriteMode,
+) -> Result<()> {
+    match data {
+        DataBytes::Direct(bytes) => stream.write_all(bytes).await?,
+        DataBytes::Composed(composed) => match write_mode {
+            UrpcWriteMode::VECTORED => write_composed_bytes(stream, composed.iter()).await?,
+            UrpcWriteMode::FREEZE => stream.write_all(&composed.freeze()).await?,
+            UrpcWriteMode::CHUNKED => {
+                for chunk in composed.iter() {
+                    stream.write_all(chunk).await?;
+                }
+            }
+        },
+        DataBytes::RawIO(raw) => {
+            send_file_full(
+                stream,
+                raw.raw_fd,
+                Some(raw.offset as i64),
+                raw.length as usize,
+            )
+            .await
+            .map_err(|e| {
+                error!(
+                    "Errors on getting localfile data by sendfile. off:{}. length:{}. e: {}",
+                    raw.offset, raw.length, &e
+                );
+                e
+            })?;
+        }
+        DataBytes::RawPipe(pipe) => {
+            system_libc::splice(stream, pipe).await.map_err(|e| {
+                error!(
+                    "Errors on getting localfile data by splice from pipe. length:{}. e: {}",
+                    pipe.length, &e
+                );
+                e
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "bench")]
+#[doc(hidden)]
+pub async fn write_composed_bytes_for_bench(
+    stream: &mut TcpStream,
+    chunks: &[Bytes],
+) -> Result<()> {
+    write_composed_bytes(stream, chunks.iter()).await
+}
+
+async fn write_composed_bytes<'a, I>(stream: &mut TcpStream, chunks: I) -> Result<()>
+where
+    I: Iterator<Item = &'a Bytes>,
+{
+    let chunks: Vec<&[u8]> = chunks
+        .filter(|chunk| !chunk.is_empty())
+        .map(|chunk| chunk.as_ref())
+        .collect();
+
+    if chunks.is_empty() {
+        return Ok(());
+    }
+
+    if chunks.len() == 1 {
+        stream.write_all(chunks[0]).await?;
+        return Ok(());
+    }
+
+    let mut chunk_index = 0;
+    let mut chunk_offset = 0;
+    let mut slices = Vec::with_capacity(MAX_WRITE_VECTORS);
+
+    while chunk_index < chunks.len() {
+        slices.clear();
+        for (index, chunk) in chunks[chunk_index..]
+            .iter()
+            .take(MAX_WRITE_VECTORS)
+            .enumerate()
+        {
+            let chunk = if index == 0 {
+                &chunk[chunk_offset..]
+            } else {
+                chunk
+            };
+            if !chunk.is_empty() {
+                slices.push(IoSlice::new(chunk));
+            }
+        }
+
+        if slices.is_empty() {
+            return Err(Error::msg("composed data contained no writable bytes"));
+        }
+
+        let written = stream.write_vectored(&slices).await?;
+        if written == 0 {
+            return Err(Error::msg("socket write returned zero bytes"));
+        }
+
+        let mut remaining = written;
+        while remaining > 0 {
+            let available = chunks[chunk_index].len() - chunk_offset;
+            if remaining < available {
+                chunk_offset += remaining;
+                remaining = 0;
+            } else {
+                remaining -= available;
+                chunk_index += 1;
+                chunk_offset = 0;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub fn get_bytes(src: &mut Cursor<&[u8]>) -> Result<Option<Bytes>, WorkerError> {
     if !Buf::has_remaining(src) {
         return Err(STREAM_INCORRECT("get_bytes".into()));
@@ -755,11 +856,16 @@ pub fn get_u8(src: &mut Cursor<&[u8]>) -> Result<u8, WorkerError> {
 
 #[cfg(test)]
 mod test {
+    use crate::composed_bytes::ComposedBytes;
+    use crate::config::UrpcWriteMode;
     use crate::error::WorkerError;
-    use crate::urpc::frame::Frame;
+    use crate::store::DataBytes;
+    use crate::urpc::frame::{write_composed_bytes, write_data_bytes, Frame};
     use anyhow::Result;
     use bytes::{BufMut, Bytes, BytesMut};
     use std::io::Cursor;
+    use tokio::io::AsyncReadExt;
+    use tokio::net::{TcpListener, TcpStream};
 
     ///
     /// The encode urpc:
@@ -798,6 +904,56 @@ mod test {
         send_data_request.put(Bytes::from(vec![0; 128]));
         let cursor = &mut Cursor::new(&send_data_request[..]);
         Frame::check(cursor).unwrap();
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn composed_bytes_are_written_without_compaction() -> Result<()> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let mut client = TcpStream::connect(address).await?;
+        let (mut server, _) = listener.accept().await?;
+
+        let chunks: Vec<Bytes> = (0..(super::MAX_WRITE_VECTORS + 1))
+            .map(|index| Bytes::from(vec![index as u8; 3]))
+            .collect();
+        let expected: Vec<u8> = chunks
+            .iter()
+            .flat_map(|chunk| chunk.iter().copied())
+            .collect();
+        let composed = ComposedBytes::from(chunks, expected.len());
+
+        write_composed_bytes(&mut server, composed.iter()).await?;
+
+        let mut actual = vec![0; expected.len()];
+        client.read_exact(&mut actual).await?;
+        assert_eq!(expected, actual);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn composed_data_write_modes_preserve_payload() -> Result<()> {
+        let chunks = vec![Bytes::from_static(b"first"), Bytes::from_static(b"second")];
+        let expected = b"firstsecond";
+
+        for write_mode in [
+            UrpcWriteMode::VECTORED,
+            UrpcWriteMode::FREEZE,
+            UrpcWriteMode::CHUNKED,
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await?;
+            let address = listener.local_addr()?;
+            let mut client = TcpStream::connect(address).await?;
+            let (mut server, _) = listener.accept().await?;
+            let data = DataBytes::Composed(ComposedBytes::from(chunks.clone(), expected.len()));
+
+            write_data_bytes(&mut server, &data, write_mode).await?;
+
+            let mut actual = vec![0; expected.len()];
+            client.read_exact(&mut actual).await?;
+            assert_eq!(expected, actual.as_slice());
+        }
 
         Ok(())
     }
