@@ -178,7 +178,8 @@ impl Connection {
     }
 
     fn skip_bytes(&mut self, len: usize, field: &'static str) -> Result<(), WorkerError> {
-        let _ = self.consume_bytes(len, field)?;
+        self.ensure_consumable(len, field)?;
+        self.read_buf.advance(len);
         Ok(())
     }
 
@@ -212,16 +213,9 @@ impl Connection {
                 let data = reader.read_len_prefixed_bytes("send.block.data").await?;
 
                 let shuffle_server_len = reader.read_len("send.block.shuffle_server_len").await?;
-                for _ in 0..shuffle_server_len {
-                    reader.skip_string("send.block.shuffle_server.host").await?;
-                    reader.skip_string("send.block.shuffle_server.id").await?;
-                    let _ = reader
-                        .read_i32("send.block.shuffle_server.grpc_port")
-                        .await?;
-                    let _ = reader
-                        .read_i32("send.block.shuffle_server.netty_port")
-                        .await?;
-                }
+                reader
+                    .skip_shuffle_servers(shuffle_server_len, "send.block.shuffle_servers")
+                    .await?;
 
                 let uncompress_length = reader.read_i32("send.block.uncompress_length").await?;
                 let _free_mem = reader.read_i64("send.block.free_mem").await?;
@@ -384,9 +378,27 @@ impl<'a> StreamingFrameReader<'a> {
 
     async fn skip_string(&mut self, field: &'static str) -> Result<(), WorkerError> {
         let len = self.read_len(field).await?;
+        self.skip_bytes(len, field).await
+    }
+
+    async fn skip_bytes(&mut self, len: usize, field: &'static str) -> Result<(), WorkerError> {
         self.ensure(len, field).await?;
         self.remaining -= len;
         self.conn.skip_bytes(len, field)
+    }
+
+    async fn skip_shuffle_servers(
+        &mut self,
+        count: usize,
+        field: &'static str,
+    ) -> Result<(), WorkerError> {
+        for _ in 0..count {
+            self.skip_string(field).await?;
+            self.skip_string(field).await?;
+            self.skip_bytes(8, field).await?;
+        }
+
+        Ok(())
     }
 
     async fn read_len_prefixed_bytes(
@@ -461,6 +473,13 @@ mod tests {
     }
 
     fn build_send_shuffle_data_frame(payload: &[u8]) -> BytesMut {
+        build_send_shuffle_data_frame_with_shuffle_servers(payload, 0)
+    }
+
+    fn build_send_shuffle_data_frame_with_shuffle_servers(
+        payload: &[u8],
+        shuffle_server_count: usize,
+    ) -> BytesMut {
         let mut body = BytesMut::new();
         body.put_i64(42);
         put_string(&mut body, "app-streaming");
@@ -477,7 +496,13 @@ mod tests {
         body.put_i64(9001);
         body.put_i32(payload.len() as i32);
         body.put_slice(payload);
-        body.put_i32(0);
+        body.put_i32(shuffle_server_count as i32);
+        for index in 0..shuffle_server_count {
+            put_string(&mut body, &format!("host-{index}"));
+            put_string(&mut body, &format!("server-{index}"));
+            body.put_i32(18000 + index as i32);
+            body.put_i32(19000 + index as i32);
+        }
         body.put_i32(payload.len() as i32);
         body.put_i64(0);
         body.put_i64(123456);
@@ -571,6 +596,36 @@ mod tests {
         match frame {
             Frame::SendShuffleData(req) => {
                 let blocks = req.blocks.get(&11).expect("partition");
+                assert_eq!(payload.as_slice(), blocks[0].data.as_ref());
+            }
+            other => panic!("unexpected frame: {other:?}"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn send_shuffle_data_streaming_parse_skips_shuffle_servers() -> Result<()> {
+        let payload = vec![5u8; 1024];
+        let send_frame = build_send_shuffle_data_frame_with_shuffle_servers(&payload, 2);
+
+        let (mut client, server) = connected_streams().await?;
+        client.write_all(&send_frame).await?;
+
+        let mut conn = Connection::new(server, true);
+        let frame = conn.read_frame().await?.expect("send frame");
+
+        match frame {
+            Frame::SendShuffleData(req) => {
+                assert_eq!(42, req.request_id);
+                assert_eq!("app-streaming", req.app_id);
+                let blocks = req.blocks.get(&11).expect("partition");
+                assert_eq!(1, blocks.len());
+                assert_eq!(1234, blocks[0].block_id);
+                assert_eq!(payload.len() as i32, blocks[0].length);
+                assert_eq!(payload.len() as i32, blocks[0].uncompress_length);
+                assert_eq!(88, blocks[0].crc);
+                assert_eq!(9001, blocks[0].task_attempt_id);
                 assert_eq!(payload.as_slice(), blocks[0].data.as_ref());
             }
             other => panic!("unexpected frame: {other:?}"),
