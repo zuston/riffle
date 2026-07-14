@@ -130,29 +130,41 @@ impl Connection {
     }
 
     fn consume_bytes(&mut self, len: usize, field: &'static str) -> Result<Bytes, WorkerError> {
+        self.ensure_consumable(len, field)?;
+        Ok(self.read_buf.split_to(len).freeze())
+    }
+
+    fn ensure_consumable(&self, len: usize, field: &'static str) -> Result<(), WorkerError> {
         if self.read_buf.len() < len {
             return Err(STREAM_INCORRECT(format!(
                 "{field} requires {len} bytes, but only {} buffered",
                 self.read_buf.len()
             )));
         }
-        Ok(self.read_buf.split_to(len).freeze())
+        Ok(())
     }
 
     fn consume_u8(&mut self, field: &'static str) -> Result<u8, WorkerError> {
-        Ok(self.consume_bytes(1, field)?[0])
+        self.ensure_consumable(1, field)?;
+        let value = self.read_buf[0];
+        self.read_buf.advance(1);
+        Ok(value)
     }
 
     fn consume_i32(&mut self, field: &'static str) -> Result<i32, WorkerError> {
-        let bytes = self.consume_bytes(4, field)?;
-        let mut buf = Cursor::new(&bytes[..]);
-        Ok(buf.get_i32())
+        self.ensure_consumable(4, field)?;
+        let mut bytes = &self.read_buf[..4];
+        let value = bytes.get_i32();
+        self.read_buf.advance(4);
+        Ok(value)
     }
 
     fn consume_i64(&mut self, field: &'static str) -> Result<i64, WorkerError> {
-        let bytes = self.consume_bytes(8, field)?;
-        let mut buf = Cursor::new(&bytes[..]);
-        Ok(buf.get_i64())
+        self.ensure_consumable(8, field)?;
+        let mut bytes = &self.read_buf[..8];
+        let value = bytes.get_i64();
+        self.read_buf.advance(8);
+        Ok(value)
     }
 
     fn consume_usize_i32(&mut self, field: &'static str) -> Result<usize, WorkerError> {
