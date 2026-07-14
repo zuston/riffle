@@ -841,10 +841,10 @@ pub fn get_string(src: &mut Cursor<&[u8]>) -> Result<String, WorkerError> {
         )));
     }
 
-    let msg = Bytes::copy_from_slice(&Buf::chunk(src)[..len]);
+    let msg = Buf::chunk(src)[..len].to_vec();
     skip(src, len)?;
 
-    Ok(String::from_utf8(msg.to_vec())?)
+    Ok(String::from_utf8(msg)?)
 }
 
 pub fn get_u8(src: &mut Cursor<&[u8]>) -> Result<u8, WorkerError> {
