@@ -485,8 +485,7 @@ pub struct Config {
 pub struct UrpcConfig {
     pub get_index_rpc_version: RpcVersion,
 
-    // todo: experimental feature to reduce the peek memory usage, especially on the large-scale active connections
-    #[serde(default = "bool::default")]
+    #[serde(default = "as_default_streaming_parse_enabled")]
     pub streaming_parse_enabled: bool,
 
     #[serde(default)]
@@ -505,6 +504,10 @@ impl Default for UrpcWriteMode {
     fn default() -> Self {
         UrpcWriteMode::VECTORED
     }
+}
+
+pub fn as_default_streaming_parse_enabled() -> bool {
+    true
 }
 
 fn as_default_get_memory_rpc_version() -> RpcVersion {
@@ -944,5 +947,11 @@ mod test {
     fn urpc_write_mode_defaults_to_vectored() {
         let config: UrpcConfig = toml::from_str("get_index_rpc_version = \"V1\"").unwrap();
         assert_eq!(UrpcWriteMode::VECTORED, config.write_mode);
+    }
+
+    #[test]
+    fn urpc_streaming_parse_defaults_to_enabled() {
+        let config: UrpcConfig = toml::from_str("get_index_rpc_version = \"V1\"").unwrap();
+        assert!(config.streaming_parse_enabled);
     }
 }
