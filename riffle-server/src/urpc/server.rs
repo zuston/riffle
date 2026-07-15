@@ -6,6 +6,7 @@ use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc, Semaphore};
 
+use crate::config::as_default_streaming_parse_enabled;
 use crate::urpc::connection::Connection;
 use crate::urpc::shutdown::Shutdown;
 
@@ -37,7 +38,7 @@ impl Listener {
         let urpc_config = app_manager_ref.get_config().urpc_config.as_ref();
         let streaming_parse_enabled = urpc_config
             .map(|c| c.streaming_parse_enabled)
-            .unwrap_or(false);
+            .unwrap_or_else(as_default_streaming_parse_enabled);
         let write_mode = urpc_config.map(|c| c.write_mode).unwrap_or_default();
 
         loop {
