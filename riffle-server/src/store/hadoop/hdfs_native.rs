@@ -5,7 +5,7 @@ use anyhow::{Error, Result};
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use hdfs_native::{Client, HdfsError, WriteOptions};
+use hdfs_native::{Client, ClientBuilder, HdfsError, WriteOptions};
 use log::{debug, info};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -43,7 +43,10 @@ impl HdfsNativeClient {
             &url_header, root_path
         );
 
-        let client = Client::new_with_config(url_header.as_str(), configs)?;
+        let client = ClientBuilder::new()
+            .with_url(url_header.as_str())
+            .with_config(configs)
+            .build()?;
         Ok(Self {
             inner: Arc::new(ClientInner {
                 client,
@@ -76,7 +79,7 @@ impl HdfsClient for HdfsNativeClient {
             .instrument_await("appending...")
             .await?;
         file_writer
-            .write(data.freeze())
+            .write_bytes(data.freeze())
             .instrument_await("writing..")
             .await?;
         file_writer.close().instrument_await("closing...").await?;
