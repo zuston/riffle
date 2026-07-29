@@ -32,7 +32,7 @@ use tonic::transport::Server;
 #[derive(Parser, Debug)]
 #[command(name = "riffle-coordinator")]
 #[command(author = "Apache Software Foundation")]
-#[command(version = "0.20.0")]
+#[command(version)]
 #[command(about = "Riffle Coordinator - Uniffle Shuffle Service Coordinator", long_about = None)]
 struct Args {
     /// Configuration file path

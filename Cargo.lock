@@ -5063,7 +5063,7 @@ dependencies = [
 
 [[package]]
 name = "riffle-coordinator"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5091,7 +5091,7 @@ dependencies = [
 
 [[package]]
 name = "riffle-ctl"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5124,7 +5124,7 @@ dependencies = [
 
 [[package]]
 name = "riffle-server"
-version = "0.25.0"
+version = "0.26.0"
 dependencies = [
  "allocator-api2",
  "anyhow",
