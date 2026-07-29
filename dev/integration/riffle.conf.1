@@ -14,19 +14,17 @@ dashmap_shard_amount = 128
 
 [localfile_store]
 data_paths = ["/tmp/riffle-server-1/data"]
-healthy_check_min_disks = 0
-disk_max_concurrency = 2000
+min_number_of_available_disks = 0
+write_concurrency_per_disk = 4
 disk_high_watermark = 1.0
 
 [hybrid_store]
 memory_spill_high_watermark = 0.5
 memory_spill_low_watermark = 0.2
-memory_spill_max_concurrency = 1000
 
 [runtime_config]
 read_thread_num = 20
-write_thread_num = 50
-grpc_thread_num = 50
+localfile_write_thread_num = 50
 http_thread_num = 5
 default_thread_num = 10
 dispatch_thread_num = 5

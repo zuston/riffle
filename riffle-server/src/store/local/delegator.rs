@@ -40,6 +40,7 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::{timeout, Instant};
 use tracing::{info, Instrument};
 
@@ -63,6 +64,7 @@ struct Inner {
     root: String,
 
     io_handler: Handler,
+    write_limiter: Arc<Semaphore>,
 
     is_corrupted: Arc<AtomicBool>,
     is_space_enough: Arc<AtomicBool>,
@@ -86,6 +88,10 @@ impl LocalDiskDelegator {
     ) -> LocalDiskDelegator {
         let high_watermark = config.disk_high_watermark;
         let low_watermark = config.disk_low_watermark;
+        assert!(
+            config.write_concurrency_per_disk > 0,
+            "write_concurrency_per_disk must be greater than 0"
+        );
         let write_capacity = ByteSize::from_str(&config.disk_write_buf_capacity).unwrap();
         let read_capacity = ByteSize::from_str(&config.disk_read_buf_capacity).unwrap();
 
@@ -143,6 +149,7 @@ impl LocalDiskDelegator {
             inner: Arc::new(Inner {
                 root: root.to_owned(),
                 io_handler,
+                write_limiter: Arc::new(Semaphore::new(config.write_concurrency_per_disk)),
                 is_corrupted: Arc::new(AtomicBool::new(false)),
                 is_space_enough: Arc::new(AtomicBool::new(true)),
                 is_operation_normal: Arc::new(AtomicBool::new(true)),
@@ -185,6 +192,10 @@ impl LocalDiskDelegator {
 
     pub fn root(&self) -> String {
         self.inner.root.to_owned()
+    }
+
+    pub(crate) async fn acquire_write_permit(&self) -> Result<OwnedSemaphorePermit, WorkerError> {
+        Ok(self.inner.write_limiter.clone().acquire_owned().await?)
     }
 
     async fn schedule_check(&self) -> Result<()> {
@@ -312,6 +323,7 @@ impl LocalDiskDelegator {
     async fn write_read_check(&self) -> Result<(), WorkerError> {
         // Bound the server_id to ensure unique if having another instance in the same machine
         let detection_file = "corruption_check.file";
+        let write_permit = self.acquire_write_permit().await?;
 
         self.delete(&detection_file).await?;
 
@@ -325,6 +337,7 @@ impl LocalDiskDelegator {
         let f = self.write(&detection_file, options);
         timeout(Duration::from_secs(60), f).await??;
         let write_time = timer.elapsed().as_millis();
+        drop(write_permit);
 
         let timer = Instant::now();
         let options = ReadOptions::default().with_read_range(ReadRange::RANGE(0, 1024 * 1024 * 10));
@@ -495,6 +508,49 @@ mod test {
 
         available.store(60, Ordering::SeqCst); // 40 used, 40/100 = 0.4
         assert_eq!(runtime.block_on(delegator.capacity_check())?, true);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_write_limiter_is_scoped_per_data_path() -> anyhow::Result<()> {
+        use tokio::time::timeout;
+
+        let first_temp_dir = tempdir::TempDir::new("test_first_write_limiter").unwrap();
+        let first_temp_path = first_temp_dir.path().to_str().unwrap().to_string();
+        let second_temp_dir = tempdir::TempDir::new("test_second_write_limiter").unwrap();
+        let second_temp_path = second_temp_dir.path().to_str().unwrap().to_string();
+
+        let runtime_manager = RuntimeManager::default();
+        let mut config =
+            LocalfileStoreConfig::new(vec![first_temp_path.clone(), second_temp_path.clone()]);
+        config.write_concurrency_per_disk = 1;
+
+        let first_disk = LocalDiskDelegator::new(&runtime_manager, &first_temp_path, &config);
+        let second_disk = LocalDiskDelegator::new(&runtime_manager, &second_temp_path, &config);
+
+        runtime_manager.wait(async {
+            let first_permit = first_disk.acquire_write_permit().await?;
+
+            assert!(
+                timeout(Duration::from_millis(50), first_disk.acquire_write_permit())
+                    .await
+                    .is_err(),
+                "the same data path must block after exhausting its write permits"
+            );
+
+            let second_permit =
+                timeout(Duration::from_secs(1), second_disk.acquire_write_permit()).await??;
+
+            drop(first_permit);
+
+            let next_first_permit =
+                timeout(Duration::from_secs(1), first_disk.acquire_write_permit()).await??;
+
+            drop(second_permit);
+            drop(next_first_permit);
+            Ok::<(), anyhow::Error>(())
+        })?;
 
         Ok(())
     }

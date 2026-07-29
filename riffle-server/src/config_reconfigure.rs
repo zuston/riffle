@@ -248,11 +248,12 @@ mod tests {
 
         [localfile_store]
         data_paths = ["/data1/uniffle"]
+        write_concurrency_per_disk = 4
 
         [hybrid_store]
         memory_spill_low_watermark = 0.2
         memory_single_buffer_max_spill_size = "256M"
-        memory_spill_to_localfile_concurrency = 100
+        memory_spill_to_hdfs_concurrency = 100
         "#;
 
         format!(
@@ -319,7 +320,7 @@ mod tests {
         );
 
         let reconf_ref_2: ConfigOption<u32> =
-            reconf_manager.register("hybrid_store.memory_spill_to_localfile_concurrency")?;
+            reconf_manager.register("hybrid_store.memory_spill_to_hdfs_concurrency")?;
         assert_eq!(100, reconf_ref_2.get());
 
         // change but wrongly configure
@@ -332,11 +333,12 @@ mod tests {
 
         [localfile_store]
         data_paths = ["/data1/uniffle"]
+        write_concurrency_per_disk = 4
 
         [hybrid_store]
         memory_spill_low_watermark = 0.2
         memory_single_buffer_max_spill_size = "256M"
-        memory_spill_to_localfile_concurrency = -1
+        memory_spill_to_hdfs_concurrency = -1
         "#;
         write_conf_into_file(target_conf_file.to_owned(), toml_str.to_string())?;
 
@@ -438,7 +440,6 @@ mod tests {
                     "memory_spill_low_watermark": 0.2,
                     "memory_single_buffer_max_spill_size": "256M",
                     "memory_spill_to_cold_threshold_size": null,
-                    "memory_spill_to_localfile_concurrency": null,
                     "memory_spill_to_hdfs_concurrency": null,
                     "huge_partition_memory_spill_to_hdfs_threshold_size": "64M",
                     "sensitive_watermark_spill_enable": false,

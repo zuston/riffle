@@ -284,6 +284,29 @@ impl LocalFileStore {
             return Err(WorkerError::LOCAL_DISK_UNHEALTHY(local_disk.root()));
         }
 
+        let shuffle_file_format = self.create_shuffle_format(blocks, next_offset as i64)?;
+        let options = if self.direct_io_append_enable {
+            WriteOptions::with_append_of_direct_io(shuffle_file_format.data, next_offset)
+        } else {
+            WriteOptions::with_append_of_buffer_io(shuffle_file_format.data)
+        };
+
+        let disk_write_permit = local_disk
+            .acquire_write_permit()
+            .instrument_await(format!(
+                "waiting for the disk write permit: {}",
+                local_disk.root()
+            ))
+            .await?;
+
+        if local_disk.is_corrupted()? {
+            return Err(WorkerError::PARTIAL_DATA_LOST(local_disk.root()));
+        }
+
+        if !local_disk.is_healthy()? {
+            return Err(WorkerError::LOCAL_DISK_UNHEALTHY(local_disk.root()));
+        }
+
         if !parent_dir_is_created {
             if let Some(path) = Path::new(&data_file_path).parent() {
                 let path = format!("{}/", path.to_str().unwrap()).as_str().to_owned();
@@ -294,12 +317,6 @@ impl LocalFileStore {
             }
         }
 
-        let shuffle_file_format = self.create_shuffle_format(blocks, next_offset as i64)?;
-        let options = if self.direct_io_append_enable {
-            WriteOptions::with_append_of_direct_io(shuffle_file_format.data, next_offset)
-        } else {
-            WriteOptions::with_append_of_buffer_io(shuffle_file_format.data)
-        };
         let append_future = local_disk.write(&data_file_path, options);
         append_future
             .instrument_await(format!(
@@ -328,6 +345,7 @@ impl LocalFileStore {
             .deref()
             .pointer
             .store(shuffle_file_format.offset as u64, SeqCst);
+        drop(disk_write_permit);
 
         Ok(())
     }
@@ -687,7 +705,9 @@ mod test {
     use crate::app_manager::application_identifier::ApplicationId;
     use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::purge_event::PurgeReason;
+    use crate::config::LocalfileStoreConfig;
     use crate::error::WorkerError;
+    use crate::runtime::manager::RuntimeManager;
     use crate::store::index_codec::{IndexBlock, IndexCodec};
     use crate::store::local::LocalDiskStorage;
     use crate::store::{Block, ResponseData, ResponseDataIndex, Store};
@@ -1000,6 +1020,63 @@ mod test {
         }
 
         temp_dir.close().unwrap();
+    }
+
+    #[test]
+    fn data_insert_obeys_write_permit_and_rechecks_disk_health() -> anyhow::Result<()> {
+        use std::time::Duration;
+        use tokio::time::timeout;
+
+        let temp_dir = tempdir::TempDir::new("data_insert_write_permit").unwrap();
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        let mut config = LocalfileStoreConfig::new(vec![temp_path]);
+        config.write_concurrency_per_disk = 1;
+
+        let local_store = LocalFileStore::from(config, RuntimeManager::default());
+        let runtime = local_store.runtime_manager.clone();
+        let local_disk = local_store.local_disks[0].clone();
+
+        runtime.wait(async {
+            let held_permit = local_disk.acquire_write_permit().await?;
+            let first_insert = local_store.insert(create_writing_ctx());
+            tokio::pin!(first_insert);
+
+            assert!(
+                timeout(Duration::from_millis(50), first_insert.as_mut())
+                    .await
+                    .is_err(),
+                "data insert must wait when the data path has no write permit"
+            );
+
+            drop(held_permit);
+            timeout(Duration::from_secs(1), first_insert.as_mut()).await??;
+
+            let held_permit = local_disk.acquire_write_permit().await?;
+            let second_insert = local_store.insert(create_writing_ctx());
+            tokio::pin!(second_insert);
+
+            assert!(
+                timeout(Duration::from_millis(50), second_insert.as_mut())
+                    .await
+                    .is_err(),
+                "the second insert must reach the write-permit wait"
+            );
+
+            local_disk.mark_operation_abnormal()?;
+            drop(held_permit);
+
+            let result = timeout(Duration::from_secs(1), second_insert.as_mut()).await?;
+            assert!(matches!(result, Err(WorkerError::LOCAL_DISK_UNHEALTHY(_))));
+
+            local_disk.mark_operation_normal()?;
+            let released_permit =
+                timeout(Duration::from_secs(1), local_disk.acquire_write_permit()).await??;
+            drop(released_permit);
+
+            Ok::<(), anyhow::Error>(())
+        })?;
+
+        Ok(())
     }
 
     #[test]
