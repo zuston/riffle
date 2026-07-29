@@ -44,11 +44,16 @@ jemalloc = [
     "dep:tikv-jemalloc-ctl",
     "dep:tikv-jemalloc-sys",
     "dep:tikv-jemallocator",
-    "dep:jemalloc_pprof",
 ]
 
 # whether to enable memory profiling or not, once enabled, it implies using jemalloc as the global allocator
-memory-prof = ["jemalloc", "tikv-jemallocator/profiling", "allocator-analysis"]
+memory-prof = [
+    "jemalloc",
+    "dep:jemalloc_pprof",
+    "tikv-jemalloc-sys/profiling",
+    "tikv-jemallocator/profiling",
+    "allocator-analysis",
+]
 
 hdfs = ["dep:hdfs-native"]
 
@@ -135,8 +140,8 @@ cap= { workspace = true, optional = true }
 hdfs-native= { workspace = true, optional = true }
 hdrs= { workspace = true, optional = true }
 tikv-jemalloc-ctl= { workspace = true, features = ["use_std"], optional = true }
-tikv-jemalloc-sys= { workspace = true, features = ["stats", "profiling", "unprefixed_malloc_on_supported_platforms"], optional = true }
-tikv-jemallocator= { workspace = true, features = ["profiling", "unprefixed_malloc_on_supported_platforms"], optional = true }
+tikv-jemalloc-sys= { workspace = true, features = ["stats", "unprefixed_malloc_on_supported_platforms"], optional = true }
+tikv-jemallocator= { workspace = true, features = ["unprefixed_malloc_on_supported_platforms"], optional = true }
 jemalloc_pprof= { workspace = true, features = ["symbolize", "flamegraph"], optional = true }
 nix= { workspace = true, optional = true }
 io-uring = { workspace = true, optional = true }
