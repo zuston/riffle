@@ -28,6 +28,8 @@ pub mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    static SPILL_TEST_LOCK: Lazy<parking_lot::Mutex<()>> = Lazy::new(Default::default);
+
     #[test]
     fn test_enum_display() {
         let store_type = StorageType::HDFS;
@@ -96,6 +98,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn test_flush_after_app_purged() -> anyhow::Result<()> {
+        let _guard = SPILL_TEST_LOCK.lock();
         GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.set(0);
         TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND.reset();
         TOTAL_MEMORY_SPILL_BYTES.reset();
@@ -154,6 +157,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn test_flush_failed() {
+        let _guard = SPILL_TEST_LOCK.lock();
         TOTAL_MEMORY_SPILL_OPERATION_FAILED.reset();
         TOTAL_SPILL_EVENTS_DROPPED.reset();
 
@@ -209,6 +213,7 @@ pub mod tests {
     // for sensitive watermark-spill mechanism
     #[tokio::test]
     async fn test_watermark_spill_of_excluding_inflight() -> anyhow::Result<()> {
+        let _guard = SPILL_TEST_LOCK.lock();
         GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.set(0);
 
         let warm_healthy = Arc::new(AtomicBool::new(true));
@@ -329,6 +334,7 @@ pub mod tests {
     #[tokio::test]
     #[cfg(feature = "hdfs")]
     async fn test_single_buffer_spill() {
+        let _guard = SPILL_TEST_LOCK.lock();
         GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.set(0);
 
         let warm_healthy = Arc::new(AtomicBool::new(true));
@@ -374,8 +380,123 @@ pub mod tests {
     }
 
     #[tokio::test]
+    async fn test_huge_partition_single_buffer_spill_threshold() -> anyhow::Result<()> {
+        let _guard = SPILL_TEST_LOCK.lock();
+        let warm_healthy = Arc::new(AtomicBool::new(true));
+        let warm = MockStore::new(LOCALFILE, &warm_healthy, None, None);
+        let cold_healthy = Arc::new(AtomicBool::new(true));
+        let cold = MockStore::new(HDFS, &cold_healthy, None, None);
+
+        let temp_dir = tempdir::TempDir::new("test_huge_partition_single_buffer_spill").unwrap();
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+
+        let mut config = create_multi_level_config(
+            StorageType::MEMORY_LOCALFILE,
+            1,
+            "1M".to_string(),
+            temp_path,
+        );
+        config.hybrid_store.memory_spill_high_watermark = 1.0;
+        config
+            .hybrid_store
+            .huge_partition_memory_single_buffer_max_spill_size = Some("128B".to_string());
+        config
+            .hybrid_store
+            .huge_partition_memory_spill_to_hdfs_threshold_size = Some("14B".to_string());
+        config.app_config.partition_limit_enable = true;
+        config.app_config.partition_limit_threshold = "100B".to_string();
+
+        let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
+        let store = create_hybrid_store(&config, &warm, Some(&cold), &reconf_manager);
+        let app_manager = AppManager::get_ref(
+            store.runtime_manager.clone(),
+            config,
+            &store,
+            &reconf_manager,
+        );
+        store.with_app_manager(&app_manager);
+
+        let app_id = ApplicationId::mock();
+        let shuffle_id = 1;
+        let huge_partition_id = 0;
+        let normal_partition_id = 1;
+        app_manager.register(app_id.to_string(), shuffle_id, Default::default())?;
+        let app = app_manager.get_app(&app_id).unwrap();
+
+        app.insert(mock_writing_context(
+            &app_id,
+            shuffle_id,
+            normal_partition_id,
+            1,
+            20,
+        ))
+        .await?;
+        awaitility::at_most(Duration::from_secs(1))
+            .until(|| warm.inner.spill_insert_ops.load(SeqCst) == 1);
+
+        app.insert(mock_writing_context(
+            &app_id,
+            shuffle_id,
+            huge_partition_id,
+            1,
+            101,
+        ))
+        .await?;
+        app.insert(mock_writing_context(
+            &app_id,
+            shuffle_id,
+            huge_partition_id,
+            1,
+            27,
+        ))
+        .await?;
+
+        assert!(app.is_huge_partition(&PartitionUId::new(
+            &app_id,
+            shuffle_id,
+            huge_partition_id,
+        ))?);
+        assert_eq!(1, warm.inner.spill_insert_ops.load(SeqCst));
+        assert_eq!(0, cold.inner.spill_insert_ops.load(SeqCst));
+        assert_eq!(
+            128,
+            store.get_memory_buffer_size(&PartitionUId::new(
+                &app_id,
+                shuffle_id,
+                huge_partition_id,
+            ))?
+        );
+
+        app.insert(mock_writing_context(
+            &app_id,
+            shuffle_id,
+            huge_partition_id,
+            1,
+            1,
+        ))
+        .await?;
+        awaitility::at_most(Duration::from_secs(1)).until(|| {
+            cold.inner.spill_insert_ops.load(SeqCst) == 1
+                && store
+                    .get_memory_buffer_size(&PartitionUId::new(
+                        &app_id,
+                        shuffle_id,
+                        huge_partition_id,
+                    ))
+                    .unwrap()
+                    == 0
+                && store.get_spill_event_num().unwrap() == 0
+        });
+
+        assert_eq!(1, warm.inner.spill_insert_ops.load(SeqCst));
+        assert_eq!(1, cold.inner.spill_insert_ops.load(SeqCst));
+        Ok(())
+    }
+
+    #[tokio::test]
     #[cfg(feature = "hdfs")]
     async fn test_localfile_disk_unhealthy() {
+        let _guard = SPILL_TEST_LOCK.lock();
         GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.set(0);
 
         // when the local disk is unhealthy, the data should be flushed
@@ -427,6 +548,7 @@ pub mod tests {
     #[tokio::test]
     #[cfg(feature = "hdfs")]
     async fn test_hdfs_failure_for_huge_partition() -> anyhow::Result<()> {
+        let _guard = SPILL_TEST_LOCK.lock();
         GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.set(0);
 
         // for the huge partition, when the hdfs flushing failed, it should fallback
