@@ -740,12 +740,19 @@ impl LocalIO for UringIo {
             let pipe_in_fd_raw = ctx.splice_pipe.as_ref().unwrap().pipe_in_fd;
 
             let _ = shard.send(ctx);
-            let _result = match rx.await {
+            let spliced = match rx.await {
                 Ok(res) => res,
                 Err(e) => {
                     return Err(WorkerError::Other(anyhow::Error::from(e)));
                 }
             }?;
+            if spliced != length as usize {
+                return Err(WorkerError::Other(anyhow!(
+                    "Unexpected uring splice. expected/spliced: {}/{}",
+                    length,
+                    spliced
+                )));
+            }
 
             // Convert raw fd back to File handle
             let pipe_in_fd = unsafe { std::fs::File::from_raw_fd(pipe_in_fd_raw) };
@@ -776,12 +783,19 @@ impl LocalIO for UringIo {
         };
 
         let _ = shard.send(ctx);
-        let _result = match rx.await {
+        let read_bytes = match rx.await {
             Ok(res) => res,
             Err(e) => {
                 return Err(WorkerError::Other(anyhow::Error::from(e)));
             }
         }?;
+        if read_bytes != length as usize {
+            return Err(WorkerError::Other(anyhow!(
+                "Unexpected uring read. expected/read: {}/{}",
+                length,
+                read_bytes
+            )));
+        }
 
         Ok(DataBytes::Direct(buf.freeze()))
     }
