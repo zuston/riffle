@@ -708,7 +708,8 @@ mod test {
     use crate::config::LocalfileStoreConfig;
     use crate::error::WorkerError;
     use crate::runtime::manager::RuntimeManager;
-    use crate::store::index_codec::{IndexBlock, IndexCodec};
+    use crate::store::index_codec::{IndexBlock, IndexCodec, INDEX_BLOCK_SIZE};
+    use crate::store::local::read_options::IoMode;
     use crate::store::local::LocalDiskStorage;
     use crate::store::{Block, ResponseData, ResponseDataIndex, Store};
     use bytes::{Buf, Bytes, BytesMut};
@@ -1075,6 +1076,83 @@ mod test {
 
             Ok::<(), anyhow::Error>(())
         })?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn direct_appends_are_immediately_visible_through_local_store() -> anyhow::Result<()> {
+        let temp_dir = tempdir::TempDir::new("direct_append_visibility").unwrap();
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        let mut config = LocalfileStoreConfig::new(vec![temp_path]);
+        config.direct_io_append_enable = true;
+
+        let local_store = LocalFileStore::from(config, RuntimeManager::default());
+        let runtime = local_store.runtime_manager.clone();
+        let uid = PartitionUId::new(&Default::default(), 0, 0);
+
+        let first_data = vec![0x11; 3073];
+        let second_data = vec![0x22; 2051];
+        let first_block = Block {
+            block_id: 101,
+            length: first_data.len() as i32,
+            uncompress_length: first_data.len() as i32,
+            crc: 1001,
+            data: Bytes::copy_from_slice(&first_data),
+            task_attempt_id: 11,
+        };
+        let second_block = Block {
+            block_id: 202,
+            length: second_data.len() as i32,
+            uncompress_length: second_data.len() as i32,
+            crc: 2002,
+            data: Bytes::copy_from_slice(&second_data),
+            task_attempt_id: 22,
+        };
+
+        runtime.wait(local_store.insert(WritingViewContext::create_for_test(
+            uid.clone(),
+            vec![first_block],
+        )))?;
+        runtime.wait(local_store.insert(WritingViewContext::create_for_test(
+            uid.clone(),
+            vec![second_block],
+        )))?;
+
+        let ResponseDataIndex::Local(index) =
+            runtime.wait(local_store.get_index(ReadingIndexViewContext {
+                partition_id: uid.clone(),
+            }))?;
+        let expected_data_len = first_data.len() + second_data.len();
+        assert_eq!(expected_data_len as i64, index.data_file_len);
+
+        let mut index_bytes = index.index_data.freeze();
+        assert_eq!(INDEX_BLOCK_SIZE * 2, index_bytes.len());
+        let first_index = IndexCodec::decode(index_bytes.split_to(INDEX_BLOCK_SIZE))?;
+        let second_index = IndexCodec::decode(index_bytes.split_to(INDEX_BLOCK_SIZE))?;
+        assert_eq!(0, first_index.offset);
+        assert_eq!(first_data.len() as i32, first_index.length);
+        assert_eq!(101, first_index.block_id);
+        assert_eq!(11, first_index.task_attempt_id);
+        assert_eq!(first_data.len() as i64, second_index.offset);
+        assert_eq!(second_data.len() as i32, second_index.length);
+        assert_eq!(202, second_index.block_id);
+        assert_eq!(22, second_index.task_attempt_id);
+
+        let reading_ctx = ReadingViewContext::new(
+            uid,
+            ReadingOptions::FILE_OFFSET_AND_LEN(0, expected_data_len as i64),
+            RpcType::GRPC,
+        )
+        .with_io_mode(IoMode::BUFFER_IO);
+        let ResponseData::Local(partitioned_data) = runtime.wait(local_store.get(reading_ctx))?
+        else {
+            panic!("expected local data");
+        };
+
+        let mut expected = first_data;
+        expected.extend_from_slice(&second_data);
+        assert_eq!(expected.as_slice(), partitioned_data.data.freeze().as_ref());
 
         Ok(())
     }

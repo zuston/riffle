@@ -75,6 +75,27 @@ jobs:
         working-directory: ./
         run: cargo test --verbose ${{ matrix.features }} -- --test-threads=1
 
+  io-uring-tests:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Remove unnecessary files
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v2
+        with:
+          version: "23.2"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Run io_uring tests
+        run: >-
+          cargo test -p riffle-server
+          --features io-uring
+          --lib store::local::uring_io::tests
+          -- --test-threads=1
+
   with-hdrs:
     runs-on: ubuntu-22.04
     steps:
