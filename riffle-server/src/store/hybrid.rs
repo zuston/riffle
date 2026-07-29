@@ -117,6 +117,7 @@ pub struct HybridStore {
 
     app_manager: OnceCell<AppManagerRef>,
 
+    huge_partition_memory_single_buffer_max_spill_size: Option<u64>,
     huge_partition_memory_spill_to_hdfs_threshold_size: Option<u64>,
 
     // Only for test
@@ -170,6 +171,19 @@ impl HybridStore {
             .huge_partition_memory_spill_to_hdfs_threshold_size
             .as_ref()
             .map(|x| ByteSize::from_str(&x).unwrap().as_u64());
+        let huge_partition_single_buffer_spill_threshold = hybrid_conf
+            .huge_partition_memory_single_buffer_max_spill_size
+            .as_ref()
+            .map(|value| {
+                ByteSize::from_str(value)
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "Invalid hybrid_store.huge_partition_memory_single_buffer_max_spill_size [{}]: {}",
+                            value, error
+                        )
+                    })
+                    .as_u64()
+            });
         if huge_partition_spill_threshold.is_none() {
             info!("Huge partition spill to HDFS has been disabled.");
         }
@@ -193,6 +207,8 @@ impl HybridStore {
             event_bus,
             app_manager: OnceCell::new(),
             in_flight_bytes: Default::default(),
+            huge_partition_memory_single_buffer_max_spill_size:
+                huge_partition_single_buffer_spill_threshold,
             huge_partition_memory_spill_to_hdfs_threshold_size: huge_partition_spill_threshold
                 .clone(),
             in_flight_bytes_of_huge_partition: Default::default(),
@@ -470,6 +486,29 @@ impl HybridStore {
         self.buffer_spill_impl(uid, buffer).await
     }
 
+    fn single_buffer_spill_threshold(
+        &self,
+        uid: &PartitionUId,
+    ) -> Result<Option<u64>, WorkerError> {
+        let Some(huge_partition_threshold) =
+            &self.huge_partition_memory_single_buffer_max_spill_size
+        else {
+            return Ok(self.memory_spill_partition_max_threshold);
+        };
+        let Some(app_manager) = self.app_manager.get() else {
+            return Ok(self.memory_spill_partition_max_threshold);
+        };
+        let Some(app) = app_manager.get_app(&uid.app_id) else {
+            return Ok(self.memory_spill_partition_max_threshold);
+        };
+
+        if app.is_huge_partition(uid)? {
+            Ok(Some(*huge_partition_threshold))
+        } else {
+            Ok(self.memory_spill_partition_max_threshold)
+        }
+    }
+
     async fn buffer_spill_impl(
         &self,
         uid: &PartitionUId,
@@ -665,7 +704,7 @@ impl Store for HybridStore {
         // safe will be ensured by the buffer self.
         // if the first request has been handled, the following requests will not
         // fast skip this logic.
-        if let Some(threshold) = self.memory_spill_partition_max_threshold {
+        if let Some(threshold) = self.single_buffer_spill_threshold(&uid)? {
             let size = self.hot_store.get_buffer_staging_size(&uid)?;
             if size > threshold {
                 if let Err(err) = self.single_buffer_spill(&uid).await {

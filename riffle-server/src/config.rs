@@ -327,6 +327,7 @@ pub struct HybridStoreConfig {
     pub memory_spill_to_localfile_concurrency: Option<i32>,
     pub memory_spill_to_hdfs_concurrency: Option<i32>,
 
+    pub huge_partition_memory_single_buffer_max_spill_size: Option<String>,
     pub huge_partition_memory_spill_to_hdfs_threshold_size: Option<String>,
     #[serde(default = "as_default_huge_partition_fallback_enable")]
     pub huge_partition_fallback_enable: bool,
@@ -382,6 +383,7 @@ impl HybridStoreConfig {
             memory_spill_to_cold_threshold_size: None,
             memory_spill_to_localfile_concurrency: None,
             memory_spill_to_hdfs_concurrency: None,
+            huge_partition_memory_single_buffer_max_spill_size: None,
             huge_partition_memory_spill_to_hdfs_threshold_size: None,
             huge_partition_fallback_enable: as_default_huge_partition_fallback_enable(),
             sensitive_watermark_spill_enable: as_default_sensitive_watermark_spill_enable(),
@@ -401,6 +403,7 @@ impl Default for HybridStoreConfig {
             memory_spill_to_cold_threshold_size: None,
             memory_spill_to_localfile_concurrency: None,
             memory_spill_to_hdfs_concurrency: None,
+            huge_partition_memory_single_buffer_max_spill_size: None,
             huge_partition_memory_spill_to_hdfs_threshold_size: None,
             huge_partition_fallback_enable: as_default_huge_partition_fallback_enable(),
             sensitive_watermark_spill_enable: as_default_sensitive_watermark_spill_enable(),
@@ -876,6 +879,7 @@ mod test {
         memory_spill_high_watermark = 0.8
         memory_spill_low_watermark = 0.2
         memory_single_buffer_max_spill_size = "256M"
+        huge_partition_memory_single_buffer_max_spill_size = "128M"
 
         [hdfs_store]
         max_concurrency = 10
@@ -899,6 +903,14 @@ mod test {
 
         let decoded: Config = toml::from_str(toml_str).unwrap();
         println!("{:#?}", decoded);
+
+        assert_eq!(
+            Some("128M"),
+            decoded
+                .hybrid_store
+                .huge_partition_memory_single_buffer_max_spill_size
+                .as_deref()
+        );
 
         let capacity = ByteSize::from_str(&decoded.memory_store.unwrap().capacity).unwrap();
         assert_eq!(ByteSize::from_str("1024M").unwrap(), capacity);

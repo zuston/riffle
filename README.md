@@ -179,6 +179,9 @@ memory_single_buffer_max_spill_size = "1G"
 memory_spill_to_cold_threshold_size = "128M"
 memory_spill_to_localfile_concurrency = 4000
 memory_spill_to_hdfs_concurrency = 500
+# Static startup setting. Huge partitions use this single-buffer spill trigger;
+# watermark spills may still flush them earlier.
+huge_partition_memory_single_buffer_max_spill_size = "128M"
 huge_partition_memory_spill_to_hdfs_threshold_size = "64M"
 
 [runtime_config]
