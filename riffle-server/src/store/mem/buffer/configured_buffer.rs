@@ -1,24 +1,24 @@
+use crate::store::mem::buffer::configured_buffer::ConfiguredMemoryBuffer::{DEFAULT, INDEXED};
 use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
-use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
-use crate::store::mem::buffer::unified_buffer::UnifiedBuffer::{DEFAULT, EXPERIMENTAL};
+use crate::store::mem::buffer::indexed_buffer::IndexedMemoryBuffer;
 use crate::store::mem::buffer::{BufferOptions, BufferSpillResult, BufferType, MemoryBuffer};
 use crate::store::{Block, PartitionedMemoryData};
 use croaring::Treemap;
 
-/// this is the router to delegate to the underlying concrete implementation without any cost
-pub enum UnifiedBuffer {
+/// Delegates to the memory buffer implementation selected by configuration.
+pub enum ConfiguredMemoryBuffer {
     DEFAULT(DefaultMemoryBuffer),
-    EXPERIMENTAL(OptStagingMemoryBuffer),
+    INDEXED(IndexedMemoryBuffer),
 }
 
-impl MemoryBuffer for UnifiedBuffer {
-    fn new(opts: BufferOptions) -> Self
+impl MemoryBuffer for ConfiguredMemoryBuffer {
+    fn new(options: BufferOptions) -> Self
     where
         Self: Sized,
     {
-        match opts.buffer_type {
-            BufferType::DEFAULT => DEFAULT(DefaultMemoryBuffer::new(opts)),
-            BufferType::EXPERIMENTAL => EXPERIMENTAL(OptStagingMemoryBuffer::new(opts)),
+        match options.buffer_type {
+            BufferType::DEFAULT => DEFAULT(DefaultMemoryBuffer::new(options)),
+            BufferType::INDEXED => INDEXED(IndexedMemoryBuffer::new(options)),
         }
     }
 
@@ -28,7 +28,7 @@ impl MemoryBuffer for UnifiedBuffer {
     {
         match &self {
             DEFAULT(x) => x.total_size(),
-            EXPERIMENTAL(x) => x.total_size(),
+            INDEXED(x) => x.total_size(),
         }
     }
 
@@ -38,7 +38,7 @@ impl MemoryBuffer for UnifiedBuffer {
     {
         match &self {
             DEFAULT(x) => x.flight_size(),
-            EXPERIMENTAL(x) => x.flight_size(),
+            INDEXED(x) => x.flight_size(),
         }
     }
 
@@ -48,7 +48,7 @@ impl MemoryBuffer for UnifiedBuffer {
     {
         match &self {
             DEFAULT(x) => x.staging_size(),
-            EXPERIMENTAL(x) => x.staging_size(),
+            INDEXED(x) => x.staging_size(),
         }
     }
 
@@ -58,7 +58,7 @@ impl MemoryBuffer for UnifiedBuffer {
     {
         match &self {
             DEFAULT(x) => x.clear(flight_id, flight_size),
-            EXPERIMENTAL(x) => x.clear(flight_id, flight_size),
+            INDEXED(x) => x.clear(flight_id, flight_size),
         }
     }
 
@@ -73,7 +73,7 @@ impl MemoryBuffer for UnifiedBuffer {
     {
         match &self {
             DEFAULT(x) => x.get(last_block_id, read_bytes_limit_len, task_ids),
-            EXPERIMENTAL(x) => x.get(last_block_id, read_bytes_limit_len, task_ids),
+            INDEXED(x) => x.get(last_block_id, read_bytes_limit_len, task_ids),
         }
     }
 
@@ -83,7 +83,7 @@ impl MemoryBuffer for UnifiedBuffer {
     {
         match &self {
             DEFAULT(x) => x.spill(),
-            EXPERIMENTAL(x) => x.spill(),
+            INDEXED(x) => x.spill(),
         }
     }
 
@@ -93,7 +93,7 @@ impl MemoryBuffer for UnifiedBuffer {
     {
         match &self {
             DEFAULT(x) => x.append(blocks, size),
-            EXPERIMENTAL(x) => x.append(blocks, size),
+            INDEXED(x) => x.append(blocks, size),
         }
     }
 
@@ -104,7 +104,7 @@ impl MemoryBuffer for UnifiedBuffer {
     {
         match &self {
             DEFAULT(x) => x.direct_push(blocks),
-            EXPERIMENTAL(x) => x.direct_push(blocks),
+            INDEXED(x) => x.direct_push(blocks),
         }
     }
 }

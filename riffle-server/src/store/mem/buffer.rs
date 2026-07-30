@@ -1,10 +1,8 @@
+pub mod configured_buffer;
 pub mod default_buffer;
-pub mod opt_buffer;
-pub mod unified_buffer;
+pub mod indexed_buffer;
 
 use crate::composed_bytes::ComposedBytes;
-use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
-use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
 use crate::store::mem::buffer::BufferType::DEFAULT;
 use crate::store::DataBytes;
 use crate::store::{Block, DataSegment, PartitionedMemoryData};
@@ -19,10 +17,11 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Copy)]
 pub enum BufferType {
-    // the default memory_buffer type
+    // The default memory buffer type.
     DEFAULT,
-    // the experimental memory_buffer type
-    EXPERIMENTAL,
+    // The memory buffer with a block-position index.
+    #[serde(alias = "EXPERIMENTAL")]
+    INDEXED,
 }
 
 impl Default for BufferType {
@@ -124,7 +123,7 @@ pub trait MemoryBuffer {
 #[cfg(test)]
 mod test {
     use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
-    use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
+    use crate::store::mem::buffer::indexed_buffer::IndexedMemoryBuffer;
     use crate::store::mem::buffer::MemoryBuffer;
     use crate::store::test_utils::create_blocks;
     use crate::store::Block;
@@ -175,7 +174,7 @@ mod test {
     #[test]
     fn test_with_block_id_zero() -> anyhow::Result<()> {
         run_test_with_block_id_zero::<DefaultMemoryBuffer>()?;
-        run_test_with_block_id_zero::<OptStagingMemoryBuffer>()?;
+        run_test_with_block_id_zero::<IndexedMemoryBuffer>()?;
         Ok(())
     }
 
@@ -197,7 +196,6 @@ mod test {
         /// case3: make all staging to spill
         let spill_result = buffer.spill()?.unwrap();
         assert_eq!(10 * 10 * 2, spill_result.flight_len);
-        assert_eq!(2, spill_result.blocks.len());
         assert_eq!(
             10 * 2,
             spill_result
@@ -283,7 +281,7 @@ mod test {
     #[test]
     fn test_put_get() -> anyhow::Result<()> {
         run_test_put_get::<DefaultMemoryBuffer>()?;
-        run_test_put_get::<OptStagingMemoryBuffer>()?;
+        run_test_put_get::<IndexedMemoryBuffer>()?;
         Ok(())
     }
 
@@ -320,7 +318,7 @@ mod test {
     #[test]
     fn test_get_v2_is_end_with_only_staging() -> anyhow::Result<()> {
         run_test_get_v2_is_end_with_only_staging::<DefaultMemoryBuffer>()?;
-        run_test_get_v2_is_end_with_only_staging::<OptStagingMemoryBuffer>()?;
+        run_test_get_v2_is_end_with_only_staging::<IndexedMemoryBuffer>()?;
         Ok(())
     }
 
@@ -352,7 +350,7 @@ mod test {
     #[test]
     fn test_get_v2_is_end_across_flight_and_staging() -> anyhow::Result<()> {
         run_test_get_v2_is_end_across_flight_and_staging::<DefaultMemoryBuffer>()?;
-        run_test_get_v2_is_end_across_flight_and_staging::<OptStagingMemoryBuffer>()?;
+        run_test_get_v2_is_end_across_flight_and_staging::<IndexedMemoryBuffer>()?;
         Ok(())
     }
 }

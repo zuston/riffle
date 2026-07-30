@@ -38,7 +38,6 @@ use crate::ddashmap::DDashMap;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::mem::budget::MemoryBudget;
 use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
-use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
 use crate::store::mem::buffer::{BufferOptions, BufferType, MemoryBuffer};
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::mem::ticket::TicketManager;
@@ -445,7 +444,7 @@ mod test {
     use crate::app_manager::purge_event::PurgeReason;
     use crate::runtime::manager::RuntimeManager;
     use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
-    use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
+    use crate::store::mem::buffer::indexed_buffer::IndexedMemoryBuffer;
     use crate::store::mem::buffer::MemoryBuffer;
     use anyhow::Result;
     use croaring::Treemap;
@@ -620,7 +619,7 @@ mod test {
     #[test]
     fn test_read_buffer_in_flight() {
         run_test_read_buffer_in_flight::<DefaultMemoryBuffer>();
-        run_test_read_buffer_in_flight::<OptStagingMemoryBuffer>();
+        run_test_read_buffer_in_flight::<IndexedMemoryBuffer>();
     }
 
     async fn get_data_with_last_block_id<B: MemoryBuffer + Send + Sync + 'static>(
@@ -700,7 +699,7 @@ mod test {
     #[test]
     fn test_allocated_and_purge_for_memory() {
         run_test_allocated_and_purge_for_memory::<DefaultMemoryBuffer>();
-        run_test_allocated_and_purge_for_memory::<OptStagingMemoryBuffer>();
+        run_test_allocated_and_purge_for_memory::<IndexedMemoryBuffer>();
     }
 
     fn run_test_timeout_ticket_releases_allocated_for_configured_store<
@@ -726,7 +725,7 @@ mod test {
     #[test]
     fn test_timeout_ticket_releases_allocated_for_configured_store() {
         run_test_timeout_ticket_releases_allocated_for_configured_store::<DefaultMemoryBuffer>();
-        run_test_timeout_ticket_releases_allocated_for_configured_store::<OptStagingMemoryBuffer>();
+        run_test_timeout_ticket_releases_allocated_for_configured_store::<IndexedMemoryBuffer>();
     }
 
     fn run_test_purge<B: MemoryBuffer + Send + Sync + 'static>() -> Result<()> {
@@ -809,7 +808,7 @@ mod test {
     #[test]
     fn test_purge() {
         run_test_purge::<DefaultMemoryBuffer>();
-        run_test_purge::<OptStagingMemoryBuffer>();
+        run_test_purge::<IndexedMemoryBuffer>();
     }
 
     fn run_test_put_and_get_for_memory<B: MemoryBuffer + Send + Sync + 'static>() {
@@ -858,7 +857,7 @@ mod test {
     #[test]
     fn test_put_and_get_for_memory() {
         run_test_put_and_get_for_memory::<DefaultMemoryBuffer>();
-        run_test_put_and_get_for_memory::<OptStagingMemoryBuffer>();
+        run_test_put_and_get_for_memory::<IndexedMemoryBuffer>();
     }
 
     fn run_test_block_id_filter_for_memory<B: MemoryBuffer + Send + Sync + 'static>() {
@@ -930,7 +929,7 @@ mod test {
     #[test]
     fn test_block_id_filter_for_memory() {
         run_test_block_id_filter_for_memory::<DefaultMemoryBuffer>();
-        run_test_block_id_filter_for_memory::<OptStagingMemoryBuffer>();
+        run_test_block_id_filter_for_memory::<IndexedMemoryBuffer>();
     }
 
     fn run_test_memory_store_operation_with_buffer_size_tracking<
@@ -992,6 +991,6 @@ mod test {
     #[test]
     fn test_memory_store_operation_with_buffer_size_tracking() {
         run_test_memory_store_operation_with_buffer_size_tracking::<DefaultMemoryBuffer>();
-        run_test_memory_store_operation_with_buffer_size_tracking::<OptStagingMemoryBuffer>();
+        run_test_memory_store_operation_with_buffer_size_tracking::<IndexedMemoryBuffer>();
     }
 }

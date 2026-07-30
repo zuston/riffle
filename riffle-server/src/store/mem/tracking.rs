@@ -77,7 +77,7 @@ mod tests {
     use super::*;
     use crate::app_manager::partition_identifier::PartitionUId;
     use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
-    use crate::store::mem::buffer::opt_buffer::OptStagingMemoryBuffer;
+    use crate::store::mem::buffer::indexed_buffer::IndexedMemoryBuffer;
     use crate::store::mem::buffer::MemoryBuffer;
     use crate::store::test_utils::create_blocks;
     use crate::store::Block;
@@ -141,14 +141,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_merge_with_opt_buffers() {
+    async fn test_merge_with_indexed_buffers() {
         let manager = BufferSizeTracking::new();
         let mut buffers = HashMap::new();
 
-        // Create test buffers with OptStagingMemoryBuffer
+        // Create test buffers with IndexedMemoryBuffer
         for i in 0..5 {
             let uid = PartitionUId::new(&Default::default(), i, 0);
-            let buffer = Arc::new(OptStagingMemoryBuffer::new(Default::default()));
+            let buffer = Arc::new(IndexedMemoryBuffer::new(Default::default()));
 
             // Add data to buffer
             let blocks = create_blocks(i * 10, 2, 10);
