@@ -517,6 +517,20 @@ pub struct UrpcConfig {
 
     #[serde(default)]
     pub write_mode: UrpcWriteMode,
+
+    /// The pluggable network engine serving the urpc protocol.
+    /// URING requires the `io-uring` cargo feature on linux, otherwise it
+    /// falls back to TOKIO with a warning.
+    #[serde(default)]
+    pub net_engine: UrpcNetEngine,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(non_camel_case_types)]
+pub enum UrpcNetEngine {
+    #[default]
+    TOKIO,
+    URING,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
