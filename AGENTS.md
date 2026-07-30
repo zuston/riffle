@@ -354,3 +354,31 @@
     * 正确性与鲁棒性；
     * 可维护性与演进策略。
 * 在没有必要澄清的重要信息缺失时，尽量减少无谓往返和问题式对话，直接给出高质量思考后的结论与实现建议。
+
+---
+
+## Cursor Cloud specific instructions
+
+本节面向未来的 cloud agent（更新脚本已自动跑过，系统依赖已就绪），只记录非显而易见的启动/运行注意事项，标准命令请直接参考 `README.md` / `Cargo.toml` / `.github/workflows/build.yaml`。
+
+### Project shape
+
+Rust workspace (`Cargo.toml` members): `riffle-server` (core shuffle server, also a `[lib]`), `riffle-coordinator` (native Rust Uniffle coordinator), `riffle-ctl` (ops CLI). Toolchain pinned by `rust-toolchain.toml` to `nightly-2025-06-01`; `rustup` auto-installs it on first `cargo` call.
+
+### Standard commands (see README / CI for details)
+
+- Build (dev): `cargo build`; release: `cargo build --release`.
+- Lint: `cargo fmt --check` (needs the `nightly` toolchain from `rust-toolchain.toml`).
+- Test: `cargo test -- --test-threads=1`. Tests MUST run single-threaded (they bind fixed ports / share global state); running the default multi-threaded will cause flaky failures. Some tests are `#[ignore]` on purpose (e.g. `graceful_shutdown`).
+
+### Running locally (non-obvious caveats)
+
+- `riffle-server` requires `--config <toml>` AND the `WORKER_IP` env var (the advertised IP used in heartbeat). Example: `WORKER_IP=127.0.0.1 RUST_LOG=info ./target/debug/riffle-server --config <toml>`.
+- `fallback_random_ports_enable` defaults to `true`: if a configured port (`grpc_port`/`http_port`/`urpc_port`) is already in use, the server silently rebinds to a random port instead of failing. Check the `Service ports.` log line for the actual ports.
+- `riffle-coordinator` serves ONLY gRPC (default port `20010`); it has no HTTP admin port. Point a server at it via `coordinator_quorum = ["127.0.0.1:20010"]`.
+- Because the native coordinator has no HTTP API, `riffle-ctl query --coordinator <url>` (which hits `/api/server/nodes`) does NOT work against `riffle-coordinator`; it targets the Java Uniffle coordinator or the servers' HTTP ports. `riffle-ctl instance {set|...}` works directly against a server's HTTP admin port (`/admin`).
+- Server HTTP admin/metrics live on `http_port`: `/` (version), `/apps/number`, `/metrics`, `/admin?get_state|update_state=...`.
+
+### Full Spark E2E (heavyweight, optional)
+
+`dev/integration/docker-compose.yml` runs the real Spark → coordinator → riffle-servers TPC-DS flow, but requires Docker (NOT installed by default) and the Java/Spark ecosystem. Not needed for building/linting/unit-testing or for running the Rust binaries; only spin it up for cross-compatibility testing.
