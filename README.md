@@ -33,6 +33,7 @@ __Riffle conf__
 ```
 store_type = "MEMORY_LOCALFILE"
 grpc_port = 21100
+http_port = 19998
 coordinator_quorum = ["xxxxx:21000"]
 tags = ["riffle2", "datanode", "GRPC", "ss_v5"]
 
@@ -42,22 +43,19 @@ dashmap_shard_amount = 128
 
 [localfile_store]
 data_paths = ["/data1/uniffle/t1", "/data2/uniffle/t1", "/data3/uniffle/t1", "/data4/uniffle/t1"]
-healthy_check_min_disks = 0
-disk_max_concurrency = 2000
+min_number_of_available_disks = 0
+write_concurrency_per_disk = 4
 
 [hybrid_store]
 memory_spill_high_watermark = 0.5
 memory_spill_low_watermark = 0.2
-memory_spill_max_concurrency = 1000
 
 [metrics]
-http_port = 19998
 push_gateway_endpoint = "http://xxxxx/prometheus/pushgateway"
 
 [runtime_config]
 read_thread_num = 40
-write_thread_num = 200
-grpc_thread_num = 100
+localfile_write_thread_num = 200
 http_thread_num = 10
 default_thread_num = 20
 dispatch_thread_num = 10
@@ -144,7 +142,7 @@ store_type = "MEMORY_LOCALFILE_HDFS"
 grpc_port = 19999
 coordinator_quorum = ["host1:port", "host2:port"]
 urpc_port = 20000
-http_monitor_service_port = 20010
+http_port = 20010
 heartbeat_interval_seconds = 2
 tags = ["GRPC", "ss_v5", "GRPC_NETTY"]
 
@@ -159,7 +157,7 @@ data_paths = ["/var/data/path1", "/var/data/path2"]
 min_number_of_available_disks = 1
 disk_high_watermark = 0.8
 disk_low_watermark = 0.7
-disk_max_concurrency = 2000
+write_concurrency_per_disk = 4
 disk_write_buf_capacity = "1M"
 disk_read_buf_capacity = "1M"
 disk_healthy_check_interval_sec = 60
@@ -177,7 +175,6 @@ memory_spill_high_watermark = 0.8
 memory_spill_low_watermark = 0.2
 memory_single_buffer_max_spill_size = "1G"
 memory_spill_to_cold_threshold_size = "128M"
-memory_spill_to_localfile_concurrency = 4000
 memory_spill_to_hdfs_concurrency = 500
 # Static startup setting. Huge partitions use this single-buffer spill trigger;
 # watermark spills may still flush them earlier.

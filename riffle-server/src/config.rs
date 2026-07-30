@@ -18,7 +18,7 @@
 use crate::block_id_manager::BlockIdManagerType;
 use crate::store::mem::buffer::BufferType;
 use crate::store::ResponseDataIndex::Local;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -113,6 +113,12 @@ pub struct KerberosSecurityConfig {
 pub struct LocalfileStoreConfig {
     pub data_paths: Vec<String>,
     pub min_number_of_available_disks: Option<i32>,
+
+    #[serde(
+        default = "as_default_write_concurrency_per_disk",
+        deserialize_with = "deserialize_write_concurrency_per_disk"
+    )]
+    pub write_concurrency_per_disk: usize,
 
     #[serde(default = "bool::default")]
     pub launch_purge_enable: bool,
@@ -223,6 +229,29 @@ fn as_default_io_duration_threshold_sec() -> usize {
     5 * 60
 }
 
+fn as_default_write_concurrency_per_disk() -> usize {
+    4
+}
+
+fn deserialize_write_concurrency_per_disk<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = usize::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(serde::de::Error::custom(
+            "write_concurrency_per_disk must be greater than 0",
+        ));
+    }
+    if value > tokio::sync::Semaphore::MAX_PERMITS {
+        return Err(serde::de::Error::custom(format!(
+            "write_concurrency_per_disk must not exceed {}",
+            tokio::sync::Semaphore::MAX_PERMITS
+        )));
+    }
+    Ok(value)
+}
+
 fn as_default_direct_io_enable() -> bool {
     false
 }
@@ -255,6 +284,7 @@ impl LocalfileStoreConfig {
         LocalfileStoreConfig {
             data_paths,
             min_number_of_available_disks: Some(1),
+            write_concurrency_per_disk: as_default_write_concurrency_per_disk(),
             launch_purge_enable: false,
             disk_high_watermark: as_default_disk_high_watermark(),
             disk_low_watermark: as_default_disk_low_watermark(),
@@ -324,7 +354,6 @@ pub struct HybridStoreConfig {
     pub memory_single_buffer_max_spill_size: Option<String>,
     pub memory_spill_to_cold_threshold_size: Option<String>,
 
-    pub memory_spill_to_localfile_concurrency: Option<i32>,
     pub memory_spill_to_hdfs_concurrency: Option<i32>,
 
     pub huge_partition_memory_single_buffer_max_spill_size: Option<String>,
@@ -357,9 +386,6 @@ fn as_default_sensitive_watermark_spill_enable() -> bool {
     false
 }
 
-fn as_default_memory_spill_to_localfile_concurrency() -> i32 {
-    4000
-}
 fn as_default_memory_spill_to_hdfs_concurrency() -> i32 {
     500
 }
@@ -381,7 +407,6 @@ impl HybridStoreConfig {
             memory_spill_low_watermark,
             memory_single_buffer_max_spill_size,
             memory_spill_to_cold_threshold_size: None,
-            memory_spill_to_localfile_concurrency: None,
             memory_spill_to_hdfs_concurrency: None,
             huge_partition_memory_single_buffer_max_spill_size: None,
             huge_partition_memory_spill_to_hdfs_threshold_size: None,
@@ -401,7 +426,6 @@ impl Default for HybridStoreConfig {
             memory_spill_low_watermark: as_default_memory_spill_low_watermark(),
             memory_single_buffer_max_spill_size: None,
             memory_spill_to_cold_threshold_size: None,
-            memory_spill_to_localfile_concurrency: None,
             memory_spill_to_hdfs_concurrency: None,
             huge_partition_memory_single_buffer_max_spill_size: None,
             huge_partition_memory_spill_to_hdfs_threshold_size: None,
@@ -832,8 +856,8 @@ impl Config {
 #[cfg(test)]
 mod test {
     use crate::config::{
-        as_default_app_heartbeat_timeout_min, Config, RpcVersion, RuntimeConfig, StorageType,
-        UrpcConfig, UrpcWriteMode,
+        as_default_app_heartbeat_timeout_min, as_default_write_concurrency_per_disk, Config,
+        RpcVersion, RuntimeConfig, StorageType, UrpcConfig, UrpcWriteMode,
     };
     use bytesize::ByteSize;
     use std::str::FromStr;
@@ -928,6 +952,14 @@ mod test {
                 .streaming_parse_enabled
         );
         assert_eq!(
+            as_default_write_concurrency_per_disk(),
+            decoded
+                .localfile_store
+                .as_ref()
+                .unwrap()
+                .write_concurrency_per_disk
+        );
+        assert_eq!(
             UrpcWriteMode::FREEZE,
             decoded.urpc_config.as_ref().unwrap().write_mode
         );
@@ -953,6 +985,74 @@ mod test {
         // check labels of metrics
         let metrics_labels = decoded.metrics.unwrap().labels;
         assert_eq!(2, metrics_labels.unwrap().len());
+    }
+
+    #[test]
+    fn localfile_write_concurrency_must_be_positive() {
+        let toml_str = r#"
+        data_paths = ["/data1/uniffle"]
+        write_concurrency_per_disk = 0
+        "#;
+
+        assert!(toml::from_str::<super::LocalfileStoreConfig>(toml_str).is_err());
+    }
+
+    #[test]
+    fn localfile_write_concurrency_accepts_positive_value() {
+        let toml_str = r#"
+        data_paths = ["/data1/uniffle"]
+        write_concurrency_per_disk = 7
+        "#;
+
+        let config = toml::from_str::<super::LocalfileStoreConfig>(toml_str).unwrap();
+        assert_eq!(7, config.write_concurrency_per_disk);
+    }
+
+    #[test]
+    fn localfile_write_concurrency_must_not_exceed_semaphore_limit() {
+        let toml_str = format!(
+            r#"
+            data_paths = ["/data1/uniffle"]
+            write_concurrency_per_disk = {}
+            "#,
+            tokio::sync::Semaphore::MAX_PERMITS + 1
+        );
+
+        assert!(toml::from_str::<super::LocalfileStoreConfig>(&toml_str).is_err());
+    }
+
+    #[test]
+    fn legacy_localfile_spill_concurrency_is_ignored() {
+        let toml_str = r#"
+        store_type = "MEMORY_LOCALFILE"
+        coordinator_quorum = [""]
+
+        [memory_store]
+        capacity = "1M"
+
+        [localfile_store]
+        data_paths = ["/data1/uniffle"]
+
+        [hybrid_store]
+        memory_spill_to_localfile_concurrency = 4000
+        "#;
+
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            as_default_write_concurrency_per_disk(),
+            config
+                .localfile_store
+                .as_ref()
+                .unwrap()
+                .write_concurrency_per_disk
+        );
+        assert!(!serde_json::to_value(config)
+            .unwrap()
+            .get("hybrid_store")
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .contains_key("memory_spill_to_localfile_concurrency"));
     }
 
     #[test]

@@ -47,6 +47,16 @@ use tokio::sync::Semaphore;
 
 const MAX_CONCURRENCY: usize = 1000000;
 
+fn localfile_spill_task_concurrency(config: &Config) -> usize {
+    config.localfile_store.as_ref().map_or(1, |localfile| {
+        localfile
+            .data_paths
+            .len()
+            .saturating_mul(localfile.write_concurrency_per_disk)
+            .clamp(1, MAX_CONCURRENCY)
+    })
+}
+
 pub struct HierarchyEventBus<T> {
     parent: EventBus<T>,
     pub(crate) children: DDashMap<StorageType, EventBus<T>>,
@@ -58,18 +68,10 @@ impl HierarchyEventBus<SpillMessage> {
         config: &Config,
         reconf_manager: &ReconfigurableConfManager,
     ) -> Self {
-        let localfile_concurrency = match config.hybrid_store.memory_spill_to_localfile_concurrency
-        {
-            Some(_) => reconf_manager
-                .register("hybrid_store.memory_spill_to_localfile_concurrency")
-                .unwrap(),
-            _ => StaticConfRef::new(
-                runtime_manager
-                    .localfile_write_runtime
-                    .max_blocking_threads_num(),
-            )
-            .into(),
-        };
+        // This is only a task admission guard. The actual I/O concurrency is enforced
+        // independently by each local disk.
+        let localfile_concurrency =
+            StaticConfRef::new(localfile_spill_task_concurrency(config)).into();
         let hdfs_concurrency = match config.hybrid_store.memory_spill_to_hdfs_concurrency {
             Some(_) => reconf_manager
                 .register("hybrid_store.memory_spill_to_hdfs_concurrency")
@@ -205,13 +207,8 @@ mod tests {
         let localfile_bus = event_bus.children.get(&LOCALFILE).unwrap();
         let hdfs_bus = event_bus.children.get(&HDFS).unwrap();
 
-        // case1: unset the concurrency limit
-        assert_eq!(
-            runtime_manager
-                .localfile_write_runtime
-                .max_blocking_threads_num(),
-            localfile_bus.concurrency_limit()
-        );
+        // A localfile child is always installed, even when local storage is disabled.
+        assert_eq!(1, localfile_bus.concurrency_limit());
         assert_eq!(
             runtime_manager
                 .hdfs_write_runtime
@@ -220,16 +217,23 @@ mod tests {
         );
         assert_eq!(MAX_CONCURRENCY, event_bus.parent.concurrency_limit());
 
-        // case2: set concurrency limit
+        // The localfile task limit is derived from the number of data paths and the
+        // per-disk write limit. HDFS keeps its independent dynamic setting.
         let mut config = Config::create_simple_config();
-        config.hybrid_store.memory_spill_to_localfile_concurrency = Some(10);
+        let mut localfile_config = crate::config::LocalfileStoreConfig::new(vec![
+            "/data1/uniffle".to_string(),
+            "/data2/uniffle".to_string(),
+            "/data3/uniffle".to_string(),
+        ]);
+        localfile_config.write_concurrency_per_disk = 7;
+        config.localfile_store = Some(localfile_config);
         config.hybrid_store.memory_spill_to_hdfs_concurrency = Some(20);
         let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
         let event_bus = HierarchyEventBus::new(&runtime_manager, &config, &reconf_manager);
         let localfile_bus = event_bus.children.get(&LOCALFILE).unwrap();
         let hdfs_bus = event_bus.children.get(&HDFS).unwrap();
 
-        assert_eq!(10, localfile_bus.concurrency_limit());
+        assert_eq!(21, localfile_bus.concurrency_limit());
         assert_eq!(20, hdfs_bus.concurrency_limit());
         assert_eq!(MAX_CONCURRENCY, event_bus.parent.concurrency_limit());
 
