@@ -60,7 +60,7 @@ pub struct UringServerConfig {
     /// Enable kernel side SQ polling with the given idle time in ms.
     /// Requires CAP_SYS_ADMIN on kernels older than 5.13.
     pub sqpoll_idle_ms: Option<u32>,
-    /// Minimum spare capacity armed for every recv.
+    /// Minimum receive size while the next frame length is unknown.
     pub recv_chunk_size: usize,
     /// Initial per-connection read buffer capacity.
     pub initial_read_buffer_size: usize,
@@ -204,7 +204,7 @@ struct Conn {
     recv_inflight: bool,
     send_inflight: bool,
     closing: bool,
-    /// Total length of the partially received frame, used to size reads.
+    /// Total length of the partially received frame.
     pending_frame_len: Option<usize>,
 }
 
@@ -329,37 +329,51 @@ impl<H: FrameHandler> UringEngine<H> {
     }
 
     fn arm_recv(&mut self, slot: u32) {
-        let (fd, token, ptr, len) = {
+        let (fd, token, ptr, len, recv_flags) = {
             let Some(conn) = self.conns[slot as usize].as_mut() else {
                 return;
             };
             if conn.recv_inflight || conn.closing {
                 return;
             }
-            // When a large frame is being accumulated, reserve enough room to
-            // receive the rest of it in as few operations as possible.
-            let spare_wanted = match conn.pending_frame_len {
-                Some(total) if total > conn.read_buf.len() => {
-                    (total - conn.read_buf.len()).max(self.cfg.recv_chunk_size)
-                }
-                _ => self.cfg.recv_chunk_size,
-            };
+
+            let frame_remaining = conn
+                .pending_frame_len
+                .and_then(|total| total.checked_sub(conn.read_buf.len()))
+                .filter(|remaining| *remaining > 0);
+            debug_assert_eq!(
+                conn.pending_frame_len.is_some(),
+                frame_remaining.is_some(),
+                "pending frame must be incomplete before arming recv"
+            );
+
+            let spare_wanted = frame_remaining.unwrap_or(self.cfg.recv_chunk_size);
             let spare = conn.read_buf.capacity() - conn.read_buf.len();
             if spare < spare_wanted {
                 conn.read_buf.reserve(spare_wanted);
             }
             let offset = conn.read_buf.len();
             let spare = conn.read_buf.capacity() - offset;
+            let (recv_len, recv_flags) = match frame_remaining {
+                // Waiting for the exact remainder completes a large frame in
+                // one CQE without consuming the next pipelined frame.
+                Some(remaining) => (remaining, libc::MSG_WAITALL),
+                None => (spare, 0),
+            };
             let ptr = unsafe { conn.read_buf.as_mut_ptr().add(offset) };
             conn.recv_inflight = true;
             (
                 conn.fd,
                 pack_token(KIND_RECV, conn.gen, slot),
                 ptr,
-                spare as u32,
+                u32::try_from(recv_len).unwrap_or(u32::MAX),
+                recv_flags,
             )
         };
-        let sqe = opcode::Recv::new(Fd(fd), ptr, len).build().user_data(token);
+        let sqe = opcode::Recv::new(Fd(fd), ptr, len)
+            .flags(recv_flags)
+            .build()
+            .user_data(token);
         self.push_sqe(sqe);
     }
 
@@ -807,6 +821,12 @@ mod tests {
         Ok((request_id, status_code, msg))
     }
 
+    async fn read_rpc_response_with_timeout(
+        stream: &mut TcpStream,
+    ) -> anyhow::Result<(i64, i32, String)> {
+        Ok(tokio::time::timeout(Duration::from_secs(5), read_rpc_response(stream)).await??)
+    }
+
     fn echo_handler(frame: Frame, responder: &mut Responder<'_>) {
         match frame {
             Frame::SendShuffleData(req) => {
@@ -881,6 +901,79 @@ mod tests {
         }
 
         drop(stream);
+        server.shutdown();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn echo_fragmented_large_frame_preserves_pipelined_frame() -> anyhow::Result<()> {
+        let server = start_echo_server();
+        let mut stream = TcpStream::connect(server.local_addr()).await?;
+
+        let large_payload = vec![5u8; 2 * 1024 * 1024];
+        let large_frame = build_send_shuffle_data_frame(1, &large_payload);
+        let small_payload = vec![6u8; 128];
+        let small_frame = build_send_shuffle_data_frame(2, &small_payload);
+
+        let first_chunk_len = 64 * 1024;
+        stream.write_all(&large_frame[..first_chunk_len]).await?;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let mut remainder_and_next =
+            BytesMut::with_capacity(large_frame.len() - first_chunk_len + small_frame.len());
+        remainder_and_next.extend_from_slice(&large_frame[first_chunk_len..]);
+        remainder_and_next.extend_from_slice(&small_frame);
+        stream.write_all(&remainder_and_next).await?;
+
+        let (request_id, status, msg) = read_rpc_response_with_timeout(&mut stream).await?;
+        assert_eq!(1, request_id);
+        assert_eq!(0, status);
+        assert_eq!(format!("len={}", large_payload.len()), msg);
+
+        let (request_id, status, msg) = read_rpc_response_with_timeout(&mut stream).await?;
+        assert_eq!(2, request_id);
+        assert_eq!(0, status);
+        assert_eq!(format!("len={}", small_payload.len()), msg);
+
+        drop(stream);
+        server.shutdown();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fragmented_large_frame_does_not_block_another_connection() -> anyhow::Result<()> {
+        let server = start_echo_server();
+        let mut slow_stream = TcpStream::connect(server.local_addr()).await?;
+
+        let slow_payload = vec![7u8; 2 * 1024 * 1024];
+        let slow_frame = build_send_shuffle_data_frame(1, &slow_payload);
+        let first_chunk_len = 64 * 1024;
+        slow_stream
+            .write_all(&slow_frame[..first_chunk_len])
+            .await?;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let mut fast_stream = TcpStream::connect(server.local_addr()).await?;
+        fast_stream
+            .write_all(&build_send_shuffle_data_frame(2, &[8u8; 128]))
+            .await?;
+        let (request_id, status, msg) =
+            tokio::time::timeout(Duration::from_secs(1), read_rpc_response(&mut fast_stream))
+                .await??;
+        assert_eq!(2, request_id);
+        assert_eq!(0, status);
+        assert_eq!("len=128", msg);
+
+        slow_stream
+            .write_all(&slow_frame[first_chunk_len..])
+            .await?;
+        let (request_id, status, msg) = read_rpc_response_with_timeout(&mut slow_stream).await?;
+        assert_eq!(1, request_id);
+        assert_eq!(0, status);
+        assert_eq!(format!("len={}", slow_payload.len()), msg);
+
+        drop(fast_stream);
+        drop(slow_stream);
         server.shutdown();
         Ok(())
     }

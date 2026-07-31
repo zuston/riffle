@@ -9,13 +9,14 @@
 //!   cargo bench --bench urpc_net_engine --features io-uring
 //!
 //! Env knobs: BENCH_DURATION_SECS, BENCH_SERVER_THREADS, BENCH_CONNS,
-//! BENCH_PIPELINE.
+//! BENCH_PIPELINE (overrides the 1 KiB case only).
 
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use bytes::{BufMut, Bytes, BytesMut};
 use riffle_server::urpc::command::RpcResponseCommand;
 use riffle_server::urpc::connection::Connection;
 use riffle_server::urpc::frame::{Frame, MessageType};
+use riffle_server::urpc::uring::encode::parse_request_frame;
 use riffle_server::urpc::uring::{Responder, UringServerConfig, UringUrpcServer};
 use std::io::Write;
 use std::net::SocketAddr;
@@ -36,39 +37,95 @@ fn env_usize(key: &str, default: usize) -> usize {
 }
 
 fn put_string(buf: &mut BytesMut, value: &str) {
-    buf.put_i32(value.len() as i32);
+    buf.put_i32(i32::try_from(value.len()).expect("string length must fit in i32"));
     buf.put_slice(value.as_bytes());
 }
 
-fn build_send_shuffle_data_frame(request_id: i64, payload_len: usize) -> Bytes {
-    let payload = vec![(request_id % 251) as u8; payload_len];
-    let mut body = BytesMut::new();
+fn build_send_shuffle_data_frame(request_id: i64, case: Case) -> Bytes {
+    let partition_count =
+        i32::try_from(case.partition_count).expect("partition count must fit in i32");
+    let blocks_per_partition =
+        i32::try_from(case.blocks_per_partition).expect("block count must fit in i32");
+    let block_len = i32::try_from(case.block_len).expect("block length must fit in i32");
+    let payload = vec![(request_id % 251) as u8; case.block_len];
+    let mut body = BytesMut::with_capacity(case.request_payload_len());
     body.put_i64(request_id);
     put_string(&mut body, "app-bench");
     body.put_i32(7);
     body.put_i64(99);
-    body.put_i32(1); // partition batch size
-    body.put_i32(11); // partition id
-    body.put_i32(1); // block batch size
-    body.put_i32(11); // pid
-    body.put_i64(1234); // block id
-    body.put_i32(payload.len() as i32); // length
-    body.put_i32(7); // shuffle id
-    body.put_i64(88); // crc
-    body.put_i64(9001); // task attempt id
-    body.put_i32(payload.len() as i32);
-    body.put_slice(&payload);
-    body.put_i32(0); // shuffle servers
-    body.put_i32(payload.len() as i32); // uncompress length
-    body.put_i64(0); // free mem
+    body.put_i32(partition_count);
+
+    let blocks_per_request =
+        i64::try_from(case.blocks_per_request()).expect("block count must fit in i64");
+    for partition_index in 0..case.partition_count {
+        let partition_id = i32::try_from(partition_index).expect("partition id must fit in i32");
+        body.put_i32(partition_id);
+        body.put_i32(blocks_per_partition);
+
+        for block_index in 0..case.blocks_per_partition {
+            let block_offset = partition_index
+                .checked_mul(case.blocks_per_partition)
+                .and_then(|offset| offset.checked_add(block_index))
+                .expect("block offset must fit in usize");
+            let block_offset = i64::try_from(block_offset).expect("block offset must fit in i64");
+            let block_id = request_id
+                .checked_mul(blocks_per_request)
+                .and_then(|base| base.checked_add(block_offset))
+                .expect("block id must fit in i64");
+
+            body.put_i32(partition_id); // pid
+            body.put_i64(block_id);
+            body.put_i32(block_len);
+            body.put_i32(7); // shuffle id
+            body.put_i64(88); // crc
+            body.put_i64(9001); // task attempt id
+            body.put_i32(block_len);
+            body.put_slice(&payload);
+            body.put_i32(0); // shuffle servers
+            body.put_i32(block_len); // uncompress length
+            body.put_i64(0); // free mem
+        }
+    }
     body.put_i64(123456); // timestamp
 
     let mut frame = BytesMut::with_capacity(9 + body.len());
     frame.put_i32(0);
     frame.put_u8(MessageType::SendShuffleData as u8);
-    frame.put_i32(body.len() as i32);
+    frame.put_i32(i32::try_from(body.len()).expect("request body length must fit in i32"));
     frame.extend_from_slice(&body);
     frame.freeze()
+}
+
+fn validate_case_frame(case: Case) -> Result<()> {
+    ensure!(case.block_len > 0, "case {} has an empty block", case.name);
+    ensure!(
+        case.partition_count > 0,
+        "case {} has no partitions",
+        case.name
+    );
+    ensure!(
+        case.blocks_per_partition > 0,
+        "case {} has no blocks",
+        case.name
+    );
+    ensure!(
+        case.pipeline > 0,
+        "case {} has an empty pipeline",
+        case.name
+    );
+
+    let frame = parse_request_frame(build_send_shuffle_data_frame(0, case))?;
+    let Frame::SendShuffleData(request) = frame else {
+        anyhow::bail!("case {} did not produce SendShuffleData", case.name);
+    };
+    ensure!(
+        request.data_len() == case.request_payload_len(),
+        "case {} payload mismatch: expected {}, parsed {}",
+        case.name,
+        case.request_payload_len(),
+        request.data_len()
+    );
+    Ok(())
 }
 
 fn echo_response(frame: Frame) -> Frame {
@@ -178,13 +235,29 @@ fn build_reuseport_listener(addr: SocketAddr) -> Result<std::net::TcpListener> {
 #[derive(Clone, Copy)]
 struct Case {
     name: &'static str,
-    payload_len: usize,
+    block_len: usize,
+    partition_count: usize,
+    blocks_per_partition: usize,
     pipeline: usize,
+}
+
+impl Case {
+    fn blocks_per_request(self) -> usize {
+        self.partition_count
+            .checked_mul(self.blocks_per_partition)
+            .expect("blocks per request must fit in usize")
+    }
+
+    fn request_payload_len(self) -> usize {
+        self.blocks_per_request()
+            .checked_mul(self.block_len)
+            .expect("request payload length must fit in usize")
+    }
 }
 
 struct CaseResult {
     rps: f64,
-    mbps: f64,
+    mib_per_sec: f64,
 }
 
 fn run_case(addr: SocketAddr, case: Case, conns: usize, duration: Duration) -> Result<CaseResult> {
@@ -196,7 +269,8 @@ fn run_case(addr: SocketAddr, case: Case, conns: usize, duration: Duration) -> R
     // One pipelined batch, pre-serialized once.
     let mut batch = BytesMut::new();
     for id in 0..case.pipeline {
-        batch.extend_from_slice(&build_send_shuffle_data_frame(id as i64, case.payload_len));
+        let request_id = i64::try_from(id).expect("request id must fit in i64");
+        batch.extend_from_slice(&build_send_shuffle_data_frame(request_id, case));
     }
     let batch = batch.freeze();
 
@@ -214,7 +288,7 @@ fn run_case(addr: SocketAddr, case: Case, conns: usize, duration: Duration) -> R
                 let mut stream = TcpStream::connect(addr).await?;
                 stream.set_nodelay(true)?;
                 let mut resp_buf = vec![0u8; RPC_RESPONSE_WIRE_LEN * case.pipeline];
-                let pipeline = case.pipeline as u64;
+                let pipeline = u64::try_from(case.pipeline).expect("pipeline must fit in u64");
                 loop {
                     let now = Instant::now();
                     if now >= deadline {
@@ -241,30 +315,48 @@ fn run_case(addr: SocketAddr, case: Case, conns: usize, duration: Duration) -> R
     let total = total_responses.load(Ordering::Relaxed) as f64;
     let secs = duration.as_secs_f64();
     let rps = total / secs;
-    let mbps = rps * case.payload_len as f64 / 1024.0 / 1024.0;
-    Ok(CaseResult { rps, mbps })
+    let mib_per_sec = rps * case.request_payload_len() as f64 / 1024.0 / 1024.0;
+    Ok(CaseResult { rps, mib_per_sec })
 }
 
 fn main() -> Result<()> {
-    let duration = Duration::from_secs(env_usize("BENCH_DURATION_SECS", 3) as u64);
+    let duration_secs = env_usize("BENCH_DURATION_SECS", 3);
     let server_threads = env_usize("BENCH_SERVER_THREADS", 2);
     let conns = env_usize("BENCH_CONNS", 8);
+    ensure!(duration_secs > 0, "BENCH_DURATION_SECS must be positive");
+    ensure!(server_threads > 0, "BENCH_SERVER_THREADS must be positive");
+    ensure!(conns > 0, "BENCH_CONNS must be positive");
+    let duration = Duration::from_secs(duration_secs as u64);
 
     let cases = [
         Case {
             name: "block=1KB",
-            payload_len: 1024,
+            block_len: 1024,
+            partition_count: 1,
+            blocks_per_partition: 1,
             pipeline: env_usize("BENCH_PIPELINE", 64),
         },
         Case {
             name: "block=64KB",
-            payload_len: 64 * 1024,
+            block_len: 64 * 1024,
+            partition_count: 1,
+            blocks_per_partition: 1,
             pipeline: 16,
         },
         Case {
             name: "block=512KB",
-            payload_len: 512 * 1024,
+            block_len: 512 * 1024,
+            partition_count: 1,
+            blocks_per_partition: 1,
             pipeline: 4,
+        },
+        // Production shape: one request carries 500 blocks across 500 partitions.
+        Case {
+            name: "prod=500x10KB",
+            block_len: 10 * 1024,
+            partition_count: 500,
+            blocks_per_partition: 1,
+            pipeline: 1,
         },
     ];
 
@@ -274,11 +366,13 @@ fn main() -> Result<()> {
     );
     println!(
         "{:<14} {:>14} {:>12} {:>14} {:>12} {:>9}",
-        "case", "tokio rps", "tokio MB/s", "uring rps", "uring MB/s", "speedup"
+        "case", "tokio rps", "tokio MiB/s", "uring rps", "uring MiB/s", "speedup"
     );
 
-    let mut all_pass = true;
+    let mut uring_wins = 0;
     for case in cases {
+        validate_case_frame(case)?;
+
         let tokio_server = TokioEchoServer::start(server_threads)?;
         let tokio_result = run_case(tokio_server.addr, case, conns, duration)?;
         tokio_server.shutdown();
@@ -298,24 +392,25 @@ fn main() -> Result<()> {
         uring_server.shutdown();
 
         let speedup = uring_result.rps / tokio_result.rps;
-        if speedup <= 1.0 {
-            all_pass = false;
+        if speedup > 1.0 {
+            uring_wins += 1;
         }
         println!(
             "{:<14} {:>14.0} {:>12.1} {:>14.0} {:>12.1} {:>8.2}x",
             case.name,
             tokio_result.rps,
-            tokio_result.mbps,
+            tokio_result.mib_per_sec,
             uring_result.rps,
-            uring_result.mbps,
+            uring_result.mib_per_sec,
             speedup
         );
         std::io::stdout().flush()?;
     }
 
     println!(
-        "\nresult: uring engine {} the default tokio engine on all cases",
-        if all_pass { "BEATS" } else { "DOES NOT BEAT" }
+        "\nresult: uring engine beats the default tokio engine on {}/{} cases",
+        uring_wins,
+        cases.len()
     );
     Ok(())
 }
