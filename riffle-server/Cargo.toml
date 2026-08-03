@@ -181,3 +181,7 @@ harness = false
 name = "urpc_net_engine"
 harness = false
 required-features = ["io-uring"]
+
+[[bench]]
+name = "memory_buffer"
+harness = false

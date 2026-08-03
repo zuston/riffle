@@ -871,8 +871,9 @@ impl Config {
 mod test {
     use crate::config::{
         as_default_app_heartbeat_timeout_min, as_default_write_concurrency_per_disk, Config,
-        RpcVersion, RuntimeConfig, StorageType, UrpcConfig, UrpcWriteMode,
+        MemoryStoreConfig, RpcVersion, RuntimeConfig, StorageType, UrpcConfig, UrpcWriteMode,
     };
+    use crate::store::mem::buffer::BufferType;
     use bytesize::ByteSize;
     use std::str::FromStr;
 
@@ -894,6 +895,21 @@ mod test {
         let config =
             Config::create_mem_localfile_config(100, "20g".to_string(), "/tmp/a".to_string());
         println!("{:#?}", config);
+    }
+
+    #[test]
+    fn indexed_memory_buffer_config_supports_legacy_name() {
+        let indexed: MemoryStoreConfig =
+            toml::from_str("capacity = \"1M\"\nbuffer_type = \"INDEXED\"").unwrap();
+        let legacy: MemoryStoreConfig =
+            toml::from_str("capacity = \"1M\"\nbuffer_type = \"EXPERIMENTAL\"").unwrap();
+
+        assert_eq!(BufferType::INDEXED, indexed.buffer_type);
+        assert_eq!(BufferType::INDEXED, legacy.buffer_type);
+
+        let encoded = toml::to_string(&indexed).unwrap();
+        assert!(encoded.contains("buffer_type = \"INDEXED\""));
+        assert!(!encoded.contains("EXPERIMENTAL"));
     }
 
     #[test]
