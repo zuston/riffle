@@ -1,0 +1,3 @@
+[build]
+# Use Cranelift as the codegen backend to speed up dev compilation.
+rustflags = ["-Zcodegen-backend=cranelift"]
