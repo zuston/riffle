@@ -1,57 +1,84 @@
 use crate::composed_bytes::ComposedBytes;
 use crate::constant::INVALID_BLOCK_ID;
-use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
 use crate::store::mem::buffer::{BufferOptions, BufferSpillResult, MemBlockBatch, MemoryBuffer};
 use crate::store::{Block, DataBytes, DataSegment, PartitionedMemoryData};
 use croaring::Treemap;
-use fastrace::trace;
 use parking_lot::Mutex;
 use std::collections::HashMap;
+use std::mem;
 use std::sync::Arc;
 
-/// the optimized implementation is from https://github.com/zuston/riffle/pull/564
+/// The indexed implementation is from https://github.com/zuston/riffle/pull/564.
+///
+/// The staging layout is identical to the default buffer (batches of blocks),
+/// so `append` stays an O(1) batch move. The block-position index is built
+/// lazily on the read path: it maps `block_id` to `(batch_idx, offset_in_batch)`
+/// and is caught up incrementally (tracked by `indexed_batches`) only when a
+/// `get` actually needs to locate a cursor inside staging. Data that is spilled
+/// before ever being read this way never pays any indexing cost.
 #[derive(Debug)]
-pub struct OptStagingBufferInternal {
+pub struct IndexedBufferInternal {
     pub total_size: i64,
     pub staging_size: i64,
     pub flight_size: i64,
 
-    pub staging: Vec<Block>,
-    pub batch_boundaries: Vec<usize>, // Track where each batch starts
-    pub block_position_index: HashMap<i64, usize>, // Maps block_id to Vec index
+    pub staging: MemBlockBatch,
+    pub block_position_index: HashMap<i64, (usize, usize)>,
+    // Number of leading staging batches already covered by the index.
+    pub indexed_batches: usize,
 
     pub flight: HashMap<u64, Arc<MemBlockBatch>>,
     pub flight_counter: u64,
 }
 
-impl OptStagingBufferInternal {
+impl IndexedBufferInternal {
     pub fn new() -> Self {
-        OptStagingBufferInternal {
+        IndexedBufferInternal {
             total_size: 0,
             staging_size: 0,
             flight_size: 0,
-            staging: Vec::new(),
-            batch_boundaries: Vec::new(),
+            staging: Default::default(),
             block_position_index: HashMap::new(),
+            indexed_batches: 0,
             flight: Default::default(),
             flight_counter: 0,
         }
     }
+
+    // Index the staging batches appended since the last catch-up.
+    fn catch_up_index(&mut self) {
+        let total_batches = self.staging.len();
+        if self.indexed_batches >= total_batches {
+            return;
+        }
+
+        let pending_blocks: usize = self.staging[self.indexed_batches..]
+            .iter()
+            .map(|batch| batch.len())
+            .sum();
+        self.block_position_index.reserve(pending_blocks);
+
+        for batch_idx in self.indexed_batches..total_batches {
+            for (block_idx, block) in self.staging[batch_idx].iter().enumerate() {
+                self.block_position_index
+                    .insert(block.block_id, (batch_idx, block_idx));
+            }
+        }
+        self.indexed_batches = total_batches;
+    }
 }
 
 #[derive(Debug)]
-pub struct OptStagingMemoryBuffer {
-    buffer: Mutex<OptStagingBufferInternal>,
+pub struct IndexedMemoryBuffer {
+    buffer: Mutex<IndexedBufferInternal>,
 }
 
-impl MemoryBuffer for OptStagingMemoryBuffer {
-    #[trace]
-    fn new(opt: BufferOptions) -> Self {
-        OptStagingMemoryBuffer {
-            buffer: Mutex::new(OptStagingBufferInternal::new()),
+impl MemoryBuffer for IndexedMemoryBuffer {
+    fn new(_options: BufferOptions) -> Self {
+        IndexedMemoryBuffer {
+            buffer: Mutex::new(IndexedBufferInternal::new()),
         }
     }
-    #[trace]
     fn total_size(&self) -> anyhow::Result<i64>
     where
         Self: Send + Sync,
@@ -59,7 +86,6 @@ impl MemoryBuffer for OptStagingMemoryBuffer {
         return Ok(self.buffer.lock().total_size);
     }
 
-    #[trace]
     fn flight_size(&self) -> anyhow::Result<i64>
     where
         Self: Send + Sync,
@@ -67,7 +93,6 @@ impl MemoryBuffer for OptStagingMemoryBuffer {
         return Ok(self.buffer.lock().flight_size);
     }
 
-    #[trace]
     fn staging_size(&self) -> anyhow::Result<i64>
     where
         Self: Send + Sync,
@@ -75,7 +100,6 @@ impl MemoryBuffer for OptStagingMemoryBuffer {
         return Ok(self.buffer.lock().staging_size);
     }
 
-    #[trace]
     fn clear(&self, flight_id: u64, flight_size: u64) -> anyhow::Result<()>
     where
         Self: Send + Sync,
@@ -90,7 +114,6 @@ impl MemoryBuffer for OptStagingMemoryBuffer {
         Ok(())
     }
 
-    #[trace]
     fn get(
         &self,
         last_block_id: i64,
@@ -103,7 +126,14 @@ impl MemoryBuffer for OptStagingMemoryBuffer {
         /// read sequence
         /// 1. from flight (expect: last_block_id not found or last_block_id == -1)
         /// 2. from staging
-        let buffer = self.buffer.lock();
+        let mut buffer = self.buffer.lock();
+
+        // The index catch-up must happen before any block reference is taken,
+        // because it mutates the internal state.
+        if last_block_id != INVALID_BLOCK_ID {
+            buffer.catch_up_index();
+        }
+        let buffer = &*buffer;
 
         let mut read_result = vec![];
         let mut read_len = 0i64;
@@ -141,33 +171,43 @@ impl MemoryBuffer for OptStagingMemoryBuffer {
                 }
             }
 
-            // Handle staging with Vec + index optimization
-            let staging_start_idx = if loop_index == FIRST_ATTEMP && !flight_found {
+            // Handle staging with the block-position index optimization
+            let (start_batch, start_block) = if loop_index == FIRST_ATTEMP && !flight_found {
                 // Try to find position after last_block_id
                 // Always set flight_found = true for the next searching
                 flight_found = true;
-                if let Some(&position) = buffer.block_position_index.get(&last_block_id) {
-                    position + 1
+                if let Some(&(batch_idx, block_idx)) =
+                    buffer.block_position_index.get(&last_block_id)
+                {
+                    (batch_idx, block_idx + 1)
                 } else {
                     // Not found in staging, will handle in fallback
                     continue;
                 }
             } else {
                 // Fallback: read from beginning
-                0
+                (0, 0)
             };
 
-            for block in &buffer.staging[staging_start_idx..] {
-                if read_len >= read_bytes_limit_len {
-                    break;
-                }
-                if let Some(ref expected_task_id) = task_ids {
-                    if !expected_task_id.contains(block.task_attempt_id as u64) {
-                        continue;
+            'staging: for (batch_idx, blocks) in buffer.staging.iter().enumerate().skip(start_batch)
+            {
+                let skip = if batch_idx == start_batch {
+                    start_block
+                } else {
+                    0
+                };
+                for block in &blocks[skip.min(blocks.len())..] {
+                    if read_len >= read_bytes_limit_len {
+                        break 'staging;
                     }
+                    if let Some(ref expected_task_id) = task_ids {
+                        if !expected_task_id.contains(block.task_attempt_id as u64) {
+                            continue;
+                        }
+                    }
+                    read_len += block.length as i64;
+                    read_result.push(block);
                 }
-                read_len += block.length as i64;
-                read_result.push(block);
             }
 
             // // If we found data in first attempt, no need for fallback
@@ -209,39 +249,15 @@ impl MemoryBuffer for OptStagingMemoryBuffer {
     }
 
     // when there is no any staging data, it will return the None
-    #[trace]
     fn spill(&self) -> anyhow::Result<Option<BufferSpillResult>> {
         let mut buffer = self.buffer.lock();
         if buffer.staging_size == 0 {
             return Ok(None);
         }
 
-        // Reconstruct batches from boundaries
-        let mut batches = Vec::new();
-        let mut start = 0;
-        for i in 0..buffer.batch_boundaries.len() {
-            let end = buffer.batch_boundaries[i];
-            if end >= buffer.staging.len() {
-                break;
-            }
-
-            // Find next boundary or use end of staging
-            let next_boundary = if i + 1 < buffer.batch_boundaries.len() {
-                buffer.batch_boundaries[i + 1]
-            } else {
-                buffer.staging.len()
-            };
-
-            batches.push(buffer.staging[start..next_boundary].to_vec());
-            start = next_boundary;
-        }
-
-        let staging: MemBlockBatch = MemBlockBatch(batches);
-
-        // Clear everything
-        buffer.staging.clear();
+        let staging: MemBlockBatch = mem::replace(&mut buffer.staging, Default::default());
         buffer.block_position_index.clear();
-        buffer.batch_boundaries.clear();
+        buffer.indexed_batches = 0;
 
         let staging_ref = Arc::new(staging);
         let flight_id = buffer.flight_counter;
@@ -261,36 +277,76 @@ impl MemoryBuffer for OptStagingMemoryBuffer {
         }))
     }
 
-    #[trace]
     fn append(&self, blocks: Vec<Block>, size: u64) -> anyhow::Result<()> {
         let mut buffer = self.buffer.lock();
-        let current_position = buffer.staging.len();
-        let block_count = blocks.len();
+        buffer.staging.push(blocks);
 
-        // Pre-allocate capacities
-        buffer.staging.reserve(block_count);
-        buffer.block_position_index.reserve(block_count);
-
-        // Record batch boundary
-        if !blocks.is_empty() {
-            buffer.batch_boundaries.push(current_position);
-        }
-
-        for (idx, block) in blocks.into_iter().enumerate() {
-            buffer
-                .block_position_index
-                .insert(block.block_id, current_position + idx);
-            buffer.staging.push(block);
-        }
         buffer.staging_size += size as i64;
         buffer.total_size += size as i64;
         Ok(())
     }
 
     #[cfg(test)]
-    #[trace]
     fn direct_push(&self, blocks: Vec<Block>) -> anyhow::Result<()> {
         let len: u64 = blocks.iter().map(|block| block.length).sum::<i32>() as u64;
         self.append(blocks, len)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::test_utils::create_blocks;
+
+    #[test]
+    fn spill_moves_staging_allocation() -> anyhow::Result<()> {
+        let buffer = IndexedMemoryBuffer::new(Default::default());
+        buffer.append(create_blocks(0, 4, 10), 40)?;
+
+        let batch_ptr = buffer.buffer.lock().staging[0].as_ptr();
+        let spill_result = buffer
+            .spill()?
+            .expect("staging blocks should produce a spill result");
+
+        assert_eq!(1, spill_result.blocks.len());
+        assert_eq!(batch_ptr, spill_result.blocks[0].as_ptr());
+        assert!(buffer.buffer.lock().staging.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn lazy_index_catches_up_on_read() -> anyhow::Result<()> {
+        let buffer = IndexedMemoryBuffer::new(Default::default());
+        buffer.append(create_blocks(0, 4, 10), 40)?;
+        buffer.append(create_blocks(4, 4, 10), 40)?;
+
+        // Append alone should not build the index.
+        assert!(buffer.buffer.lock().block_position_index.is_empty());
+
+        // A cursor read inside staging triggers the catch-up.
+        let result = buffer.get(3, 40, None)?;
+        assert_eq!(4, result.shuffle_data_block_segments.len());
+        assert_eq!(3 + 4, result.shuffle_data_block_segments[3].block_id);
+        {
+            let internal = buffer.buffer.lock();
+            assert_eq!(8, internal.block_position_index.len());
+            assert_eq!(2, internal.indexed_batches);
+        }
+
+        // New appends after a catch-up are indexed incrementally on next read.
+        buffer.append(create_blocks(8, 4, 10), 40)?;
+        let result = buffer.get(7, 40, None)?;
+        assert_eq!(4, result.shuffle_data_block_segments.len());
+        assert_eq!(11, result.shuffle_data_block_segments[3].block_id);
+        assert_eq!(12, buffer.buffer.lock().block_position_index.len());
+
+        // Spill drops the index together with staging.
+        buffer.spill()?;
+        {
+            let internal = buffer.buffer.lock();
+            assert!(internal.block_position_index.is_empty());
+            assert_eq!(0, internal.indexed_batches);
+        }
+        Ok(())
     }
 }

@@ -176,3 +176,7 @@ harness = false
 [[bench]]
 name = "urpc_streaming_parse"
 harness = false
+
+[[bench]]
+name = "memory_buffer"
+harness = false

@@ -61,8 +61,8 @@ use crate::app_manager::AppManagerRef;
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::local::LocalfileStoreStat;
+use crate::store::mem::buffer::configured_buffer::ConfiguredMemoryBuffer;
 use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
-use crate::store::mem::buffer::unified_buffer::UnifiedBuffer;
 use crate::store::mem::buffer::{BufferType, MemoryBuffer};
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::spill::hierarchy_event_bus::HierarchyEventBus;
@@ -92,7 +92,7 @@ const DEFAULT_MEMORY_SPILL_MAX_CONCURRENCY: i32 = 20;
 
 pub struct HybridStore {
     // Box<dyn Store> will build fail
-    pub(crate) hot_store: Arc<MemoryStore<UnifiedBuffer>>,
+    pub(crate) hot_store: Arc<MemoryStore<ConfiguredMemoryBuffer>>,
 
     pub(crate) warm_store: Option<Box<dyn PersistentStore>>,
     pub(crate) cold_store: Option<Box<dyn PersistentStore>>,
@@ -189,8 +189,8 @@ impl HybridStore {
         }
         let async_watermark_spill_enable = hybrid_conf.async_watermark_spill_trigger_enable;
 
-        // use the unified buffer to delegate the underlying concrete buffer
-        let mem_store: MemoryStore<UnifiedBuffer> =
+        // Delegate to the memory buffer implementation selected by configuration.
+        let mem_store: MemoryStore<ConfiguredMemoryBuffer> =
             MemoryStore::from(config.memory_store.unwrap(), runtime_manager.clone());
 
         let store = HybridStore {
@@ -446,7 +446,10 @@ impl HybridStore {
         Ok(Default::default())
     }
 
-    pub async fn get_memory_buffer(&self, uid: &PartitionUId) -> Result<Arc<UnifiedBuffer>> {
+    pub async fn get_memory_buffer(
+        &self,
+        uid: &PartitionUId,
+    ) -> Result<Arc<ConfiguredMemoryBuffer>> {
         self.hot_store.get_buffer(uid)
     }
 
@@ -512,7 +515,7 @@ impl HybridStore {
     async fn buffer_spill_impl(
         &self,
         uid: &PartitionUId,
-        buffer: Arc<UnifiedBuffer>,
+        buffer: Arc<ConfiguredMemoryBuffer>,
     ) -> Result<u64> {
         let spill_result = buffer.spill()?;
         if spill_result.is_none() {
