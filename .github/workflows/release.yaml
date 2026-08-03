@@ -42,6 +42,12 @@ jobs:
             artifact_path: target-docker/release/riffle-server
             docker_compose: dev/anolisos8/amd64/docker-compose.yml
             component: riffle-server
+          - name: linux-amd64-anolisos8-hdfs-native
+            os: ubuntu-22.04
+            build_command: RIFFLE_HDFS_FEATURE=hdfs docker compose -f dev/anolisos8/amd64/docker-compose.yml up
+            artifact_path: target-docker/release/riffle-server
+            docker_compose: dev/anolisos8/amd64/docker-compose.yml
+            component: riffle-server
 
     steps:
       - name: Remove unnecessary files (Linux only)
