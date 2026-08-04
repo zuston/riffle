@@ -2,7 +2,9 @@ version: "3"
 
 services:
   build-release:
-    build: ../amd64
+    image: ${RIFFLE_BUILD_IMAGE:-riffle-release-builder-anolisos8-amd64:local}
+    build:
+      context: ../amd64
     volumes:
       - ~/.m2:/root/.m2:rw
       - ~/.sbt:/root/.sbt:rw
