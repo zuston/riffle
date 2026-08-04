@@ -48,45 +48,54 @@ impl Command {
         }
     }
 
+    /// Computes the response frame of this command. This is the net-engine
+    /// agnostic part shared by the default tokio server and the io_uring
+    /// engine bridge.
+    pub async fn process(self, app_manager_ref: AppManagerRef) -> Result<Frame> {
+        match self {
+            Command::Send(req) => {
+                req.process(app_manager_ref)
+                    .instrument_await("applying the command of [Send]")
+                    .await
+            }
+            Command::GetMem(req) => {
+                req.process(app_manager_ref)
+                    .instrument_await("applying the command of [GetMemory]")
+                    .await
+            }
+            Command::GetLocalIndex(req) => {
+                req.process(app_manager_ref)
+                    .instrument_await("applying the command of [GetLocalIndex]")
+                    .await
+            }
+            Command::GetLocalData(req) => {
+                req.process(app_manager_ref)
+                    .instrument_await("applying the command of [GetLocalData]")
+                    .await
+            }
+            Command::GetLocalDataV2(req) => {
+                req.process(app_manager_ref)
+                    .instrument_await("applying the command of [GetLocalDataV2]")
+                    .await
+            }
+            Command::GetLocalDataV3(req) => {
+                req.process(app_manager_ref)
+                    .instrument_await("applying the command of [GetLocalDataV3]")
+                    .await
+            }
+        }
+    }
+
     pub async fn apply(
         self,
         app_manager_ref: AppManagerRef,
         conn: &mut Connection,
-        shutdown: &mut Shutdown,
+        _shutdown: &mut Shutdown,
     ) -> Result<()> {
-        match self {
-            Command::Send(req) => {
-                req.apply(app_manager_ref, conn, shutdown)
-                    .instrument_await("applying the command of [Send]")
-                    .await?
-            }
-            Command::GetMem(req) => {
-                req.apply(app_manager_ref, conn, shutdown)
-                    .instrument_await("applying the command of [GetMemory]")
-                    .await?
-            }
-            Command::GetLocalIndex(req) => {
-                req.apply(app_manager_ref, conn, shutdown)
-                    .instrument_await("applying the command of [GetLocalIndex]")
-                    .await?
-            }
-            Command::GetLocalData(req) => {
-                req.apply(app_manager_ref, conn, shutdown)
-                    .instrument_await("applying the command of [GetLocalData]")
-                    .await?
-            }
-            Command::GetLocalDataV2(req) => {
-                req.apply(app_manager_ref, conn, shutdown)
-                    .instrument_await("applying the command of [GetLocalDataV2]")
-                    .await?
-            }
-            Command::GetLocalDataV3(req) => {
-                req.apply(app_manager_ref, conn, shutdown)
-                    .instrument_await("applying the command of [GetLocalDataV3]")
-                    .await?
-            }
-            _ => {}
-        }
+        let frame = self.process(app_manager_ref).await?;
+        conn.write_frame(&frame)
+            .instrument_await("writing the response...")
+            .await?;
         Ok(())
     }
 }
@@ -104,12 +113,7 @@ pub struct GetMemoryDataRequestCommand {
 }
 
 impl GetMemoryDataRequestCommand {
-    pub(crate) async fn apply(
-        &self,
-        app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
-        shutdown: &mut Shutdown,
-    ) -> Result<()> {
+    pub(crate) async fn process(&self, app_manager_ref: AppManagerRef) -> Result<Frame> {
         let timer = Instant::now();
 
         let request_id = self.request_id;
@@ -122,15 +126,11 @@ impl GetMemoryDataRequestCommand {
 
         let app = app_manager_ref.get_app(&application_id);
         if app.is_none() {
-            let response = RpcResponseCommand {
+            return Ok(Frame::RpcResponse(RpcResponseCommand {
                 request_id,
                 status_code: StatusCode::NO_REGISTER.into(),
                 ret_msg: "No such app in server side".to_string(),
-            };
-            write_response(conn, response)
-                .instrument_await("writing the response...")
-                .await?;
-            return Ok(());
+            }));
         }
 
         let app = app.unwrap();
@@ -156,10 +156,9 @@ impl GetMemoryDataRequestCommand {
         let result = app.select(ctx).instrument_await("selecting...").await;
         let read_elapsed = read_timer.elapsed().as_millis();
 
-        let write_timer = Instant::now();
         let mut read_length = 0;
         let rpc_version = &app.app_config_options.get_memory_data_urpc_version;
-        match rpc_version {
+        let frame = match rpc_version {
             RpcVersion::V1 => {
                 let response = match result {
                     Err(e) => GetMemoryDataResponseCommand {
@@ -178,10 +177,7 @@ impl GetMemoryDataRequestCommand {
                         }
                     }
                 };
-                let frame = Frame::GetMemoryDataResponse(response);
-                conn.write_frame(&frame)
-                    .instrument_await("writing the V1 response...")
-                    .await?;
+                Frame::GetMemoryDataResponse(response)
             }
             _ => {
                 let response = match result {
@@ -201,16 +197,12 @@ impl GetMemoryDataRequestCommand {
                         }
                     }
                 };
-                let frame = Frame::GetMemoryDataV2Response(response);
-                conn.write_frame(&frame)
-                    .instrument_await("writing the V2 response...")
-                    .await?;
+                Frame::GetMemoryDataV2Response(response)
             }
-        }
-        let write_elapsed = write_timer.elapsed().as_millis();
+        };
         let thread_label = util::current_thread_label();
         info!(
-            "[get_memory_data][{:?}] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}. read cost {}(ms) and socket_write cost {}(ms), thread_label: {}",
+            "[get_memory_data][{:?}] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}. read cost {}(ms), thread_label: {}",
             rpc_version,
             timer.elapsed().as_millis(),
             read_length,
@@ -218,10 +210,9 @@ impl GetMemoryDataRequestCommand {
             shuffle_id,
             partition_id,
             read_elapsed,
-            write_elapsed,
             thread_label,
         );
-        Ok(())
+        Ok(frame)
     }
 }
 
@@ -283,12 +274,7 @@ pub struct ReadSegment {
 }
 
 impl GetLocalDataRequestV2Command {
-    pub(crate) async fn apply(
-        &self,
-        app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
-        shutdown: &mut Shutdown,
-    ) -> Result<()> {
+    pub(crate) async fn process(&self, app_manager_ref: AppManagerRef) -> Result<Frame> {
         let timer = Instant::now();
 
         let request_id = self.request_id;
@@ -309,11 +295,7 @@ impl GetLocalDataRequestV2Command {
                 ret_msg: "No such app in server side".to_string(),
                 data: Default::default(),
             };
-            let frame = Frame::GetLocalDataResponse(command);
-            conn.write_frame(&frame)
-                .instrument_await("No such app and then fast return")
-                .await?;
-            return Ok(());
+            return Ok(Frame::GetLocalDataResponse(command));
         }
 
         let app = app.unwrap();
@@ -357,34 +339,21 @@ impl GetLocalDataRequestV2Command {
         };
         let read_elapsed = read_timer.elapsed().as_millis();
 
-        let write_timer = Instant::now();
-        let frame = Frame::GetLocalDataResponse(command);
-        conn.write_frame(&frame)
-            .instrument_await("writing the response...")
-            .await?;
-        let write_elapsed = write_timer.elapsed().as_millis();
-
         info!(
-            "[get_local_data_v2] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}. read cost {}(ms) and socket_write cost {}(ms)",
+            "[get_local_data_v2] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}. read cost {}(ms)",
             timer.elapsed().as_millis(),
             len,
             app_id,
             shuffle_id,
             partition_id,
             read_elapsed,
-            write_elapsed,
         );
-        Ok(())
+        Ok(Frame::GetLocalDataResponse(command))
     }
 }
 
 impl GetLocalDataRequestV3Command {
-    pub(crate) async fn apply(
-        &self,
-        app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
-        shutdown: &mut Shutdown,
-    ) -> Result<()> {
+    pub(crate) async fn process(&self, app_manager_ref: AppManagerRef) -> Result<Frame> {
         let timer = Instant::now();
 
         let request_id = self.request_id;
@@ -405,11 +374,7 @@ impl GetLocalDataRequestV3Command {
                 ret_msg: "No such app in server side".to_string(),
                 data: Default::default(),
             };
-            let frame = Frame::GetLocalDataResponse(command);
-            conn.write_frame(&frame)
-                .instrument_await("No such app and then fast return")
-                .await?;
-            return Ok(());
+            return Ok(Frame::GetLocalDataResponse(command));
         }
 
         let app = app.unwrap();
@@ -453,10 +418,6 @@ impl GetLocalDataRequestV3Command {
             }
         };
 
-        let frame = Frame::GetLocalDataResponse(command);
-        conn.write_frame(&frame)
-            .instrument_await("writing the response...")
-            .await?;
         info!(
             "[get_local_data_v3] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
             timer.elapsed().as_millis(),
@@ -465,17 +426,12 @@ impl GetLocalDataRequestV3Command {
             shuffle_id,
             partition_id,
         );
-        Ok(())
+        Ok(Frame::GetLocalDataResponse(command))
     }
 }
 
 impl GetLocalDataRequestCommand {
-    pub(crate) async fn apply(
-        &self,
-        app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
-        shutdown: &mut Shutdown,
-    ) -> Result<()> {
+    pub(crate) async fn process(&self, app_manager_ref: AppManagerRef) -> Result<Frame> {
         let timer = Instant::now();
 
         let request_id = self.request_id;
@@ -494,11 +450,7 @@ impl GetLocalDataRequestCommand {
                 ret_msg: "No such app in server side".to_string(),
                 data: Default::default(),
             };
-            let frame = Frame::GetLocalDataResponse(command);
-            conn.write_frame(&frame)
-                .instrument_await("No such app and then fast return")
-                .await?;
-            return Ok(());
+            return Ok(Frame::GetLocalDataResponse(command));
         }
 
         let app = app.unwrap();
@@ -540,10 +492,6 @@ impl GetLocalDataRequestCommand {
             }
         };
 
-        let frame = Frame::GetLocalDataResponse(command);
-        conn.write_frame(&frame)
-            .instrument_await("writing the response...")
-            .await?;
         info!(
             "[get_local_data] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
             timer.elapsed().as_millis(),
@@ -552,7 +500,7 @@ impl GetLocalDataRequestCommand {
             shuffle_id,
             partition_id,
         );
-        Ok(())
+        Ok(Frame::GetLocalDataResponse(command))
     }
 }
 
@@ -584,12 +532,7 @@ pub struct GetLocalDataIndexRequestCommand {
 }
 
 impl GetLocalDataIndexRequestCommand {
-    pub(crate) async fn apply(
-        &self,
-        app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
-        shutdown: &mut Shutdown,
-    ) -> Result<()> {
+    pub(crate) async fn process(&self, app_manager_ref: AppManagerRef) -> Result<Frame> {
         let timer = Instant::now();
 
         let request_id = self.request_id;
@@ -606,9 +549,7 @@ impl GetLocalDataIndexRequestCommand {
                 ret_msg: "No such app in server side".to_string(),
                 data_index: Default::default(),
             };
-            let frame = Frame::GetLocalDataIndexResponse(command);
-            conn.write_frame(&frame).await?;
-            return Ok(());
+            return Ok(Frame::GetLocalDataIndexResponse(command));
         }
 
         let app = app.unwrap();
@@ -675,9 +616,6 @@ impl GetLocalDataIndexRequestCommand {
                 Frame::GetLocalDataIndexV2Response(command)
             }
         };
-        conn.write_frame(&frame)
-            .instrument_await("writing the response...")
-            .await?;
         info!(
             "[get_local_index] duration {}(ms) with {} bytes. app_id: {}, shuffle_id: {}, partition_id: {}",
             timer.elapsed().as_millis(),
@@ -686,7 +624,7 @@ impl GetLocalDataIndexRequestCommand {
             shuffle_id,
             partition_id,
         );
-        Ok(())
+        Ok(frame)
     }
 }
 
@@ -716,6 +654,38 @@ pub struct SendDataRequestCommand {
     pub(crate) timestamp: i64,
 }
 
+impl SendDataRequestCommand {
+    pub fn new(
+        request_id: i64,
+        app_id: String,
+        shuffle_id: i32,
+        blocks: HashMap<i32, Vec<Block>>,
+        ticket_id: i64,
+        timestamp: i64,
+    ) -> Self {
+        Self {
+            request_id,
+            app_id,
+            shuffle_id,
+            blocks,
+            ticket_id,
+            timestamp,
+        }
+    }
+
+    pub fn request_id(&self) -> i64 {
+        self.request_id
+    }
+
+    pub fn data_len(&self) -> usize {
+        self.blocks
+            .values()
+            .flatten()
+            .map(|block| block.data.len())
+            .sum()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RpcResponseCommand {
     pub(crate) request_id: i64,
@@ -723,18 +693,18 @@ pub struct RpcResponseCommand {
     pub(crate) ret_msg: String,
 }
 
-async fn write_response(conn: &mut Connection, command: RpcResponseCommand) -> Result<()> {
-    let frame = Frame::RpcResponse(command);
-    conn.write_frame(&frame).await
+impl RpcResponseCommand {
+    pub fn new(request_id: i64, status_code: i32, ret_msg: String) -> Self {
+        Self {
+            request_id,
+            status_code,
+            ret_msg,
+        }
+    }
 }
 
 impl SendDataRequestCommand {
-    async fn apply(
-        self,
-        app_manager_ref: AppManagerRef,
-        conn: &mut Connection,
-        shutdown: &mut Shutdown,
-    ) -> Result<()> {
+    async fn process(self, app_manager_ref: AppManagerRef) -> Result<Frame> {
         let timer = Instant::now();
 
         let request_id = self.request_id;
@@ -748,13 +718,11 @@ impl SendDataRequestCommand {
             .observe(((util::now_timestamp_as_millis() - timestamp as u128) / 1000) as f64);
         let app = app_manager_ref.get_app(&application_id);
         if app.is_none() {
-            let response = RpcResponseCommand {
+            return Ok(Frame::RpcResponse(RpcResponseCommand {
                 request_id,
                 status_code: StatusCode::NO_REGISTER.into(),
                 ret_msg: "No such app in server side".to_string(),
-            };
-            write_response(conn, response).await?;
-            return Ok(());
+            }));
         }
 
         let app = app.unwrap();
@@ -764,13 +732,11 @@ impl SendDataRequestCommand {
             .await
         {
             Err(e) => {
-                let response = RpcResponseCommand {
+                return Ok(Frame::RpcResponse(RpcResponseCommand {
                     request_id,
                     status_code: StatusCode::INTERNAL_ERROR.into(),
                     ret_msg: "No such ticket id. Maybe it has been out of date".to_string(),
-                };
-                write_response(conn, response).await?;
-                return Ok(());
+                }));
             }
             Ok(len) => len,
         };
@@ -803,9 +769,6 @@ impl SendDataRequestCommand {
                 ret_msg: "".to_string(),
             },
         };
-        write_response(conn, response)
-            .instrument_await(format!("writing response for app:{}", &app_id))
-            .await?;
         if !insert_failure_occur {
             RPC_BATCH_DATA_BYTES_HISTOGRAM
                 .with_label_values(&[&RPC_BATCH_BYTES_OPERATION::SEND_DATA.to_string()])
@@ -818,7 +781,7 @@ impl SendDataRequestCommand {
             app_id,
             shuffle_id,
         );
-        Ok(())
+        Ok(Frame::RpcResponse(response))
     }
 
     /// Inserts all partition blocks for send_data; isolated for await-tree visibility.

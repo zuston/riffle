@@ -53,4 +53,35 @@ mod tests {
 
         shuffle_testing(&config, _app_ref).await
     }
+
+    #[cfg(all(feature = "io-uring", target_os = "linux"))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn shuffle_write_read_with_uring_net_engine_testing() -> Result<()> {
+        use riffle_server::config::{RpcVersion, UrpcConfig, UrpcNetEngine};
+
+        init_logger();
+        let temp_dir = tempdir::TempDir::new("test_write_read_uring").unwrap();
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        info!("temp file path: {} created", &temp_path);
+
+        let grpc_port = 21203;
+        let urpc_port = 21204;
+        let mut config =
+            Config::create_mem_localfile_config(grpc_port, "1G".to_string(), temp_path);
+        config.urpc_port = Some(urpc_port);
+        config.urpc_config = Some(UrpcConfig {
+            get_index_rpc_version: RpcVersion::V1,
+            streaming_parse_enabled: true,
+            write_mode: Default::default(),
+            net_engine: UrpcNetEngine::URING,
+        });
+        config.hybrid_store.memory_single_buffer_max_spill_size = Some("1B".to_string());
+        config.localfile_store.as_mut().unwrap().disk_high_watermark = 1.0;
+
+        let _app_ref = mini_riffle::start(&config).await?;
+        // wait all setup
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        shuffle_testing(&config, _app_ref).await
+    }
 }

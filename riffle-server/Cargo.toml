@@ -178,5 +178,10 @@ name = "urpc_streaming_parse"
 harness = false
 
 [[bench]]
+name = "urpc_net_engine"
+harness = false
+required-features = ["io-uring"]
+
+[[bench]]
 name = "memory_buffer"
 harness = false

@@ -6,3 +6,6 @@ pub mod frame;
 mod metrics;
 pub mod server;
 pub mod shutdown;
+
+#[cfg(all(feature = "io-uring", target_os = "linux"))]
+pub mod uring;
