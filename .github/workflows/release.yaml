@@ -23,30 +23,45 @@ jobs:
             build_command: cargo build --release --bin riffle-ctl
             artifact_path: target/release/riffle-ctl
             docker_compose: ""
+            builder_variant: ""
+            builder_context: ""
+            builder_dockerfile: ""
             component: riffle-ctl
           - name: linux-arm64-anolisos8
             os: ubuntu-22.04-arm
-            build_command: docker compose -f dev/anolisos8/arm64/docker-compose.yml up
+            build_command: docker compose -f dev/anolisos8/arm64/docker-compose.yml up --no-build
             artifact_path: target-docker/release/riffle-server
             docker_compose: dev/anolisos8/arm64/docker-compose.yml
+            builder_variant: anolisos8-arm64
+            builder_context: dev/anolisos8/arm64
+            builder_dockerfile: dev/anolisos8/arm64/Dockerfile
             component: riffle-server
           - name: linux-amd64-centos7
             os: ubuntu-22.04
-            build_command: docker compose -f dev/centos7/amd64/docker-compose.yml up
+            build_command: docker compose -f dev/centos7/amd64/docker-compose.yml up --no-build
             artifact_path: target-docker/release/riffle-server target-docker/release/riffle-ctl
             docker_compose: dev/centos7/amd64/docker-compose.yml
+            builder_variant: centos7-amd64
+            builder_context: dev/centos7/amd64
+            builder_dockerfile: dev/centos7/amd64/Dockerfile
             component: riffle-server
           - name: linux-amd64-anolisos8
             os: ubuntu-22.04
-            build_command: docker compose -f dev/anolisos8/amd64/docker-compose.yml up
+            build_command: docker compose -f dev/anolisos8/amd64/docker-compose.yml up --no-build
             artifact_path: target-docker/release/riffle-server
             docker_compose: dev/anolisos8/amd64/docker-compose.yml
+            builder_variant: anolisos8-amd64
+            builder_context: dev/anolisos8/amd64
+            builder_dockerfile: dev/anolisos8/amd64/Dockerfile
             component: riffle-server
           - name: linux-amd64-anolisos8-hdfs-native
             os: ubuntu-22.04
-            build_command: RIFFLE_HDFS_FEATURE=hdfs docker compose -f dev/anolisos8/amd64/docker-compose.yml up
+            build_command: RIFFLE_HDFS_FEATURE=hdfs docker compose -f dev/anolisos8/amd64/docker-compose.yml up --no-build
             artifact_path: target-docker/release/riffle-server
             docker_compose: dev/anolisos8/amd64/docker-compose.yml
+            builder_variant: anolisos8-amd64
+            builder_context: dev/anolisos8/amd64
+            builder_dockerfile: dev/anolisos8/amd64/Dockerfile
             component: riffle-server
 
     steps:
@@ -57,6 +72,41 @@ jobs:
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
 
       - uses: actions/checkout@v4
+
+      - name: Resolve release builder image (Linux only)
+        if: ${{ matrix.builder_variant != '' }}
+        id: builder
+        shell: bash
+        env:
+          BUILDER_DOCKERFILE: ${{ matrix.builder_dockerfile }}
+          BUILDER_VARIANT: ${{ matrix.builder_variant }}
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          dockerfile_hash="$(sha256sum "$BUILDER_DOCKERFILE" | awk '{print $1}')"
+          echo "image=ghcr.io/$owner/riffle-release-builder:$BUILDER_VARIANT-$dockerfile_hash" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR (Linux only)
+        if: ${{ matrix.builder_variant != '' }}
+        continue-on-error: true
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare release builder image (Linux only)
+        if: ${{ matrix.builder_variant != '' }}
+        shell: bash
+        env:
+          BUILDER_CONTEXT: ${{ matrix.builder_context }}
+          BUILDER_IMAGE: ${{ steps.builder.outputs.image }}
+        run: |
+          if docker pull "$BUILDER_IMAGE"; then
+            exit 0
+          fi
+
+          echo "::warning::Release builder image is unavailable; building it locally."
+          docker build --tag "$BUILDER_IMAGE" "$BUILDER_CONTEXT"
 
       - name: Sanitize ref name
         id: vars
@@ -92,6 +142,8 @@ jobs:
 
       - name: Build
         run: ${{ matrix.build_command }}
+        env:
+          RIFFLE_BUILD_IMAGE: ${{ steps.builder.outputs.image }}
 
       - name: Set component name
         id: component

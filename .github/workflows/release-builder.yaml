@@ -1,0 +1,81 @@
+name: Release Builder Images
+
+on:
+  push:
+    branches:
+      - "master"
+    paths:
+      - ".github/workflows/release-builder.yaml"
+      - "dev/anolisos8/amd64/Dockerfile"
+      - "dev/anolisos8/arm64/Dockerfile"
+      - "dev/centos7/amd64/Dockerfile"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release-builder-images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish ${{ matrix.variant }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: anolisos8-amd64
+            os: ubuntu-22.04
+            context: dev/anolisos8/amd64
+            dockerfile: dev/anolisos8/amd64/Dockerfile
+            platform: linux/amd64
+          - variant: anolisos8-arm64
+            os: ubuntu-22.04-arm
+            context: dev/anolisos8/arm64
+            dockerfile: dev/anolisos8/arm64/Dockerfile
+            platform: linux/arm64
+          - variant: centos7-amd64
+            os: ubuntu-22.04
+            context: dev/centos7/amd64
+            dockerfile: dev/centos7/amd64/Dockerfile
+            platform: linux/amd64
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve image reference
+        id: image
+        shell: bash
+        env:
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          dockerfile_hash="$(sha256sum "$DOCKERFILE" | awk '{print $1}')"
+          echo "ref=ghcr.io/$owner/riffle-release-builder:$VARIANT-$dockerfile_hash" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and publish release builder image
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          platforms: ${{ matrix.platform }}
+          push: true
+          tags: ${{ steps.image.outputs.ref }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=release-builder-${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=release-builder-${{ matrix.variant }}
