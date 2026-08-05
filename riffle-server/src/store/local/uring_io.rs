@@ -561,8 +561,8 @@ impl UringIo {
                 written
             )));
         }
-        file.sync_all()
-            .map_err(|e| WorkerError::Other(anyhow!(e)))?;
+        // Shuffle files are discarded on restart, so append completion does not
+        // force per-write durability.
         Ok(())
     }
 }
@@ -1131,7 +1131,7 @@ pub mod tests {
         use crate::store::alignment::ALIGN;
         use crate::store::local::options::WriteOptions;
         use crate::store::local::read_options::ReadRange;
-        use bytes::{BufMut, Bytes, BytesMut};
+        use bytes::{Bytes, BytesMut};
         use std::fs;
         use tempdir::TempDir;
 
@@ -1151,6 +1151,7 @@ pub mod tests {
         written_data.extend_from_slice(&vec![b'y'; 2]);
         written_data.extend_from_slice(&vec![b'z'; 5]);
         let written_data = written_data.freeze();
+        let cross_alignment_data = Bytes::from(vec![b'a'; ALIGN + 10]);
 
         w_runtime.block_on(async {
             uring_io_engine
@@ -1170,14 +1171,30 @@ pub mod tests {
             uring_io_engine
                 .write(
                     data_file_name,
-                    WriteOptions::with_append_of_direct_io(
-                        Bytes::from(vec![b'a'; 4096 + 10]).into(),
-                        20,
-                    ),
+                    WriteOptions::with_append_of_direct_io(cross_alignment_data.clone().into(), 20),
                 )
                 .await
                 .unwrap();
         });
+
+        let mut expected_data = BytesMut::new();
+        expected_data.extend_from_slice(&written_data);
+        expected_data.extend_from_slice(&written_data);
+        expected_data.extend_from_slice(&cross_alignment_data);
+        let expected_data = expected_data.freeze();
+
+        let read_options = crate::store::local::read_options::ReadOptions::default()
+            .with_read_range(ReadRange::RANGE(0, expected_data.len() as u64))
+            .with_io_mode(IoMode::BUFFER_IO);
+        let buffered_data = r_runtime
+            .block_on(async {
+                uring_io_engine
+                    .read(data_file_name, read_options)
+                    .await
+                    .unwrap()
+            })
+            .freeze();
+        assert_eq!(expected_data, buffered_data);
 
         let read_options = crate::store::local::read_options::ReadOptions::default()
             .with_read_range(ReadRange::RANGE(3, 3))
@@ -1219,7 +1236,7 @@ pub mod tests {
         assert_eq!(vec![b'z', b'a'], data_3);
 
         assert_eq!(
-            align_up(ALIGN, 10 + 10 + 4096 + 10) as u64,
+            align_up(ALIGN, expected_data.len()) as u64,
             fs::metadata(format!("{}/{}", &temp_path, &data_file_name))
                 .unwrap()
                 .len()

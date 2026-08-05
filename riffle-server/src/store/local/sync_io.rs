@@ -161,7 +161,8 @@ impl SyncLocalIO {
                         ),
                     ));
                 }
-                file.sync_all()?;
+                // Shuffle files are discarded on restart, so append completion does not
+                // force per-write durability.
                 Ok::<(), io::Error>(())
             })
             .instrument_await("wait the spawned block future")
@@ -201,7 +202,7 @@ impl SyncLocalIO {
             .write_runtime_ref
             .spawn_blocking(move || {
                 let path = Path::new(&path);
-                let mut file = OpenOptions::new().append(true).create(true).open(path)?;
+                let file = OpenOptions::new().append(true).create(true).open(path)?;
                 let mut buf_writer = match buffer_capacity {
                     Some(capacity) => BufWriter::with_capacity(capacity, file),
                     _ => BufWriter::new(file),
@@ -214,10 +215,8 @@ impl SyncLocalIO {
                     }
                     _ => todo!(),
                 }
+                // Make appended bytes visible to readers without forcing them to stable storage.
                 buf_writer.flush()?;
-
-                let file = buf_writer.into_inner()?;
-                file.sync_all()?;
 
                 Ok::<(), io::Error>(())
             })
@@ -537,6 +536,7 @@ mod test {
     use crate::store::local::read_options::{IoMode, ReadOptions, ReadRange};
     use crate::store::local::sync_io::{fill_buffer_and_write, SyncLocalIO, ALIGN};
     use crate::store::local::LocalIO;
+    use crate::store::DataBytes;
     use bytes::{Bytes, BytesMut};
     use std::fs;
     use std::fs::{File, OpenOptions};
@@ -764,6 +764,97 @@ mod test {
                 .unwrap()
                 .len()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_direct_append_is_visible_to_buffer_and_sendfile_reads() -> anyhow::Result<()> {
+        let base_runtime_ref = create_runtime(2, "base");
+        let read_runtime_ref = create_runtime(1, "read");
+        let write_runtime_ref = create_runtime(1, "write");
+
+        let temp_dir = tempdir::TempDir::new("test_direct_append_visibility")?;
+        let temp_path = temp_dir.path().to_str().unwrap().to_string();
+        let data_file_name = "1.data";
+        let io_handler = SyncLocalIO::new(
+            &read_runtime_ref,
+            &write_runtime_ref,
+            &temp_path,
+            None,
+            None,
+        );
+
+        let first = Bytes::from(
+            (0..ALIGN - 3)
+                .map(|index| (index % 251) as u8)
+                .collect::<Vec<_>>(),
+        );
+        base_runtime_ref.block_on(io_handler.write(
+            data_file_name,
+            WriteOptions::with_append_of_direct_io(first.clone().into(), 0),
+        ))?;
+
+        let first_read = base_runtime_ref
+            .block_on(
+                io_handler.read(
+                    data_file_name,
+                    ReadOptions::default()
+                        .with_io_mode(IoMode::BUFFER_IO)
+                        .with_read_range(ReadRange::RANGE(0, first.len() as u64)),
+                ),
+            )?
+            .freeze();
+        assert_eq!(first.as_ref(), first_read.as_ref());
+
+        let second = Bytes::from(
+            (0..ALIGN + 11)
+                .map(|index| ((index + 37) % 251) as u8)
+                .collect::<Vec<_>>(),
+        );
+        base_runtime_ref.block_on(io_handler.write(
+            data_file_name,
+            WriteOptions::with_append_of_direct_io(second.clone().into(), first.len() as u64),
+        ))?;
+
+        let mut expected = first.to_vec();
+        expected.extend_from_slice(&second);
+
+        let range_start = ALIGN - 7;
+        let range_len = 32;
+        let range_end = range_start + range_len;
+        let buffered_read = base_runtime_ref
+            .block_on(
+                io_handler.read(
+                    data_file_name,
+                    ReadOptions::default()
+                        .with_io_mode(IoMode::BUFFER_IO)
+                        .with_read_range(ReadRange::RANGE(range_start as u64, range_len as u64)),
+                ),
+            )?
+            .freeze();
+        assert_eq!(&expected[range_start..range_end], buffered_read.as_ref());
+
+        let sendfile_read = base_runtime_ref.block_on(
+            io_handler.read(
+                data_file_name,
+                ReadOptions::default()
+                    .with_io_mode(IoMode::SENDFILE)
+                    .with_read_range(ReadRange::RANGE(range_start as u64, range_len as u64)),
+            ),
+        )?;
+        match sendfile_read {
+            DataBytes::RawIO(mut raw_io) => {
+                assert_eq!(range_start as u64, raw_io.offset);
+                assert_eq!(range_len as u64, raw_io.length);
+
+                let mut actual = vec![0; range_len];
+                raw_io.file.seek(SeekFrom::Start(raw_io.offset))?;
+                raw_io.file.read_exact(&mut actual)?;
+                assert_eq!(&expected[range_start..range_end], actual.as_slice());
+            }
+            data => panic!("Expected RawIO, got {data:?}"),
+        }
 
         Ok(())
     }
