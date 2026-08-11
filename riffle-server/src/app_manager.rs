@@ -393,7 +393,7 @@ pub(crate) mod test {
     }
 
     pub fn mock_config() -> Config {
-        let temp_dir = tempdir::TempDir::new("test_local_store").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("init local file path: {}", temp_path);
 

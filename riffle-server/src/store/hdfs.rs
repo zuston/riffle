@@ -841,7 +841,7 @@ mod tests {
         unsafe impl Send for MockedHdfsClient {}
         unsafe impl Sync for MockedHdfsClient {}
 
-        let temp_dir = tempdir::TempDir::new("partial_delete_test_store").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("init local file path: {}", temp_path);
         #[async_trait]

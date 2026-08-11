@@ -746,7 +746,7 @@ mod test {
 
     #[test]
     fn local_disk_under_exception_test() -> anyhow::Result<()> {
-        let temp_dir = tempdir::TempDir::new("local_disk_under_exception_test").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("init local file path: {}", &temp_path);
         let local_store = LocalFileStore::new(vec![temp_path.to_string()]);
@@ -822,7 +822,7 @@ mod test {
 
     #[test]
     fn purge_test() -> anyhow::Result<()> {
-        let temp_dir = tempdir::TempDir::new("test_local_store").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("init local file path: {}", &temp_path);
         let local_store = LocalFileStore::new(vec![temp_path.clone()]);
@@ -908,7 +908,7 @@ mod test {
     #[test]
     #[ignore]
     fn local_store_test() {
-        let temp_dir = tempdir::TempDir::new("test_local_store").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         info!("init local file path: {}", temp_path);
         let mut local_store = LocalFileStore::new(vec![temp_path]);
@@ -1028,7 +1028,7 @@ mod test {
         use std::time::Duration;
         use tokio::time::timeout;
 
-        let temp_dir = tempdir::TempDir::new("data_insert_write_permit").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         let mut config = LocalfileStoreConfig::new(vec![temp_path]);
         config.write_concurrency_per_disk = 1;
@@ -1082,7 +1082,7 @@ mod test {
 
     #[test]
     fn direct_appends_are_immediately_visible_through_local_store() -> anyhow::Result<()> {
-        let temp_dir = tempdir::TempDir::new("direct_append_visibility").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         let mut config = LocalfileStoreConfig::new(vec![temp_path]);
         config.direct_io_append_enable = true;
@@ -1159,7 +1159,7 @@ mod test {
 
     #[test]
     fn test_index_consistency() -> anyhow::Result<()> {
-        let temp_dir = tempdir::TempDir::new("test_index_consistency").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         info!("init local file path: {}", temp_path);
 

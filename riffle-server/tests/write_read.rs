@@ -32,7 +32,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn shuffle_write_read_testing() -> Result<()> {
         init_logger();
-        let temp_dir = tempdir::TempDir::new("test_write_read").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         info!("temp file path: {} created", &temp_path);
 
@@ -60,7 +60,7 @@ mod tests {
         use riffle_server::config::{RpcVersion, UrpcConfig, UrpcNetEngine};
 
         init_logger();
-        let temp_dir = tempdir::TempDir::new("test_write_read_uring").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         info!("temp file path: {} created", &temp_path);
 

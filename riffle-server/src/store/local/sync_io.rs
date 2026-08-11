@@ -552,7 +552,7 @@ mod test {
         let read_rumtime_ref = create_runtime(1, "read");
         let write_rumtime_ref = create_runtime(1, "write");
 
-        let temp_dir = tempdir::TempDir::new("test_sync_io").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("created the temp file path: {}", &temp_path);
 
@@ -664,7 +664,7 @@ mod test {
         let mut io_buffer = buffer_pool.acquire();
 
         // write some data into the file.
-        let temp_dir = tempdir::TempDir::new("test_direct_read_with_pool")?;
+        let temp_dir = tempfile::tempdir()?;
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         let data_file_name = format!("{}/{}", &temp_path, "1.data");
 
@@ -699,7 +699,7 @@ mod test {
         let read_rumtime_ref = create_runtime(1, "read");
         let write_rumtime_ref = create_runtime(1, "write");
 
-        let temp_dir = tempdir::TempDir::new("test_direct_io")?;
+        let temp_dir = tempfile::tempdir()?;
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         // let temp_path = "/tmp/test_direct_io";
         println!("created the temp file path: {}", &temp_path);
@@ -774,7 +774,7 @@ mod test {
         let read_runtime_ref = create_runtime(1, "read");
         let write_runtime_ref = create_runtime(1, "write");
 
-        let temp_dir = tempdir::TempDir::new("test_direct_append_visibility")?;
+        let temp_dir = tempfile::tempdir()?;
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         let data_file_name = "1.data";
         let io_handler = SyncLocalIO::new(
@@ -869,7 +869,7 @@ mod test {
 
     #[test]
     fn test_fill_buffer_and_write() -> anyhow::Result<()> {
-        let temp_dir = tempdir::TempDir::new("test_fill_buffer_and_write")?;
+        let temp_dir = tempfile::tempdir()?;
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("created the temp file path: {}", &temp_path);
         let file_path = format!("{}/{}", &temp_path, "1.data");

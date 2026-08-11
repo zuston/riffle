@@ -51,6 +51,7 @@ use bytesize::ByteSize;
 use clap::builder::Str;
 use clap::{Arg, Parser};
 use log::{info, LevelFilter};
+#[cfg(feature = "logforth")]
 use logforth::append;
 use std::str::FromStr;
 use tracing_subscriber::layer::SubscriberExt;

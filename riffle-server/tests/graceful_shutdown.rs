@@ -33,7 +33,7 @@ mod test {
     #[ignore = "This test is flaky on CI"]
     async fn graceful_shutdown_test() -> anyhow::Result<()> {
         init_logger();
-        let temp_dir = tempdir::TempDir::new("test_write_read").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         info!("temp file path: {} created", &temp_path);
 

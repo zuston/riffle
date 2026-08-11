@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_reconf_wrong_but_fallback() -> Result<()> {
-        let temp_dir = tempdir::TempDir::new("test_reconf_wrong_but_fallback").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("init local file path: {}", &temp_path);
 
@@ -352,7 +352,7 @@ mod tests {
 
     #[test]
     fn test_reconf() -> Result<()> {
-        let temp_dir = tempdir::TempDir::new("test_reconf_dir").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("init local file path: {}", &temp_path);
 
@@ -393,7 +393,7 @@ mod tests {
 
     #[test]
     fn test_register_and_remove() -> Result<()> {
-        let temp_dir = tempdir::TempDir::new("test_register_and_remove").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("init local file path: {}", &temp_path);
 

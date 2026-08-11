@@ -72,9 +72,7 @@ io-uring = ["dep:io-uring"]
 [dependencies]
 anyhow = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
-tokio-rustls = { workspace = true }
 tokio-stream = { workspace = true, features = ["sync", "net"] }
-tokio-util = { workspace = true, features = ["full"] }
 toml = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
@@ -82,15 +80,11 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 tonic = { workspace = true }
 prost = { workspace = true }
 bytes = { workspace = true }
-tonic-build = { workspace = true }
 thiserror = { workspace = true }
 dashmap = { workspace = true }
 log = { workspace = true }
-env_logger = { workspace = true }
 crossbeam = { workspace = true }
-crossbeam-channel = { workspace = true }
 crossbeam-utils = { workspace = true }
-tempdir = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -101,20 +95,16 @@ crc32fast = { workspace = true }
 fs2 = { workspace = true }
 url = { workspace = true }
 await-tree = { workspace = true }
-poem = { workspace = true, features = ["rustls", "test", "anyhow"] }
+poem = { workspace = true }
 pprof = { workspace = true, features = ["flamegraph", "protobuf-codec", "protobuf"] }
 tempfile = { workspace = true }
 once_cell = { workspace = true }
 tower = { workspace = true, features = ["util", "load-shed"] }
 hyper = { workspace = true }
-tokio-console = { workspace = true }
 pin-project-lite = { workspace = true }
 signal-hook = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 socket2 = { workspace = true, features = ["all"] }
-spin = { workspace = true }
-hashlink = { workspace = true }
-rand = { workspace = true }
 #fastrace = { version = "0.6", features = ["enable"] }
 fastrace = { workspace = true }
 fastrace-jaeger = { workspace = true }
@@ -152,6 +142,9 @@ prost-build = { workspace = true }
 
 [dev-dependencies]
 env_logger = { workspace = true }
+hashlink = { workspace = true }
+poem = { workspace = true, features = ["test"] }
+rand = { workspace = true }
 awaitility = { workspace = true }
 criterion = { workspace = true }
 nix = { workspace = true }

@@ -829,10 +829,10 @@ pub mod tests {
     fn test_uring_write_read() -> anyhow::Result<()> {
         use crate::store::DataBytes;
         use bytes::Bytes;
-        use tempdir::TempDir;
+        use tempfile::TempDir;
         use tokio::runtime::Runtime;
 
-        let temp_dir = TempDir::new("test_write_read")?;
+        let temp_dir = TempDir::new()?;
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("init local file path: {}", temp_path);
 
@@ -931,9 +931,9 @@ pub mod tests {
     fn test_uring_buffer_append_without_offset() -> anyhow::Result<()> {
         use crate::store::DataBytes;
         use bytes::Bytes;
-        use tempdir::TempDir;
+        use tempfile::TempDir;
 
-        let temp_dir = TempDir::new("test_write_append_none")?;
+        let temp_dir = TempDir::new()?;
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
 
         let r_runtime = create_runtime(1, "r");
@@ -1013,8 +1013,8 @@ pub mod tests {
         use crate::store::DataBytes;
         use bytes::Bytes;
         use std::io::Read;
-        use tempdir::TempDir;
-        let temp_dir = TempDir::new("test_read_splice")?;
+        use tempfile::TempDir;
+        let temp_dir = TempDir::new()?;
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("init local file path: {}", temp_path);
         let r_runtime = create_runtime(1, "r");
@@ -1058,9 +1058,9 @@ pub mod tests {
         use crate::store::local::uring_io::UIO_MAXIOV;
         use crate::store::DataBytes;
         use bytes::Bytes;
-        use tempdir::TempDir;
+        use tempfile::TempDir;
 
-        let temp_dir = TempDir::new("test_writev_exceed_maxiov")?;
+        let temp_dir = TempDir::new()?;
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
 
         let r_runtime = create_runtime(1, "r");
@@ -1133,9 +1133,9 @@ pub mod tests {
         use crate::store::local::read_options::ReadRange;
         use bytes::{Bytes, BytesMut};
         use std::fs;
-        use tempdir::TempDir;
+        use tempfile::TempDir;
 
-        let temp_dir = TempDir::new("test_uring_direct_io")?;
+        let temp_dir = TempDir::new()?;
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
 
         let r_runtime = create_runtime(1, "r");

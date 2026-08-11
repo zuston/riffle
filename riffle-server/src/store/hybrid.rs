@@ -912,7 +912,7 @@ pub(crate) mod tests {
         let data = b"hello world!";
         let _data_len = data.len();
 
-        let temp_dir = tempdir::TempDir::new("test_local_store").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("init local file path: {}", temp_path);
 
