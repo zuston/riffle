@@ -574,7 +574,7 @@ mod tests {
         let options = AppConfigOptions::new(DataDistribution::NORMAL, 1, None, conf);
 
         // server configs
-        let temp_dir = tempdir::TempDir::new("partition_split_by_storage").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         info!("init local file path: {}", &temp_path);
 

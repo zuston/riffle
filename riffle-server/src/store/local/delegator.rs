@@ -445,7 +445,7 @@ mod test {
     #[test]
     #[ignore]
     fn test_capacity_check() -> anyhow::Result<()> {
-        let temp_dir = tempdir::TempDir::new("test_sync_io").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("created the temp file path: {}", &temp_path);
 
@@ -484,7 +484,7 @@ mod test {
         use std::sync::atomic::{AtomicU64, Ordering};
         use std::sync::Arc;
 
-        let temp_dir = tempdir::TempDir::new("test_capacity_check_behavior").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
 
         let mut config = LocalfileStoreConfig::new(vec![temp_path.clone()]);
@@ -516,9 +516,9 @@ mod test {
     fn test_write_limiter_is_scoped_per_data_path() -> anyhow::Result<()> {
         use tokio::time::timeout;
 
-        let first_temp_dir = tempdir::TempDir::new("test_first_write_limiter").unwrap();
+        let first_temp_dir = tempfile::tempdir().unwrap();
         let first_temp_path = first_temp_dir.path().to_str().unwrap().to_string();
-        let second_temp_dir = tempdir::TempDir::new("test_second_write_limiter").unwrap();
+        let second_temp_dir = tempfile::tempdir().unwrap();
         let second_temp_path = second_temp_dir.path().to_str().unwrap().to_string();
 
         let runtime_manager = RuntimeManager::default();
@@ -561,7 +561,7 @@ mod test {
         use crate::runtime::manager::RuntimeManager;
         use std::str::FromStr;
 
-        let temp_dir = tempdir::TempDir::new("test_write_read_check").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
 
         let mut config = LocalfileStoreConfig::new(vec![temp_path.clone()]);
@@ -585,7 +585,7 @@ mod test {
         use std::sync::Arc;
         use std::time::Duration;
 
-        let temp_dir = tempdir::TempDir::new("test_schedule_check_behavior").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
 
         let mut config = LocalfileStoreConfig::new(vec![temp_path.clone()]);

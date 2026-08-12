@@ -29,28 +29,19 @@ default = ["logforth"]
 logforth = ["dep:logforth"]
 
 [dependencies]
-anyhow = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tonic = { workspace = true }
-prost = { workspace = true }
-bytes = { workspace = true }
 thiserror = { workspace = true }
 dashmap = { workspace = true }
 log = { workspace = true }
-env_logger = { workspace = true }
-async-trait = { workspace = true }
-futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 chrono = { workspace = true, features = ["serde"] }
 parking_lot = { workspace = true }
-rand = { workspace = true }
 toml = { workspace = true }
-poem = { workspace = true, features = ["rustls", "test", "anyhow"] }
 logforth = { workspace = true, features = ["append-rolling-file"], optional = true }
 
 # Reuse riffle-server's gRPC generated code
-riffle-server = { path = "../riffle-server" }
+riffle-server = { workspace = true }
 
 uuid = { version = "1.7", features = ["v4"] }

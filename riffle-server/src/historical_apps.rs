@@ -263,7 +263,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sled_store() -> Result<()> {
-        let temp_dir = tempdir::TempDir::new("test_sled_store")?;
+        let temp_dir = tempfile::tempdir()?;
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("created the temp file path: {}", &temp_path);
         let store = SledHistoricalAppStore::new(&temp_path);

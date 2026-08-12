@@ -110,7 +110,7 @@ pub mod tests {
         let warm_healthy = Arc::new(AtomicBool::new(true));
         let warm = MockStore::new(LOCALFILE, &warm_healthy, None, None);
 
-        let temp_dir = tempdir::TempDir::new("test_flush_after_app_purged").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         info!("init local file path: {}", &temp_path);
 
@@ -172,7 +172,7 @@ pub mod tests {
             None,
         );
 
-        let temp_dir = tempdir::TempDir::new("test_local_store").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         info!("init local file path: {}", &temp_path);
 
@@ -225,7 +225,7 @@ pub mod tests {
             Some(warm_write_hang_ref.clone()),
         );
 
-        let temp_dir = tempdir::TempDir::new("test_watermark_spill_of_excluding_inflight").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         info!("init local file path: {}", &temp_path);
 
@@ -342,7 +342,7 @@ pub mod tests {
         let cold_healthy = Arc::new(AtomicBool::new(true));
         let cold = MockStore::new(HDFS, &cold_healthy, None, None);
 
-        let temp_dir = tempdir::TempDir::new("test_local_store").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("init local file path: {}", &temp_path);
 
@@ -387,7 +387,7 @@ pub mod tests {
         let cold_healthy = Arc::new(AtomicBool::new(true));
         let cold = MockStore::new(HDFS, &cold_healthy, None, None);
 
-        let temp_dir = tempdir::TempDir::new("test_huge_partition_single_buffer_spill").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
 
         let mut config = create_multi_level_config(
@@ -507,7 +507,7 @@ pub mod tests {
         let cold_healthy = Arc::new(AtomicBool::new(true));
         let cold = MockStore::new(HDFS, &cold_healthy, None, None);
 
-        let temp_dir = tempdir::TempDir::new("test_local_store").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("init local file path: {}", &temp_path);
 
@@ -565,7 +565,7 @@ pub mod tests {
             None,
         );
 
-        let temp_dir = tempdir::TempDir::new("test_local_store").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
         println!("init local file path: {}", &temp_path);
 
