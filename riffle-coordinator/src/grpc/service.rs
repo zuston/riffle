@@ -467,7 +467,7 @@ mod tests {
     use crate::config::Config;
 
     fn service() -> DefaultCoordinatorServer {
-        let cluster_manager = ClusterManager::new(Config::default());
+        let cluster_manager = ClusterManager::new(&Config::default());
         let application_manager = ApplicationManager::default();
         DefaultCoordinatorServer::new(&cluster_manager, &application_manager)
     }
