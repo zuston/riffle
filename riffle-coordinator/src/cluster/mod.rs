@@ -15,10 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-pub mod application;
 pub mod assignment;
 pub mod cluster_manager;
 pub mod server_node;
 
-pub use assignment::AssignmentStrategy;
 pub use cluster_manager::{ClusterManager, ClusterManagerRef};

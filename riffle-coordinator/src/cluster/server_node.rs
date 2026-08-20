@@ -24,23 +24,21 @@ use std::collections::HashMap;
 pub struct ShuffleServerNode {
     pub id: String,
     pub ip: String,
-    pub grpc_port: i32,
-    pub netty_port: i32,
-    pub http_port: i32,
+    pub grpc_port: usize,
+    pub netty_port: usize,
+    pub http_port: usize,
 
     // Resource state
-    pub used_memory: i64,
-    pub available_memory: i64,
-    pub pre_allocated_memory: i64,
-    pub event_num_in_flush: i32,
-
-    // Timestamp for detecting server restarts
-    pub timestamp: i64,
+    pub used_memory: usize,
+    pub free_memory: usize,
+    pub reserved_memory: usize,
+    pub event_num_in_flush: usize,
 
     // Tags for filtering
     pub tags: Vec<String>,
 
     // Health status
+    // todo: could be removed after heartbeat.rs to mark status as unhealthy
     pub is_healthy: bool,
     pub status: ServerStatus,
 
@@ -50,11 +48,7 @@ pub struct ShuffleServerNode {
     // Metadata
     pub version: Option<String>,
     pub git_commit_id: Option<String>,
-    pub start_time_ms: Option<i64>,
-
-    // Timestamps
-    pub last_heartbeat: DateTime<Utc>,
-    pub registration_time: DateTime<Utc>,
+    pub server_start_time: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,15 +89,12 @@ pub enum StorageStatus {
 
 impl ShuffleServerNode {
     /// Check if the node is available for assignment
-    pub fn is_available_for_assignment(&self) -> bool {
-        self.is_healthy && self.status == ServerStatus::Active && self.available_memory > 0
+    pub fn is_available(&self) -> bool {
+        self.is_healthy && self.status == ServerStatus::Active && self.free_memory > 0
     }
 
     /// Check if the node matches the required tags
     pub fn matches_tags(&self, required_tags: &[String]) -> bool {
-        if required_tags.is_empty() {
-            return true;
-        }
         required_tags.iter().all(|tag| self.tags.contains(tag))
     }
 }
