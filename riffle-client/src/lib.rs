@@ -27,12 +27,15 @@
 //! attempt remain the execution engine's responsibility. Readers must receive
 //! only the attempt IDs accepted by that engine's scheduler.
 
-mod channel_pool;
+mod connection_pool;
+mod coordinator_client;
 mod driver;
 mod error;
+mod read_client;
 mod reader;
 mod retry;
 mod types;
+mod write_client;
 mod writer;
 
 pub use driver::{ApplicationSession, Driver};

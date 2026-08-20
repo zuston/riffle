@@ -15,8 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::channel_pool::{GrpcChannelPool, GrpcClientSettings};
-use crate::error::RemoteStatus;
+use crate::read_client::ReadClient;
 use crate::{
     BlockId, PartitionId, ReadPartitionRequest, RiffleError, ShuffleBlock, ShuffleHandle,
     ShuffleReaderConfig, ShuffleServer, TaskAttemptId,
@@ -24,18 +23,11 @@ use crate::{
 use bytes::{Buf, Bytes};
 use croaring::{JvmLegacy, Treemap};
 use futures::Stream;
-use riffle_proto::uniffle::{
-    BlockIdLayout as ProtoBlockIdLayout, GetLocalShuffleDataRequest, GetLocalShuffleDataResponse,
-    GetLocalShuffleIndexRequest, GetLocalShuffleIndexResponse, GetMemoryShuffleDataRequest,
-    GetMemoryShuffleDataResponse, GetShuffleResultRequest, GetShuffleResultResponse,
-};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::transport::Channel;
 
 const INDEX_BLOCK_SIZE: usize = 40;
 const MISSING_BLOCK_SAMPLE_SIZE: usize = 16;
@@ -51,12 +43,11 @@ pub struct ShuffleReader {
 struct ReaderInner {
     handle: ShuffleHandle,
     config: ShuffleReaderConfig,
-    channel_pool: GrpcChannelPool,
+    clients: BTreeMap<ShuffleServer, ReadClient>,
 }
 
 struct ReadPass<'a> {
-    channel: &'a Channel,
-    server: &'a ShuffleServer,
+    client: &'a ReadClient,
     partition_id: PartitionId,
     expected: &'a HashSet<BlockId>,
     seen: &'a mut HashSet<BlockId>,
@@ -75,16 +66,18 @@ impl ShuffleReader {
                 "the initial ShuffleReader supports one replica only".to_string(),
             ));
         }
-        let settings = GrpcClientSettings {
-            connect_timeout: config.connect_timeout,
-            request_timeout: config.request_timeout,
-            max_encoding_message_size: config.max_encoding_message_size,
-            max_decoding_message_size: config.max_decoding_message_size,
-        };
+        let clients = handle
+            .servers()
+            .into_iter()
+            .map(|server| {
+                let client = ReadClient::new(&server, &handle, &config)?;
+                Ok((server, client))
+            })
+            .collect::<Result<BTreeMap<_, _>, RiffleError>>()?;
         Ok(Self {
             inner: Arc::new(ReaderInner {
                 handle,
-                channel_pool: GrpcChannelPool::new(settings),
+                clients,
                 config,
             }),
         })
@@ -120,14 +113,14 @@ impl ShuffleReader {
             return Ok(Box::pin(futures::stream::empty()));
         }
 
-        let channel = self.inner.channel_pool.channel(&server).await?;
+        let client = self.inner.clients.get(&server).cloned().ok_or_else(|| {
+            RiffleError::InvalidAssignment(format!(
+                "shuffle server {} is missing from the reader client registry",
+                server.id
+            ))
+        })?;
         let expected = self
-            .fetch_expected_blocks(
-                channel.clone(),
-                &server,
-                request.partition_id,
-                &accepted_attempts,
-            )
+            .fetch_expected_blocks(&client, request.partition_id, &accepted_attempts)
             .await?;
         if expected.is_empty() {
             return Ok(Box::pin(futures::stream::empty()));
@@ -139,8 +132,7 @@ impl ShuffleReader {
         tokio::spawn(async move {
             let result = reader
                 .read_partition_into(
-                    channel,
-                    server,
+                    client,
                     partition_id,
                     accepted_attempts,
                     expected,
@@ -156,15 +148,12 @@ impl ShuffleReader {
 
     async fn fetch_expected_blocks(
         &self,
-        channel: Channel,
-        server: &ShuffleServer,
+        client: &ReadClient,
         partition_id: PartitionId,
         accepted_attempts: &HashSet<TaskAttemptId>,
     ) -> Result<HashSet<BlockId>, RiffleError> {
         let layout = self.inner.handle.block_id_layout;
-        let response = self
-            .get_shuffle_result(channel, server, partition_id)
-            .await?;
+        let response = client.get_shuffle_result(partition_id).await?;
         let reported = if response.serialized_bitmap.is_empty() {
             Treemap::new()
         } else {
@@ -204,8 +193,7 @@ impl ShuffleReader {
 
     async fn read_partition_into(
         &self,
-        channel: Channel,
-        server: ShuffleServer,
+        client: ReadClient,
         partition_id: PartitionId,
         accepted_attempts: HashSet<TaskAttemptId>,
         expected: HashSet<BlockId>,
@@ -214,8 +202,7 @@ impl ShuffleReader {
         let expected_attempt_bitmap = serialize_attempts(&accepted_attempts);
         let mut seen = HashSet::with_capacity(expected.len());
         let mut pass = ReadPass {
-            channel: &channel,
-            server: &server,
+            client: &client,
             partition_id,
             expected: &expected,
             seen: &mut seen,
@@ -259,14 +246,9 @@ impl ShuffleReader {
     ) -> Result<(), RiffleError> {
         let mut cursor = -1_i64;
         loop {
-            let response = self
-                .get_memory_page(
-                    pass.channel.clone(),
-                    pass.server,
-                    pass.partition_id,
-                    cursor,
-                    expected_attempt_bitmap.clone(),
-                )
+            let response = pass
+                .client
+                .get_memory_page(pass.partition_id, cursor, expected_attempt_bitmap.clone())
                 .await?;
             if response.shuffle_data_block_segments.is_empty() {
                 return Ok(());
@@ -360,9 +342,7 @@ impl ShuffleReader {
         pass: &mut ReadPass<'_>,
         accepted_attempts: &HashSet<TaskAttemptId>,
     ) -> Result<(), RiffleError> {
-        let response = self
-            .get_local_index(pass.channel.clone(), pass.server, pass.partition_id)
-            .await?;
+        let response = pass.client.get_local_index(pass.partition_id).await?;
         let entries = parse_index(response.index_data, response.data_file_len)?;
         let mut selected = entries
             .into_iter()
@@ -377,15 +357,9 @@ impl ShuffleReader {
         let storage_id = response.storage_ids.first().copied().unwrap_or(0);
 
         for span in spans {
-            let response = self
-                .get_local_data(
-                    pass.channel.clone(),
-                    pass.server,
-                    pass.partition_id,
-                    span.offset,
-                    span.length,
-                    storage_id,
-                )
+            let response = pass
+                .client
+                .get_local_data(pass.partition_id, span.offset, span.length, storage_id)
                 .await?;
             if response.data.len() != span.length as usize {
                 return Err(invalid_response(
@@ -472,242 +446,6 @@ impl ShuffleReader {
             ));
         }
         Ok(())
-    }
-
-    async fn get_shuffle_result(
-        &self,
-        channel: Channel,
-        server: &ShuffleServer,
-        partition_id: PartitionId,
-    ) -> Result<GetShuffleResultResponse, RiffleError> {
-        let operation = "get_shuffle_result";
-        for attempt in 1..=self.inner.config.retry_policy.max_attempts {
-            let mut client = self.inner.channel_pool.client(channel.clone());
-            match client
-                .get_shuffle_result(GetShuffleResultRequest {
-                    app_id: self.inner.handle.application_id.as_str().to_string(),
-                    shuffle_id: self.inner.handle.shuffle_id.value(),
-                    partition_id: partition_id.as_i32()?,
-                    block_id_layout: Some(ProtoBlockIdLayout {
-                        sequence_no_bits: i32::from(
-                            self.inner.handle.block_id_layout.sequence_no_bits,
-                        ),
-                        partition_id_bits: i32::from(
-                            self.inner.handle.block_id_layout.partition_id_bits,
-                        ),
-                        task_attempt_id_bits: i32::from(
-                            self.inner.handle.block_id_layout.task_attempt_id_bits,
-                        ),
-                    }),
-                })
-                .await
-            {
-                Ok(response) => {
-                    let response = response.into_inner();
-                    let status = RemoteStatus::from(response.status);
-                    if status == RemoteStatus::Success {
-                        return Ok(response);
-                    }
-                    if status.is_retryable_read()
-                        && attempt < self.inner.config.retry_policy.max_attempts
-                    {
-                        self.sleep_after(attempt).await;
-                        continue;
-                    }
-                    return Err(RiffleError::Remote {
-                        operation,
-                        status,
-                        message: response.ret_msg,
-                    });
-                }
-                Err(_error) if attempt < self.inner.config.retry_policy.max_attempts => {
-                    self.sleep_after(attempt).await;
-                }
-                Err(error) => return Err(read_transport(operation, server, error)),
-            }
-        }
-        unreachable!("retry policy always has at least one attempt")
-    }
-
-    async fn get_memory_page(
-        &self,
-        channel: Channel,
-        server: &ShuffleServer,
-        partition_id: PartitionId,
-        cursor: i64,
-        expected_attempts: Bytes,
-    ) -> Result<GetMemoryShuffleDataResponse, RiffleError> {
-        let operation = "get_memory_shuffle_data";
-        for attempt in 1..=self.inner.config.retry_policy.max_attempts {
-            let mut client = self.inner.channel_pool.client(channel.clone());
-            match client
-                .get_memory_shuffle_data(GetMemoryShuffleDataRequest {
-                    app_id: self.inner.handle.application_id.as_str().to_string(),
-                    shuffle_id: self.inner.handle.shuffle_id.value(),
-                    partition_id: partition_id.as_i32()?,
-                    last_block_id: cursor,
-                    read_buffer_size: i32::try_from(self.inner.config.read_buffer_size).map_err(
-                        |_| {
-                            RiffleError::InvalidArgument(
-                                "read_buffer_size exceeds i32::MAX".to_string(),
-                            )
-                        },
-                    )?,
-                    timestamp: now_millis(),
-                    serialized_expected_task_ids_bitmap: expected_attempts.clone(),
-                })
-                .await
-            {
-                Ok(response) => {
-                    let response = response.into_inner();
-                    let status = RemoteStatus::from(response.status);
-                    if status == RemoteStatus::Success {
-                        return Ok(response);
-                    }
-                    if status.is_retryable_read()
-                        && attempt < self.inner.config.retry_policy.max_attempts
-                    {
-                        self.sleep_after(attempt).await;
-                        continue;
-                    }
-                    return Err(RiffleError::Remote {
-                        operation,
-                        status,
-                        message: response.ret_msg,
-                    });
-                }
-                Err(_error) if attempt < self.inner.config.retry_policy.max_attempts => {
-                    self.sleep_after(attempt).await;
-                }
-                Err(error) => return Err(read_transport(operation, server, error)),
-            }
-        }
-        unreachable!("retry policy always has at least one attempt")
-    }
-
-    async fn get_local_index(
-        &self,
-        channel: Channel,
-        server: &ShuffleServer,
-        partition_id: PartitionId,
-    ) -> Result<GetLocalShuffleIndexResponse, RiffleError> {
-        let operation = "get_local_shuffle_index";
-        for attempt in 1..=self.inner.config.retry_policy.max_attempts {
-            let mut client = self.inner.channel_pool.client(channel.clone());
-            match client
-                .get_local_shuffle_index(GetLocalShuffleIndexRequest {
-                    app_id: self.inner.handle.application_id.as_str().to_string(),
-                    shuffle_id: self.inner.handle.shuffle_id.value(),
-                    partition_id: partition_id.as_i32()?,
-                    partition_num_per_range: i32::try_from(self.inner.handle.partition_range_size)
-                        .map_err(|_| {
-                            RiffleError::InvalidArgument(
-                                "partition_range_size exceeds i32::MAX".to_string(),
-                            )
-                        })?,
-                    partition_num: i32::try_from(self.inner.handle.partition_count).map_err(
-                        |_| {
-                            RiffleError::InvalidArgument(
-                                "partition_count exceeds i32::MAX".to_string(),
-                            )
-                        },
-                    )?,
-                })
-                .await
-            {
-                Ok(response) => {
-                    let response = response.into_inner();
-                    let status = RemoteStatus::from(response.status);
-                    if status == RemoteStatus::Success {
-                        return Ok(response);
-                    }
-                    if status.is_retryable_read()
-                        && attempt < self.inner.config.retry_policy.max_attempts
-                    {
-                        self.sleep_after(attempt).await;
-                        continue;
-                    }
-                    return Err(RiffleError::Remote {
-                        operation,
-                        status,
-                        message: response.ret_msg,
-                    });
-                }
-                Err(_error) if attempt < self.inner.config.retry_policy.max_attempts => {
-                    self.sleep_after(attempt).await;
-                }
-                Err(error) => return Err(read_transport(operation, server, error)),
-            }
-        }
-        unreachable!("retry policy always has at least one attempt")
-    }
-
-    async fn get_local_data(
-        &self,
-        channel: Channel,
-        server: &ShuffleServer,
-        partition_id: PartitionId,
-        offset: i64,
-        length: i32,
-        storage_id: i32,
-    ) -> Result<GetLocalShuffleDataResponse, RiffleError> {
-        let operation = "get_local_shuffle_data";
-        for attempt in 1..=self.inner.config.retry_policy.max_attempts {
-            let mut client = self.inner.channel_pool.client(channel.clone());
-            match client
-                .get_local_shuffle_data(GetLocalShuffleDataRequest {
-                    app_id: self.inner.handle.application_id.as_str().to_string(),
-                    shuffle_id: self.inner.handle.shuffle_id.value(),
-                    partition_id: partition_id.as_i32()?,
-                    partition_num_per_range: i32::try_from(self.inner.handle.partition_range_size)
-                        .map_err(|_| {
-                            RiffleError::InvalidArgument(
-                                "partition_range_size exceeds i32::MAX".to_string(),
-                            )
-                        })?,
-                    partition_num: i32::try_from(self.inner.handle.partition_count).map_err(
-                        |_| {
-                            RiffleError::InvalidArgument(
-                                "partition_count exceeds i32::MAX".to_string(),
-                            )
-                        },
-                    )?,
-                    offset,
-                    length,
-                    timestamp: now_millis(),
-                    storage_id,
-                })
-                .await
-            {
-                Ok(response) => {
-                    let response = response.into_inner();
-                    let status = RemoteStatus::from(response.status);
-                    if status == RemoteStatus::Success {
-                        return Ok(response);
-                    }
-                    if status.is_retryable_read()
-                        && attempt < self.inner.config.retry_policy.max_attempts
-                    {
-                        self.sleep_after(attempt).await;
-                        continue;
-                    }
-                    return Err(RiffleError::Remote {
-                        operation,
-                        status,
-                        message: response.ret_msg,
-                    });
-                }
-                Err(_error) if attempt < self.inner.config.retry_policy.max_attempts => {
-                    self.sleep_after(attempt).await;
-                }
-                Err(error) => return Err(read_transport(operation, server, error)),
-            }
-        }
-        unreachable!("retry policy always has at least one attempt")
-    }
-
-    async fn sleep_after(&self, attempt: u32) {
-        tokio::time::sleep(self.inner.config.retry_policy.delay_for(attempt)).await;
     }
 }
 
@@ -881,26 +619,6 @@ fn non_negative_attempt_id(name: &str, value: i64) -> Result<TaskAttemptId, Riff
 
 fn invalid_response(operation: &'static str, message: String) -> RiffleError {
     RiffleError::InvalidResponse { operation, message }
-}
-
-fn read_transport(
-    operation: &'static str,
-    server: &ShuffleServer,
-    error: tonic::Status,
-) -> RiffleError {
-    RiffleError::Transport {
-        operation,
-        endpoint: server.grpc_endpoint(),
-        message: error.to_string(),
-    }
-}
-
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .min(i64::MAX as u128) as i64
 }
 
 #[cfg(test)]

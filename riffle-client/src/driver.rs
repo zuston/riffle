@@ -15,7 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::channel_pool::{connect_channel, GrpcChannelPool, GrpcClientSettings};
+use crate::connection_pool::{ConnectionPool, ConnectionSettings};
+use crate::coordinator_client::CoordinatorClient;
 use crate::error::{ensure_success, RemoteStatus};
 use crate::types::{as_i32, PartitionRoute};
 use crate::{
@@ -23,7 +24,6 @@ use crate::{
     ShuffleId, ShuffleServer, ShuffleSpec,
 };
 use futures::future::join_all;
-use riffle_proto::uniffle::coordinator_server_client::CoordinatorServerClient;
 use riffle_proto::uniffle::{
     AccessClusterRequest, AppHeartBeatRequest, ApplicationInfoRequest, GetShuffleServerRequest,
     PartitionRangeAssignment, RemoteStorage, RemoteStorageConfItem, ShufflePartitionRange,
@@ -33,97 +33,62 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Weak};
 use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
-use tonic::transport::Channel;
 use tracing::warn;
 
 #[derive(Clone, Debug)]
 pub struct Driver {
     config: DriverConfig,
-    coordinator_endpoint: String,
-    coordinator_channel: Channel,
+    coordinator: CoordinatorClient,
 }
 
 impl Driver {
     pub async fn connect(config: DriverConfig) -> Result<Self, RiffleError> {
         config.validate()?;
-        let mut errors = Vec::new();
-        let endpoints = config.coordinator_endpoints.clone();
-        for endpoint in endpoints {
-            match connect_channel(
-                &endpoint,
-                config.connect_timeout,
-                config.request_timeout,
-                "connect_coordinator",
-            )
-            .await
-            {
-                Ok(channel) => {
-                    return Ok(Self {
-                        config,
-                        coordinator_endpoint: endpoint,
-                        coordinator_channel: channel,
-                    });
-                }
-                Err(error) => errors.push(error.to_string()),
-            }
-        }
-        Err(RiffleError::NoAvailableCoordinator { errors })
+        let settings = ConnectionSettings {
+            connect_timeout: config.connect_timeout,
+            request_timeout: config.request_timeout,
+            max_encoding_message_size: config.max_encoding_message_size,
+            max_decoding_message_size: config.max_decoding_message_size,
+        };
+        let coordinator =
+            CoordinatorClient::connect(config.coordinator_endpoints.clone(), settings).await?;
+        Ok(Self {
+            config,
+            coordinator,
+        })
     }
 
     pub async fn open_application(
         &self,
         spec: ApplicationSpec,
     ) -> Result<ApplicationSession, RiffleError> {
-        let mut client = self.coordinator_client();
-        let access = client
+        let access = self
+            .coordinator
             .access_cluster(AccessClusterRequest {
                 access_id: self.config.access_id.clone(),
                 tags: self.config.required_tags.clone(),
                 extra_properties: self.config.access_properties.clone().into_iter().collect(),
                 user: spec.user.clone(),
             })
-            .await
-            .map_err(|error| self.coordinator_transport("access_cluster", error))?
-            .into_inner();
+            .await?;
         ensure_success("access_cluster", access.status, access.ret_msg)?;
 
-        let registration = client
-            .register_application_info(ApplicationInfoRequest {
+        let registration = self
+            .coordinator
+            .register_application(ApplicationInfoRequest {
                 app_id: spec.application_id.as_str().to_string(),
                 user: spec.user.clone(),
                 version: spec.version.clone(),
                 git_commit_id: spec.git_commit_id.clone(),
             })
-            .await
-            .map_err(|error| self.coordinator_transport("register_application", error))?
-            .into_inner();
+            .await?;
         ensure_success(
             "register_application",
             registration.status,
             registration.ret_msg,
         )?;
 
-        ApplicationSession::new(
-            self.config.clone(),
-            self.coordinator_endpoint.clone(),
-            self.coordinator_channel.clone(),
-            spec,
-        )
-        .await
-    }
-
-    fn coordinator_client(&self) -> CoordinatorServerClient<Channel> {
-        CoordinatorServerClient::new(self.coordinator_channel.clone())
-            .max_encoding_message_size(self.config.max_encoding_message_size)
-            .max_decoding_message_size(self.config.max_decoding_message_size)
-    }
-
-    fn coordinator_transport(&self, operation: &'static str, error: tonic::Status) -> RiffleError {
-        RiffleError::Transport {
-            operation,
-            endpoint: self.coordinator_endpoint.clone(),
-            message: error.to_string(),
-        }
+        ApplicationSession::new(self.config.clone(), self.coordinator.clone(), spec).await
     }
 }
 
@@ -133,10 +98,10 @@ pub struct ApplicationSession {
 
 struct SessionInner {
     config: DriverConfig,
-    coordinator_endpoint: String,
-    coordinator_channel: Channel,
+    coordinator: CoordinatorClient,
     application: ApplicationSpec,
-    channel_pool: GrpcChannelPool,
+    connection_pool: ConnectionPool,
+    connection_settings: ConnectionSettings,
     lifecycle_guard: Mutex<()>,
     state: Mutex<SessionState>,
     shutdown_tx: watch::Sender<bool>,
@@ -152,11 +117,10 @@ struct SessionState {
 impl ApplicationSession {
     async fn new(
         config: DriverConfig,
-        coordinator_endpoint: String,
-        coordinator_channel: Channel,
+        coordinator: CoordinatorClient,
         application: ApplicationSpec,
     ) -> Result<Self, RiffleError> {
-        let settings = GrpcClientSettings {
+        let connection_settings = ConnectionSettings {
             connect_timeout: config.connect_timeout,
             request_timeout: config.request_timeout,
             max_encoding_message_size: config.max_encoding_message_size,
@@ -165,10 +129,10 @@ impl ApplicationSession {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let inner = Arc::new(SessionInner {
             config,
-            coordinator_endpoint,
-            coordinator_channel,
+            coordinator,
             application,
-            channel_pool: GrpcChannelPool::new(settings),
+            connection_pool: ConnectionPool::global(),
+            connection_settings,
             lifecycle_guard: Mutex::new(()),
             state: Mutex::new(SessionState::default()),
             shutdown_tx,
@@ -282,8 +246,9 @@ impl ApplicationSession {
         };
         let estimate_task_concurrency =
             as_i32("estimate_task_concurrency", spec.estimate_task_concurrency)?;
-        let mut client = self.coordinator_client();
-        let response = client
+        let response = self
+            .inner
+            .coordinator
             .get_shuffle_assignments(GetShuffleServerRequest {
                 client_host: self.inner.config.client_host.clone(),
                 client_port: self.inner.config.client_port.clone(),
@@ -298,9 +263,7 @@ impl ApplicationSession {
                 estimate_task_concurrency,
                 faulty_server_ids: Vec::new(),
             })
-            .await
-            .map_err(|error| self.coordinator_transport("get_shuffle_assignments", error))?
-            .into_inner();
+            .await?;
         ensure_success("get_shuffle_assignments", response.status, response.ret_msg)?;
         response
             .assignments
@@ -315,8 +278,10 @@ impl ApplicationSession {
         ranges: &[ShufflePartitionRange],
         spec: &ShuffleSpec,
     ) -> Result<(), RiffleError> {
-        let channel = self.inner.channel_pool.channel(server).await?;
-        let mut client = self.inner.channel_pool.client(channel);
+        let (_connection, mut client) = self
+            .inner
+            .connection_pool
+            .shuffle_server_client(server, &self.inner.connection_settings)?;
         let response = client
             .register_shuffle(ShuffleRegisterRequest {
                 app_id: self.inner.application.application_id.as_str().to_string(),
@@ -393,8 +358,10 @@ impl ApplicationSession {
         server: &ShuffleServer,
         shuffle_id: ShuffleId,
     ) -> Result<(), RiffleError> {
-        let channel = self.inner.channel_pool.channel(server).await?;
-        let mut client = self.inner.channel_pool.client(channel);
+        let (_connection, mut client) = self
+            .inner
+            .connection_pool
+            .shuffle_server_client(server, &self.inner.connection_settings)?;
         let response = client
             .unregister_shuffle(ShuffleUnregisterRequest {
                 app_id: self.inner.application.application_id.as_str().to_string(),
@@ -419,20 +386,6 @@ impl ApplicationSession {
                 status,
                 message: response.ret_msg,
             })
-        }
-    }
-
-    fn coordinator_client(&self) -> CoordinatorServerClient<Channel> {
-        CoordinatorServerClient::new(self.inner.coordinator_channel.clone())
-            .max_encoding_message_size(self.inner.config.max_encoding_message_size)
-            .max_decoding_message_size(self.inner.config.max_decoding_message_size)
-    }
-
-    fn coordinator_transport(&self, operation: &'static str, error: tonic::Status) -> RiffleError {
-        RiffleError::Transport {
-            operation,
-            endpoint: self.inner.coordinator_endpoint.clone(),
-            message: error.to_string(),
         }
     }
 }
@@ -476,17 +429,14 @@ async fn shutdown_requested(shutdown_rx: &mut watch::Receiver<bool>) {
 }
 
 async fn heartbeat_once(session: &SessionInner) {
-    let mut coordinator = CoordinatorServerClient::new(session.coordinator_channel.clone())
-        .max_encoding_message_size(session.config.max_encoding_message_size)
-        .max_decoding_message_size(session.config.max_decoding_message_size);
-    match coordinator
+    match session
+        .coordinator
         .app_heartbeat(AppHeartBeatRequest {
             app_id: session.application.application_id.as_str().to_string(),
         })
         .await
     {
         Ok(response) => {
-            let response = response.into_inner();
             if let Err(error) = ensure_success(
                 "coordinator_app_heartbeat",
                 response.status,
@@ -495,11 +445,7 @@ async fn heartbeat_once(session: &SessionInner) {
                 warn!(error = %error, "Riffle coordinator heartbeat failed");
             }
         }
-        Err(error) => warn!(
-            endpoint = %session.coordinator_endpoint,
-            error = %error,
-            "Riffle coordinator heartbeat transport failed"
-        ),
+        Err(error) => warn!(error = %error, "Riffle coordinator heartbeat failed"),
     }
 
     let servers = session
@@ -512,8 +458,9 @@ async fn heartbeat_once(session: &SessionInner) {
         .collect::<std::collections::BTreeSet<_>>();
     join_all(servers.iter().map(|server| async move {
         let result = async {
-            let channel = session.channel_pool.channel(server).await?;
-            let mut client = session.channel_pool.client(channel);
+            let (_connection, mut client) = session
+                .connection_pool
+                .shuffle_server_client(server, &session.connection_settings)?;
             let response = client
                 .app_heartbeat(AppHeartBeatRequest {
                     app_id: session.application.application_id.as_str().to_string(),
