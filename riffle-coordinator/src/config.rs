@@ -18,64 +18,169 @@
 use riffle_server::config::LogConfig;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use thiserror::Error;
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssignmentStrategyType {
+    Basic,
+    #[default]
+    PartitionBalance,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostAssignmentStrategy {
+    MustDiff,
+    #[default]
+    PreferDiff,
+    None,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PartitionAssignmentStrategy {
+    Round,
+    #[default]
+    Continuous,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Config {
-    #[serde(default = "as_default_grpc_port")]
+    #[serde(default = "default_grpc_port")]
     pub grpc_port: u16,
 
-    #[serde(default = "as_default_http_port")]
+    #[serde(default = "default_http_port")]
     pub http_port: u16,
 
-    #[serde(default = "as_default_node_heartbeat_timeout_seconds")]
-    pub node_heartbeat_timeout_seconds: usize,
+    #[serde(default = "default_shuffle_nodes_max")]
+    pub max_assignment_servers: usize,
 
-    #[serde(default = "as_default_node_expiry_check_interval_seconds")]
-    pub node_expiry_check_interval_seconds: usize,
+    #[serde(default)]
+    pub assignment_strategy: AssignmentStrategyType,
+
+    #[serde(default)]
+    pub assignment_host_strategy: HostAssignmentStrategy,
+
+    #[serde(default)]
+    pub select_partition_strategy: PartitionAssignmentStrategy,
 
     pub log: Option<LogConfig>,
+}
+
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("failed to read coordinator config {path}: {source}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to parse coordinator config {path}: {source}")]
+    Parse {
+        path: PathBuf,
+        #[source]
+        source: toml::de::Error,
+    },
+
+    #[error("invalid coordinator config: {0}")]
+    Invalid(String),
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            grpc_port: as_default_grpc_port(),
-            http_port: as_default_http_port(),
-            node_heartbeat_timeout_seconds: as_default_node_heartbeat_timeout_seconds(),
-            node_expiry_check_interval_seconds: as_default_node_expiry_check_interval_seconds(),
+            grpc_port: default_grpc_port(),
+            http_port: default_http_port(),
+            max_assignment_servers: default_shuffle_nodes_max(),
+            assignment_strategy: AssignmentStrategyType::default(),
+            assignment_host_strategy: HostAssignmentStrategy::default(),
+            select_partition_strategy: PartitionAssignmentStrategy::default(),
             log: None,
         }
     }
 }
 
-fn as_default_node_expiry_check_interval_seconds() -> usize {
-    20
+impl Config {
+    pub fn load(cfg_path: Option<&str>) -> Result<Self, ConfigError> {
+        let config = match cfg_path {
+            Some(path) => {
+                let path = Path::new(path);
+                let file_content =
+                    fs::read_to_string(path).map_err(|source| ConfigError::Read {
+                        path: path.to_path_buf(),
+                        source,
+                    })?;
+                toml::from_str(&file_content).map_err(|source| ConfigError::Parse {
+                    path: path.to_path_buf(),
+                    source,
+                })?
+            }
+            None => Self::default(),
+        };
+
+        config.validate()?;
+        Ok(config)
+    }
+
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        validate_positive("shuffle_nodes_max", self.max_assignment_servers)?;
+        Ok(())
+    }
 }
 
-fn as_default_node_heartbeat_timeout_seconds() -> usize {
-    60
+fn validate_positive(name: &str, value: usize) -> Result<(), ConfigError> {
+    if value == 0 {
+        return Err(ConfigError::Invalid(format!("{name} must be positive")));
+    }
+    Ok(())
 }
 
-fn as_default_grpc_port() -> u16 {
+fn default_shuffle_nodes_max() -> usize {
+    9
+}
+
+fn default_grpc_port() -> u16 {
     20010
 }
 
-fn as_default_http_port() -> u16 {
+fn default_http_port() -> u16 {
     20020
 }
 
-impl Config {
-    pub fn from(cfg_path: &Option<String>) -> Self {
-        if let Some(path) = cfg_path {
-            let path = Path::new(path);
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-            // Read the file content as a string
-            let file_content = fs::read_to_string(path).expect("Failed to read file");
+    #[test]
+    fn minimal_config_uses_uniffle_compatible_assignment_defaults() {
+        let config: Config = toml::from_str("grpc_port = 21000").unwrap();
 
-            toml::from_str(&file_content).unwrap()
-        } else {
-            Self::default()
-        }
+        assert_eq!(config.grpc_port, 21000);
+        assert_eq!(config.max_assignment_servers, 9);
+        assert_eq!(
+            config.assignment_strategy,
+            AssignmentStrategyType::PartitionBalance
+        );
+        assert_eq!(
+            config.assignment_host_strategy,
+            HostAssignmentStrategy::PreferDiff
+        );
+        assert_eq!(
+            config.select_partition_strategy,
+            PartitionAssignmentStrategy::Continuous
+        );
+    }
+
+    #[test]
+    fn rejects_zero_limits() {
+        let config = Config {
+            max_assignment_servers: 0,
+            ..Config::default()
+        };
+
+        assert!(matches!(config.validate(), Err(ConfigError::Invalid(_))));
     }
 }

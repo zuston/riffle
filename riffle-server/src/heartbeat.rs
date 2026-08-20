@@ -9,6 +9,7 @@ use crate::metric::SERVICE_IS_HEALTHY;
 use crate::runtime::manager::RuntimeManager;
 use crate::server_state_manager::ServerStateManager;
 use crate::service_tags_manager::SERVICE_TAGS_MANAGER_REF;
+use crate::util::now_timestamp_as_millis;
 use await_tree::InstrumentAwait;
 use log::{error, info};
 use std::time::Duration;
@@ -48,7 +49,7 @@ impl HeartbeatTask {
             netty_port: urpc_port as i32,
             jetty_port: http_port as i32,
         };
-        let start_time = std::time::Instant::now();
+        let start_time_ms = now_timestamp_as_millis() as i64;
         let git_commit_id = env!("GIT_COMMIT_HASH").to_string();
         let version = env!("CARGO_PKG_VERSION").to_string();
 
@@ -113,8 +114,7 @@ impl HeartbeatTask {
                         storage_info: Default::default(),
                         version: Some(version.to_string()),
                         git_commit_id: Some(git_commit_id.clone()),
-                        // todo: add start time
-                        start_time_ms: None,
+                        start_time_ms: Some(start_time_ms),
                         // todo: add active application infos
                         application_info: vec![],
                         display_metrics: Default::default(),

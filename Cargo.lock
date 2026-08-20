@@ -4740,7 +4740,7 @@ dependencies = [
  "dashmap 5.5.3",
  "log",
  "logforth",
- "parking_lot 0.12.3",
+ "rand 0.8.5",
  "riffle-server",
  "serde",
  "thiserror 1.0.69",

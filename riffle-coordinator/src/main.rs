@@ -15,10 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
+mod application;
 mod cluster;
 mod config;
 mod grpc;
 
+use crate::application::ApplicationManager;
+use crate::cluster::ClusterManager;
 use crate::config::Config;
 use crate::grpc::protobuf::uniffle::coordinator_server_server::CoordinatorServerServer;
 use crate::grpc::service::DefaultCoordinatorServer;
@@ -43,7 +46,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    let config = Config::from(&args.config);
+    let config = Config::load(args.config.as_deref())?;
 
     // Initialize logging
     let _log_guard = match &config.log {
@@ -62,11 +65,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // Initialize ClusterManager
-    let cluster_manager = cluster::ClusterManager::new(config.clone());
+    let application_manager = ApplicationManager::default();
+    let cluster_manager = ClusterManager::new(&config);
 
     // Create gRPC service
-    let coordinator_server = DefaultCoordinatorServer::new(cluster_manager.clone());
+    let coordinator_server = DefaultCoordinatorServer::new(&cluster_manager, &application_manager);
     let service = CoordinatorServerServer::new(coordinator_server)
         .max_decoding_message_size(usize::MAX)
         .max_encoding_message_size(usize::MAX);
@@ -75,7 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), config.grpc_port);
 
     // Start gRPC server
-    info!("Starting gRPC server on {}", addr);
+    info!("Starting gRPC server on {addr}");
     Server::builder().add_service(service).serve(addr).await?;
 
     Ok(())
