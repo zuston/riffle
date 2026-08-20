@@ -20,6 +20,9 @@ use dashmap::DashMap;
 use log::info;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::Duration;
+
+const DEFAULT_APP_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ApplicationInfo {
@@ -27,6 +30,7 @@ pub struct ApplicationInfo {
     pub user: String,
     pub client_version: Option<String>,
     pub client_git_commit_id: Option<String>,
+    pub last_heartbeat: DateTime<Utc>,
     pub registration_time: DateTime<Utc>,
 }
 
@@ -37,22 +41,38 @@ impl ApplicationInfo {
         version: Option<String>,
         git_commit_id: Option<String>,
     ) -> Self {
+        let now = Utc::now();
         Self {
             app_id,
             user,
             client_version: version,
             client_git_commit_id: git_commit_id,
-            registration_time: Utc::now(),
+            last_heartbeat: now,
+            registration_time: now,
         }
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct ApplicationManager {
     apps: Arc<DashMap<String, ApplicationInfo>>,
+    heartbeat_timeout: Duration,
+}
+
+impl Default for ApplicationManager {
+    fn default() -> Self {
+        Self::new(DEFAULT_APP_HEARTBEAT_TIMEOUT)
+    }
 }
 
 impl ApplicationManager {
+    pub fn new(heartbeat_timeout: Duration) -> Self {
+        Self {
+            apps: Arc::new(DashMap::new()),
+            heartbeat_timeout,
+        }
+    }
+
     pub fn register(
         &self,
         app_id: String,
@@ -60,12 +80,15 @@ impl ApplicationManager {
         version: Option<String>,
         git_commit_id: Option<String>,
     ) {
+        self.remove_expired();
+        let now = Utc::now();
         self.apps
             .entry(app_id.clone())
             .and_modify(|application| {
                 application.user = user.clone();
                 application.client_version = version.clone();
                 application.client_git_commit_id = git_commit_id.clone();
+                application.last_heartbeat = now;
             })
             .or_insert_with(|| {
                 info!("Application registered: {app_id} (user: {user})");
@@ -74,8 +97,20 @@ impl ApplicationManager {
     }
 
     pub fn heartbeat(&self, app_id: &str) {
-        if !self.apps.contains_key(app_id) {
+        self.remove_expired();
+        if let Some(mut application) = self.apps.get_mut(app_id) {
+            application.last_heartbeat = Utc::now();
+        } else {
             self.register(app_id.to_string(), String::new(), None, None);
         }
+    }
+
+    fn remove_expired(&self) {
+        let now = Utc::now();
+        self.apps.retain(|_, application| {
+            now.signed_duration_since(application.last_heartbeat)
+                .to_std()
+                .map_or(true, |age| age < self.heartbeat_timeout)
+        });
     }
 }
