@@ -543,8 +543,6 @@ pub struct DriverConfig {
     pub connect_timeout: Duration,
     pub request_timeout: Duration,
     pub heartbeat_interval: Duration,
-    pub max_encoding_message_size: usize,
-    pub max_decoding_message_size: usize,
 }
 
 impl DriverConfig {
@@ -575,12 +573,7 @@ impl DriverConfig {
                 "heartbeat interval must be positive".to_string(),
             ));
         }
-        validate_rpc_settings(
-            self.connect_timeout,
-            self.request_timeout,
-            self.max_encoding_message_size,
-            self.max_decoding_message_size,
-        )?;
+        validate_rpc_timeouts(self.connect_timeout, self.request_timeout)?;
         Ok(())
     }
 }
@@ -598,8 +591,6 @@ impl Default for DriverConfig {
             connect_timeout: Duration::from_secs(5),
             request_timeout: Duration::from_secs(30),
             heartbeat_interval: Duration::from_secs(10),
-            max_encoding_message_size: 64 * 1024 * 1024,
-            max_decoding_message_size: 64 * 1024 * 1024,
         }
     }
 }
@@ -726,8 +717,6 @@ pub struct ShuffleWriterConfig {
     pub max_inflight_requests: usize,
     pub connect_timeout: Duration,
     pub request_timeout: Duration,
-    pub max_encoding_message_size: usize,
-    pub max_decoding_message_size: usize,
     pub retry_policy: RetryPolicy,
 }
 
@@ -756,17 +745,7 @@ impl ShuffleWriterConfig {
                 "max_batch_bytes must not exceed i32::MAX".to_string(),
             ));
         }
-        if self.max_batch_bytes > self.max_encoding_message_size {
-            return Err(RiffleError::InvalidArgument(
-                "max_batch_bytes must not exceed max_encoding_message_size".to_string(),
-            ));
-        }
-        validate_rpc_settings(
-            self.connect_timeout,
-            self.request_timeout,
-            self.max_encoding_message_size,
-            self.max_decoding_message_size,
-        )?;
+        validate_rpc_timeouts(self.connect_timeout, self.request_timeout)?;
         self.retry_policy.validate()
     }
 }
@@ -779,8 +758,6 @@ impl Default for ShuffleWriterConfig {
             max_inflight_requests: 8,
             connect_timeout: Duration::from_secs(5),
             request_timeout: Duration::from_secs(30),
-            max_encoding_message_size: 64 * 1024 * 1024,
-            max_decoding_message_size: 64 * 1024 * 1024,
             retry_policy: RetryPolicy::default(),
         }
     }
@@ -793,8 +770,6 @@ pub struct ShuffleReaderConfig {
     pub spill_race_retries: u32,
     pub connect_timeout: Duration,
     pub request_timeout: Duration,
-    pub max_encoding_message_size: usize,
-    pub max_decoding_message_size: usize,
     pub retry_policy: RetryPolicy,
 }
 
@@ -808,17 +783,7 @@ impl ShuffleReaderConfig {
         i32::try_from(self.read_buffer_size).map_err(|_| {
             RiffleError::InvalidArgument("read_buffer_size exceeds i32::MAX".to_string())
         })?;
-        if self.read_buffer_size > self.max_decoding_message_size {
-            return Err(RiffleError::InvalidArgument(
-                "read_buffer_size must not exceed max_decoding_message_size".to_string(),
-            ));
-        }
-        validate_rpc_settings(
-            self.connect_timeout,
-            self.request_timeout,
-            self.max_encoding_message_size,
-            self.max_decoding_message_size,
-        )?;
+        validate_rpc_timeouts(self.connect_timeout, self.request_timeout)?;
         self.retry_policy.validate()
     }
 }
@@ -831,27 +796,18 @@ impl Default for ShuffleReaderConfig {
             spill_race_retries: 2,
             connect_timeout: Duration::from_secs(5),
             request_timeout: Duration::from_secs(30),
-            max_encoding_message_size: 64 * 1024 * 1024,
-            max_decoding_message_size: 64 * 1024 * 1024,
             retry_policy: RetryPolicy::default(),
         }
     }
 }
 
-fn validate_rpc_settings(
+fn validate_rpc_timeouts(
     connect_timeout: Duration,
     request_timeout: Duration,
-    max_encoding_message_size: usize,
-    max_decoding_message_size: usize,
 ) -> Result<(), RiffleError> {
     if connect_timeout.is_zero() || request_timeout.is_zero() {
         return Err(RiffleError::InvalidArgument(
             "RPC timeouts must be positive".to_string(),
-        ));
-    }
-    if max_encoding_message_size == 0 || max_decoding_message_size == 0 {
-        return Err(RiffleError::InvalidArgument(
-            "RPC message size limits must be positive".to_string(),
         ));
     }
     Ok(())

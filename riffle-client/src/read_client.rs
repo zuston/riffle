@@ -55,8 +55,6 @@ impl ReadClient {
         let settings = ConnectionSettings {
             connect_timeout: config.connect_timeout,
             request_timeout: config.request_timeout,
-            max_encoding_message_size: config.max_encoding_message_size,
-            max_decoding_message_size: config.max_decoding_message_size,
         };
         let (connection, client) =
             ConnectionPool::global().shuffle_server_client(server, &settings)?;
