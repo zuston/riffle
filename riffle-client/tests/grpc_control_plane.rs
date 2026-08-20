@@ -51,9 +51,12 @@ async fn driver_creates_serializable_handle_and_owns_remote_lifecycle() {
     let mut shuffle_client = connect_shuffle_with_retry(&shuffle_endpoint).await;
 
     let heartbeat_count = Arc::new(AtomicUsize::new(0));
+    let successful_request_count = Arc::new(AtomicUsize::new(0));
     let coordinator = MockCoordinator {
         shuffle_port,
         heartbeat_count: heartbeat_count.clone(),
+        request_count: successful_request_count,
+        fail_requests: false,
     };
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .await
@@ -66,7 +69,28 @@ async fn driver_creates_serializable_handle_and_owns_remote_lifecycle() {
             .await
     });
 
-    let mut driver_config = DriverConfig::new(vec![format!("http://{coordinator_addr}")]);
+    let failing_request_count = Arc::new(AtomicUsize::new(0));
+    let failing_listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("failing coordinator listener binds");
+    let failing_coordinator_addr = failing_listener.local_addr().unwrap();
+    let failing_coordinator = MockCoordinator {
+        shuffle_port,
+        heartbeat_count: Arc::new(AtomicUsize::new(0)),
+        request_count: failing_request_count.clone(),
+        fail_requests: true,
+    };
+    let failing_coordinator_task = tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(CoordinatorServerServer::new(failing_coordinator))
+            .serve_with_incoming(TcpListenerStream::new(failing_listener))
+            .await
+    });
+
+    let mut driver_config = DriverConfig::new(vec![
+        format!("http://{failing_coordinator_addr}"),
+        format!("http://{coordinator_addr}"),
+    ]);
     driver_config.heartbeat_interval = Duration::from_millis(20);
     let driver = Driver::connect(driver_config)
         .await
@@ -128,6 +152,11 @@ async fn driver_creates_serializable_handle_and_owns_remote_lifecycle() {
     assert!(Treemap::deserialize::<JvmLegacy>(&response.serialized_bitmap).is_empty());
 
     session.close().await.expect("application session closes");
+    assert!(
+        failing_request_count.load(Ordering::Relaxed) >= 3,
+        "each coordinator request starts from the first configured endpoint"
+    );
+    failing_coordinator_task.abort();
     coordinator_task.abort();
 }
 
@@ -135,6 +164,19 @@ async fn driver_creates_serializable_handle_and_owns_remote_lifecycle() {
 struct MockCoordinator {
     shuffle_port: u16,
     heartbeat_count: Arc<AtomicUsize>,
+    request_count: Arc<AtomicUsize>,
+    fail_requests: bool,
+}
+
+impl MockCoordinator {
+    fn before_request(&self) -> Result<(), Status> {
+        self.request_count.fetch_add(1, Ordering::Relaxed);
+        if self.fail_requests {
+            Err(Status::unavailable("coordinator is unavailable"))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 #[tonic::async_trait]
@@ -157,6 +199,7 @@ impl CoordinatorServer for MockCoordinator {
         &self,
         request: Request<GetShuffleServerRequest>,
     ) -> Result<Response<GetShuffleAssignmentsResponse>, Status> {
+        self.before_request()?;
         let request = request.into_inner();
         Ok(Response::new(GetShuffleAssignmentsResponse {
             status: StatusCode::Success as i32,
@@ -180,6 +223,7 @@ impl CoordinatorServer for MockCoordinator {
         &self,
         _request: Request<AppHeartBeatRequest>,
     ) -> Result<Response<AppHeartBeatResponse>, Status> {
+        self.before_request()?;
         self.heartbeat_count.fetch_add(1, Ordering::Relaxed);
         Ok(Response::new(AppHeartBeatResponse {
             status: StatusCode::Success as i32,
@@ -219,6 +263,7 @@ impl CoordinatorServer for MockCoordinator {
         &self,
         request: Request<ApplicationInfoRequest>,
     ) -> Result<Response<ApplicationInfoResponse>, Status> {
+        self.before_request()?;
         if request.get_ref().app_id.is_empty() {
             return Err(Status::invalid_argument("app_id is required"));
         }
@@ -232,6 +277,7 @@ impl CoordinatorServer for MockCoordinator {
         &self,
         _request: Request<AccessClusterRequest>,
     ) -> Result<Response<AccessClusterResponse>, Status> {
+        self.before_request()?;
         Ok(Response::new(AccessClusterResponse {
             status: StatusCode::Success as i32,
             ret_msg: String::new(),

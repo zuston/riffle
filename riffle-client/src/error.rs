@@ -83,7 +83,7 @@ pub enum RiffleError {
     #[error("invalid shuffle assignment: {0}")]
     InvalidAssignment(String),
 
-    #[error("failed to connect to any coordinator: {errors:?}")]
+    #[error("no coordinator completed the request: {errors:?}")]
     NoAvailableCoordinator { errors: Vec<String> },
 
     #[error("{operation} transport failure at {endpoint}: {message}")]
