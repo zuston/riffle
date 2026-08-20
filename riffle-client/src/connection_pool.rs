@@ -26,8 +26,6 @@ use tonic::transport::{Channel, Endpoint};
 pub(crate) struct ConnectionSettings {
     pub connect_timeout: Duration,
     pub request_timeout: Duration,
-    pub max_encoding_message_size: usize,
-    pub max_decoding_message_size: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -82,8 +80,8 @@ impl ConnectionPool {
     ) -> Result<(Arc<Connection>, ShuffleServerClient<Channel>), RiffleError> {
         let connection = self.get_server(server, settings)?;
         let client = ShuffleServerClient::new(connection.channel())
-            .max_encoding_message_size(settings.max_encoding_message_size)
-            .max_decoding_message_size(settings.max_decoding_message_size);
+            .max_encoding_message_size(usize::MAX)
+            .max_decoding_message_size(usize::MAX);
         Ok((connection, client))
     }
 
@@ -226,8 +224,6 @@ mod tests {
         let settings = ConnectionSettings {
             connect_timeout: Duration::from_secs(5),
             request_timeout: Duration::from_secs(30),
-            max_encoding_message_size: 1024,
-            max_decoding_message_size: 1024,
         };
         let first = pool
             .get("http://shared-connection.invalid:19999", &settings)

@@ -157,8 +157,8 @@ impl CoordinatorEndpoint {
             .get_or_try_init(|| pool.connect(&self.endpoint, settings, "connect_coordinator"))
             .await?;
         Ok(CoordinatorServerClient::new(connection.channel())
-            .max_encoding_message_size(settings.max_encoding_message_size)
-            .max_decoding_message_size(settings.max_decoding_message_size))
+            .max_encoding_message_size(usize::MAX)
+            .max_decoding_message_size(usize::MAX))
     }
 }
 
