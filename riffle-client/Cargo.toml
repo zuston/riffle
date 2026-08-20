@@ -1,0 +1,22 @@
+[package]
+name = "riffle-client"
+version = "0.27.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+bytes = { workspace = true }
+crc32fast = { workspace = true }
+croaring = { workspace = true }
+futures = { workspace = true }
+riffle-proto = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tokio-stream = { workspace = true, features = ["net"] }
+tonic = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+riffle-server = { workspace = true }
+serde_json = { workspace = true }
