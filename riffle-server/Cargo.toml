@@ -135,10 +135,7 @@ tikv-jemallocator= { workspace = true, features = ["unprefixed_malloc_on_support
 jemalloc_pprof= { workspace = true, features = ["symbolize", "flamegraph"], optional = true }
 nix= { workspace = true, optional = true }
 io-uring = { workspace = true, optional = true }
-
-[build-dependencies]
-tonic-build = { workspace = true }
-prost-build = { workspace = true }
+riffle-proto = { workspace = true }
 
 [dev-dependencies]
 env_logger = { workspace = true }
