@@ -14,6 +14,15 @@ Services are split into the following roles:
 
 All services are connected via the `riffle-network` network, supporting hostname-based communication.
 
+## Build the Integration Base Image
+
+The service image uses a local base image containing the toolchain, Spark, Hadoop, Uniffle, and static JARs. Build it once before starting the services:
+
+```bash
+cd dev/integration
+docker build --file Dockerfile.base --tag riffle-integration-base:local .
+```
+
 ## Quick Start
 
 ### Start all services
