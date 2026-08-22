@@ -30,19 +30,6 @@ echo_role() {
     echo -e "${BLUE}[ROLE: $ROLE]${NC} $1"
 }
 
-# compile the uniffle client jar and copy to SPARK_HOME/jars
-prepare_uniffle_client() {
-    UNIFFLE_REPO=/tmp/uniffle-repo
-    mkdir -p ${UNIFFLE_REPO}
-    cd ${UNIFFLE_REPO}
-    git clone https://github.com/apache/uniffle.git
-    cd uniffle
-    ./mvnw clean package install -Pspark3.5 -pl client-spark/spark3-shaded -DskipTests -am
-    # remove the latest release uniffle client
-    rm ${SPARK_HOME}/jars/rss-client-spark3-shaded-*.jar
-    cp client-spark/spark3-shaded/target/rss-client-spark3-shaded-*-SNAPSHOT.jar ${SPARK_HOME}/jars/
-}
-
 build_riffle_server() {
     if [ ! -f /riffle/target/debug/riffle-server ]; then
         echo_info "Building Riffle Server..."
@@ -142,8 +129,6 @@ case "$ROLE" in
     echo_info "    ${SPARK_HOME}/bin/spark-sql --master local[*]"
     echo_info "==========================================="
 
-    prepare_uniffle_client
-
     # Keep the container running
     exec tail -f /dev/null
     ;;
@@ -154,8 +139,6 @@ case "$ROLE" in
     COORDINATOR_HOST=${COORDINATOR_HOST:-coordinator}
     RIFFLE_SERVER_1_HOST=${RIFFLE_SERVER_1_HOST:-riffle-server-1}
     RIFFLE_SERVER_2_HOST=${RIFFLE_SERVER_2_HOST:-riffle-server-2}
-
-    prepare_uniffle_client
 
     # Run Spark SQL Integration Test
     echo_info "Running basic test..."

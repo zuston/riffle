@@ -1,0 +1,89 @@
+FROM docker.io/openanolis/anolisos:8
+
+RUN yum install -y libzip unzip wget cmake openssl-devel llvm clang-devel clang krb5-workstation git gcc gcc-c++
+
+# Install the pinned Rust toolchain used by Riffle.
+RUN curl https://sh.rustup.rs > /rustup-init
+RUN chmod +x /rustup-init
+RUN /rustup-init -y --default-toolchain nightly-2025-06-01-x86_64-unknown-linux-gnu
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install Java.
+RUN yum install -y java-1.8.0-openjdk java-1.8.0-openjdk-devel
+ENV JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk
+RUN echo 'export JAVA_HOME="/usr/lib/jvm/java-1.8.0-openjdk"' >> ~/.bashrc
+
+# Install protoc.
+RUN wget -O /protobuf-21.7-linux-x86_64.zip https://github.com/protocolbuffers/protobuf/releases/download/v21.7/protoc-21.7-linux-x86_64.zip
+RUN mkdir /protobuf-bin && (cd /protobuf-bin && unzip /protobuf-21.7-linux-x86_64.zip)
+ENV PATH="/protobuf-bin/bin:${PATH}"
+RUN echo 'export PATH="/protobuf-bin/bin:$PATH"' >> ~/.bashrc
+
+# Attach libjvm.so.
+RUN echo 'export LD_LIBRARY_PATH=${JAVA_HOME}/jre/lib/amd64/server:${LD_LIBRARY_PATH}' >> ~/.bashrc
+
+# Install Hadoop.
+RUN curl -LsSf https://dlcdn.apache.org/hadoop/common/hadoop-3.3.5/hadoop-3.3.5.tar.gz | tar zxf - -C /root
+ENV HADOOP_HOME=/root/hadoop-3.3.5
+RUN echo "export HADOOP_HOME=${HADOOP_HOME}" >> ~/.bashrc
+RUN echo "export CLASSPATH=$(${HADOOP_HOME}/bin/hadoop classpath --glob)" >> ~/.bashrc
+RUN echo "export HDRS_NAMENODE=default" >> ~/.bashrc
+
+# Install Python and pip.
+RUN yum install -y python3 python3-pip
+RUN pip3 install --upgrade pip
+
+# Install netcat for port checking.
+RUN yum install -y nc
+
+# Install Spark.
+ARG SPARK_VERSION=3.5.0
+RUN cd /opt && \
+    wget -q https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz && \
+    tar -xzf spark-${SPARK_VERSION}-bin-hadoop3.tgz && \
+    mv spark-${SPARK_VERSION}-bin-hadoop3 spark && \
+    rm spark-${SPARK_VERSION}-bin-hadoop3.tgz
+ENV SPARK_HOME=/opt/spark
+ENV PATH="${SPARK_HOME}/bin:${PATH}"
+
+# Install the Uniffle coordinator.
+ARG UNIFFLE_VERSION=0.10.0
+RUN cd /opt && \
+    wget -q https://archive.apache.org/dist/uniffle/${UNIFFLE_VERSION}/apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz && \
+    tar zxvf apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz && \
+    mv apache-uniffle-${UNIFFLE_VERSION}-hadoop2.8 uniffle && \
+    rm -f apache-uniffle-${UNIFFLE_VERSION}-bin.tar.gz
+ENV UNIFFLE_HOME=/opt/uniffle
+ENV PATH="${UNIFFLE_HOME}/bin:${PATH}"
+RUN mkdir -p ${UNIFFLE_HOME}/conf
+
+# Build the Uniffle Spark client from a pinned master commit.
+ARG UNIFFLE_GIT_COMMIT=b1ac32ffee1015ab45277821b4015f21eb5cddca
+RUN mkdir -p ${SPARK_HOME}/jars /tmp/uniffle-repo && \
+    git -C /tmp/uniffle-repo init && \
+    git -C /tmp/uniffle-repo remote add origin https://github.com/apache/uniffle.git && \
+    git -C /tmp/uniffle-repo fetch --depth 1 --no-tags origin ${UNIFFLE_GIT_COMMIT} && \
+    git -C /tmp/uniffle-repo checkout --detach ${UNIFFLE_GIT_COMMIT} && \
+    cd /tmp/uniffle-repo && \
+    chmod +x ./mvnw && \
+    ./mvnw -B clean package install -Pspark3.5 -pl client-spark/spark3-shaded -DskipTests -am && \
+    cp client-spark/spark3-shaded/target/rss-client-spark3-shaded-*-SNAPSHOT.jar \
+        ${SPARK_HOME}/jars/rss-client.jar && \
+    rm -rf /tmp/uniffle-repo /root/.m2
+
+ENV RIFFLE_HOME=/opt/riffle
+RUN mkdir -p ${RIFFLE_HOME}/conf
+
+RUN echo "export SPARK_HOME=${SPARK_HOME}" >> ~/.bashrc && \
+    echo "export UNIFFLE_HOME=${UNIFFLE_HOME}" >> ~/.bashrc && \
+    echo "export RIFFLE_HOME=${RIFFLE_HOME}" >> ~/.bashrc && \
+    echo "export PYTHONPATH=\${SPARK_HOME}/python:\${SPARK_HOME}/python/lib/py4j-*.zip:\${PYTHONPATH}" >> ~/.bashrc
+
+RUN echo "export RUST_BACKTRACE=1" >> ~/.bashrc
+
+ENV LD_LIBRARY_PATH=${HADOOP_HOME}/lib/native:${LD_LIBRARY_PATH}
+RUN echo "${HADOOP_HOME}/lib/native" >> /etc/ld.so.conf.d/hadoop.conf && ldconfig
+
+# Install the Kyuubi TPCDS connector.
+RUN cd ${SPARK_HOME}/jars && \
+    wget https://repo1.maven.org/maven2/org/apache/kyuubi/kyuubi-spark-connector-tpcds_2.12/1.10.2/kyuubi-spark-connector-tpcds_2.12-1.10.2.jar
