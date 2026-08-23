@@ -30,9 +30,7 @@ default_thread_num = 10
 dispatch_thread_num = 5
 
 [metrics]
-push_gateway_endpoint = "http://pushgateway:9091/"
-push_interval_sec = 5
-labels = { mode = "test" }
+# Pushgateway delivery is disabled; metrics remain available at /metrics.
 
 [log]
 path = "/tmp/riffle-server-2/log"

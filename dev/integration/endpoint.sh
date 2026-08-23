@@ -30,17 +30,28 @@ echo_role() {
     echo -e "${BLUE}[ROLE: $ROLE]${NC} $1"
 }
 
-# compile the uniffle client jar and copy to SPARK_HOME/jars
-prepare_uniffle_client() {
-    UNIFFLE_REPO=/tmp/uniffle-repo
-    mkdir -p ${UNIFFLE_REPO}
-    cd ${UNIFFLE_REPO}
-    git clone https://github.com/apache/uniffle.git
-    cd uniffle
-    ./mvnw clean package install -Pspark3.5 -pl client-spark/spark3-shaded -DskipTests -am
-    # remove the latest release uniffle client
-    rm ${SPARK_HOME}/jars/rss-client-spark3-shaded-*.jar
-    cp client-spark/spark3-shaded/target/rss-client-spark3-shaded-*-SNAPSHOT.jar ${SPARK_HOME}/jars/
+wait_for_shuffle_servers() {
+    local endpoint="http://uniffle-coordinator:19995/api/server/nodes?status=ACTIVE"
+
+    echo_info "Waiting for two active shuffle servers..."
+    for i in {1..60}; do
+        if curl -fsS "$endpoint" | python3 -c '
+import json
+import sys
+
+payload = json.load(sys.stdin)
+servers = payload.get("data", [])
+raise SystemExit(0 if len(servers) >= 2 else 1)
+'; then
+            echo_info "Two active shuffle servers are registered."
+            return 0
+        fi
+        sleep 2
+    done
+
+    echo_error "Timed out waiting for active shuffle servers."
+    curl -fsS "$endpoint" || true
+    exit 1
 }
 
 build_riffle_server() {
@@ -142,8 +153,6 @@ case "$ROLE" in
     echo_info "    ${SPARK_HOME}/bin/spark-sql --master local[*]"
     echo_info "==========================================="
 
-    prepare_uniffle_client
-
     # Keep the container running
     exec tail -f /dev/null
     ;;
@@ -154,8 +163,7 @@ case "$ROLE" in
     COORDINATOR_HOST=${COORDINATOR_HOST:-coordinator}
     RIFFLE_SERVER_1_HOST=${RIFFLE_SERVER_1_HOST:-riffle-server-1}
     RIFFLE_SERVER_2_HOST=${RIFFLE_SERVER_2_HOST:-riffle-server-2}
-
-    prepare_uniffle_client
+    wait_for_shuffle_servers
 
     # Run Spark SQL Integration Test
     echo_info "Running basic test..."

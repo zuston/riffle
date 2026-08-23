@@ -7,6 +7,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  packages: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -14,7 +18,7 @@ concurrency:
 jobs:
   spark-sql-integration-test:
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - name: Remove unnecessary files
@@ -25,8 +29,49 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Log in to GHCR
+        continue-on-error: true
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare integration base image
+        id: integration-base
+        shell: bash
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          dockerfile_hash="$(sha256sum dev/integration/Dockerfile.base | awk '{print $1}')"
+          image="ghcr.io/$owner/riffle-integration-base:integration-amd64-$dockerfile_hash"
+          if ! docker pull "$image"; then
+            echo "::warning::Integration base image is unavailable; building it locally."
+            docker build --file dev/integration/Dockerfile.base --tag "$image" dev/integration
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
       # - name: ssh to debug 
         # uses: valeriangalliat/action-sshd-cloudflared@v4
 
       - name: Run Spark SQL Test
-        run: docker compose -f dev/integration/docker-compose.yml up -d riffle-test
+        run: |
+          docker compose \
+            -f dev/integration/docker-compose.yml \
+            --profile test \
+            up \
+            --abort-on-container-exit \
+            --exit-code-from riffle-test \
+            riffle-test
+        env:
+          RIFFLE_INTEGRATION_BASE_IMAGE: ${{ steps.integration-base.outputs.image }}
+
+      - name: Dump integration service logs
+        if: ${{ failure() }}
+        continue-on-error: true
+        run: |
+          docker compose -f dev/integration/docker-compose.yml ps
+          docker compose -f dev/integration/docker-compose.yml logs \
+            --no-color \
+            --timestamps \
+            --tail=200 \
+            uniffle-coordinator riffle-server-1 riffle-server-2 riffle-test
