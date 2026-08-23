@@ -64,3 +64,14 @@ jobs:
             riffle-test
         env:
           RIFFLE_INTEGRATION_BASE_IMAGE: ${{ steps.integration-base.outputs.image }}
+
+      - name: Dump integration service logs
+        if: ${{ failure() }}
+        continue-on-error: true
+        run: |
+          docker compose -f dev/integration/docker-compose.yml ps
+          docker compose -f dev/integration/docker-compose.yml logs \
+            --no-color \
+            --timestamps \
+            --tail=200 \
+            uniffle-coordinator riffle-server-1 riffle-server-2 riffle-test

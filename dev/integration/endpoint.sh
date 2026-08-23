@@ -30,6 +30,30 @@ echo_role() {
     echo -e "${BLUE}[ROLE: $ROLE]${NC} $1"
 }
 
+wait_for_shuffle_servers() {
+    local endpoint="http://uniffle-coordinator:19995/api/server/nodes?status=ACTIVE"
+
+    echo_info "Waiting for two active shuffle servers..."
+    for i in {1..60}; do
+        if curl -fsS "$endpoint" | python3 -c '
+import json
+import sys
+
+payload = json.load(sys.stdin)
+servers = payload.get("data", [])
+raise SystemExit(0 if len(servers) >= 2 else 1)
+'; then
+            echo_info "Two active shuffle servers are registered."
+            return 0
+        fi
+        sleep 2
+    done
+
+    echo_error "Timed out waiting for active shuffle servers."
+    curl -fsS "$endpoint" || true
+    exit 1
+}
+
 build_riffle_server() {
     if [ ! -f /riffle/target/debug/riffle-server ]; then
         echo_info "Building Riffle Server..."
@@ -139,6 +163,7 @@ case "$ROLE" in
     COORDINATOR_HOST=${COORDINATOR_HOST:-coordinator}
     RIFFLE_SERVER_1_HOST=${RIFFLE_SERVER_1_HOST:-riffle-server-1}
     RIFFLE_SERVER_2_HOST=${RIFFLE_SERVER_2_HOST:-riffle-server-2}
+    wait_for_shuffle_servers
 
     # Run Spark SQL Integration Test
     echo_info "Running basic test..."
