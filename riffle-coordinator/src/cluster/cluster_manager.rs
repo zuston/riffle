@@ -75,6 +75,7 @@ pub struct NodeHeartbeatInfo {
 pub struct ClusterManager {
     servers: DashMap<String, ShuffleServerNode>,
     assignment_strategy: Box<dyn AssignmentStrategy>,
+    exclusive_tags: HashSet<String>,
 }
 
 impl ClusterManager {
@@ -83,6 +84,7 @@ impl ClusterManager {
         Arc::new(Self {
             servers: DashMap::new(),
             assignment_strategy,
+            exclusive_tags: config.exclusive_tags.iter().cloned().collect(),
         })
     }
 
@@ -152,7 +154,7 @@ impl ClusterManager {
             .iter()
             .filter(|entry| {
                 let node = entry.value();
-                node.is_available() && node.matches_tags(required_tags)
+                node.is_available() && node.matches_tags(required_tags, &self.exclusive_tags)
             })
             .map(|entry| entry.value().clone())
             .collect()
@@ -193,5 +195,61 @@ impl ClusterManager {
             assignments,
             servers,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn heartbeat(server_id: &str, tags: &[&str]) -> NodeHeartbeatInfo {
+        NodeHeartbeatInfo {
+            ip: "127.0.0.1".to_string(),
+            server_id: server_id.to_string(),
+            tags: tags.iter().map(|tag| (*tag).to_string()).collect(),
+            version: None,
+            git_commit_id: None,
+            start_time_ms: None,
+            grpc_port: 1,
+            urpc_port: 2,
+            http_port: 3,
+            used_memory: 0,
+            free_memory: 1,
+            reserved_memory: 0,
+            event_num_in_flush: 0,
+            is_healthy: true,
+            status: ServerStatus::Active,
+            storage_info: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn filters_unrequested_exclusive_tags() {
+        let config = Config {
+            exclusive_tags: vec!["gpu".to_string()],
+            ..Config::default()
+        };
+        let manager = ClusterManager::new(&config);
+        manager.heartbeat(heartbeat("gpu-1", &["gpu"]));
+        manager.heartbeat(heartbeat("general-1", &["cpu"]));
+
+        let no_required_tags = Vec::new();
+        let available_without_tags: HashSet<_> = manager
+            .list_available(&no_required_tags)
+            .into_iter()
+            .map(|node| node.id)
+            .collect();
+        assert_eq!(
+            available_without_tags,
+            HashSet::from(["general-1".to_string()])
+        );
+
+        let required_tags = vec!["gpu".to_string()];
+        let available_with_gpu: HashSet<_> = manager
+            .list_available(&required_tags)
+            .into_iter()
+            .map(|node| node.id)
+            .collect();
+        assert_eq!(available_with_gpu, HashSet::from(["gpu-1".to_string()]));
     }
 }

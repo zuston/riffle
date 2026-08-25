@@ -17,7 +17,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Represents a shuffle server node in the cluster
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -93,8 +93,12 @@ impl ShuffleServerNode {
         self.is_healthy && self.status == ServerStatus::Active && self.free_memory > 0
     }
 
-    /// Check if the node matches the required tags
-    pub fn matches_tags(&self, required_tags: &[String]) -> bool {
+    /// Check if the node matches required tags and configured exclusive tags.
+    pub fn matches_tags(&self, required_tags: &[String], exclusive_tags: &HashSet<String>) -> bool {
         required_tags.iter().all(|tag| self.tags.contains(tag))
+            && exclusive_tags
+                .iter()
+                .filter(|tag| self.tags.contains(tag))
+                .all(|tag| required_tags.contains(tag))
     }
 }
