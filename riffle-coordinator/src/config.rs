@@ -58,6 +58,9 @@ pub struct Config {
     pub max_assignment_servers: usize,
 
     #[serde(default)]
+    pub exclusive_tags: Vec<String>,
+
+    #[serde(default)]
     pub assignment_strategy: AssignmentStrategyType,
 
     #[serde(default)]
@@ -95,6 +98,7 @@ impl Default for Config {
             grpc_port: default_grpc_port(),
             http_port: default_http_port(),
             max_assignment_servers: default_shuffle_nodes_max(),
+            exclusive_tags: Vec::new(),
             assignment_strategy: AssignmentStrategyType::default(),
             assignment_host_strategy: HostAssignmentStrategy::default(),
             select_partition_strategy: PartitionAssignmentStrategy::default(),
@@ -127,6 +131,11 @@ impl Config {
 
     pub fn validate(&self) -> Result<(), ConfigError> {
         validate_positive("shuffle_nodes_max", self.max_assignment_servers)?;
+        if self.exclusive_tags.iter().any(|tag| tag.is_empty()) {
+            return Err(ConfigError::Invalid(
+                "exclusive_tags must not contain empty tags".to_string(),
+            ));
+        }
         Ok(())
     }
 }
@@ -160,6 +169,7 @@ mod tests {
 
         assert_eq!(config.grpc_port, 21000);
         assert_eq!(config.max_assignment_servers, 9);
+        assert!(config.exclusive_tags.is_empty());
         assert_eq!(
             config.assignment_strategy,
             AssignmentStrategyType::PartitionBalance
@@ -175,9 +185,26 @@ mod tests {
     }
 
     #[test]
+    fn parses_exclusive_tags() {
+        let config: Config = toml::from_str(r#"exclusive_tags = ["gpu", "ssd"]"#).unwrap();
+
+        assert_eq!(config.exclusive_tags, ["gpu", "ssd"]);
+    }
+
+    #[test]
     fn rejects_zero_limits() {
         let config = Config {
             max_assignment_servers: 0,
+            ..Config::default()
+        };
+
+        assert!(matches!(config.validate(), Err(ConfigError::Invalid(_))));
+    }
+
+    #[test]
+    fn rejects_empty_exclusive_tags() {
+        let config = Config {
+            exclusive_tags: vec![String::new()],
             ..Config::default()
         };
 
