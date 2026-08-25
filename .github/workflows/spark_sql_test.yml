@@ -17,8 +17,28 @@ concurrency:
 
 jobs:
   spark-sql-integration-test:
+    name: Spark SQL Integration Test (${{ matrix.coordinator_name }} coordinator)
     runs-on: ubuntu-22.04
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - coordinator_name: Uniffle
+            coordinator_host: uniffle-coordinator
+            coordinator_type: uniffle
+            coordinator_service: uniffle-coordinator
+            profile: test
+            test_service: riffle-test
+          - coordinator_name: Riffle
+            coordinator_host: riffle-coordinator
+            coordinator_type: riffle
+            coordinator_service: riffle-coordinator
+            profile: riffle-coordinator
+            test_service: riffle-test-riffle-coordinator
+    env:
+      COORDINATOR_HOST: ${{ matrix.coordinator_host }}
+      COORDINATOR_TYPE: ${{ matrix.coordinator_type }}
 
     steps:
       - name: Remove unnecessary files
@@ -57,11 +77,11 @@ jobs:
         run: |
           docker compose \
             -f dev/integration/docker-compose.yml \
-            --profile test \
+            --profile ${{ matrix.profile }} \
             up \
             --abort-on-container-exit \
-            --exit-code-from riffle-test \
-            riffle-test
+            --exit-code-from ${{ matrix.test_service }} \
+            ${{ matrix.test_service }}
         env:
           RIFFLE_INTEGRATION_BASE_IMAGE: ${{ steps.integration-base.outputs.image }}
 
@@ -69,9 +89,15 @@ jobs:
         if: ${{ failure() }}
         continue-on-error: true
         run: |
-          docker compose -f dev/integration/docker-compose.yml ps
-          docker compose -f dev/integration/docker-compose.yml logs \
+          docker compose \
+            -f dev/integration/docker-compose.yml \
+            --profile ${{ matrix.profile }} \
+            ps
+          docker compose \
+            -f dev/integration/docker-compose.yml \
+            --profile ${{ matrix.profile }} \
+            logs \
             --no-color \
             --timestamps \
             --tail=200 \
-            uniffle-coordinator riffle-server-1 riffle-server-2 riffle-test
+            ${{ matrix.coordinator_service }} riffle-server-1 riffle-server-2 ${{ matrix.test_service }}

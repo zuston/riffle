@@ -113,6 +113,29 @@ services:
       retries: 5
       start_period: 30s
 
+  # Riffle Coordinator
+  riffle-coordinator:
+    build: *integration-build
+    container_name: riffle-coordinator
+    hostname: riffle-coordinator
+    networks:
+      - riffle-network
+    ports:
+      - "21001:21000"  # RPC
+    volumes: *common-volumes
+    command: riffle-coordinator
+    depends_on:
+      riffle-compile:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "21000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    profiles:
+      - riffle-coordinator
+
   # Code Compilation Service
   riffle-compile:
     build: *integration-build
@@ -123,7 +146,7 @@ services:
     volumes: *common-volumes
     command: riffle-compile
     healthcheck:
-      test: ["CMD", "bash", "-c", "test -f /riffle/target/debug/riffle-server"]
+      test: ["CMD", "bash", "-c", "test -f /riffle/target/debug/riffle-server && test -f /riffle/target/debug/riffle-coordinator"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -141,10 +164,10 @@ services:
       - "21100:21100"  # gRPC port
     volumes: *common-volumes
     command: riffle-server-1
+    environment:
+      COORDINATOR_HOST: "${COORDINATOR_HOST:-uniffle-coordinator}"
     depends_on:
       riffle-compile:
-        condition: service_healthy
-      uniffle-coordinator:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:19998/metrics"]
@@ -165,10 +188,10 @@ services:
       - "21101:21101"  # gRPC port
     volumes: *common-volumes
     command: riffle-server-2
+    environment:
+      COORDINATOR_HOST: "${COORDINATOR_HOST:-uniffle-coordinator}"
     depends_on:
       riffle-compile:
-        condition: service_healthy
-      uniffle-coordinator:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:19999/metrics"]
@@ -190,7 +213,11 @@ services:
       - "4040:4040"  # Spark UI
     volumes: *common-volumes
     command: spark-client
+    environment:
+      COORDINATOR_HOST: "${COORDINATOR_HOST:-uniffle-coordinator}"
     depends_on:
+      uniffle-coordinator:
+        condition: service_healthy
       riffle-server-1:
         condition: service_healthy
       riffle-server-2:
@@ -204,10 +231,36 @@ services:
       - riffle-network
     volumes: *common-volumes
     command: run-tests
+    environment:
+      COORDINATOR_HOST: "${COORDINATOR_HOST:-uniffle-coordinator}"
+      COORDINATOR_TYPE: "${COORDINATOR_TYPE:-uniffle}"
     depends_on:
+      uniffle-coordinator:
+        condition: service_healthy
       riffle-server-1:
         condition: service_healthy
       riffle-server-2:
         condition: service_healthy
     profiles:
       - test
+
+  # Spark SQL tests with Riffle Coordinator
+  riffle-test-riffle-coordinator:
+    build: *integration-build
+    container_name: riffle-test-riffle-coordinator
+    networks:
+      - riffle-network
+    volumes: *common-volumes
+    command: run-tests
+    environment:
+      COORDINATOR_HOST: "${COORDINATOR_HOST:-riffle-coordinator}"
+      COORDINATOR_TYPE: riffle
+    depends_on:
+      riffle-coordinator:
+        condition: service_healthy
+      riffle-server-1:
+        condition: service_healthy
+      riffle-server-2:
+        condition: service_healthy
+    profiles:
+      - riffle-coordinator

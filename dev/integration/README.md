@@ -7,10 +7,12 @@ This directory contains Docker Compose configuration for Riffle integration test
 Services are split into the following roles:
 
 1. **uniffle-coordinator**: Uniffle coordinator for task assignment and scheduling
-2. **riffle-server-1**: First Riffle Shuffle server
-3. **riffle-server-2**: Second Riffle Shuffle server
-4. **spark-client**: Spark client for running queries and tests
-5. **riffle-test**: Complete test service (includes all test cases)
+2. **riffle-coordinator**: Native Riffle coordinator (enabled by the `riffle-coordinator` profile)
+3. **riffle-server-1**: First Riffle Shuffle server
+4. **riffle-server-2**: Second Riffle Shuffle server
+5. **spark-client**: Spark client for running queries and tests
+6. **riffle-test**: Complete test service using Uniffle coordinator
+7. **riffle-test-riffle-coordinator**: Complete test service using Riffle coordinator
 
 All services are connected via the `riffle-network` network, supporting hostname-based communication.
 
@@ -95,6 +97,19 @@ spark-sql --master local[*]
 docker-compose --profile test up riffle-test
 ```
 
+### 使用 Riffle coordinator 运行 Spark SQL 测试
+
+该流程复用相同的 Spark SQL 用例和 Riffle server，仅将 coordinator 切换为 native Riffle 实现：
+
+```bash
+COORDINATOR_HOST=riffle-coordinator \
+COORDINATOR_TYPE=riffle \
+docker-compose --profile riffle-coordinator up \
+  --abort-on-container-exit \
+  --exit-code-from riffle-test-riffle-coordinator \
+  riffle-test-riffle-coordinator
+```
+
 ### Stop all services
 
 ```bash
@@ -120,6 +135,7 @@ docker-compose down
 | grafana | 3000 | Grafana UI |
 | uniffle-coordinator | 19995 | Web UI |
 | uniffle-coordinator | 21000 | RPC |
+| riffle-coordinator | 21001 | RPC (host mapping) |
 | riffle-server-1 | 19998 | HTTP/Metrics |
 | riffle-server-1 | 21100 | gRPC |
 | riffle-server-2 | 19999 | HTTP/Metrics |
@@ -230,13 +246,15 @@ docker-compose up -d uniffle-coordinator riffle-server-1 riffle-server-2
 
 In `spark-client` and `riffle-test` services, configure service addresses via environment variables:
 
-- `COORDINATOR_HOST`: Coordinator hostname (default: coordinator)
+- `COORDINATOR_HOST`: Coordinator hostname (default: uniffle-coordinator)
+- `COORDINATOR_TYPE`: Coordinator implementation (`uniffle` or `riffle`, default: `uniffle`)
 - `RIFFLE_SERVER_1_HOST`: Riffle Server 1 hostname (default: riffle-server-1)
 - `RIFFLE_SERVER_2_HOST`: Riffle Server 2 hostname (default: riffle-server-2)
 
 ### Configuration Files
 
 - **coordinator.conf**: Uniffle Coordinator configuration
+- **riffle-coordinator.conf**: Riffle Coordinator configuration
 - **riffle.conf.1**: Riffle Server 1 configuration
 - **riffle.conf.2**: Riffle Server 2 configuration
 - **spark-defaults.conf**: Spark default configuration (uses Riffle as Shuffle Manager)
