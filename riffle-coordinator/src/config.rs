@@ -54,6 +54,9 @@ pub struct Config {
     #[serde(default = "default_http_port")]
     pub http_port: u16,
 
+    #[serde(default = "default_server_heartbeat_timeout_seconds")]
+    pub server_heartbeat_timeout_seconds: u64,
+
     #[serde(default = "default_shuffle_nodes_max")]
     pub max_assignment_servers: usize,
 
@@ -97,6 +100,7 @@ impl Default for Config {
         Self {
             grpc_port: default_grpc_port(),
             http_port: default_http_port(),
+            server_heartbeat_timeout_seconds: default_server_heartbeat_timeout_seconds(),
             max_assignment_servers: default_shuffle_nodes_max(),
             exclusive_tags: Vec::new(),
             assignment_strategy: AssignmentStrategyType::default(),
@@ -131,6 +135,11 @@ impl Config {
 
     pub fn validate(&self) -> Result<(), ConfigError> {
         validate_positive("shuffle_nodes_max", self.max_assignment_servers)?;
+        if self.server_heartbeat_timeout_seconds == 0 {
+            return Err(ConfigError::Invalid(
+                "server_heartbeat_timeout_seconds must be positive".to_string(),
+            ));
+        }
         if self.exclusive_tags.iter().any(|tag| tag.is_empty()) {
             return Err(ConfigError::Invalid(
                 "exclusive_tags must not contain empty tags".to_string(),
@@ -159,6 +168,10 @@ fn default_http_port() -> u16 {
     20020
 }
 
+fn default_server_heartbeat_timeout_seconds() -> u64 {
+    30
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,6 +181,7 @@ mod tests {
         let config: Config = toml::from_str("grpc_port = 21000").unwrap();
 
         assert_eq!(config.grpc_port, 21000);
+        assert_eq!(config.server_heartbeat_timeout_seconds, 30);
         assert_eq!(config.max_assignment_servers, 9);
         assert!(config.exclusive_tags.is_empty());
         assert_eq!(
@@ -195,6 +209,13 @@ mod tests {
     fn rejects_zero_limits() {
         let config = Config {
             max_assignment_servers: 0,
+            ..Config::default()
+        };
+
+        assert!(matches!(config.validate(), Err(ConfigError::Invalid(_))));
+
+        let config = Config {
+            server_heartbeat_timeout_seconds: 0,
             ..Config::default()
         };
 

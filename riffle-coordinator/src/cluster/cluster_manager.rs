@@ -17,9 +17,10 @@
 
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
-use log::{debug, info};
+use log::{debug, info, warn};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use super::assignment::{
     create_assignment_strategy, AssignmentError, AssignmentOptions, AssignmentStrategy,
@@ -72,31 +73,48 @@ pub struct NodeHeartbeatInfo {
     pub storage_info: HashMap<String, super::server_node::StorageInfo>,
 }
 
+struct RegisteredNode {
+    node: ShuffleServerNode,
+    last_heartbeat: Instant,
+}
+
+impl RegisteredNode {
+    fn is_alive(&self, heartbeat_timeout: Duration) -> bool {
+        self.last_heartbeat.elapsed() <= heartbeat_timeout
+    }
+}
+
 pub struct ClusterManager {
-    servers: DashMap<String, ShuffleServerNode>,
+    servers: DashMap<String, RegisteredNode>,
     assignment_strategy: Box<dyn AssignmentStrategy>,
     exclusive_tags: HashSet<String>,
+    heartbeat_timeout: Duration,
 }
 
 impl ClusterManager {
     pub fn new(config: &Config) -> ClusterManagerRef {
         let assignment_strategy = create_assignment_strategy(config);
-        Arc::new(Self {
+        let manager = Arc::new(Self {
             servers: DashMap::new(),
             assignment_strategy,
             exclusive_tags: config.exclusive_tags.iter().cloned().collect(),
-        })
+            heartbeat_timeout: Duration::from_secs(config.server_heartbeat_timeout_seconds),
+        });
+        Self::start_expiration_task(&manager);
+        manager
     }
 
     pub fn heartbeat(&self, heartbeat: NodeHeartbeatInfo) {
         let now = Utc::now();
+        let last_heartbeat = Instant::now();
         let server_start_time = heartbeat
             .start_time_ms
             .and_then(DateTime::<Utc>::from_timestamp_millis);
 
         self.servers
             .entry(heartbeat.server_id.clone())
-            .and_modify(|node| {
+            .and_modify(|registered| {
+                let node = &mut registered.node;
                 node.ip = heartbeat.ip.clone();
                 node.grpc_port = heartbeat.grpc_port;
                 node.netty_port = heartbeat.urpc_port;
@@ -111,41 +129,72 @@ impl ClusterManager {
                 node.storage_info = heartbeat.storage_info.clone();
                 node.version = heartbeat.version.clone();
                 node.git_commit_id = heartbeat.git_commit_id.clone();
-                if let Some(server_start_time) = server_start_time.clone() {
+                if let Some(server_start_time) = server_start_time {
                     node.server_start_time = server_start_time;
                 }
+                registered.last_heartbeat = last_heartbeat;
             })
             .or_insert_with(|| {
                 info!(
                     "New shuffle server registered: {} ({})",
                     heartbeat.server_id, heartbeat.ip
                 );
-                ShuffleServerNode {
-                    id: heartbeat.server_id.clone(),
-                    ip: heartbeat.ip,
-                    grpc_port: heartbeat.grpc_port,
-                    netty_port: heartbeat.urpc_port,
-                    http_port: heartbeat.http_port,
-                    used_memory: heartbeat.used_memory,
-                    free_memory: heartbeat.free_memory,
-                    reserved_memory: heartbeat.reserved_memory,
-                    event_num_in_flush: heartbeat.event_num_in_flush,
-                    tags: heartbeat.tags,
-                    is_healthy: heartbeat.is_healthy,
-                    status: heartbeat.status,
-                    storage_info: heartbeat.storage_info,
-                    version: heartbeat.version,
-                    git_commit_id: heartbeat.git_commit_id,
-                    server_start_time: server_start_time.unwrap_or(now),
+                RegisteredNode {
+                    node: ShuffleServerNode {
+                        id: heartbeat.server_id.clone(),
+                        ip: heartbeat.ip,
+                        grpc_port: heartbeat.grpc_port,
+                        netty_port: heartbeat.urpc_port,
+                        http_port: heartbeat.http_port,
+                        used_memory: heartbeat.used_memory,
+                        free_memory: heartbeat.free_memory,
+                        reserved_memory: heartbeat.reserved_memory,
+                        event_num_in_flush: heartbeat.event_num_in_flush,
+                        tags: heartbeat.tags,
+                        is_healthy: heartbeat.is_healthy,
+                        status: heartbeat.status,
+                        storage_info: heartbeat.storage_info,
+                        version: heartbeat.version,
+                        git_commit_id: heartbeat.git_commit_id,
+                        server_start_time: server_start_time.unwrap_or(now),
+                    },
+                    last_heartbeat,
                 }
             });
     }
 
-    /// Return every registered shuffle server.
+    fn start_expiration_task(manager: &ClusterManagerRef) {
+        let heartbeat_timeout = manager.heartbeat_timeout;
+        let manager = Arc::downgrade(manager);
+        let _expiration_task = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(heartbeat_timeout / 3);
+            interval.tick().await;
+            loop {
+                interval.tick().await;
+                let Some(manager) = manager.upgrade() else {
+                    break;
+                };
+                manager.remove_expired();
+            }
+        });
+    }
+
+    fn remove_expired(&self) {
+        self.servers.retain(|server_id, registered| {
+            let alive = registered.is_alive(self.heartbeat_timeout);
+            if !alive {
+                warn!("Heartbeat timed out; removing shuffle server {server_id}");
+            }
+            alive
+        });
+    }
+
+    /// Return every live registered shuffle server.
     pub fn list_all(&self) -> Vec<ShuffleServerNode> {
         self.servers
             .iter()
-            .map(|entry| entry.value().clone())
+            .filter(|entry| entry.value().is_alive(self.heartbeat_timeout))
+            .map(|entry| entry.value().node.clone())
             .collect()
     }
 
@@ -153,10 +202,14 @@ impl ClusterManager {
         self.servers
             .iter()
             .filter(|entry| {
-                let node = entry.value();
-                node.is_available() && node.matches_tags(required_tags, &self.exclusive_tags)
+                let registered = entry.value();
+                registered.is_alive(self.heartbeat_timeout)
+                    && registered.node.is_available()
+                    && registered
+                        .node
+                        .matches_tags(required_tags, &self.exclusive_tags)
             })
-            .map(|entry| entry.value().clone())
+            .map(|entry| entry.value().node.clone())
             .collect()
     }
 
@@ -223,8 +276,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn filters_unrequested_exclusive_tags() {
+    #[tokio::test]
+    async fn filters_unrequested_exclusive_tags() {
         let config = Config {
             exclusive_tags: vec!["gpu".to_string()],
             ..Config::default()
@@ -251,5 +304,39 @@ mod tests {
             .map(|node| node.id)
             .collect();
         assert_eq!(available_with_gpu, HashSet::from(["gpu-1".to_string()]));
+    }
+
+    #[tokio::test]
+    async fn removes_expired_and_does_not_assign_unhealthy_servers() {
+        let manager = ClusterManager::new(&Config::default());
+        manager.heartbeat(heartbeat("healthy", &[]));
+
+        let mut unhealthy = heartbeat("unhealthy", &[]);
+        unhealthy.is_healthy = false;
+        manager.heartbeat(unhealthy);
+
+        manager.heartbeat(heartbeat("expired", &[]));
+        manager.servers.get_mut("expired").unwrap().last_heartbeat =
+            Instant::now() - manager.heartbeat_timeout - Duration::from_millis(1);
+        manager.remove_expired();
+
+        assert!(!manager.servers.contains_key("expired"));
+
+        let result = manager
+            .assign(AssignmentRequest {
+                app_id: "app-1".to_string(),
+                shuffle_id: 1,
+                partition_num: 1,
+                partition_num_per_range: 1,
+                data_replica: 1,
+                required_tags: Vec::new(),
+                required_server_num: Some(1),
+                estimate_task_concurrency: 0,
+                exclusive_server_ids: HashSet::new(),
+            })
+            .unwrap();
+
+        assert_eq!(result.servers.len(), 1);
+        assert!(result.servers.contains_key("healthy"));
     }
 }
