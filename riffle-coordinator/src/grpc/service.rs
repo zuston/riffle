@@ -328,8 +328,7 @@ impl CoordinatorServer for DefaultCoordinatorServer {
         &self,
         _request: Request<()>,
     ) -> Result<Response<CheckServiceAvailableResponse>, Status> {
-        let server_num = self.cluster_manager.list_all().len();
-        let available = server_num > 0;
+        let available = !self.cluster_manager.list_available(&[]).is_empty();
 
         Ok(Response::new(CheckServiceAvailableResponse {
             status: StatusCode::Success.into(),
@@ -486,8 +485,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn parses_uniffle_default_assignment_sentinels_without_unsigned_wraparound() {
+    #[tokio::test]
+    async fn parses_uniffle_default_assignment_sentinels_without_unsigned_wraparound() {
         let request = service()
             .parse_assignment_request(valid_assignment_request())
             .unwrap();
@@ -497,8 +496,8 @@ mod tests {
         assert!(request.exclusive_server_ids.contains("faulty-1"));
     }
 
-    #[test]
-    fn rejects_negative_partition_fields() {
+    #[tokio::test]
+    async fn rejects_negative_partition_fields() {
         let coordinator = service();
         for request in [
             valid_assignment_request(),
@@ -517,5 +516,32 @@ mod tests {
         }) {
             assert!(coordinator.parse_assignment_request(request).is_err());
         }
+    }
+
+    #[tokio::test]
+    async fn service_is_unavailable_without_healthy_servers() {
+        let coordinator = service();
+        coordinator
+            .heartbeat(Request::new(ShuffleServerHeartBeatRequest {
+                server_id: Some(ShuffleServerId {
+                    id: "unhealthy".to_string(),
+                    ip: "127.0.0.1".to_string(),
+                    port: 1,
+                    ..Default::default()
+                }),
+                available_memory: 1,
+                is_healthy: Some(false),
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
+
+        let response = coordinator
+            .check_service_available(Request::new(()))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!response.available);
     }
 }
