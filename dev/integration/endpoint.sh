@@ -31,7 +31,25 @@ echo_role() {
 }
 
 wait_for_shuffle_servers() {
-    local endpoint="http://uniffle-coordinator:19995/api/server/nodes?status=ACTIVE"
+    if [ "${COORDINATOR_TYPE:-uniffle}" = "riffle" ]; then
+        echo_info "Waiting for Riffle coordinator and shuffle servers..."
+        for i in {1..60}; do
+            if nc -z "${COORDINATOR_HOST}" 21000 >/dev/null 2>&1 && \
+                curl -fsS "http://${RIFFLE_SERVER_1_HOST}:19998/metrics" >/dev/null && \
+                curl -fsS "http://${RIFFLE_SERVER_2_HOST}:19999/metrics" >/dev/null; then
+                # ponytail: fixed wait replaces a gRPC registration probe; increase if the heartbeat interval changes.
+                sleep 5
+                echo_info "Riffle coordinator and shuffle servers are ready."
+                return 0
+            fi
+            sleep 2
+        done
+
+        echo_error "Timed out waiting for Riffle coordinator and shuffle servers."
+        exit 1
+    fi
+
+    local endpoint="http://${COORDINATOR_HOST}:19995/api/server/nodes?status=ACTIVE"
 
     echo_info "Waiting for two active shuffle servers..."
     for i in {1..60}; do
@@ -54,11 +72,25 @@ raise SystemExit(0 if len(servers) >= 2 else 1)
     exit 1
 }
 
-build_riffle_server() {
-    if [ ! -f /riffle/target/debug/riffle-server ]; then
-        echo_info "Building Riffle Server..."
+wait_for_coordinator() {
+    echo_info "Waiting for coordinator ${COORDINATOR_HOST}:21000..."
+    for i in {1..60}; do
+        if nc -z "${COORDINATOR_HOST}" 21000 >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+
+    echo_error "Timed out waiting for coordinator ${COORDINATOR_HOST}:21000."
+    exit 1
+}
+
+build_riffle_binaries() {
+    if [ ! -f /riffle/target/debug/riffle-server ] || \
+        [ ! -f /riffle/target/debug/riffle-coordinator ]; then
+        echo_info "Building Riffle binaries..."
         cd /riffle
-        cargo build --bin riffle-server
+        cargo build --bin riffle-server --bin riffle-coordinator
     fi
 }
 
@@ -107,17 +139,26 @@ case "$ROLE" in
     fi
     ;;
 
+  riffle-coordinator)
+    echo_info "Starting Riffle Coordinator..."
+    exec /riffle/target/debug/riffle-coordinator \
+        --config "${RIFFLE_HOME}/conf/riffle-coordinator.conf"
+    ;;
+
   riffle-compile)
-    build_riffle_server
+    build_riffle_binaries
     exec tail -f /dev/null
     ;;
 
   riffle-server-1)
     echo_info "Starting Riffle Server 1..."
+    COORDINATOR_HOST=${COORDINATOR_HOST:-uniffle-coordinator}
     mkdir -p /tmp/riffle-server-1/data
     cd /tmp/riffle-server-1
     cp ${RIFFLE_HOME}/conf/riffle.conf.1 config.toml
+    sed -i "s|uniffle-coordinator:21000|${COORDINATOR_HOST}:21000|" config.toml
     mkdir -p /tmp/riffle-server-1/log
+    wait_for_coordinator
 
     exec nohup /riffle/target/debug/riffle-server --config config.toml &
     sleep 5
@@ -127,10 +168,13 @@ case "$ROLE" in
 
   riffle-server-2)
     echo_info "Starting Riffle Server 2..."
+    COORDINATOR_HOST=${COORDINATOR_HOST:-uniffle-coordinator}
     mkdir -p /tmp/riffle-server-2/data
     cd /tmp/riffle-server-2
     cp ${RIFFLE_HOME}/conf/riffle.conf.2 config.toml
+    sed -i "s|uniffle-coordinator:21000|${COORDINATOR_HOST}:21000|" config.toml
     mkdir -p /tmp/riffle-server-2/log
+    wait_for_coordinator
 
     exec nohup /riffle/target/debug/riffle-server --config config.toml &
     sleep 5
@@ -139,9 +183,10 @@ case "$ROLE" in
     ;;
 
   spark-client)
+    COORDINATOR_HOST=${COORDINATOR_HOST:-uniffle-coordinator}
     echo_info "==========================================="
     echo_info "Spark Client is ready. Services available:"
-    echo_info "  - Uniffle Coordinator: http://uniffle-coordinator:19995"
+    echo_info "  - Coordinator: ${COORDINATOR_HOST}:21000"
     echo_info "  - Riffle Server 1: http://riffle-server-1:19998"
     echo_info "  - Riffle Server 2: http://riffle-server-2:19999"
     echo_info "  - Spark Home: ${SPARK_HOME}"
@@ -160,7 +205,8 @@ case "$ROLE" in
   run-tests)
     # ========== Run Full Integration Tests ==========
     echo_info "Waiting for Riffle Servers to be ready..."
-    COORDINATOR_HOST=${COORDINATOR_HOST:-coordinator}
+    COORDINATOR_HOST=${COORDINATOR_HOST:-uniffle-coordinator}
+    COORDINATOR_TYPE=${COORDINATOR_TYPE:-uniffle}
     RIFFLE_SERVER_1_HOST=${RIFFLE_SERVER_1_HOST:-riffle-server-1}
     RIFFLE_SERVER_2_HOST=${RIFFLE_SERVER_2_HOST:-riffle-server-2}
     wait_for_shuffle_servers
@@ -172,6 +218,7 @@ case "$ROLE" in
     # case1: with sql_set sqls
     if ./bin/spark-shell \
         --master local[1] \
+        --conf "spark.rss.coordinator.quorum=${COORDINATOR_HOST}:21000" \
         -i /tmp/sql_set/basic.scala; then
         echo_info "Spark SQL test completed successfully!"
     else
@@ -191,7 +238,10 @@ case "$ROLE" in
 
     echo_info "Running all TPCDS SQL..."
     start_time=$(date +%s)
-    if ./bin/spark-sql --master local[1] -f "$MERGED_SQL"; then
+    if ./bin/spark-sql \
+        --master local[1] \
+        --conf "spark.rss.coordinator.quorum=${COORDINATOR_HOST}:21000" \
+        -f "$MERGED_SQL"; then
         end_time=$(date +%s)
         duration=$((end_time - start_time))
         echo_info "All SQL files executed in one session successfully (Time: ${duration}s)"
@@ -209,6 +259,7 @@ case "$ROLE" in
     echo_error "Unknown role: $ROLE"
     echo_info "Available roles:"
     echo_info "  - coordinator: Start Uniffle Coordinator"
+    echo_info "  - riffle-coordinator: Start Riffle Coordinator"
     echo_info "  - riffle-server-1: Start Riffle Server 1"
     echo_info "  - riffle-server-2: Start Riffle Server 2"
     echo_info "  - spark-client: Start Spark client (interactive)"
