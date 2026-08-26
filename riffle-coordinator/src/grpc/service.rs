@@ -16,8 +16,10 @@
 // under the License.
 
 use log::{debug, warn};
+use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
+use crate::access::{AccessPlugin, AccessResult, AllowAllAccessPlugin};
 use crate::application::ApplicationManager;
 use crate::cluster::cluster_manager::{AssignmentRequest, NodeHeartbeatInfo};
 use crate::cluster::server_node::ShuffleServerNode;
@@ -33,6 +35,7 @@ type StatusCode = crate::grpc::protobuf::uniffle::StatusCode;
 pub struct DefaultCoordinatorServer {
     cluster_manager: ClusterManagerRef,
     application_manager: ApplicationManager,
+    access_plugin: Arc<dyn AccessPlugin>,
 }
 
 impl DefaultCoordinatorServer {
@@ -40,9 +43,22 @@ impl DefaultCoordinatorServer {
         cluster_manager: &ClusterManagerRef,
         application_manager: &ApplicationManager,
     ) -> Self {
+        Self::with_access_plugin(
+            cluster_manager,
+            application_manager,
+            Arc::new(AllowAllAccessPlugin),
+        )
+    }
+
+    pub fn with_access_plugin(
+        cluster_manager: &ClusterManagerRef,
+        application_manager: &ApplicationManager,
+        access_plugin: Arc<dyn AccessPlugin>,
+    ) -> Self {
         Self {
             cluster_manager: cluster_manager.clone(),
             application_manager: application_manager.clone(),
+            access_plugin,
         }
     }
 
@@ -401,6 +417,26 @@ impl CoordinatorServer for DefaultCoordinatorServer {
         &self,
         request: Request<AccessClusterRequest>,
     ) -> Result<Response<AccessClusterResponse>, Status> {
+        let decision = match self.access_plugin.access(request.get_ref()).await {
+            Ok(decision) => decision,
+            Err(error) => {
+                warn!("{error}");
+                return Ok(Response::new(AccessClusterResponse {
+                    status: StatusCode::InternalError.into(),
+                    ret_msg: "Access plugin failed".to_string(),
+                    uuid: String::new(),
+                }));
+            }
+        };
+
+        if let AccessResult::Deny(message) = decision {
+            return Ok(Response::new(AccessClusterResponse {
+                status: StatusCode::AccessDenied.into(),
+                ret_msg: message,
+                uuid: String::new(),
+            }));
+        }
+
         let inner = request.into_inner();
 
         // Check if there are available servers matching the required tags
@@ -462,13 +498,55 @@ impl CoordinatorServer for DefaultCoordinatorServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::access::{AccessError, AccessPlugin, AccessResult};
     use crate::cluster::ClusterManager;
     use crate::config::Config;
+    use std::sync::Arc;
 
     fn service() -> DefaultCoordinatorServer {
         let cluster_manager = ClusterManager::new(&Config::default());
         let application_manager = ApplicationManager::default();
         DefaultCoordinatorServer::new(&cluster_manager, &application_manager)
+    }
+
+    struct DenyBlockedUser;
+
+    #[tonic::async_trait]
+    impl AccessPlugin for DenyBlockedUser {
+        async fn access(
+            &self,
+            request: &AccessClusterRequest,
+        ) -> Result<AccessResult, AccessError> {
+            if request.user == "blocked" {
+                Ok(AccessResult::Deny("user is blocked".to_string()))
+            } else {
+                Ok(AccessResult::Allow)
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn access_plugin_can_deny_a_request() {
+        let cluster_manager = ClusterManager::new(&Config::default());
+        let application_manager = ApplicationManager::default();
+        let coordinator = DefaultCoordinatorServer::with_access_plugin(
+            &cluster_manager,
+            &application_manager,
+            Arc::new(DenyBlockedUser),
+        );
+
+        let response = coordinator
+            .access_cluster(Request::new(AccessClusterRequest {
+                user: "blocked".to_string(),
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(response.status, StatusCode::AccessDenied as i32);
+        assert_eq!(response.ret_msg, "user is blocked");
+        assert!(response.uuid.is_empty());
     }
 
     fn valid_assignment_request() -> GetShuffleServerRequest {
