@@ -29,12 +29,14 @@ default = ["logforth"]
 logforth = ["dep:logforth"]
 
 [dependencies]
+boa_engine = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tonic = { workspace = true }
 thiserror = { workspace = true }
 dashmap = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 chrono = { workspace = true, features = ["serde"] }
 rand = { workspace = true }
@@ -45,3 +47,6 @@ logforth = { workspace = true, features = ["append-rolling-file"], optional = tr
 riffle-server = { workspace = true }
 
 uuid = { version = "1.7", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

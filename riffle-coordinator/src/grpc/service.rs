@@ -19,7 +19,7 @@ use log::{debug, warn};
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
-use crate::access::{AccessPlugin, AccessResult, AllowAllAccessPlugin};
+use crate::access::{load_default_access_plugin, AccessPlugin, AccessResult};
 use crate::application::ApplicationManager;
 use crate::cluster::cluster_manager::{AssignmentRequest, NodeHeartbeatInfo};
 use crate::cluster::server_node::ShuffleServerNode;
@@ -46,7 +46,7 @@ impl DefaultCoordinatorServer {
         Self::with_access_plugin(
             cluster_manager,
             application_manager,
-            Arc::new(AllowAllAccessPlugin),
+            load_default_access_plugin(),
         )
     }
 
