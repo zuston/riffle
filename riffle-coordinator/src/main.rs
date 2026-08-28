@@ -23,15 +23,23 @@ mod grpc;
 
 use crate::application::ApplicationManager;
 use crate::cluster::ClusterManager;
-use crate::config::Config;
+use crate::config::{Config, LogConfig, RotationConfig};
 use crate::grpc::protobuf::uniffle::coordinator_server_server::CoordinatorServerServer;
 use crate::grpc::service::DefaultCoordinatorServer;
 use clap::Parser;
-use log::{info, LevelFilter};
+use log::info;
+#[cfg(feature = "logforth")]
+use log::LevelFilter;
+#[cfg(feature = "logforth")]
 use logforth::append;
-use riffle_server::log_service::LogService;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tonic::transport::Server;
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{fmt, EnvFilter, Registry};
+
+const LOG_FILE_NAME: &str = "riffle-coordinator.log";
 
 #[derive(Parser, Debug)]
 #[command(name = "riffle-coordinator")]
@@ -52,16 +60,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
     let _log_guard = match &config.log {
         None => {
+            #[cfg(feature = "logforth")]
             logforth::builder()
                 .dispatch(|d| {
                     d.filter(LevelFilter::Info)
                         .append(append::Stdout::default())
                 })
                 .apply();
+            #[cfg(not(feature = "logforth"))]
+            tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::INFO)
+                .init();
             None
         }
         Some(log_config) => {
-            let _guard = LogService::init(log_config);
+            let _guard = init_file_logging(log_config);
             Some(_guard)
         }
     };
@@ -83,4 +96,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Server::builder().add_service(service).serve(addr).await?;
 
     Ok(())
+}
+
+fn init_file_logging(log: &LogConfig) -> WorkerGuard {
+    let file_appender = match log.rotation {
+        RotationConfig::Hourly => tracing_appender::rolling::hourly(&log.path, LOG_FILE_NAME),
+        RotationConfig::Daily => tracing_appender::rolling::daily(&log.path, LOG_FILE_NAME),
+        RotationConfig::Never => tracing_appender::rolling::never(&log.path, LOG_FILE_NAME),
+    };
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let formatting_layer = fmt::layer().pretty().with_writer(std::io::stderr);
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    let file_layer = fmt::layer()
+        .with_ansi(false)
+        .with_line_number(true)
+        .with_writer(non_blocking);
+
+    Registry::default()
+        .with(env_filter)
+        .with(formatting_layer)
+        .with(file_layer)
+        .init();
+
+    guard
 }

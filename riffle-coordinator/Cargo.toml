@@ -42,9 +42,10 @@ chrono = { workspace = true, features = ["serde"] }
 rand = { workspace = true }
 toml = { workspace = true }
 logforth = { workspace = true, features = ["append-rolling-file"], optional = true }
-
-# Reuse riffle-server's gRPC generated code
-riffle-server = { workspace = true }
+riffle-proto = { workspace = true }
+tracing-appender = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 uuid = { version = "1.7", features = ["v4"] }
 

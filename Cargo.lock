@@ -5064,6 +5064,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "riffle-client"
+version = "0.27.0"
+dependencies = [
+ "bytes 1.10.1",
+ "crc32fast",
+ "croaring",
+ "futures",
+ "riffle-proto",
+ "riffle-server",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tracing",
+]
+
+[[package]]
 name = "riffle-coordinator"
 version = "0.27.0"
 dependencies = [
@@ -5074,7 +5093,7 @@ dependencies = [
  "log",
  "logforth",
  "rand 0.8.5",
- "riffle-server",
+ "riffle-proto",
  "serde",
  "serde_json",
  "tempfile",
@@ -5082,6 +5101,9 @@ dependencies = [
  "tokio",
  "toml",
  "tonic",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
  "uuid",
 ]
 
@@ -5114,6 +5136,17 @@ dependencies = [
  "tokio",
  "toml",
  "url",
+]
+
+[[package]]
+name = "riffle-proto"
+version = "0.27.0"
+dependencies = [
+ "bytes 1.10.1",
+ "prost 0.12.6",
+ "prost-build",
+ "tonic",
+ "tonic-build",
 ]
 
 [[package]]
@@ -5167,8 +5200,8 @@ dependencies = [
  "pprof",
  "prometheus",
  "prost 0.12.6",
- "prost-build",
  "rand 0.8.5",
+ "riffle-proto",
  "serde",
  "serde_json",
  "signal-hook",
@@ -5185,7 +5218,6 @@ dependencies = [
  "tokio-stream",
  "toml",
  "tonic",
- "tonic-build",
  "tower 0.4.13",
  "tracing",
  "tracing-appender",
