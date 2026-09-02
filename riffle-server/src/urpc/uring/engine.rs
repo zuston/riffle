@@ -1,21 +1,4 @@
 //! A self-contained, completion-driven io_uring network engine for urpc.
-//!
-//! Design goals:
-//! - No dependency on any async runtime in the hot loop: one OS thread drives
-//!   one `io_uring` instance with a per-connection state machine.
-//! - Kernel 5.10 baseline: plain (re-armed) accept/recv/send, batched
-//!   submissions via a single `io_uring_enter` per loop iteration, relying on
-//!   `IORING_FEAT_FAST_POLL` for readiness handling.
-//! - Pluggable request handling: the engine only understands urpc frames.
-//!   A [`FrameHandler`] decides how to answer, either inline (on the engine
-//!   thread) or asynchronously from any other thread via [`RemoteResponder`]
-//!   (eventfd based wakeup).
-//!
-//! Known limitations (documented, intentional for now):
-//! - Response payloads must be in-memory bytes (`DataBytes::Direct/Composed`).
-//!   Raw fd/pipe payloads must be materialized by the handler beforehand.
-//! - The per-connection outbound queue is unbounded; with request/response
-//!   style traffic it is effectively bounded by the client pipeline depth.
 
 use crate::urpc::frame::Frame;
 use crate::urpc::uring::encode::{encode_frame_into, peek_request_header};

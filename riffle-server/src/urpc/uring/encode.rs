@@ -1,8 +1,4 @@
 //! Wire-level encode/decode helpers for the io_uring based urpc net engine.
-//!
-//! The encoded layout MUST stay byte-identical with [`Frame::write_with_mode`]
-//! (see `urpc/frame.rs`), so that clients cannot distinguish which net engine
-//! serves them.
 
 use crate::error::WorkerError;
 use crate::store::{DataBytes, ResponseData};

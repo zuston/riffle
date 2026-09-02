@@ -1,9 +1,5 @@
 //! Bridge between the io_uring net engine and the existing urpc command
 //! processing logic.
-//!
-//! The engine thread only parses frames; the actual command execution
-//! (memory/localfile store access) is spawned onto a tokio runtime and the
-//! response is pushed back to the engine through a [`RemoteResponder`].
 
 use crate::app_manager::AppManagerRef;
 use crate::runtime::RuntimeRef;
