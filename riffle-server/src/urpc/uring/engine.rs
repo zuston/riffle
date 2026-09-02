@@ -1,7 +1,8 @@
 //! A self-contained, completion-driven io_uring network engine for urpc.
 
-use crate::urpc::frame::Frame;
-use crate::urpc::uring::encode::{encode_frame_into, peek_request_header};
+use crate::error::WorkerError;
+use crate::store::DataBytes;
+use crate::urpc::frame::{get_i32, get_u8, Frame};
 use anyhow::{anyhow, Context, Result};
 use bytes::{Bytes, BytesMut};
 use crossbeam::queue::SegQueue;
@@ -9,6 +10,7 @@ use io_uring::types::Fd;
 use io_uring::{opcode, squeue, IoUring};
 use log::{debug, error, info, warn};
 use std::collections::VecDeque;
+use std::io::Cursor;
 use std::net::{SocketAddr, TcpListener};
 use std::os::fd::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,6 +22,39 @@ const KIND_ACCEPT: u64 = 1;
 const KIND_RECV: u64 = 2;
 const KIND_SEND: u64 = 3;
 const KIND_WAKE: u64 = 4;
+const FRAME_HEADER_LEN: usize = 4 + 1 + 4;
+
+#[derive(Debug, Clone, Copy)]
+struct RequestHeader {
+    content_len: usize,
+    body_len: usize,
+}
+
+impl RequestHeader {
+    fn total_len(&self) -> usize {
+        FRAME_HEADER_LEN + self.content_len + self.body_len
+    }
+}
+
+fn peek_request_header(buf: &[u8]) -> Result<Option<RequestHeader>, WorkerError> {
+    if buf.len() < FRAME_HEADER_LEN {
+        return Ok(None);
+    }
+    let mut cursor = Cursor::new(buf);
+    let content_len = get_i32(&mut cursor)?;
+    let _message_type = get_u8(&mut cursor)?;
+    let body_len = get_i32(&mut cursor)?;
+    if content_len < 0 || body_len < 0 {
+        return Err(WorkerError::STREAM_INCORRECT(format!(
+            "negative frame length. content_len: {}, body_len: {}",
+            content_len, body_len
+        )));
+    }
+    Ok(Some(RequestHeader {
+        content_len: content_len as usize,
+        body_len: body_len as usize,
+    }))
+}
 
 #[inline]
 fn pack_token(kind: u64, gen: u16, slot: u32) -> u64 {
@@ -121,6 +156,37 @@ impl Drop for EngineShared {
             libc::close(self.wake_fd);
         }
     }
+}
+
+fn push_data_chunks(data: &DataBytes, chunks: &mut Vec<Bytes>) -> Result<()> {
+    match data {
+        DataBytes::Direct(bytes) => {
+            if !bytes.is_empty() {
+                chunks.push(bytes.clone());
+            }
+        }
+        DataBytes::Composed(composed) => {
+            for chunk in composed.iter() {
+                if !chunk.is_empty() {
+                    chunks.push(chunk.clone());
+                }
+            }
+        }
+        DataBytes::RawIO(_) | DataBytes::RawPipe(_) => {
+            return Err(anyhow!(
+                "The io_uring net engine requires in-memory response data, \
+                 but got a raw fd/pipe based payload. Materialize it first."
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn encode_frame_into(frame: &Frame, head: &mut BytesMut, chunks: &mut Vec<Bytes>) -> Result<()> {
+    if let Some(data) = frame.encode_head(head)? {
+        push_data_chunks(data, chunks)?;
+    }
+    Ok(())
 }
 
 /// Inline responder handed to [`FrameHandler::on_frame`].
