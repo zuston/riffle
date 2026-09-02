@@ -1,24 +1,7 @@
 //! A self-contained, completion-driven io_uring network engine for urpc.
-//!
-//! Design goals:
-//! - No dependency on any async runtime in the hot loop: one OS thread drives
-//!   one `io_uring` instance with a per-connection state machine.
-//! - Kernel 5.10 baseline: plain (re-armed) accept/recv/send, batched
-//!   submissions via a single `io_uring_enter` per loop iteration, relying on
-//!   `IORING_FEAT_FAST_POLL` for readiness handling.
-//! - Pluggable request handling: the engine only understands urpc frames.
-//!   A [`FrameHandler`] decides how to answer, either inline (on the engine
-//!   thread) or asynchronously from any other thread via [`RemoteResponder`]
-//!   (eventfd based wakeup).
-//!
-//! Known limitations (documented, intentional for now):
-//! - Response payloads must be in-memory bytes (`DataBytes::Direct/Composed`).
-//!   Raw fd/pipe payloads must be materialized by the handler beforehand.
-//! - The per-connection outbound queue is unbounded; with request/response
-//!   style traffic it is effectively bounded by the client pipeline depth.
 
 use crate::urpc::frame::Frame;
-use crate::urpc::uring::encode::{encode_frame_into, parse_request_frame, peek_request_header};
+use crate::urpc::uring::encode::{encode_frame_into, peek_request_header};
 use anyhow::{anyhow, Context, Result};
 use bytes::{Bytes, BytesMut};
 use crossbeam::queue::SegQueue;
@@ -528,7 +511,7 @@ impl<H: FrameHandler> UringEngine<H> {
             conn.pending_frame_len = None;
 
             let frame_bytes = conn.read_buf.split_to(total).freeze();
-            let frame = parse_request_frame(frame_bytes)?;
+            let frame = Frame::parse(frame_bytes)?;
 
             let mut responder = Responder {
                 token: pack_token(KIND_REMOTE, conn.gen, slot),

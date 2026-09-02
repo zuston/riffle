@@ -356,20 +356,23 @@ impl Frame {
             return Err(STREAM_INCOMPLETE);
         }
 
-        let msg_len = get_i32(src)?;
-        let msg_type = get_u8(src)?;
-        let body_len = get_i32(src)?;
+        let msg_len = get_len(src, "frame.content_len")?;
+        let _msg_type = get_u8(src)?;
+        let body_len = get_len(src, "frame.body_len")?;
+        let payload_len = msg_len
+            .checked_add(body_len)
+            .ok_or_else(|| STREAM_INCORRECT("frame payload length overflow".into()))?;
 
-        if Buf::remaining(src) < (msg_len + body_len) as usize {
+        if src.remaining() < payload_len {
             return Err(STREAM_INCOMPLETE);
         }
-        skip(src, (msg_len + body_len) as usize)?;
+        skip(src, payload_len)?;
 
         Ok(())
     }
 
     fn parse_to_get_localfile_data_v2_command(
-        src: &mut Cursor<&[u8]>,
+        src: &mut impl Buf,
     ) -> Result<GetLocalDataRequestV2Command> {
         debug!("Gotten the localfile data v2 request");
 
@@ -401,7 +404,7 @@ impl Frame {
     }
 
     fn parse_to_get_localfile_data_v3_command(
-        src: &mut Cursor<&[u8]>,
+        src: &mut impl Buf,
     ) -> Result<GetLocalDataRequestV3Command> {
         debug!("Gotten the localfile data v3 request");
 
@@ -446,7 +449,7 @@ impl Frame {
     }
 
     fn parse_to_get_localfile_data_command(
-        src: &mut Cursor<&[u8]>,
+        src: &mut impl Buf,
     ) -> Result<GetLocalDataRequestCommand> {
         debug!("Gotten the localfile data request");
 
@@ -473,42 +476,36 @@ impl Frame {
         })
     }
 
-    fn parse_to_send_shuffle_data_command(
-        src: &mut Cursor<&[u8]>,
-    ) -> Result<SendDataRequestCommand> {
+    fn parse_to_send_shuffle_data_command(src: &mut impl Buf) -> Result<SendDataRequestCommand> {
         let request_id = get_i64(src)?;
         let app_id = get_string(src)?;
         let shuffle_id = get_i32(src)?;
         let require_id = get_i64(src)?;
 
-        let partition_batch_size = get_i32(src)?;
-        let mut blocks_map: HashMap<i32, Vec<Block>> =
-            HashMap::with_capacity(partition_batch_size as usize);
-        for idx in 0..partition_batch_size {
+        let partition_batch_size = get_len(src, "send.partition_batch_size")?;
+        let mut blocks_map: HashMap<i32, Vec<Block>> = HashMap::with_capacity(partition_batch_size);
+        for _ in 0..partition_batch_size {
             let partition_id = get_i32(src)?;
-            let block_batch_size = get_i32(src)?;
-            let mut blocks = Vec::with_capacity(block_batch_size as usize);
-            for block_idx in 0..block_batch_size {
-                let pid = get_i32(src)?;
+            let block_batch_size = get_len(src, "send.block_batch_size")?;
+            let mut blocks = Vec::with_capacity(block_batch_size);
+            for _ in 0..block_batch_size {
+                let _pid = get_i32(src)?;
                 let block_id = get_i64(src)?;
                 let length = get_i32(src)?;
-                let shuffle_id = get_i32(src)?;
+                let _shuffle_id = get_i32(src)?;
                 let crc = get_i64(src)?;
                 let task_attempt_id = get_i64(src)?;
-                // todo: make this allocated with the contiguous memory buffer.
                 let buffer = get_bytes(src)?.unwrap_or(Bytes::new());
 
-                /// skip the shuffle-servers data?
-                let length_of_shuffle_servers = get_i32(src)?;
-                for idx in 0..length_of_shuffle_servers {
-                    let _ = skip_string(src)?;
-                    let _ = skip_string(src)?;
-                    let _ = get_i32(src)?;
-                    let _ = get_i32(src)?;
+                let shuffle_server_len = get_len(src, "send.block.shuffle_server_len")?;
+                for _ in 0..shuffle_server_len {
+                    skip_string(src)?;
+                    skip_string(src)?;
+                    skip(src, 8)?;
                 }
 
                 let uncompress_len = get_i32(src)?;
-                let free_mem = get_i64(src)?;
+                let _free_mem = get_i64(src)?;
 
                 let block = Block {
                     block_id,
@@ -524,19 +521,18 @@ impl Frame {
             blocks_map.insert(partition_id, blocks);
         }
         let timestamp = get_i64(src)?;
-        let req = SendDataRequestCommand {
+        Ok(SendDataRequestCommand {
             request_id,
             app_id,
             shuffle_id,
             blocks: blocks_map,
             ticket_id: require_id,
             timestamp,
-        };
-        return Ok(req);
+        })
     }
 
     fn parse_to_get_localfile_index_command(
-        src: &mut Cursor<&[u8]>,
+        src: &mut impl Buf,
     ) -> Result<GetLocalDataIndexRequestCommand> {
         debug!("Gotten the localfile index request");
         let request_id = get_i64(src)?;
@@ -556,9 +552,7 @@ impl Frame {
         })
     }
 
-    fn parse_to_get_memory_data_command(
-        src: &mut Cursor<&[u8]>,
-    ) -> Result<GetMemoryDataRequestCommand> {
+    fn parse_to_get_memory_data_command(src: &mut impl Buf) -> Result<GetMemoryDataRequestCommand> {
         let request_id = get_i64(src)?;
         let app_id = get_string(src)?;
         let shuffle_id = get_i32(src)?;
@@ -580,12 +574,16 @@ impl Frame {
         })
     }
 
-    pub fn parse(src: &mut Cursor<&[u8]>) -> Result<Frame, WorkerError> {
-        let encode_msg_len = get_i32(src)?;
-        let msg_type = get_u8(src)?;
-        let body_len = get_i32(src)?;
+    /// Parses a complete frame. Passing `Bytes` keeps payload extraction zero-copy.
+    pub fn parse(mut src: impl Buf) -> Result<Frame, WorkerError> {
+        let encode_msg_len = get_len(&mut src, "frame.content_len")?;
+        let msg_type = get_u8(&mut src)?;
+        let body_len = get_len(&mut src, "frame.body_len")?;
+        let payload_len = encode_msg_len
+            .checked_add(body_len)
+            .ok_or_else(|| STREAM_INCORRECT("frame payload length overflow".into()))?;
 
-        if Buf::remaining(src) < (encode_msg_len + body_len) as usize {
+        if src.remaining() < payload_len {
             warn!("This should not happen that the frame has been passed in check logic, but not have enough buffer to parse.");
             return Err(WorkerError::STREAM_ABNORMAL);
         }
@@ -598,33 +596,33 @@ impl Frame {
 
         match msg_type? {
             MessageType::GetLocalData => {
-                let command = Frame::parse_to_get_localfile_data_command(src)?;
+                let command = Frame::parse_to_get_localfile_data_command(&mut src)?;
                 return Ok(Frame::GetLocalData(command));
             }
             MessageType::GetLocalDataV2 => {
-                let command = Frame::parse_to_get_localfile_data_v2_command(src)?;
+                let command = Frame::parse_to_get_localfile_data_v2_command(&mut src)?;
                 return Ok(Frame::GetLocalDataV2(command));
             }
             MessageType::GetLocalDataV3 => {
-                let command = Frame::parse_to_get_localfile_data_v3_command(src)?;
+                let command = Frame::parse_to_get_localfile_data_v3_command(&mut src)?;
                 return Ok(Frame::GetLocalDataV3(command));
             }
             MessageType::GetLocalDataIndex => {
-                let command = Frame::parse_to_get_localfile_index_command(src)?;
+                let command = Frame::parse_to_get_localfile_index_command(&mut src)?;
                 return Ok(Frame::GetLocalDataIndex(command));
             }
             MessageType::GetMemoryData => {
-                let command = Frame::parse_to_get_memory_data_command(src)?;
+                let command = Frame::parse_to_get_memory_data_command(&mut src)?;
                 return Ok(Frame::GetMemoryData(command));
             }
             MessageType::SendShuffleData => {
-                let command = Frame::parse_to_send_shuffle_data_command(src)?;
+                let command = Frame::parse_to_send_shuffle_data_command(&mut src)?;
                 return Ok(Frame::SendShuffleData(command));
             }
             MessageType::RpcResponse => {
-                let request_id = get_i64(src)?;
-                let status_code = get_i32(src)?;
-                let ret_msg = get_string(src)?;
+                let request_id = get_i64(&mut src)?;
+                let status_code = get_i32(&mut src)?;
+                let ret_msg = get_string(&mut src)?;
                 return Ok(Frame::RpcResponse(RpcResponseCommand {
                     request_id,
                     status_code,
@@ -759,8 +757,8 @@ where
     Ok(())
 }
 
-pub fn get_bytes(src: &mut Cursor<&[u8]>) -> Result<Option<Bytes>, WorkerError> {
-    if !Buf::has_remaining(src) {
+fn get_bytes(src: &mut impl Buf) -> Result<Option<Bytes>, WorkerError> {
+    if !src.has_remaining() {
         return Err(STREAM_INCORRECT("get_bytes".into()));
     }
     let bytes_data_len = get_i32(src)?;
@@ -768,55 +766,63 @@ pub fn get_bytes(src: &mut Cursor<&[u8]>) -> Result<Option<Bytes>, WorkerError> 
         return Ok(None);
     }
 
-    if Buf::remaining(src) < bytes_data_len as usize {
+    if src.remaining() < bytes_data_len as usize {
         return Err(STREAM_INCORRECT(format!(
             "get_bytes but not have enough remaining bytes. expected: {}, real: {}",
             bytes_data_len,
-            Buf::remaining(src)
+            src.remaining()
         )));
     }
 
-    let data = Bytes::copy_from_slice(&Buf::chunk(src)[..bytes_data_len as usize]);
-    skip(src, bytes_data_len as usize)?;
-    Ok(Some(data))
+    Ok(Some(src.copy_to_bytes(bytes_data_len as usize)))
 }
 
-pub fn get_i64(src: &mut Cursor<&[u8]>) -> Result<i64, WorkerError> {
-    if !Buf::has_remaining(src) {
+pub fn get_i64(src: &mut impl Buf) -> Result<i64, WorkerError> {
+    if src.remaining() < 8 {
         return Err(STREAM_INCORRECT("get_i64".into()));
     }
 
     Ok(src.get_i64())
 }
 
-pub fn get_i32(src: &mut Cursor<&[u8]>) -> Result<i32, WorkerError> {
-    if !Buf::has_remaining(src) {
+pub fn get_i32(src: &mut impl Buf) -> Result<i32, WorkerError> {
+    if src.remaining() < 4 {
         return Err(STREAM_INCORRECT("get_i32".into()));
     }
     Ok(src.get_i32())
 }
 
-fn skip(src: &mut Cursor<&[u8]>, n: usize) -> Result<(), WorkerError> {
-    if Buf::remaining(src) < n {
+fn get_len(src: &mut impl Buf, field: &'static str) -> Result<usize, WorkerError> {
+    let len = get_i32(src)?;
+    if len < 0 {
+        return Err(STREAM_INCORRECT(format!(
+            "{field} should not be negative: {len}"
+        )));
+    }
+    Ok(len as usize)
+}
+
+fn skip(src: &mut impl Buf, n: usize) -> Result<(), WorkerError> {
+    if src.remaining() < n {
         return Err(STREAM_INCORRECT("skip".into()));
     }
 
-    Buf::advance(src, n);
+    src.advance(n);
     Ok(())
 }
 
-fn skip_string(src: &mut Cursor<&[u8]>) -> Result<(), WorkerError> {
-    if !Buf::has_remaining(src) {
+fn skip_string(src: &mut impl Buf) -> Result<(), WorkerError> {
+    if !src.has_remaining() {
         return Err(STREAM_INCORRECT("get_string 1".into()));
     }
     let len = get_i32(src)? as usize;
     if len <= 0 {
         return Ok(());
     }
-    if Buf::remaining(src) < len {
+    if src.remaining() < len {
         return Err(STREAM_INCORRECT(format!(
             "get string. src remaining: {}. len: {}",
-            Buf::remaining(src),
+            src.remaining(),
             len
         )));
     }
@@ -824,8 +830,8 @@ fn skip_string(src: &mut Cursor<&[u8]>) -> Result<(), WorkerError> {
     Ok(())
 }
 
-pub fn get_string(src: &mut Cursor<&[u8]>) -> Result<String, WorkerError> {
-    if !Buf::has_remaining(src) {
+pub fn get_string(src: &mut impl Buf) -> Result<String, WorkerError> {
+    if !src.has_remaining() {
         return Err(STREAM_INCORRECT("get_string 1".into()));
     }
     let len = get_i32(src)? as usize;
@@ -833,22 +839,29 @@ pub fn get_string(src: &mut Cursor<&[u8]>) -> Result<String, WorkerError> {
         return Ok("".into());
     }
 
-    if Buf::remaining(src) < len {
+    if src.remaining() < len {
         return Err(STREAM_INCORRECT(format!(
             "get string. src remaining: {}. len: {}",
-            Buf::remaining(src),
+            src.remaining(),
             len
         )));
     }
 
-    let msg = Buf::chunk(src)[..len].to_vec();
-    skip(src, len)?;
+    let msg = if src.chunk().len() >= len {
+        let msg = src.chunk()[..len].to_vec();
+        src.advance(len);
+        msg
+    } else {
+        let mut msg = vec![0; len];
+        src.copy_to_slice(&mut msg);
+        msg
+    };
 
     Ok(String::from_utf8(msg)?)
 }
 
-pub fn get_u8(src: &mut Cursor<&[u8]>) -> Result<u8, WorkerError> {
-    if !Buf::has_remaining(src) {
+pub fn get_u8(src: &mut impl Buf) -> Result<u8, WorkerError> {
+    if !src.has_remaining() {
         return Err(STREAM_INCORRECT("get_u8".into()));
     }
     Ok(src.get_u8())
@@ -860,9 +873,9 @@ mod test {
     use crate::config::UrpcWriteMode;
     use crate::error::WorkerError;
     use crate::store::DataBytes;
-    use crate::urpc::frame::{write_composed_bytes, write_data_bytes, Frame};
+    use crate::urpc::frame::{get_string, write_composed_bytes, write_data_bytes, Frame};
     use anyhow::Result;
-    use bytes::{BufMut, Bytes, BytesMut};
+    use bytes::{Buf, BufMut, Bytes, BytesMut};
     use std::io::Cursor;
     use tokio::io::AsyncReadExt;
     use tokio::net::{TcpListener, TcpStream};
@@ -877,7 +890,9 @@ mod test {
     ///
 
     #[test]
-    fn frame_parse() -> Result<()> {
+    fn get_string_reads_fragmented_buf() -> Result<()> {
+        let mut src = Bytes::from_static(b"\0\0\0\x03a").chain(Bytes::from_static(b"bc"));
+        assert_eq!("abc", get_string(&mut src)?);
         Ok(())
     }
 
