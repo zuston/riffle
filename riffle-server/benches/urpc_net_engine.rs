@@ -16,7 +16,6 @@ use bytes::{BufMut, Bytes, BytesMut};
 use riffle_server::urpc::command::RpcResponseCommand;
 use riffle_server::urpc::connection::Connection;
 use riffle_server::urpc::frame::{Frame, MessageType};
-use riffle_server::urpc::uring::encode::parse_request_frame;
 use riffle_server::urpc::uring::{Responder, UringServerConfig, UringUrpcServer};
 use std::io::Write;
 use std::net::SocketAddr;
@@ -114,7 +113,7 @@ fn validate_case_frame(case: Case) -> Result<()> {
         case.name
     );
 
-    let frame = parse_request_frame(build_send_shuffle_data_frame(0, case))?;
+    let frame = Frame::parse(build_send_shuffle_data_frame(0, case))?;
     let Frame::SendShuffleData(request) = frame else {
         anyhow::bail!("case {} did not produce SendShuffleData", case.name);
     };

@@ -18,7 +18,7 @@
 //!   style traffic it is effectively bounded by the client pipeline depth.
 
 use crate::urpc::frame::Frame;
-use crate::urpc::uring::encode::{encode_frame_into, parse_request_frame, peek_request_header};
+use crate::urpc::uring::encode::{encode_frame_into, peek_request_header};
 use anyhow::{anyhow, Context, Result};
 use bytes::{Bytes, BytesMut};
 use crossbeam::queue::SegQueue;
@@ -528,7 +528,7 @@ impl<H: FrameHandler> UringEngine<H> {
             conn.pending_frame_len = None;
 
             let frame_bytes = conn.read_buf.split_to(total).freeze();
-            let frame = parse_request_frame(frame_bytes)?;
+            let frame = Frame::parse(frame_bytes)?;
 
             let mut responder = Responder {
                 token: pack_token(KIND_REMOTE, conn.gen, slot),

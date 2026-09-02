@@ -254,9 +254,7 @@ impl Connection {
             Ok(_) => {
                 let timer = std::time::Instant::now();
                 let len = buf.position() as usize;
-                buf.set_position(0);
-                let frame = Frame::parse(&mut buf)?;
-                self.read_buf.advance(len);
+                let frame = Frame::parse(self.read_buf.split_to(len).freeze())?;
                 self.maybe_reset_read_buffer();
                 URPC_REQUEST_PARSING_LATENCY
                     .with_label_values(&[&format!("{}", &frame)])
@@ -541,6 +539,25 @@ mod tests {
         let client = TcpStream::connect(addr).await?;
         let (server, _) = listener.accept().await?;
         Ok((client, server))
+    }
+
+    #[test]
+    fn complete_send_shuffle_data_parse_is_zero_copy() -> Result<()> {
+        let payload = b"zero-copy";
+        let encoded = build_send_shuffle_data_frame_with_shuffle_servers(payload, 1).freeze();
+        let allocation_start = encoded.as_ptr() as usize;
+        let allocation_end = allocation_start + encoded.len();
+
+        let Frame::SendShuffleData(request) = Frame::parse(encoded)? else {
+            panic!("expected SendShuffleData");
+        };
+        let data = &request.blocks[&11][0].data;
+        let data_start = data.as_ptr() as usize;
+
+        assert_eq!(payload, data.as_ref());
+        assert!(data_start >= allocation_start);
+        assert!(data_start + data.len() <= allocation_end);
+        Ok(())
     }
 
     #[tokio::test]

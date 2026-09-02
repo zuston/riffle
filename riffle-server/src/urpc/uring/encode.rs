@@ -5,12 +5,10 @@
 //! serves them.
 
 use crate::error::WorkerError;
-use crate::store::{Block, DataBytes, ResponseData};
-use crate::urpc::command::SendDataRequestCommand;
-use crate::urpc::frame::{get_i32, get_i64, get_string, get_u8, Frame, MessageType};
+use crate::store::{DataBytes, ResponseData};
+use crate::urpc::frame::{get_i32, get_u8, Frame, MessageType};
 use anyhow::{anyhow, Result};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use std::collections::HashMap;
+use bytes::{BufMut, Bytes, BytesMut};
 use std::io::Cursor;
 
 /// content_length(i32) + message_type(u8) + body_length(i32)
@@ -49,122 +47,6 @@ pub fn peek_request_header(buf: &[u8]) -> Result<Option<RequestHeader>, WorkerEr
         content_len: content_len as usize,
         body_len: body_len as usize,
     }))
-}
-
-/// Parses one complete request frame. `frame_bytes` must contain exactly one
-/// frame (header included), as sliced out by the engine according to
-/// [`peek_request_header`].
-///
-/// For `SendShuffleData` the block payloads are zero-copy slices of
-/// `frame_bytes` instead of the copying path in [`Frame::parse`].
-pub fn parse_request_frame(frame_bytes: Bytes) -> Result<Frame, WorkerError> {
-    let mut cursor = Cursor::new(&frame_bytes[..]);
-    let _content_len = get_i32(&mut cursor)?;
-    let message_type = get_u8(&mut cursor)?;
-    let _body_len = get_i32(&mut cursor)?;
-
-    if message_type == MessageType::SendShuffleData as u8 {
-        return parse_send_shuffle_data_zero_copy(&frame_bytes, &mut cursor);
-    }
-
-    cursor.set_position(0);
-    Frame::parse(&mut cursor)
-}
-
-fn ensure_remaining(
-    cursor: &Cursor<&[u8]>,
-    len: usize,
-    field: &'static str,
-) -> Result<(), WorkerError> {
-    if cursor.remaining() < len {
-        return Err(WorkerError::STREAM_INCORRECT(format!(
-            "{field} requires {len} bytes, but only {} remaining",
-            cursor.remaining()
-        )));
-    }
-    Ok(())
-}
-
-fn read_len(cursor: &mut Cursor<&[u8]>, field: &'static str) -> Result<usize, WorkerError> {
-    let len = get_i32(cursor)?;
-    if len < 0 {
-        return Err(WorkerError::STREAM_INCORRECT(format!(
-            "{field} should not be negative: {len}"
-        )));
-    }
-    Ok(len as usize)
-}
-
-fn skip_string(cursor: &mut Cursor<&[u8]>, field: &'static str) -> Result<(), WorkerError> {
-    let len = read_len(cursor, field)?;
-    ensure_remaining(cursor, len, field)?;
-    cursor.advance(len);
-    Ok(())
-}
-
-fn parse_send_shuffle_data_zero_copy(
-    frame_bytes: &Bytes,
-    cursor: &mut Cursor<&[u8]>,
-) -> Result<Frame, WorkerError> {
-    let request_id = get_i64(cursor)?;
-    let app_id = get_string(cursor)?;
-    let shuffle_id = get_i32(cursor)?;
-    let ticket_id = get_i64(cursor)?;
-
-    let partition_batch_size = read_len(cursor, "send.partition_batch_size")?;
-    let mut blocks_map: HashMap<i32, Vec<Block>> = HashMap::with_capacity(partition_batch_size);
-    for _ in 0..partition_batch_size {
-        let partition_id = get_i32(cursor)?;
-        let block_batch_size = read_len(cursor, "send.block_batch_size")?;
-        let mut blocks = Vec::with_capacity(block_batch_size);
-        for _ in 0..block_batch_size {
-            let _pid = get_i32(cursor)?;
-            let block_id = get_i64(cursor)?;
-            let length = get_i32(cursor)?;
-            let _shuffle_id = get_i32(cursor)?;
-            let crc = get_i64(cursor)?;
-            let task_attempt_id = get_i64(cursor)?;
-
-            let data_len = get_i32(cursor)?;
-            let data = if data_len <= 0 {
-                Bytes::new()
-            } else {
-                let data_len = data_len as usize;
-                ensure_remaining(cursor, data_len, "send.block.data")?;
-                let pos = cursor.position() as usize;
-                // Zero-copy: the block payload shares the receive buffer allocation.
-                let data = frame_bytes.slice(pos..pos + data_len);
-                cursor.advance(data_len);
-                data
-            };
-
-            let shuffle_server_len = read_len(cursor, "send.block.shuffle_server_len")?;
-            for _ in 0..shuffle_server_len {
-                skip_string(cursor, "send.block.shuffle_server.id")?;
-                skip_string(cursor, "send.block.shuffle_server.host")?;
-                ensure_remaining(cursor, 8, "send.block.shuffle_server.ports")?;
-                cursor.advance(8);
-            }
-
-            let uncompress_length = get_i32(cursor)?;
-            let _free_mem = get_i64(cursor)?;
-
-            blocks.push(Block {
-                block_id,
-                length,
-                uncompress_length,
-                crc,
-                data,
-                task_attempt_id,
-            });
-        }
-        blocks_map.insert(partition_id, blocks);
-    }
-    let timestamp = get_i64(cursor)?;
-
-    Ok(Frame::SendShuffleData(SendDataRequestCommand::new(
-        request_id, app_id, shuffle_id, blocks_map, ticket_id, timestamp,
-    )))
 }
 
 /// Appends the data payload of a response as separate zero-copy chunks.
