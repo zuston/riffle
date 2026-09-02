@@ -1,7 +1,6 @@
 //! Pluggable io_uring based urpc net engine.
 
 pub mod bridge;
-pub mod encode;
 pub mod engine;
 
 pub use bridge::AppCommandBridgeHandler;

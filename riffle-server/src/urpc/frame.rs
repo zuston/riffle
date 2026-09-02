@@ -119,235 +119,143 @@ impl Frame {
         write_buf: &mut BytesMut,
         write_mode: UrpcWriteMode,
     ) -> Result<()> {
-        match frame {
+        let data = frame.encode_head(write_buf)?;
+        stream.write_all(&write_buf.split()).await?;
+        if let Some(data) = data {
+            let write_mode = match frame {
+                Frame::GetLocalDataIndexResponse(_) | Frame::GetLocalDataIndexV2Response(_) => {
+                    UrpcWriteMode::FREEZE
+                }
+                _ => write_mode,
+            };
+            write_data_bytes(stream, data, write_mode).await?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn encode_head<'a>(&'a self, head: &mut BytesMut) -> Result<Option<&'a DataBytes>> {
+        match self {
             Frame::GetLocalDataResponse(resp) => {
                 debug!("gotten the localfile data response");
-
-                let request_id = resp.request_id;
-                let status_code = resp.status_code;
-
-                let msg = &resp.ret_msg;
-                let msg_bytes = msg.as_bytes();
-
+                let msg_bytes = resp.ret_msg.as_bytes();
                 let data = &resp.data;
-
-                // header
-                write_buf.put_i32(msg_bytes.len() as i32 + 8 + 4 + 4);
-                write_buf.put_u8(MessageType::GetLocalDataResponse as u8);
-                write_buf.put_i32(data.len() as i32);
-
-                // partial content with general response info
-                write_buf.put_i64(request_id);
-                write_buf.put_i32(status_code);
-
-                write_buf.put_i32(msg_bytes.len() as i32);
-                write_buf.put(msg_bytes);
-
-                stream.write_all(&write_buf.split()).await?;
-
-                // write all data
-                write_data_bytes(stream, data, write_mode).await?;
-
-                Ok(())
+                head.reserve(HEADER_LEN + 16 + msg_bytes.len());
+                head.put_i32(msg_bytes.len() as i32 + 8 + 4 + 4);
+                head.put_u8(MessageType::GetLocalDataResponse as u8);
+                head.put_i32(data.len() as i32);
+                head.put_i64(resp.request_id);
+                head.put_i32(resp.status_code);
+                head.put_i32(msg_bytes.len() as i32);
+                head.put(msg_bytes);
+                Ok(Some(data))
             }
             Frame::GetLocalDataIndexV2Response(resp) => {
-                let request_id = resp.request_id;
-                let status_code = resp.status_code;
-
-                let msg = &resp.ret_msg;
-                let msg_bytes = msg.as_bytes();
-
+                let msg_bytes = resp.ret_msg.as_bytes();
                 let index_bytes = &resp.data_index.index_data;
-                let data_file_len = resp.data_index.data_file_len;
-
-                // header
-                // compared with the v1 version, add the extra [4 + 4 * storage_ids.len()]
-                write_buf.put_i32(
+                head.reserve(HEADER_LEN + 28 + msg_bytes.len() + 4 * resp.storage_ids.len());
+                head.put_i32(
                     msg_bytes.len() as i32 + 8 + 4 + 4 + 8 + 4 + 4 * resp.storage_ids.len() as i32,
                 );
-                write_buf.put_u8(MessageType::GetLocalDataIndexV2Response as u8);
-                write_buf.put_i32(index_bytes.len() as i32);
-
-                // partial content with general response info
-                write_buf.put_i64(request_id);
-                write_buf.put_i32(status_code);
-
-                write_buf.put_i32(msg_bytes.len() as i32);
-                write_buf.put(msg_bytes);
-
-                // write the data length
-                write_buf.put_i64(data_file_len);
-
-                // write the storage ids
-                write_buf.put_i32(resp.storage_ids.len() as i32);
+                head.put_u8(MessageType::GetLocalDataIndexV2Response as u8);
+                head.put_i32(index_bytes.len() as i32);
+                head.put_i64(resp.request_id);
+                head.put_i32(resp.status_code);
+                head.put_i32(msg_bytes.len() as i32);
+                head.put(msg_bytes);
+                head.put_i64(resp.data_index.data_file_len);
+                head.put_i32(resp.storage_ids.len() as i32);
                 for storage_id in &resp.storage_ids {
-                    write_buf.put_i32(*storage_id as i32);
+                    head.put_i32(*storage_id as i32);
                 }
-
-                stream.write_all(&write_buf.split()).await?;
-
-                // write the all bytes
-                let data = index_bytes.freeze();
-                stream.write_all(&data).await?;
-
-                Ok(())
+                Ok(Some(index_bytes))
             }
             Frame::GetLocalDataIndexResponse(resp) => {
                 debug!("gotten the localfile index response");
-
-                let request_id = resp.request_id;
-                let status_code = resp.status_code;
-
-                let msg = &resp.ret_msg;
-                let msg_bytes = msg.as_bytes();
-
+                let msg_bytes = resp.ret_msg.as_bytes();
                 let index_bytes = &resp.data_index.index_data;
-                let data_file_len = resp.data_index.data_file_len;
-
-                // header
-                write_buf.put_i32(msg_bytes.len() as i32 + 8 + 4 + 4 + 8);
-                write_buf.put_u8(MessageType::GetLocalDataIndexResponse as u8);
-                write_buf.put_i32(index_bytes.len() as i32);
-
-                // partial content with general response info
-                write_buf.put_i64(request_id);
-                write_buf.put_i32(status_code);
-
-                write_buf.put_i32(msg_bytes.len() as i32);
-                write_buf.put(msg_bytes);
-
-                // write the data length
-                write_buf.put_i64(data_file_len);
-
-                stream.write_all(&write_buf.split()).await?;
-                // write the all bytes
-                let data = index_bytes.freeze();
-                stream.write_all(&data).await?;
-
-                Ok(())
+                head.reserve(HEADER_LEN + 24 + msg_bytes.len());
+                head.put_i32(msg_bytes.len() as i32 + 8 + 4 + 4 + 8);
+                head.put_u8(MessageType::GetLocalDataIndexResponse as u8);
+                head.put_i32(index_bytes.len() as i32);
+                head.put_i64(resp.request_id);
+                head.put_i32(resp.status_code);
+                head.put_i32(msg_bytes.len() as i32);
+                head.put(msg_bytes);
+                head.put_i64(resp.data_index.data_file_len);
+                Ok(Some(index_bytes))
             }
             Frame::GetMemoryDataResponse(resp) => {
-                let request_id = resp.request_id;
-                let status_code = resp.status_code;
-
-                let msg = &resp.ret_msg;
-                let msg_bytes = msg.as_bytes();
-
-                let read_result_data = &resp.data;
-                let mem_data = match read_result_data {
+                let mem_data = match &resp.data {
                     Mem(mem_data) => mem_data,
-                    _ => panic!("This should not happen that the result data is not mem type."),
+                    _ => return Err(Error::msg("GetMemoryDataResponse requires mem typed data")),
                 };
-
-                let data_bytes_wrapper = &mem_data.data;
-                let data_bytes_len = data_bytes_wrapper.len() as i32;
-
+                let msg_bytes = resp.ret_msg.as_bytes();
                 let segments = &mem_data.shuffle_data_block_segments;
                 let segments_encode_len = (4 + segments.len() * (3 * 8 + 3 * 4)) as i32;
-
-                // header
-                write_buf.put_i32(msg_bytes.len() as i32 + 8 + 4 + 4 + segments_encode_len);
-                write_buf.put_u8(MessageType::GetMemoryDataResponse as u8);
-                write_buf.put_i32(data_bytes_len);
-
-                // partial content with general response info
-                write_buf.put_i64(request_id);
-                write_buf.put_i32(status_code);
-
-                write_buf.put_i32(msg_bytes.len() as i32);
-                write_buf.put(msg_bytes);
-
-                // write segment
-                write_buf.put_i32(segments.len() as i32);
+                head.reserve(HEADER_LEN + 16 + msg_bytes.len() + segments_encode_len as usize);
+                head.put_i32(msg_bytes.len() as i32 + 8 + 4 + 4 + segments_encode_len);
+                head.put_u8(MessageType::GetMemoryDataResponse as u8);
+                head.put_i32(mem_data.data.len() as i32);
+                head.put_i64(resp.request_id);
+                head.put_i32(resp.status_code);
+                head.put_i32(msg_bytes.len() as i32);
+                head.put(msg_bytes);
+                head.put_i32(segments.len() as i32);
                 for segment in segments {
-                    write_buf.put_i64(segment.block_id);
-                    write_buf.put_i32(segment.offset as i32);
-                    write_buf.put_i32(segment.length);
-                    write_buf.put_i32(segment.uncompress_length);
-                    write_buf.put_i64(segment.crc);
-                    write_buf.put_i64(segment.task_attempt_id);
+                    head.put_i64(segment.block_id);
+                    head.put_i32(segment.offset as i32);
+                    head.put_i32(segment.length);
+                    head.put_i32(segment.uncompress_length);
+                    head.put_i64(segment.crc);
+                    head.put_i64(segment.task_attempt_id);
                 }
-                stream.write_all(&write_buf.split()).await?;
-
-                // data_bytes
-                write_data_bytes(stream, data_bytes_wrapper, write_mode).await?;
-                Ok(())
+                Ok(Some(&mem_data.data))
             }
             Frame::GetMemoryDataV2Response(resp) => {
-                let request_id = resp.request_id;
-                let status_code = resp.status_code;
-
-                let msg = &resp.ret_msg;
-                let msg_bytes = msg.as_bytes();
-
-                let read_result_data = &resp.data;
-                let mem_data = match read_result_data {
+                let mem_data = match &resp.data {
                     Mem(mem_data) => mem_data,
-                    _ => panic!("This should not happen that the result data is not mem type."),
+                    _ => {
+                        return Err(Error::msg(
+                            "GetMemoryDataV2Response requires mem typed data",
+                        ))
+                    }
                 };
-
-                let data_bytes_wrapper = &mem_data.data;
-                let data_bytes_len = data_bytes_wrapper.len() as i32;
-
+                let msg_bytes = resp.ret_msg.as_bytes();
                 let segments = &mem_data.shuffle_data_block_segments;
                 let segments_encode_len = (4 + segments.len() * (3 * 8 + 3 * 4)) as i32;
-
-                // header
-                // compared with v1, only includes the extra bytes to store is_end flag
-                write_buf.put_i32(msg_bytes.len() as i32 + 8 + 4 + 4 + segments_encode_len + 1);
-                write_buf.put_u8(MessageType::GetMemoryDataV2Response as u8);
-                write_buf.put_i32(data_bytes_len);
-
-                // partial content with general response info
-                write_buf.put_i64(request_id);
-                write_buf.put_i32(status_code);
-
-                write_buf.put_i32(msg_bytes.len() as i32);
-                write_buf.put(msg_bytes);
-
-                // write segment
-                write_buf.put_i32(segments.len() as i32);
+                head.reserve(HEADER_LEN + 17 + msg_bytes.len() + segments_encode_len as usize);
+                head.put_i32(msg_bytes.len() as i32 + 8 + 4 + 4 + segments_encode_len + 1);
+                head.put_u8(MessageType::GetMemoryDataV2Response as u8);
+                head.put_i32(mem_data.data.len() as i32);
+                head.put_i64(resp.request_id);
+                head.put_i32(resp.status_code);
+                head.put_i32(msg_bytes.len() as i32);
+                head.put(msg_bytes);
+                head.put_i32(segments.len() as i32);
                 for segment in segments {
-                    write_buf.put_i64(segment.block_id);
-                    write_buf.put_i32(segment.offset as i32);
-                    write_buf.put_i32(segment.length);
-                    write_buf.put_i32(segment.uncompress_length);
-                    write_buf.put_i64(segment.crc);
-                    write_buf.put_i64(segment.task_attempt_id);
+                    head.put_i64(segment.block_id);
+                    head.put_i32(segment.offset as i32);
+                    head.put_i32(segment.length);
+                    head.put_i32(segment.uncompress_length);
+                    head.put_i64(segment.crc);
+                    head.put_i64(segment.task_attempt_id);
                 }
-                // add is_end flag
-                write_buf.put_u8(mem_data.is_end as u8);
-
-                stream.write_all(&write_buf.split()).await?;
-
-                // data_bytes
-                write_data_bytes(stream, data_bytes_wrapper, write_mode).await?;
-
-                Ok(())
+                head.put_u8(mem_data.is_end as u8);
+                Ok(Some(&mem_data.data))
             }
             Frame::RpcResponse(resp) => {
-                let request_id = resp.request_id;
-                let status_code = resp.status_code;
-
-                let msg = &resp.ret_msg;
-                let msg_bytes = msg.as_bytes();
-
-                // header
-                write_buf.put_i32(msg_bytes.len() as i32 + 8 + 4 + 4);
-                write_buf.put_u8(MessageType::RpcResponse as u8);
-                write_buf.put_i32(0);
-
-                // content
-                write_buf.put_i64(request_id);
-                write_buf.put_i32(status_code);
-
-                write_buf.put_i32(msg_bytes.len() as i32);
-                write_buf.put(msg_bytes);
-
-                stream.write_all(&write_buf.split()).await?;
-                Ok(())
+                let msg_bytes = resp.ret_msg.as_bytes();
+                head.reserve(HEADER_LEN + 16 + msg_bytes.len());
+                head.put_i32(msg_bytes.len() as i32 + 8 + 4 + 4);
+                head.put_u8(MessageType::RpcResponse as u8);
+                head.put_i32(0);
+                head.put_i64(resp.request_id);
+                head.put_i32(resp.status_code);
+                head.put_i32(msg_bytes.len() as i32);
+                head.put(msg_bytes);
+                Ok(None)
             }
-            _ => todo!(),
+            other => Err(Error::msg(format!("Cannot encode frame type: {}", other))),
         }
     }
 
@@ -873,7 +781,10 @@ mod test {
     use crate::config::UrpcWriteMode;
     use crate::error::WorkerError;
     use crate::store::DataBytes;
-    use crate::urpc::frame::{get_string, write_composed_bytes, write_data_bytes, Frame};
+    use crate::urpc::command::GetLocalDataResponseCommand;
+    use crate::urpc::frame::{
+        get_string, write_composed_bytes, write_data_bytes, Frame, MessageType,
+    };
     use anyhow::Result;
     use bytes::{Buf, BufMut, Bytes, BytesMut};
     use std::io::Cursor;
@@ -893,6 +804,40 @@ mod test {
     fn get_string_reads_fragmented_buf() -> Result<()> {
         let mut src = Bytes::from_static(b"\0\0\0\x03a").chain(Bytes::from_static(b"bc"));
         assert_eq!("abc", get_string(&mut src)?);
+        Ok(())
+    }
+
+    #[test]
+    fn response_encoding_preserves_wire_layout() -> Result<()> {
+        let chunks = vec![Bytes::from_static(b"first"), Bytes::from_static(b"second")];
+        let frame = Frame::GetLocalDataResponse(GetLocalDataResponseCommand {
+            request_id: 42,
+            status_code: 7,
+            ret_msg: "ok".into(),
+            data: DataBytes::Composed(ComposedBytes::from(chunks.clone(), 11)),
+        });
+
+        let mut encoded = BytesMut::new();
+        let data = frame.encode_head(&mut encoded)?.expect("response payload");
+        match data {
+            DataBytes::Direct(bytes) => encoded.extend_from_slice(bytes),
+            DataBytes::Composed(composed) => {
+                for chunk in composed.iter() {
+                    encoded.extend_from_slice(chunk);
+                }
+            }
+            _ => panic!("expected in-memory payload"),
+        }
+
+        let mut expected = BytesMut::new();
+        expected.put_i32(18);
+        expected.put_u8(MessageType::GetLocalDataResponse as u8);
+        expected.put_i32(11);
+        expected.put_i64(42);
+        expected.put_i32(7);
+        expected.put_i32(2);
+        expected.put_slice(b"okfirstsecond");
+        assert_eq!(expected, encoded);
         Ok(())
     }
 
