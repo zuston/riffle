@@ -1,6 +1,7 @@
 use crate::app_manager::app_configs::AppConfigOptions;
 use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::purge_event::PurgeReason;
+use crate::config::UrpcNetEngine;
 use crate::id_layout::IdLayout;
 use crate::partition_stats::{PartitionStats, TaskToRecordStatRef};
 use crate::store::local::read_options::IoMode;
@@ -132,7 +133,7 @@ pub struct ReadingViewContext {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RpcType {
     GRPC,
-    URPC,
+    URPC(UrpcNetEngine),
 }
 
 impl ReadingViewContext {

@@ -2,6 +2,7 @@
 //! processing logic.
 
 use crate::app_manager::AppManagerRef;
+use crate::config::UrpcNetEngine;
 use crate::runtime::RuntimeRef;
 use crate::store::DataBytes;
 use crate::urpc::command::Command;
@@ -43,7 +44,7 @@ impl FrameHandler for AppCommandBridgeHandler {
         let app_manager = self.app_manager.clone();
         self.runtime.spawn(async move {
             let _tracker = tracker;
-            match command.process(app_manager).await {
+            match command.process(app_manager, UrpcNetEngine::URING).await {
                 Ok(frame) => match materialize_frame_data(frame) {
                     Ok(frame) => {
                         if let Err(e) = remote.respond(&frame) {
