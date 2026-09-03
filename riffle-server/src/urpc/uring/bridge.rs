@@ -3,23 +3,55 @@
 
 use crate::app_manager::AppManagerRef;
 use crate::config::UrpcNetEngine;
-use crate::runtime::RuntimeRef;
 use crate::store::DataBytes;
 use crate::urpc::command::Command;
 use crate::urpc::frame::Frame;
 use crate::urpc::metrics::RequestMetricTracker;
 use crate::urpc::uring::engine::{FrameHandler, Responder};
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 use bytes::Bytes;
+use core_affinity::CoreId;
 use log::error;
+use std::sync::{mpsc, Arc};
+use tokio::runtime::Runtime;
+
+pub(crate) fn create_handler_runtime(core: CoreId) -> Result<Arc<Runtime>> {
+    let (affinity_tx, affinity_rx) = mpsc::sync_channel(1);
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .thread_name(format!("urpc-handler-{}", core.id))
+        .on_thread_start(move || {
+            let _ = affinity_tx.send(core_affinity::set_for_current(core));
+        })
+        .enable_all()
+        .build()
+        .with_context(|| {
+            format!(
+                "failed to create urpc handler runtime on logical CPU {}",
+                core.id
+            )
+        })?;
+
+    if !affinity_rx
+        .recv()
+        .context("urpc handler runtime exited before reporting CPU affinity")?
+    {
+        return Err(anyhow!(
+            "failed to bind urpc handler runtime to logical CPU {}",
+            core.id
+        ));
+    }
+
+    Ok(Arc::new(runtime))
+}
 
 pub struct AppCommandBridgeHandler {
     app_manager: AppManagerRef,
-    runtime: RuntimeRef,
+    runtime: Arc<Runtime>,
 }
 
 impl AppCommandBridgeHandler {
-    pub fn new(app_manager: AppManagerRef, runtime: RuntimeRef) -> Self {
+    pub fn new(app_manager: AppManagerRef, runtime: Arc<Runtime>) -> Self {
         Self {
             app_manager,
             runtime,
@@ -99,5 +131,23 @@ fn materialize_data_bytes(data: DataBytes) -> Result<DataBytes> {
             Ok(DataBytes::Direct(Bytes::from(buf)))
         }
         other => Ok(other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::create_handler_runtime;
+
+    #[test]
+    fn handler_runtime_is_pinned() {
+        let core = core_affinity::get_core_ids()
+            .and_then(|cores| cores.into_iter().next())
+            .expect("at least one logical CPU should be available");
+        let runtime = create_handler_runtime(core).unwrap();
+
+        let allowed_cores = runtime.block_on(runtime.spawn(async {
+            core_affinity::get_core_ids().expect("runtime CPU affinity should be readable")
+        }));
+        assert_eq!(vec![core], allowed_cores.unwrap());
     }
 }

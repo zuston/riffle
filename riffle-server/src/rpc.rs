@@ -56,7 +56,7 @@ pub struct DefaultRpcService;
 impl DefaultRpcService {
     fn _start_urpc(
         config: &Config,
-        runtime_manager: RuntimeManager,
+        _runtime_manager: RuntimeManager,
         tx: Sender<()>,
         app_manager_ref: AppManagerRef,
     ) -> Result<()> {
@@ -70,7 +70,7 @@ impl DefaultRpcService {
         if matches!(net_engine, crate::config::UrpcNetEngine::URING) {
             #[cfg(all(feature = "io-uring", target_os = "linux"))]
             {
-                return Self::_start_urpc_uring(config, runtime_manager, tx, app_manager_ref);
+                return Self::_start_urpc_uring(config, tx, app_manager_ref);
             }
             #[cfg(not(all(feature = "io-uring", target_os = "linux")))]
             log::warn!(
@@ -128,16 +128,17 @@ impl DefaultRpcService {
     }
 
     /// Serves urpc with the pluggable io_uring net engine: per-core engine
-    /// threads own all socket I/O, while the command processing runs on the
-    /// dispatch tokio runtime and completes responses asynchronously.
+    /// threads own all socket I/O, while command processing runs on a
+    /// single-worker tokio runtime pinned to the same logical CPU.
     #[cfg(all(feature = "io-uring", target_os = "linux"))]
     fn _start_urpc_uring(
         config: &Config,
-        runtime_manager: RuntimeManager,
         tx: Sender<()>,
         app_manager_ref: AppManagerRef,
     ) -> Result<()> {
+        use crate::urpc::uring::bridge::create_handler_runtime;
         use crate::urpc::uring::{AppCommandBridgeHandler, UringServerConfig, UringUrpcServer};
+        use anyhow::anyhow;
 
         let urpc_port = config.urpc_port.unwrap();
         let threads = URPC_PARALLELISM.get();
@@ -146,15 +147,27 @@ impl DefaultRpcService {
             urpc_port, threads
         );
 
+        let bound_cores = core_affinity::get_core_ids()
+            .ok_or_else(|| anyhow!("failed to discover logical CPUs for the urpc uring server"))?;
+        if bound_cores.is_empty() {
+            return Err(anyhow!(
+                "no logical CPU is available for the urpc uring server"
+            ));
+        }
+        let bound_cores: Vec<_> = bound_cores.into_iter().take(threads).collect();
+        let handler_runtimes = bound_cores
+            .iter()
+            .map(|core| create_handler_runtime(*core))
+            .collect::<Result<Vec<_>>>()?;
+
         let mut engine_config = UringServerConfig::default();
-        engine_config.bind_cores = core_affinity::get_core_ids()
-            .map(|ids| ids.into_iter().map(|core| core.id as u32).collect());
+        engine_config.bind_cores = Some(bound_cores.iter().map(|core| core.id as u32).collect());
 
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port);
         let app_manager = app_manager_ref.clone();
-        let dispatch_runtime = runtime_manager.dispatch_runtime.clone();
-        let server = UringUrpcServer::start(addr, threads, engine_config, move |_| {
-            AppCommandBridgeHandler::new(app_manager.clone(), dispatch_runtime.clone())
+        let server = UringUrpcServer::start(addr, threads, engine_config, move |engine_index| {
+            let runtime = handler_runtimes[engine_index % handler_runtimes.len()].clone();
+            AppCommandBridgeHandler::new(app_manager.clone(), runtime)
         })?;
 
         let mut rx = tx.subscribe();
