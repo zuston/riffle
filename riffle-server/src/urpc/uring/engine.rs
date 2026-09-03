@@ -1,6 +1,7 @@
 //! A self-contained, completion-driven io_uring network engine for urpc.
 
 use crate::error::WorkerError;
+use crate::metric::{URPC_CONNECTION_NUMBER, URPC_REQUEST_PARSING_LATENCY};
 use crate::store::DataBytes;
 use crate::urpc::frame::{get_i32, get_u8, Frame};
 use anyhow::{anyhow, Context, Result};
@@ -259,6 +260,7 @@ struct Conn {
 
 impl Conn {
     fn new(fd: RawFd, gen: u16, initial_read_buffer_size: usize) -> Self {
+        URPC_CONNECTION_NUMBER.inc();
         Self {
             fd,
             gen,
@@ -282,6 +284,12 @@ impl Conn {
 
     fn has_inflight(&self) -> bool {
         self.recv_inflight || self.send_inflight
+    }
+}
+
+impl Drop for Conn {
+    fn drop(&mut self) {
+        URPC_CONNECTION_NUMBER.dec();
     }
 }
 
@@ -576,8 +584,12 @@ impl<H: FrameHandler> UringEngine<H> {
             }
             conn.pending_frame_len = None;
 
+            let timer = std::time::Instant::now();
             let frame_bytes = conn.read_buf.split_to(total).freeze();
             let frame = Frame::parse(frame_bytes)?;
+            URPC_REQUEST_PARSING_LATENCY
+                .with_label_values(&[&frame.to_string()])
+                .observe(timer.elapsed().as_secs_f64());
 
             let mut responder = Responder {
                 token: pack_token(KIND_REMOTE, conn.gen, slot),
@@ -811,6 +823,7 @@ fn build_reuseport_listener(addr: SocketAddr) -> Result<TcpListener> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metric::URPC_REQUEST_PARSING_LATENCY;
     use crate::urpc::command::RpcResponseCommand;
     use crate::urpc::frame::MessageType;
     use bytes::BufMut;
@@ -927,6 +940,25 @@ mod tests {
 
         drop(stream);
         server.shutdown();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn records_parsing_latency_metric() -> anyhow::Result<()> {
+        let parsing = URPC_REQUEST_PARSING_LATENCY.with_label_values(&["SendShuffleData"]);
+        let parsing_count = parsing.get_sample_count();
+
+        let server = start_echo_server();
+        let mut stream = TcpStream::connect(server.local_addr()).await?;
+        stream
+            .write_all(&build_send_shuffle_data_frame(1, &[1u8; 128]))
+            .await?;
+        read_rpc_response(&mut stream).await?;
+
+        drop(stream);
+        server.shutdown();
+
+        assert!(parsing.get_sample_count() > parsing_count);
         Ok(())
     }
 
