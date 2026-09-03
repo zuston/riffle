@@ -20,7 +20,7 @@ use crate::app_manager::request_context::{
     PurgeDataContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
     RegisterAppContext, ReleaseTicketContext, RequireBufferContext, RpcType, WritingViewContext,
 };
-use crate::config::{LocalfileStoreConfig, StorageType};
+use crate::config::{LocalfileStoreConfig, StorageType, UrpcNetEngine};
 use crate::error::WorkerError;
 use crate::metric::{
     GAUGE_LOCAL_DISK_SERVICE_USED, LCOALFILE_GET_DATA_RPC_LATENCY_HISTOGRAM_WITH_DATA_BYTES,
@@ -496,7 +496,7 @@ impl Store for LocalFileStore {
 
                 // determine to use which io_mode. having the following limitations
                 // 1. io_mode==DIRECT_IO, this is only valid when append use the direct_io mode!
-                // 2. sendfile + splice are only valid in urpc
+                // 2. sendfile + splice are only valid with the tokio urpc transport
                 let io_mode = if matches!(io_mode, IoMode::DIRECT_IO) {
                     if !self.direct_io_append_enable {
                         debug!("Fallback DIRECT_IO to BUFFER_IO due to append mode mismatch");
@@ -505,9 +505,10 @@ impl Store for LocalFileStore {
                         io_mode
                     }
                 } else {
-                    if matches!(rpc_source, RpcType::URPC) {
+                    if matches!(rpc_source, RpcType::URPC(UrpcNetEngine::TOKIO)) {
                         io_mode
                     } else {
+                        // todo: support sendfile/splice for urpc uring mechanism
                         io_mode.fallback(vec![IoMode::SPLICE, IoMode::SENDFILE], IoMode::BUFFER_IO)
                     }
                 };
@@ -705,13 +706,13 @@ mod test {
     use crate::app_manager::application_identifier::ApplicationId;
     use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::purge_event::PurgeReason;
-    use crate::config::LocalfileStoreConfig;
+    use crate::config::{LocalfileStoreConfig, UrpcNetEngine};
     use crate::error::WorkerError;
     use crate::runtime::manager::RuntimeManager;
     use crate::store::index_codec::{IndexBlock, IndexCodec, INDEX_BLOCK_SIZE};
     use crate::store::local::read_options::IoMode;
     use crate::store::local::LocalDiskStorage;
-    use crate::store::{Block, ResponseData, ResponseDataIndex, Store};
+    use crate::store::{Block, DataBytes, ResponseData, ResponseDataIndex, Store};
     use bytes::{Buf, Bytes, BytesMut};
     use log::{error, info};
 
@@ -742,6 +743,28 @@ mod test {
         );
 
         writing_ctx
+    }
+
+    #[test]
+    fn uring_urpc_disables_sendfile() -> anyhow::Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let local_store = LocalFileStore::new(vec![temp_dir.path().display().to_string()]);
+        let runtime = local_store.runtime_manager.clone();
+        let writing_ctx = create_writing_ctx();
+        let uid = writing_ctx.uid.clone();
+        let data_size = writing_ctx.data_size as i64;
+
+        runtime.wait(local_store.insert(writing_ctx))?;
+        let reading_ctx = ReadingViewContext::new(
+            uid,
+            ReadingOptions::FILE_OFFSET_AND_LEN(0, data_size),
+            RpcType::URPC(UrpcNetEngine::URING),
+        )
+        .with_io_mode(IoMode::SENDFILE);
+
+        let data = runtime.wait(local_store.get(reading_ctx))?.from_local();
+        assert!(matches!(data, DataBytes::Direct(_)));
+        Ok(())
     }
 
     #[test]

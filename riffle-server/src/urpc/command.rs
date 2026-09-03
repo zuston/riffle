@@ -5,7 +5,7 @@ use crate::app_manager::request_context::{
     ReadingIndexViewContext, ReadingOptions, ReadingViewContext, RpcType, WritingViewContext,
 };
 use crate::app_manager::AppManagerRef;
-use crate::config::RpcVersion;
+use crate::config::{RpcVersion, UrpcNetEngine};
 use crate::constant::StatusCode;
 use crate::metric::{
     RPC_BATCH_BYTES_OPERATION, RPC_BATCH_DATA_BYTES_HISTOGRAM, URPC_SEND_DATA_TRANSPORT_TIME,
@@ -51,7 +51,11 @@ impl Command {
     /// Computes the response frame of this command. This is the net-engine
     /// agnostic part shared by the default tokio server and the io_uring
     /// engine bridge.
-    pub async fn process(self, app_manager_ref: AppManagerRef) -> Result<Frame> {
+    pub async fn process(
+        self,
+        app_manager_ref: AppManagerRef,
+        urpc_engine: UrpcNetEngine,
+    ) -> Result<Frame> {
         match self {
             Command::Send(req) => {
                 req.process(app_manager_ref)
@@ -59,7 +63,7 @@ impl Command {
                     .await
             }
             Command::GetMem(req) => {
-                req.process(app_manager_ref)
+                req.process(app_manager_ref, urpc_engine)
                     .instrument_await("applying the command of [GetMemory]")
                     .await
             }
@@ -69,17 +73,17 @@ impl Command {
                     .await
             }
             Command::GetLocalData(req) => {
-                req.process(app_manager_ref)
+                req.process(app_manager_ref, urpc_engine)
                     .instrument_await("applying the command of [GetLocalData]")
                     .await
             }
             Command::GetLocalDataV2(req) => {
-                req.process(app_manager_ref)
+                req.process(app_manager_ref, urpc_engine)
                     .instrument_await("applying the command of [GetLocalDataV2]")
                     .await
             }
             Command::GetLocalDataV3(req) => {
-                req.process(app_manager_ref)
+                req.process(app_manager_ref, urpc_engine)
                     .instrument_await("applying the command of [GetLocalDataV3]")
                     .await
             }
@@ -92,7 +96,7 @@ impl Command {
         conn: &mut Connection,
         _shutdown: &mut Shutdown,
     ) -> Result<()> {
-        let frame = self.process(app_manager_ref).await?;
+        let frame = self.process(app_manager_ref, UrpcNetEngine::TOKIO).await?;
         conn.write_frame(&frame)
             .instrument_await("writing the response...")
             .await?;
@@ -113,7 +117,11 @@ pub struct GetMemoryDataRequestCommand {
 }
 
 impl GetMemoryDataRequestCommand {
-    pub(crate) async fn process(&self, app_manager_ref: AppManagerRef) -> Result<Frame> {
+    pub(crate) async fn process(
+        &self,
+        app_manager_ref: AppManagerRef,
+        urpc_engine: UrpcNetEngine,
+    ) -> Result<Frame> {
         let timer = Instant::now();
 
         let request_id = self.request_id;
@@ -142,7 +150,7 @@ impl GetMemoryDataRequestCommand {
                 last_block_id,
                 read_buffer_size as i64,
             ),
-            RpcType::URPC,
+            RpcType::URPC(urpc_engine),
         );
         let ctx = match &self.expected_tasks_bitmap_raw {
             Some(raw) => {
@@ -274,7 +282,11 @@ pub struct ReadSegment {
 }
 
 impl GetLocalDataRequestV2Command {
-    pub(crate) async fn process(&self, app_manager_ref: AppManagerRef) -> Result<Frame> {
+    pub(crate) async fn process(
+        &self,
+        app_manager_ref: AppManagerRef,
+        urpc_engine: UrpcNetEngine,
+    ) -> Result<Frame> {
         let timer = Instant::now();
 
         let request_id = self.request_id;
@@ -303,7 +315,7 @@ impl GetLocalDataRequestV2Command {
         let ctx = ReadingViewContext::new(
             uid,
             ReadingOptions::FILE_OFFSET_AND_LEN(offset, length as i64),
-            RpcType::URPC,
+            RpcType::URPC(urpc_engine),
         );
         let mut len = 0;
         let read_timer = Instant::now();
@@ -353,7 +365,11 @@ impl GetLocalDataRequestV2Command {
 }
 
 impl GetLocalDataRequestV3Command {
-    pub(crate) async fn process(&self, app_manager_ref: AppManagerRef) -> Result<Frame> {
+    pub(crate) async fn process(
+        &self,
+        app_manager_ref: AppManagerRef,
+        urpc_engine: UrpcNetEngine,
+    ) -> Result<Frame> {
         let timer = Instant::now();
 
         let request_id = self.request_id;
@@ -382,7 +398,7 @@ impl GetLocalDataRequestV3Command {
         let ctx = ReadingViewContext::new(
             uid,
             ReadingOptions::FILE_OFFSET_AND_LEN(offset, length as i64),
-            RpcType::URPC,
+            RpcType::URPC(urpc_engine),
         )
         .with_localfile_next_read_segments(self.next_read_segments.clone())
         .with_task_id(self.task_id);
@@ -431,7 +447,11 @@ impl GetLocalDataRequestV3Command {
 }
 
 impl GetLocalDataRequestCommand {
-    pub(crate) async fn process(&self, app_manager_ref: AppManagerRef) -> Result<Frame> {
+    pub(crate) async fn process(
+        &self,
+        app_manager_ref: AppManagerRef,
+        urpc_engine: UrpcNetEngine,
+    ) -> Result<Frame> {
         let timer = Instant::now();
 
         let request_id = self.request_id;
@@ -458,7 +478,7 @@ impl GetLocalDataRequestCommand {
         let ctx = ReadingViewContext::new(
             uid,
             ReadingOptions::FILE_OFFSET_AND_LEN(offset, length as i64),
-            RpcType::URPC,
+            RpcType::URPC(urpc_engine),
         );
         let mut len = 0;
         let command = match app
