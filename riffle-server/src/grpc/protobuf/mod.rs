@@ -15,5 +15,4 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#[rustfmt::skip]
-pub mod uniffle;
+pub use riffle_proto::uniffle;
