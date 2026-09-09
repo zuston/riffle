@@ -290,6 +290,24 @@ struct UringIoEngineShard {
 }
 
 impl UringIoEngineShard {
+    fn submit(&self) {
+        let inflight = self.read_inflight + self.write_inflight;
+        if inflight == 0 {
+            return;
+        }
+
+        // At capacity, a completion must free a slot before we can accept more work.
+        // Below capacity, new channel requests cannot wake a completion wait.
+        let wait_for = usize::from(inflight >= self.io_depth);
+        loop {
+            match self.uring.submit_and_wait(wait_for) {
+                Ok(_) => break,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => panic!("io_uring submission failed: {error}"),
+            }
+        }
+    }
+
     fn run(mut self) {
         loop {
             'prepare: loop {
@@ -373,9 +391,7 @@ impl UringIoEngineShard {
                 unsafe { self.uring.submission().push(&sqe).unwrap() }
             }
 
-            if self.read_inflight + self.write_inflight > 0 {
-                self.uring.submit().unwrap();
-            }
+            self.submit();
 
             for cqe in self.uring.completion() {
                 let data = cqe.user_data();
@@ -824,6 +840,62 @@ pub mod tests {
     use std::io::Read;
     use std::io::Seek;
     use std::os::fd::FromRawFd;
+
+    #[test]
+    fn test_submission_waits_only_at_capacity() -> anyhow::Result<()> {
+        use super::UringIoEngineShard;
+        use io_uring::{opcode, types::Fd, IoUring};
+        use std::io::Write;
+        use std::os::fd::AsRawFd;
+        use std::os::unix::net::UnixStream;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let (reader, mut writer) = UnixStream::pair()?;
+        let (_read_tx, read_rx) = mpsc::sync_channel(1);
+        let (_write_tx, write_rx) = mpsc::sync_channel(1);
+        let mut shard = UringIoEngineShard {
+            read_rx,
+            write_rx,
+            weight: 1.0,
+            uring: IoUring::new(2)?,
+            io_depth: 2,
+            read_inflight: 1,
+            write_inflight: 0,
+        };
+        // The peer controls completion, independently of disk speed or page cache state.
+        let entry = opcode::PollAdd::new(Fd(reader.as_raw_fd()), libc::POLLIN as u32)
+            .build()
+            .user_data(1);
+        unsafe { shard.uring.submission().push(&entry).unwrap() };
+
+        let (submitted_tx, submitted_rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            shard.submit();
+            submitted_tx.send(()).unwrap();
+            shard.io_depth = 1;
+            shard.submit();
+            submitted_tx.send(()).unwrap();
+            let mut completions = shard.uring.completion();
+            completions
+                .next()
+                .map(|cqe| (cqe.user_data(), cqe.result()))
+        });
+
+        let below_capacity = submitted_rx.recv_timeout(Duration::from_secs(2));
+        let at_capacity = submitted_rx.recv_timeout(Duration::from_millis(100));
+        // Unblock the worker before asserting, including when submission regresses.
+        writer.write_all(b"x")?;
+        let completion = worker.join().unwrap();
+
+        assert!(below_capacity.is_ok(), "submission blocked below capacity");
+        assert_eq!(at_capacity, Err(mpsc::RecvTimeoutError::Timeout));
+        let (user_data, result) = completion.expect("completion must be available after waiting");
+        assert_eq!(user_data, 1);
+        assert!(result >= 0, "poll failed: {result}");
+        assert_eq!(result & i32::from(libc::POLLIN), i32::from(libc::POLLIN));
+        Ok(())
+    }
 
     #[test]
     fn test_uring_write_read() -> anyhow::Result<()> {
