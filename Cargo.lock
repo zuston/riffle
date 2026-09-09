@@ -5065,7 +5065,7 @@ dependencies = [
 
 [[package]]
 name = "riffle-coordinator"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "boa_engine",
  "chrono",
@@ -5087,7 +5087,7 @@ dependencies = [
 
 [[package]]
 name = "riffle-ctl"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5118,7 +5118,7 @@ dependencies = [
 
 [[package]]
 name = "riffle-server"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "allocator-api2",
  "anyhow",
