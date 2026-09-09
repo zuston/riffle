@@ -20,11 +20,14 @@ use once_cell::sync::Lazy;
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::num::NonZeroUsize;
+use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::{Receiver, Sender};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Server;
+
+pub(crate) const TCP_KEEPALIVE_IDLE: Duration = Duration::from_secs(5 * 60);
 
 pub static GRPC_PARALLELISM: Lazy<NonZeroUsize> = Lazy::new(|| {
     let available_cores = std::thread::available_parallelism().unwrap();
@@ -367,6 +370,7 @@ async fn grpc_serve(
     Server::builder()
         .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
         .initial_stream_window_size(STREAM_WINDOW_SIZE)
+        .tcp_keepalive(Some(TCP_KEEPALIVE_IDLE))
         .tcp_nodelay(true)
         .layer(TracingMiddleWareLayer::new())
         .layer(MetricsMiddlewareLayer::new(GRPC_LATENCY_TIME_SEC.clone()))

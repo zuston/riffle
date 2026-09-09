@@ -2,6 +2,7 @@
 
 use crate::error::WorkerError;
 use crate::metric::{URPC_CONNECTION_NUMBER, URPC_REQUEST_PARSING_LATENCY};
+use crate::rpc::TCP_KEEPALIVE_IDLE;
 use crate::store::DataBytes;
 use crate::urpc::frame::{get_i32, get_u8, Frame};
 use anyhow::{anyhow, Context, Result};
@@ -493,6 +494,7 @@ impl<H: FrameHandler> UringEngine<H> {
 
         unsafe {
             let one: libc::c_int = 1;
+            let keepalive_idle_secs = TCP_KEEPALIVE_IDLE.as_secs() as libc::c_int;
             libc::setsockopt(
                 fd,
                 libc::IPPROTO_TCP,
@@ -505,6 +507,13 @@ impl<H: FrameHandler> UringEngine<H> {
                 libc::SOL_SOCKET,
                 libc::SO_KEEPALIVE,
                 &one as *const _ as *const libc::c_void,
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            );
+            libc::setsockopt(
+                fd,
+                libc::IPPROTO_TCP,
+                libc::TCP_KEEPIDLE,
+                &keepalive_idle_secs as *const _ as *const libc::c_void,
                 std::mem::size_of::<libc::c_int>() as libc::socklen_t,
             );
         }
