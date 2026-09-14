@@ -575,6 +575,8 @@ pub(crate) mod test {
                 capacity: "20B".to_string(),
                 buffer_ticket_timeout_sec: 1,
                 buffer_ticket_check_interval_sec: 1,
+                allocated_buffer_high_watermark_duration_sec: None,
+                allocated_buffer_high_watermark_ratio: 0.5,
                 buffer_type: Default::default(),
             }),
         );

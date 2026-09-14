@@ -69,7 +69,7 @@ unsafe impl<B: MemoryBuffer + Send + Sync> Sync for MemoryStore<B> {}
 impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
     // only for test cases
     pub fn new(max_memory_size: i64) -> Self {
-        let budget = MemoryBudget::new(max_memory_size);
+        let budget = MemoryBudget::new(max_memory_size, None, 0.5);
         let runtime_manager: RuntimeManager = Default::default();
 
         let budget_clone = budget.clone();
@@ -91,7 +91,11 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
 
     pub fn from(conf: MemoryStoreConfig, runtime_manager: RuntimeManager) -> Self {
         let capacity = ByteSize::from_str(&conf.capacity).unwrap();
-        let budget = MemoryBudget::new(capacity.as_u64() as i64);
+        let budget = MemoryBudget::new(
+            capacity.as_u64() as i64,
+            conf.allocated_buffer_high_watermark_duration_sec,
+            conf.allocated_buffer_high_watermark_ratio,
+        );
 
         let budget_clone = budget.clone();
         let release_allocated_func =
@@ -351,7 +355,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
 
     #[trace]
     async fn is_healthy(&self) -> Result<bool> {
-        Ok(true)
+        Ok(self.budget.is_healthy())
     }
 
     #[trace]
