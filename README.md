@@ -150,6 +150,13 @@ tags = ["GRPC", "ss_v5", "GRPC_NETTY"]
 capacity = "1G"
 buffer_ticket_timeout_sec = 300
 buffer_ticket_check_interval_sec = 10
+# Optional: latch unhealthy when allocated buffer stays above 50% of memory
+# capacity for more than 60 seconds. Omit the duration to disable this check.
+# Falling to or below the ratio resets the timer before unhealthy is latched.
+# The duration must be positive and the ratio must be in (0, 1).
+# Restart after repair to clear the unhealthy latch.
+# allocated_buffer_high_watermark_duration_sec = 60
+# allocated_buffer_high_watermark_ratio = 0.5
 dashmap_shard_amount = 128
 
 [localfile_store]

@@ -33,6 +33,11 @@ pub struct MemoryStoreConfig {
     #[serde(default = "as_default_buffer_ticket_timeout_check_interval_sec")]
     pub buffer_ticket_check_interval_sec: i64,
 
+    // Disabled when omitted. Allocated memory must stay above the ratio for this duration.
+    pub allocated_buffer_high_watermark_duration_sec: Option<u64>,
+    #[serde(default = "as_default_allocated_buffer_high_watermark_ratio")]
+    pub allocated_buffer_high_watermark_ratio: f64,
+
     #[serde(default = "as_default_buffer_type")]
     pub buffer_type: BufferType,
 }
@@ -49,12 +54,19 @@ fn as_default_buffer_ticket_timeout_sec() -> i64 {
     5 * 60
 }
 
+fn as_default_allocated_buffer_high_watermark_ratio() -> f64 {
+    0.5
+}
+
 impl MemoryStoreConfig {
     pub fn new(capacity: String) -> Self {
         Self {
             capacity,
             buffer_ticket_timeout_sec: as_default_buffer_ticket_timeout_sec(),
             buffer_ticket_check_interval_sec: as_default_buffer_ticket_timeout_check_interval_sec(),
+            allocated_buffer_high_watermark_duration_sec: None,
+            allocated_buffer_high_watermark_ratio: as_default_allocated_buffer_high_watermark_ratio(
+            ),
             buffer_type: BufferType::DEFAULT,
         }
     }
@@ -64,6 +76,9 @@ impl MemoryStoreConfig {
             capacity,
             buffer_ticket_timeout_sec,
             buffer_ticket_check_interval_sec: as_default_buffer_ticket_timeout_check_interval_sec(),
+            allocated_buffer_high_watermark_duration_sec: None,
+            allocated_buffer_high_watermark_ratio: as_default_allocated_buffer_high_watermark_ratio(
+            ),
             buffer_type: BufferType::DEFAULT,
         }
     }

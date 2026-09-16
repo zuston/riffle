@@ -207,6 +207,9 @@ impl HealthService {
 
 #[cfg(test)]
 mod tests {
+    use crate::app_manager::application_identifier::ApplicationId;
+    use crate::app_manager::partition_identifier::PartitionUId;
+    use crate::app_manager::request_context::RequireBufferContext;
     use crate::app_manager::test::mock_config;
     use crate::app_manager::AppManager;
     use crate::config_reconfigure::ReconfigurableConfManager;
@@ -215,8 +218,46 @@ mod tests {
     use crate::health_service::HealthService;
     use crate::runtime::manager::RuntimeManager;
     use crate::storage::StorageService;
+    use crate::store::Store;
     use std::sync::atomic::Ordering::SeqCst;
     use std::time::Duration;
+
+    #[tokio::test]
+    async fn test_allocated_buffer_high_watermark_propagates_to_service_health(
+    ) -> anyhow::Result<()> {
+        let mut config = mock_config();
+        config.store_type = crate::config::StorageType::MEMORY;
+        let memory = config.memory_store.as_mut().unwrap();
+        memory.allocated_buffer_high_watermark_duration_sec = Some(1);
+        memory.buffer_ticket_timeout_sec = 2;
+        memory.buffer_ticket_check_interval_sec = 1;
+        let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
+        let runtime_manager = RuntimeManager::default();
+        let storage = StorageService::init(&runtime_manager, &config, &reconf_manager);
+        let app_manager =
+            AppManager::get_ref(runtime_manager, config.clone(), &storage, &reconf_manager);
+        let health = HealthService::new(&app_manager, &storage, &config.health_service_config);
+        assert!(health.is_healthy().await?);
+        storage
+            .require_buffer(RequireBufferContext::create_for_test(
+                PartitionUId::new(&ApplicationId::mock(), 0, 0),
+                600_000,
+            ))
+            .await?;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while health.is_healthy().await.unwrap() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            while storage.mem_snapshot().unwrap().allocated() > 0 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await?;
+        assert!(!health.is_healthy().await?);
+        assert!(!storage.is_healthy().await?);
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_stable_memory_used() -> anyhow::Result<()> {
