@@ -5,12 +5,14 @@ use crate::config::UrpcNetEngine;
 use crate::id_layout::IdLayout;
 use crate::partition_stats::{PartitionStats, TaskToRecordStatRef};
 use crate::store::local::read_options::IoMode;
+use crate::store::mem::buffer::MemBlockBatch;
 use crate::store::Block;
 use crate::urpc::command::ReadSegment;
 use bytes::Bytes;
 use croaring::Treemap;
 use std::collections::HashMap;
 use std::ops::Deref;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct PurgeDataContext {
@@ -72,9 +74,29 @@ pub struct ShuffleResult {
 }
 
 #[derive(Debug, Clone)]
+pub enum WritingData {
+    Owned(Vec<Block>),
+    Shared(Arc<MemBlockBatch>),
+}
+
+impl WritingData {
+    pub(crate) fn as_persistent_blocks(&self) -> Vec<&Block> {
+        match self {
+            Self::Owned(blocks) => blocks.iter().collect(),
+            Self::Shared(batches) => {
+                let mut blocks: Vec<&Block> = batches.iter().flatten().collect();
+                // Group spilled blocks by task for AQE without changing the shared batches.
+                blocks.sort_by_key(|block| block.task_attempt_id);
+                blocks
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct WritingViewContext {
     pub uid: PartitionUId,
-    pub data_blocks: Vec<Block>,
+    pub data_blocks: WritingData,
     pub data_size: u64,
 }
 
@@ -83,7 +105,7 @@ impl WritingViewContext {
     pub fn create_for_test(uid: PartitionUId, data_blocks: Vec<Block>) -> Self {
         WritingViewContext {
             uid,
-            data_blocks,
+            data_blocks: WritingData::Owned(data_blocks),
             data_size: 0,
         }
     }
@@ -92,7 +114,7 @@ impl WritingViewContext {
     pub fn new_with_size(uid: PartitionUId, data_blocks: Vec<Block>, data_size: u64) -> Self {
         WritingViewContext {
             uid,
-            data_blocks,
+            data_blocks: WritingData::Owned(data_blocks),
             data_size,
         }
     }
@@ -101,7 +123,7 @@ impl WritingViewContext {
         let len: u64 = data_blocks.iter().map(|block| block.length).sum::<i32>() as u64;
         WritingViewContext {
             uid,
-            data_blocks,
+            data_blocks: WritingData::Owned(data_blocks),
             data_size: len,
         }
     }

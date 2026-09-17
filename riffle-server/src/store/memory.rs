@@ -18,7 +18,7 @@
 use crate::app_manager::request_context::ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE;
 use crate::app_manager::request_context::{
     PurgeDataContext, ReadingIndexViewContext, ReadingViewContext, RegisterAppContext,
-    ReleaseTicketContext, RequireBufferContext, WritingViewContext,
+    ReleaseTicketContext, RequireBufferContext, WritingData, WritingViewContext,
 };
 use crate::config::{MemoryStoreConfig, StorageType};
 use crate::error::WorkerError;
@@ -42,7 +42,6 @@ use crate::store::mem::buffer::{BufferOptions, BufferType, MemoryBuffer};
 use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::mem::ticket::TicketManager;
 use crate::store::mem::tracking::BufferSizeTracking;
-use crate::store::spill::SpillWritingViewContext;
 use anyhow::anyhow;
 use anyhow::Result;
 use bytesize::ByteSize;
@@ -276,8 +275,9 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
     #[trace]
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
         let uid = ctx.uid;
-        let blocks = ctx.data_blocks;
-        let size = ctx.data_size;
+        let WritingData::Owned(blocks) = ctx.data_blocks else {
+            return Err(anyhow!("Memory store only accepts owned writing data").into());
+        };
 
         let buffer = self.get_or_create_buffer(uid.clone());
         buffer.append(blocks, ctx.data_size)?;
@@ -400,10 +400,6 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
         StorageType::MEMORY
     }
 
-    async fn spill_insert(&self, _ctx: SpillWritingViewContext) -> Result<(), WorkerError> {
-        todo!()
-    }
-
     async fn pre_check(&self) -> Result<(), WorkerError> {
         Ok(())
     }
@@ -429,7 +425,7 @@ impl From<(i64, i64, i64)> for MemorySnapshot {
 mod test {
     use crate::app_manager::request_context::{
         PurgeDataContext, ReadingOptions, ReadingViewContext, RequireBufferContext, RpcType,
-        WritingViewContext,
+        WritingData, WritingViewContext,
     };
 
     use crate::config::MemoryStoreConfig;
@@ -452,6 +448,19 @@ mod test {
     use crate::store::mem::buffer::MemoryBuffer;
     use anyhow::Result;
     use croaring::Treemap;
+
+    #[test]
+    fn insert_rejects_shared_batches_without_creating_a_buffer() {
+        let store: MemoryStore = MemoryStore::new(1024);
+        let ctx = WritingViewContext {
+            uid: Default::default(),
+            data_blocks: WritingData::Shared(Arc::new(Default::default())),
+            data_size: 0,
+        };
+
+        assert!(store.runtime_manager.wait(store.insert(ctx)).is_err());
+        assert!(store.state.is_empty());
+    }
 
     fn run_test_read_buffer_in_flight<B: MemoryBuffer + Send + Sync + 'static>() {
         let store: MemoryStore<B> = MemoryStore::new(1024);

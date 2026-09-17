@@ -58,7 +58,6 @@ use crate::store::local::delegator::LocalDiskDelegator;
 use crate::store::local::options::{CreateOptions, WriteOptions};
 use crate::store::local::read_options::{AheadOptions, IoMode, ReadOptions, ReadRange};
 use crate::store::local::{LocalDiskStorage, LocalIO, LocalfileStoreStat};
-use crate::store::spill::SpillWritingViewContext;
 use crate::util;
 use crate::util::get_crc;
 use dashmap::mapref::entry::Entry;
@@ -444,13 +443,14 @@ impl Store for LocalFileStore {
     }
 
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
-        if ctx.data_blocks.len() <= 0 {
+        let blocks = ctx.data_blocks.as_persistent_blocks();
+        if blocks.is_empty() {
             return Ok(());
         }
 
-        let uid = ctx.uid;
-        let blocks: Vec<&Block> = ctx.data_blocks.iter().collect();
-        self.data_insert(uid, blocks).await
+        self.data_insert(ctx.uid, blocks)
+            .instrument_await("data insert")
+            .await
     }
 
     async fn get(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
@@ -671,22 +671,6 @@ impl Store for LocalFileStore {
         StorageType::LOCALFILE
     }
 
-    async fn spill_insert(&self, ctx: SpillWritingViewContext) -> Result<(), WorkerError> {
-        let uid = ctx.uid;
-        let mut data = vec![];
-        let batch_memory_block = ctx.data_blocks;
-        for blocks in batch_memory_block.iter() {
-            for block in blocks {
-                data.push(block);
-            }
-        }
-        // for AQE
-        data.sort_by_key(|block| block.task_attempt_id);
-        self.data_insert(uid, data)
-            .instrument_await("data insert")
-            .await
-    }
-
     async fn pre_check(&self) -> Result<(), WorkerError> {
         // todo: check the localfile permission
         Ok(())
@@ -696,10 +680,11 @@ impl Store for LocalFileStore {
 #[cfg(test)]
 mod test {
     use std::path::Path;
+    use std::sync::Arc;
 
     use crate::app_manager::request_context::{
         PurgeDataContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext, RpcType,
-        WritingViewContext,
+        WritingData, WritingViewContext,
     };
     use crate::store::localfile::LocalFileStore;
 
@@ -712,9 +697,75 @@ mod test {
     use crate::store::index_codec::{IndexBlock, IndexCodec, INDEX_BLOCK_SIZE};
     use crate::store::local::read_options::IoMode;
     use crate::store::local::LocalDiskStorage;
+    use crate::store::mem::buffer::MemBlockBatch;
     use crate::store::{Block, DataBytes, ResponseData, ResponseDataIndex, Store};
     use bytes::{Buf, Bytes, BytesMut};
     use log::{error, info};
+
+    #[test]
+    fn insert_preserves_owned_order_and_sorts_shared_batches() -> anyhow::Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let store = LocalFileStore::new(vec![temp_dir.path().display().to_string()]);
+        let runtime = store.runtime_manager.clone();
+        let uid = PartitionUId::new(&Default::default(), 0, 0);
+        let block = |block_id, task_attempt_id| Block {
+            block_id,
+            task_attempt_id,
+            length: 1,
+            uncompress_length: 1,
+            crc: 0,
+            data: Bytes::from(vec![block_id as u8]),
+        };
+
+        runtime.wait(store.insert(WritingViewContext::new(
+            uid.clone(),
+            vec![block(9, 3), block(8, 1)],
+        )))?;
+
+        let batches = Arc::new(MemBlockBatch(vec![
+            vec![block(3, 2), block(1, 1)],
+            vec![block(2, 1)],
+        ]));
+        let ctx = WritingViewContext {
+            uid: uid.clone(),
+            data_blocks: WritingData::Shared(batches.clone()),
+            data_size: 3,
+        };
+        let cloned_ctx = ctx.clone();
+        let WritingData::Shared(cloned_batches) = &cloned_ctx.data_blocks else {
+            panic!("expected shared batches");
+        };
+        assert!(Arc::ptr_eq(&batches, cloned_batches));
+        runtime.wait(store.insert(cloned_ctx))?;
+        assert_eq!(3, batches[0][0].block_id);
+
+        let ResponseDataIndex::Local(index) =
+            runtime.wait(store.get_index(ReadingIndexViewContext {
+                partition_id: uid.clone(),
+            }))?;
+        assert_eq!(5, index.data_file_len);
+        let mut index_bytes = index.index_data.freeze();
+        assert_eq!(5 * INDEX_BLOCK_SIZE, index_bytes.len());
+        for (offset, (block_id, task_id)) in [(9, 3), (8, 1), (1, 1), (2, 1), (3, 2)]
+            .into_iter()
+            .enumerate()
+        {
+            let entry = IndexCodec::decode(index_bytes.split_to(INDEX_BLOCK_SIZE))?;
+            assert_eq!(block_id, entry.block_id);
+            assert_eq!(task_id, entry.task_attempt_id);
+            assert_eq!(offset as i64, entry.offset);
+            assert_eq!(1, entry.length);
+        }
+        let data = runtime
+            .wait(store.get(ReadingViewContext::new(
+                uid,
+                ReadingOptions::FILE_OFFSET_AND_LEN(0, 5),
+                RpcType::GRPC,
+            )))?
+            .from_local();
+        assert_eq!(&[9, 8, 1, 2, 3], data.freeze().as_ref());
+        Ok(())
+    }
 
     fn create_writing_ctx() -> WritingViewContext {
         let uid = PartitionUId::new(&Default::default(), 0, 0);
