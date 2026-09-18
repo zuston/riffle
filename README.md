@@ -2,8 +2,13 @@
 
 A high-performance, fully compatible implementation of the [Apache Uniffle](https://github.com/apache/uniffle) shuffle server.
 
-> This project is production-ready and has been extensively deployed to support iQIYI’s hyperscale Spark workloads, 
-> handling nearly **10 petabytes** of data daily at a throughput of __500 gigabytes per second__.
+> This project is **production-ready** and has been extensively deployed to support iQIYI’s hyperscale Spark workloads,
+> handling nearly **16 petabytes** of data daily at a throughput of __580+ gigabytes per second__.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/throughput-dark.jpg">
+  <img src="./assets/throughput-light.jpg" alt="Riffle production RPC throughput: read, write, and total in GB/s" width="100%">
+</picture>
 
 <details>
 
