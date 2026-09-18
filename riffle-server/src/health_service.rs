@@ -209,7 +209,7 @@ impl HealthService {
 mod tests {
     use crate::app_manager::application_identifier::ApplicationId;
     use crate::app_manager::partition_identifier::PartitionUId;
-    use crate::app_manager::request_context::RequireBufferContext;
+    use crate::app_manager::request_context::AcquireTicketContext;
     use crate::app_manager::test::mock_config;
     use crate::app_manager::AppManager;
     use crate::config_reconfigure::ReconfigurableConfManager;
@@ -233,13 +233,13 @@ mod tests {
         memory.buffer_ticket_check_interval_sec = 1;
         let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
         let runtime_manager = RuntimeManager::default();
-        let storage = StorageService::init(&runtime_manager, &config, &reconf_manager);
+        let storage = StorageService::init(&runtime_manager, &config, &reconf_manager)?;
         let app_manager =
             AppManager::get_ref(runtime_manager, config.clone(), &storage, &reconf_manager);
         let health = HealthService::new(&app_manager, &storage, &config.health_service_config);
         assert!(health.is_healthy().await?);
         storage
-            .require_buffer(RequireBufferContext::create_for_test(
+            .acquire_ticket(AcquireTicketContext::create_for_test(
                 PartitionUId::new(&ApplicationId::mock(), 0, 0),
                 600_000,
             ))
@@ -255,7 +255,7 @@ mod tests {
         })
         .await?;
         assert!(!health.is_healthy().await?);
-        assert!(!storage.is_healthy().await?);
+        assert!(!storage.check_health().await?);
         Ok(())
     }
 
@@ -276,7 +276,7 @@ mod tests {
 
         let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
         let runtime_manager: RuntimeManager = Default::default();
-        let storage = StorageService::init(&runtime_manager, &config, &reconf_manager);
+        let storage = StorageService::init(&runtime_manager, &config, &reconf_manager)?;
         let app_manager_ref = AppManager::get_ref(
             Default::default(),
             config.clone(),

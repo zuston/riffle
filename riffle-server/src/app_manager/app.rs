@@ -3,9 +3,9 @@ use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::partition_meta::PartitionMeta;
 use crate::app_manager::purge_event::PurgeReason;
 use crate::app_manager::request_context::{
-    GetShuffleResultContext, PurgeDataContext, ReadingIndexViewContext, ReadingOptions,
-    ReadingViewContext, RegisterAppContext, ReleaseTicketContext, ReportShuffleResultContext,
-    RequireBufferContext, ShuffleResult, WritingViewContext,
+    AcquireTicketContext, GetShuffleResultContext, PurgeDataContext, ReadingIndexViewContext,
+    ReadingOptions, ReadingViewContext, RegisterAppContext, ReleaseTicketContext,
+    ReportShuffleResultContext, ShuffleResult, WritingViewContext,
 };
 use crate::block_id_manager::{get_block_id_manager, BlockIdManager};
 use crate::client_configs::{HARD_SPLIT_ENABLED, UNIFFLE_CLIENT_REASSIGN_ENABLED};
@@ -286,7 +286,7 @@ impl App {
             ctx
         };
 
-        let response = self.store.get(ctx).await;
+        let response = self.store.get_data(ctx).await;
         response.map(|data| {
             match &data {
                 ResponseData::Local(local_data) => {
@@ -364,7 +364,7 @@ impl App {
 
     pub async fn require_buffer(
         &self,
-        ctx: RequireBufferContext,
+        ctx: AcquireTicketContext,
     ) -> anyhow::Result<RequireBufferResponse, WorkerError> {
         self.heartbeat()?;
 
@@ -374,7 +374,7 @@ impl App {
         // Quickly reassign partitions to another healthy riffle server once unhealthy storage is detected and hard split is enabled.
         // This behavior depends on the Uniffle client having the partition reassignment mechanism enabled.
         if self.app_config_options.client_configs.get(&HARD_SPLIT_ENABLED).unwrap_or(false)
-            && !self.store.is_healthy().await? // TODO: If the store is corrupted and only a single replica exists, fail the job fast instead of performing a hard split.
+            && !self.store.check_health().await? // TODO: If the store is corrupted and only a single replica exists, fail the job fast instead of performing a hard split.
             && self.app_config_options.client_configs.get(&UNIFFLE_CLIENT_REASSIGN_ENABLED).unwrap_or(false)
         {
             warn!(
@@ -411,7 +411,7 @@ impl App {
             }
         }
 
-        let mut required = self.store.require_buffer(ctx).await.map_err(|err| {
+        let mut required = self.store.acquire_ticket(ctx).await.map_err(|err| {
             TOTAL_REQUIRE_BUFFER_FAILED.inc();
             err
         })?;
@@ -541,7 +541,7 @@ mod tests {
     use crate::app_manager::app_configs::{AppConfigOptions, DataDistribution};
     use crate::app_manager::application_identifier::ApplicationId;
     use crate::app_manager::partition_identifier::PartitionUId;
-    use crate::app_manager::request_context::RequireBufferContext;
+    use crate::app_manager::request_context::AcquireTicketContext;
     use crate::client_configs::{
         ClientRssConf, HARD_SPLIT_ENABLED, UNIFFLE_CLIENT_REASSIGN_ENABLED,
     };
@@ -608,7 +608,7 @@ mod tests {
             .build()?;
 
         // case1: legal
-        let ctx = RequireBufferContext {
+        let ctx = AcquireTicketContext {
             uid: PartitionUId {
                 app_id: app_id.clone(),
                 shuffle_id: 1,

@@ -34,6 +34,35 @@ pub mod tests {
     static SPILL_TEST_LOCK: Lazy<parking_lot::Mutex<()>> = Lazy::new(Default::default);
 
     #[test]
+    fn test_initialize_propagates_backend_errors() {
+        for (fail_warm, fail_cold) in [(true, false), (false, true), (false, false)] {
+            let mut config = Config::create_simple_config();
+            config.hybrid_store.async_watermark_spill_trigger_enable = false;
+            let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
+            let mut store = HybridStore::from(config, RuntimeManager::default(), &reconf_manager);
+            let healthy = Arc::new(AtomicBool::new(true));
+            let warm = Arc::new(MockStore::new(LOCALFILE, &healthy, None, None));
+            let cold = Arc::new(MockStore::new(HDFS, &healthy, None, None));
+            warm.inner.initialize_fail.store(fail_warm, SeqCst);
+            cold.inner.initialize_fail.store(fail_cold, SeqCst);
+            store.warm_store = Some(warm.clone());
+            store.cold_store = Some(cold.clone());
+
+            let result = Arc::new(store).initialize();
+            if fail_warm || fail_cold {
+                assert!(matches!(result, Err(WorkerError::INTERNAL_ERROR)));
+            } else {
+                result.unwrap();
+            }
+            assert_eq!(1, warm.inner.initialize_ops.load(SeqCst));
+            assert_eq!(
+                u64::from(!fail_warm),
+                cold.inner.initialize_ops.load(SeqCst)
+            );
+        }
+    }
+
+    #[test]
     fn test_enum_display() {
         let store_type = StorageType::HDFS;
         assert_eq!("HDFS", format!("{:?}", store_type));
@@ -75,12 +104,12 @@ pub mod tests {
         let runtime_manager = RuntimeManager::default();
         let mut hybrid_store = HybridStore::from(config.clone(), runtime_manager, reconf_manager);
 
-        let warm_wrapper: Option<Box<dyn PersistentStore>> = Some(Box::new(warm.clone()));
+        let warm_wrapper: Option<Arc<dyn PersistentStore>> = Some(Arc::new(warm.clone()));
         let _ = std::mem::replace(&mut hybrid_store.warm_store, warm_wrapper);
 
         if cold.is_some() {
             let cold = cold.unwrap();
-            let cold_wrapper: Option<Box<dyn PersistentStore>> = Some(Box::new(cold.clone()));
+            let cold_wrapper: Option<Arc<dyn PersistentStore>> = Some(Arc::new(cold.clone()));
             let _ = std::mem::replace(&mut hybrid_store.cold_store, cold_wrapper);
         }
 
@@ -660,8 +689,8 @@ pub mod tests {
 
 pub mod mock {
     use crate::app_manager::request_context::{
-        PurgeDataContext, ReadingIndexViewContext, ReadingViewContext, RegisterAppContext,
-        ReleaseTicketContext, RequireBufferContext, WritingViewContext,
+        AcquireTicketContext, PurgeDataContext, ReadingIndexViewContext, ReadingViewContext,
+        RegisterAppContext, ReleaseTicketContext, WritingViewContext,
     };
     use crate::config::StorageType;
     use crate::error::WorkerError;
@@ -681,6 +710,8 @@ pub mod mock {
     }
 
     pub struct Inner {
+        pub(crate) initialize_ops: AtomicU64,
+        pub(crate) initialize_fail: AtomicBool,
         pub(crate) insert_ops: AtomicU64,
         pub(crate) insert_fail_ops: AtomicU64,
         pub(crate) store_type: StorageType,
@@ -699,6 +730,8 @@ pub mod mock {
         ) -> Self {
             Self {
                 inner: Arc::new(Inner {
+                    initialize_ops: Default::default(),
+                    initialize_fail: Default::default(),
                     insert_ops: Default::default(),
                     insert_fail_ops: Default::default(),
                     store_type: stype,
@@ -717,11 +750,18 @@ pub mod mock {
     }
     #[async_trait]
     impl Store for MockStore {
-        fn start(self: Arc<Self>) {
-            todo!()
+        fn initialize(self: Arc<Self>) -> anyhow::Result<(), WorkerError> {
+            self.inner.initialize_ops.fetch_add(1, SeqCst);
+            if self.inner.initialize_fail.load(SeqCst) {
+                return Err(WorkerError::INTERNAL_ERROR);
+            }
+            Ok(())
         }
 
-        async fn get(&self, ctx: ReadingViewContext) -> anyhow::Result<ResponseData, WorkerError> {
+        async fn get_data(
+            &self,
+            ctx: ReadingViewContext,
+        ) -> anyhow::Result<ResponseData, WorkerError> {
             todo!()
         }
 
@@ -736,13 +776,13 @@ pub mod mock {
             todo!()
         }
 
-        async fn is_healthy(&self) -> anyhow::Result<bool> {
+        async fn check_health(&self) -> anyhow::Result<bool> {
             Ok(self.inner.is_healthy.load(SeqCst))
         }
 
-        async fn require_buffer(
+        async fn acquire_ticket(
             &self,
-            ctx: RequireBufferContext,
+            ctx: AcquireTicketContext,
         ) -> anyhow::Result<RequireBufferResponse, WorkerError> {
             todo!()
         }
@@ -758,7 +798,7 @@ pub mod mock {
             Ok(())
         }
 
-        async fn name(&self) -> StorageType {
+        async fn storage_type(&self) -> StorageType {
             self.inner.store_type
         }
 
@@ -794,10 +834,6 @@ pub mod mock {
                 }
             }
 
-            Ok(())
-        }
-
-        async fn pre_check(&self) -> anyhow::Result<(), WorkerError> {
             Ok(())
         }
     }

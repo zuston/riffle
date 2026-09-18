@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::config_reconfigure::ReconfigurableConfManager;
+use crate::error::WorkerError;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::hybrid::HybridStore;
 use crate::store::{Store, StoreProvider};
@@ -14,13 +15,13 @@ impl StorageService {
         runtime_manager: &RuntimeManager,
         config: &Config,
         reconfig_manager: &ReconfigurableConfManager,
-    ) -> HybridStorage {
+    ) -> Result<HybridStorage, WorkerError> {
         let store = Arc::new(StoreProvider::get(
             runtime_manager.clone(),
             config.clone(),
             reconfig_manager,
         ));
-        store.clone().start();
-        store.clone()
+        store.clone().initialize()?;
+        Ok(store)
     }
 }

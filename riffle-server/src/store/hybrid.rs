@@ -16,9 +16,8 @@
 // under the License.
 
 use crate::app_manager::request_context::{
-    PurgeDataContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
-    RegisterAppContext, ReleaseTicketContext, RequireBufferContext, WritingData,
-    WritingViewContext,
+    AcquireTicketContext, PurgeDataContext, ReadingIndexViewContext, ReadingOptions,
+    ReadingViewContext, RegisterAppContext, ReleaseTicketContext, WritingData, WritingViewContext,
 };
 
 use crate::config::{Config, HybridStoreConfig, StorageType};
@@ -92,11 +91,10 @@ impl PersistentStore for HdfsStore {
 const DEFAULT_MEMORY_SPILL_MAX_CONCURRENCY: i32 = 20;
 
 pub struct HybridStore {
-    // Box<dyn Store> will build fail
     pub(crate) hot_store: Arc<MemoryStore<ConfiguredMemoryBuffer>>,
 
-    pub(crate) warm_store: Option<Box<dyn PersistentStore>>,
-    pub(crate) cold_store: Option<Box<dyn PersistentStore>>,
+    pub(crate) warm_store: Option<Arc<dyn PersistentStore>>,
+    pub(crate) cold_store: Option<Arc<dyn PersistentStore>>,
 
     config: HybridStoreConfig,
 
@@ -140,11 +138,11 @@ impl HybridStore {
             panic!("Storage type must contains memory.");
         }
 
-        let mut persistent_stores: VecDeque<Box<dyn PersistentStore>> = VecDeque::with_capacity(2);
+        let mut persistent_stores: VecDeque<Arc<dyn PersistentStore>> = VecDeque::with_capacity(2);
         if StorageType::contains_localfile(&store_type) {
             let localfile_store =
                 LocalFileStore::from(config.localfile_store.unwrap(), runtime_manager.clone());
-            persistent_stores.push_back(Box::new(localfile_store));
+            persistent_stores.push_back(Arc::new(localfile_store));
         }
 
         if StorageType::contains_hdfs(&store_type) {
@@ -154,7 +152,7 @@ impl HybridStore {
             #[cfg(feature = "hdfs")]
             let hdfs_store = HdfsStore::from(config.hdfs_store.unwrap(), &runtime_manager);
             #[cfg(feature = "hdfs")]
-            persistent_stores.push_back(Box::new(hdfs_store));
+            persistent_stores.push_back(Arc::new(hdfs_store));
         }
 
         let hybrid_conf = config.hybrid_store;
@@ -343,7 +341,7 @@ impl HybridStore {
         // if the cold is unhealthy(when the oom occurs), it should fallback to the warm
         let cold = {
             let cold = self.cold_store.as_ref().unwrap_or(warm);
-            if !cold.is_healthy().await? {
+            if !cold.check_health().await? {
                 warm
             } else {
                 cold
@@ -356,7 +354,7 @@ impl HybridStore {
         // 3. huge partition directly flush to hdfs (if flushing failed, falllback to localfile)
 
         // normal assignment
-        let mut candidate_store = if warm.is_healthy().await? {
+        let mut candidate_store = if warm.check_health().await? {
             let cold_spilled_size = self.memory_spill_to_cold_threshold_size.unwrap_or(u64::MAX);
             if cold_spilled_size < spill_size as u64 {
                 cold
@@ -393,7 +391,7 @@ impl HybridStore {
                             if let Some(stype) = spill_message.get_candidate_storage_type() {
                                 if stype == StorageType::HDFS
                                     && spill_message.get_retry_counter() > 1
-                                    && warm.is_healthy().await?
+                                    && warm.check_health().await?
                                     && self.config.huge_partition_fallback_enable
                                 {
                                     candidate_store = warm;
@@ -416,7 +414,7 @@ impl HybridStore {
             candidate_store = cold;
         }
 
-        let storage_type = candidate_store.name().await;
+        let storage_type = candidate_store.storage_type().await;
         Ok(storage_type)
     }
 
@@ -659,9 +657,14 @@ impl HybridStore {
 
 #[async_trait]
 impl Store for HybridStore {
-    fn start(self: Arc<HybridStore>) {
+    fn initialize(self: Arc<HybridStore>) -> Result<(), WorkerError> {
+        self.hot_store.clone().initialize()?;
+        for store in self.warm_store.iter().chain(self.cold_store.iter()) {
+            store.clone().initialize()?;
+        }
+
         if self.is_memory_only() {
-            return;
+            return Ok(());
         }
 
         self.event_bus.subscribe(
@@ -689,6 +692,7 @@ impl Store for HybridStore {
                 },
             );
         }
+        Ok(())
     }
 
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
@@ -729,12 +733,12 @@ impl Store for HybridStore {
         insert_result
     }
 
-    async fn get(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
+    async fn get_data(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
         match ctx.reading_options {
             ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(_, _) => {
-                self.hot_store.get(ctx).await
+                self.hot_store.get_data(ctx).await
             }
-            _ => self.warm_store.as_ref().unwrap().get(ctx).await,
+            _ => self.warm_store.as_ref().unwrap().get_data(ctx).await,
         }
     }
 
@@ -762,10 +766,10 @@ impl Store for HybridStore {
         Ok(removed_size)
     }
 
-    async fn is_healthy(&self) -> Result<bool> {
-        async fn check_healthy(store: Option<&Box<dyn PersistentStore>>) -> Result<bool> {
+    async fn check_health(&self) -> Result<bool> {
+        async fn check_healthy(store: Option<&Arc<dyn PersistentStore>>) -> Result<bool> {
             match store {
-                Some(store) => store.is_healthy().await,
+                Some(store) => store.check_health().await,
                 _ => Ok(true),
             }
         }
@@ -775,16 +779,16 @@ impl Store for HybridStore {
         let cold = check_healthy(self.cold_store.as_ref())
             .await
             .unwrap_or(false);
-        Ok(self.hot_store.is_healthy().await? && warm && cold)
+        Ok(self.hot_store.check_health().await? && warm && cold)
     }
 
-    async fn require_buffer(
+    async fn acquire_ticket(
         &self,
-        ctx: RequireBufferContext,
+        ctx: AcquireTicketContext,
     ) -> Result<RequireBufferResponse, WorkerError> {
         let uid = &ctx.uid.clone();
         self.hot_store
-            .require_buffer(ctx)
+            .acquire_ticket(ctx)
             .instrument_await(format!("requiring buffers. uid: {:?}", uid))
             .await
     }
@@ -810,21 +814,8 @@ impl Store for HybridStore {
         Ok(())
     }
 
-    async fn name(&self) -> StorageType {
+    async fn storage_type(&self) -> StorageType {
         unimplemented!()
-    }
-
-    async fn pre_check(&self) -> Result<(), WorkerError> {
-        async fn do_pre_check(store: Option<&Box<dyn PersistentStore>>) -> Result<(), WorkerError> {
-            match store {
-                Some(store) => store.pre_check().await,
-                _ => Ok(()),
-            }
-        }
-        self.hot_store.pre_check().await?;
-        do_pre_check(self.warm_store.as_ref()).await?;
-        do_pre_check(self.cold_store.as_ref()).await?;
-        Ok(())
     }
 }
 
@@ -884,10 +875,15 @@ pub(crate) mod tests {
         config.hybrid_store = HybridStoreConfig::new(0.8, 0.2, None);
         config.store_type = StorageType::MEMORY;
         let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
-        let store = HybridStore::from(config, Default::default(), &reconf_manager);
+        let store = Arc::new(HybridStore::from(
+            config,
+            Default::default(),
+            &reconf_manager,
+        ));
+        store.clone().initialize().unwrap();
 
         let runtime = store.runtime_manager.clone();
-        assert_eq!(true, runtime.wait(store.is_healthy()).unwrap());
+        assert_eq!(true, runtime.wait(store.check_health()).unwrap());
     }
 
     #[test]
@@ -972,7 +968,7 @@ pub(crate) mod tests {
             Some("1".to_string()),
             ((data_len * 10000) as i64).to_string(),
         );
-        store.clone().start();
+        store.clone().initialize().unwrap();
 
         let runtime = store.runtime_manager.clone();
 
@@ -988,7 +984,7 @@ pub(crate) mod tests {
         thread::sleep(Duration::from_secs(1));
 
         // read from memory and then from localfile
-        let response_data = runtime.wait(store.get(ReadingViewContext::new(
+        let response_data = runtime.wait(store.get_data(ReadingViewContext::new(
             uid.clone(),
             MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(-1, 1024 * 1024 * 1024),
             RpcType::GRPC,
@@ -1038,7 +1034,7 @@ pub(crate) mod tests {
         let data_len = data.len();
 
         let store = start_store(Some("1B".to_string()), ((data_len * 1) as i64).to_string());
-        store.clone().start();
+        store.clone().initialize().unwrap();
 
         let uid = PartitionUId::new(&Default::default(), 0, 0);
         write_some_data(store.clone(), uid.clone(), data_len as i32, data, 400).await;
@@ -1053,7 +1049,7 @@ pub(crate) mod tests {
             RpcType::GRPC,
         );
 
-        let read_data = store.get(reading_view_ctx).await;
+        let read_data = store.get_data(reading_view_ctx).await;
         if read_data.is_err() {
             panic!();
         }
@@ -1089,7 +1085,7 @@ pub(crate) mod tests {
                         RpcType::GRPC,
                     );
                     println!("reading. offset: {:?}. len: {:?}", offset, length);
-                    let read_data = store.get(reading_view_ctx).await.unwrap();
+                    let read_data = store.get_data(reading_view_ctx).await.unwrap();
                     match read_data {
                         ResponseData::Local(local_data) => {
                             assert_eq!(Bytes::copy_from_slice(data), local_data.data.freeze());
@@ -1133,7 +1129,7 @@ pub(crate) mod tests {
                 RpcType::GRPC,
             );
 
-            let read_data = runtime.wait(store.get(reading_view_ctx));
+            let read_data = runtime.wait(store.get_data(reading_view_ctx));
             if read_data.is_err() {
                 panic!();
             }

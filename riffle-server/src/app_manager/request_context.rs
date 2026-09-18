@@ -218,7 +218,7 @@ pub struct ReadingIndexViewContext {
 }
 
 #[derive(Debug, Clone)]
-pub struct RequireBufferContext {
+pub struct AcquireTicketContext {
     pub uid: PartitionUId,
     pub size: i64,
     // todo: we should replace uid with (app_id, shuffle_id).
@@ -242,7 +242,7 @@ impl From<i64> for ReleaseTicketContext {
     }
 }
 
-impl RequireBufferContext {
+impl AcquireTicketContext {
     pub fn create_for_test(uid: PartitionUId, size: i64) -> Self {
         Self {
             uid,
