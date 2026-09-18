@@ -702,6 +702,41 @@ impl<H: FrameHandler> UringEngine<H> {
         }
     }
 
+    fn wait_for_completion(&mut self) -> Result<()> {
+        loop {
+            match self.ring.submit() {
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e).context("io_uring submit failed"),
+            }
+            if !self.ring.completion().is_empty() {
+                return Ok(());
+            }
+
+            // Waiting in io_uring_enter accounts idle network listeners as iowait
+            // on older kernels. The ring fd is readable whenever CQEs are ready;
+            // level-triggered poll also covers completions racing this check.
+            let mut fd = libc::pollfd {
+                fd: self.ring.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            if unsafe { libc::poll(&mut fd, 1, -1) } < 0 {
+                let e = std::io::Error::last_os_error();
+                if e.kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(e).context("polling io_uring completions failed");
+            }
+            if fd.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+                return Err(anyhow!("unexpected io_uring poll events: {}", fd.revents));
+            }
+            if fd.revents & libc::POLLIN != 0 {
+                return Ok(());
+            }
+        }
+    }
+
     fn run(mut self) -> Result<()> {
         info!(
             "uring urpc engine started on {:?}, sqpoll: {:?}",
@@ -714,9 +749,7 @@ impl<H: FrameHandler> UringEngine<H> {
         let mut completions: Vec<(u64, i32)> = Vec::with_capacity(1024);
         while !self.shared.stopped.load(Ordering::Acquire) {
             self.drain_remote_responses();
-            self.ring
-                .submit_and_wait(1)
-                .context("io_uring submit_and_wait failed")?;
+            self.wait_for_completion()?;
             completions.clear();
             {
                 let cq = self.ring.completion();
@@ -920,6 +953,42 @@ mod tests {
             |_| echo_handler,
         )
         .expect("uring server should start")
+    }
+
+    #[test]
+    fn idle_engine_waits_in_poll_and_wakes_for_shutdown() -> anyhow::Result<()> {
+        let listener = build_reuseport_listener("127.0.0.1:0".parse()?)?;
+        let engine = UringEngine::new(listener, UringServerConfig::default(), echo_handler)?;
+        let shared = engine.shared();
+        let (tid_tx, tid_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            tid_tx
+                .send(unsafe { libc::syscall(libc::SYS_gettid) })
+                .unwrap();
+            engine.run()
+        });
+
+        let tid = tid_rx.recv_timeout(Duration::from_secs(5))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut wait_channel = String::new();
+        while std::time::Instant::now() < deadline {
+            wait_channel =
+                std::fs::read_to_string(format!("/proc/self/task/{tid}/wchan")).unwrap_or_default();
+            if wait_channel.contains("poll") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        // Always wake the engine before asserting, including on the old wait path.
+        shared.stopped.store(true, Ordering::Release);
+        shared.wake();
+        worker.join().unwrap()?;
+        assert!(
+            wait_channel.contains("poll"),
+            "idle engine should sleep in poll, got {wait_channel:?}"
+        );
+        Ok(())
     }
 
     #[tokio::test]
