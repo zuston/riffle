@@ -47,7 +47,6 @@ use crate::raw_io::RawIO;
 use crate::raw_pipe::RawPipe;
 use crate::runtime::manager::RuntimeManager;
 use crate::store::index_codec::IndexCodec;
-use crate::store::spill::SpillWritingViewContext;
 use crate::store::DataBytes::{Composed, Direct};
 use std::sync::Arc;
 
@@ -273,8 +272,6 @@ pub trait Store {
     fn register_app(&self, ctx: RegisterAppContext) -> Result<()>;
 
     async fn name(&self) -> StorageType;
-
-    async fn spill_insert(&self, ctx: SpillWritingViewContext) -> Result<(), WorkerError>;
 
     fn create_shuffle_format(&self, blocks: Vec<&Block>, offset: i64) -> Result<ShuffleFileFormat> {
         let mut offset = offset;

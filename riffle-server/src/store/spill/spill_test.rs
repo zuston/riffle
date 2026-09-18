@@ -3,11 +3,13 @@ pub mod tests {
     use crate::app_manager::app::App;
     use crate::app_manager::application_identifier::ApplicationId;
     use crate::app_manager::partition_identifier::PartitionUId;
+    use crate::app_manager::request_context::{WritingData, WritingViewContext};
     use crate::app_manager::test::mock_writing_context;
     use crate::app_manager::AppManager;
     use crate::config::StorageType::{HDFS, LOCALFILE};
     use crate::config::{Config, StorageType};
     use crate::config_reconfigure::ReconfigurableConfManager;
+    use crate::error::WorkerError;
     use crate::metric::{
         GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES, TOTAL_MEMORY_SPILL_BYTES,
         TOTAL_MEMORY_SPILL_OPERATION_FAILED, TOTAL_SPILL_EVENTS_DROPPED,
@@ -19,6 +21,7 @@ pub mod tests {
     use crate::store::spill::spill_test::mock::MockStore;
     use crate::store::spill::storage_flush_handler::StorageFlushHandler;
     use crate::store::spill::storage_select_handler::StorageSelectHandler;
+    use crate::store::spill::SpillMessage;
     use crate::store::Store;
     use libc::{c_int, stpcpy};
     use log::info;
@@ -94,6 +97,46 @@ pub mod tests {
         );
 
         store.clone()
+    }
+
+    #[tokio::test]
+    async fn test_app_purged_between_selection_and_flush() -> anyhow::Result<()> {
+        let _guard = SPILL_TEST_LOCK.lock();
+        let warm = MockStore::new(LOCALFILE, &Arc::new(AtomicBool::new(true)), None, None);
+        let temp_dir = tempfile::tempdir()?;
+        let config = create_multi_level_config(
+            StorageType::MEMORY_LOCALFILE,
+            1,
+            "1M".to_string(),
+            temp_dir.path().display().to_string(),
+        );
+        let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
+        let store = create_hybrid_store(&config, &warm, None, &reconf_manager);
+        let app_exists = Arc::new(AtomicBool::new(true));
+        let app_exists_for_message = app_exists.clone();
+        let message = SpillMessage {
+            ctx: WritingViewContext {
+                uid: Default::default(),
+                data_blocks: WritingData::Shared(Arc::new(Default::default())),
+                data_size: 0,
+            },
+            app_is_exist_func: Arc::new(move |_| app_exists_for_message.load(SeqCst)),
+            retry_cnt: Default::default(),
+            flight_id: 0,
+            candidate_store_type: Default::default(),
+            huge_partition_tag: Default::default(),
+        };
+        let storage_type = store.select_storage_for_buffer(&message).await?;
+        message.set_candidate_storage_type(storage_type);
+        let pending_message = message.clone();
+
+        app_exists.store(false, SeqCst);
+        assert!(matches!(
+            store.flush_storage_for_buffer(&pending_message).await,
+            Err(WorkerError::APP_IS_NOT_FOUND)
+        ));
+        assert_eq!(0, warm.inner.insert_ops.load(SeqCst));
+        Ok(())
     }
 
     #[tokio::test]
@@ -362,7 +405,7 @@ pub mod tests {
         let _ = store.insert(ctx).await;
 
         awaitility::at_most(Duration::from_secs(1))
-            .until(|| warm.inner.spill_insert_ops.load(SeqCst) == 1);
+            .until(|| warm.inner.insert_ops.load(SeqCst) == 1);
 
         // check the success spill event in memory size
         assert_eq!(0, store.get_in_flight_size().unwrap());
@@ -432,7 +475,7 @@ pub mod tests {
         ))
         .await?;
         awaitility::at_most(Duration::from_secs(1))
-            .until(|| warm.inner.spill_insert_ops.load(SeqCst) == 1);
+            .until(|| warm.inner.insert_ops.load(SeqCst) == 1);
 
         app.insert(mock_writing_context(
             &app_id,
@@ -456,8 +499,8 @@ pub mod tests {
             shuffle_id,
             huge_partition_id,
         ))?);
-        assert_eq!(1, warm.inner.spill_insert_ops.load(SeqCst));
-        assert_eq!(0, cold.inner.spill_insert_ops.load(SeqCst));
+        assert_eq!(1, warm.inner.insert_ops.load(SeqCst));
+        assert_eq!(0, cold.inner.insert_ops.load(SeqCst));
         assert_eq!(
             128,
             store.get_memory_buffer_size(&PartitionUId::new(
@@ -476,7 +519,7 @@ pub mod tests {
         ))
         .await?;
         awaitility::at_most(Duration::from_secs(1)).until(|| {
-            cold.inner.spill_insert_ops.load(SeqCst) == 1
+            cold.inner.insert_ops.load(SeqCst) == 1
                 && store
                     .get_memory_buffer_size(&PartitionUId::new(
                         &app_id,
@@ -488,8 +531,8 @@ pub mod tests {
                 && store.get_spill_event_num().unwrap() == 0
         });
 
-        assert_eq!(1, warm.inner.spill_insert_ops.load(SeqCst));
-        assert_eq!(1, cold.inner.spill_insert_ops.load(SeqCst));
+        assert_eq!(1, warm.inner.insert_ops.load(SeqCst));
+        assert_eq!(1, cold.inner.insert_ops.load(SeqCst));
         Ok(())
     }
 
@@ -528,7 +571,7 @@ pub mod tests {
         let _ = store.insert(ctx).await;
 
         awaitility::at_most(Duration::from_secs(1))
-            .until(|| cold.inner.spill_insert_ops.load(SeqCst) == 1);
+            .until(|| cold.inner.insert_ops.load(SeqCst) == 1);
 
         // check the success spill event in memory size
         assert_eq!(0, store.get_in_flight_size().unwrap());
@@ -604,12 +647,12 @@ pub mod tests {
         // step1: but the hdfs is broken, it should fallback to localfile after 1 retry time
         cold_spill_failure_tag.store(true, SeqCst);
         awaitility::at_most(Duration::from_secs(1000))
-            .until(|| cold.inner.spill_insert_ops.load(SeqCst) == 2);
-        assert_eq!(2, cold.inner.spill_insert_fail_ops.load(SeqCst));
+            .until(|| cold.inner.insert_ops.load(SeqCst) == 2);
+        assert_eq!(2, cold.inner.insert_fail_ops.load(SeqCst));
 
         // step2: after 2 times passed, it should fallback to localfile
         awaitility::at_most(Duration::from_secs(1000))
-            .until(|| warm.inner.spill_insert_ops.load(SeqCst) == 1);
+            .until(|| warm.inner.insert_ops.load(SeqCst) == 1);
 
         Ok(())
     }
@@ -623,7 +666,6 @@ pub mod mock {
     use crate::config::StorageType;
     use crate::error::WorkerError;
     use crate::store::hybrid::PersistentStore;
-    use crate::store::spill::SpillWritingViewContext;
     use crate::store::{Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex, Store};
     use async_trait::async_trait;
     use parking_lot::Mutex;
@@ -639,8 +681,8 @@ pub mod mock {
     }
 
     pub struct Inner {
-        pub(crate) spill_insert_ops: AtomicU64,
-        pub(crate) spill_insert_fail_ops: AtomicU64,
+        pub(crate) insert_ops: AtomicU64,
+        pub(crate) insert_fail_ops: AtomicU64,
         pub(crate) store_type: StorageType,
         pub(crate) is_healthy: Arc<AtomicBool>,
 
@@ -657,8 +699,8 @@ pub mod mock {
         ) -> Self {
             Self {
                 inner: Arc::new(Inner {
-                    spill_insert_ops: Default::default(),
-                    spill_insert_fail_ops: Default::default(),
+                    insert_ops: Default::default(),
+                    insert_fail_ops: Default::default(),
                     store_type: stype,
                     is_healthy: is_healthy.clone(),
                     mark_write_fail_option: mark_write_fail,
@@ -676,10 +718,6 @@ pub mod mock {
     #[async_trait]
     impl Store for MockStore {
         fn start(self: Arc<Self>) {
-            todo!()
-        }
-
-        async fn insert(&self, ctx: WritingViewContext) -> anyhow::Result<(), WorkerError> {
             todo!()
         }
 
@@ -724,11 +762,8 @@ pub mod mock {
             self.inner.store_type
         }
 
-        async fn spill_insert(
-            &self,
-            ctx: SpillWritingViewContext,
-        ) -> anyhow::Result<(), WorkerError> {
-            self.inner.spill_insert_ops.fetch_add(1, SeqCst);
+        async fn insert(&self, ctx: WritingViewContext) -> anyhow::Result<(), WorkerError> {
+            self.inner.insert_ops.fetch_add(1, SeqCst);
 
             if self.inner.mark_write_fail_option.is_some() {
                 if self
@@ -738,7 +773,7 @@ pub mod mock {
                     .unwrap()
                     .load(SeqCst)
                 {
-                    self.inner.spill_insert_fail_ops.fetch_add(1, SeqCst);
+                    self.inner.insert_fail_ops.fetch_add(1, SeqCst);
                     return Err(WorkerError::INTERNAL_ERROR);
                 }
             }

@@ -17,7 +17,8 @@
 
 use crate::app_manager::request_context::{
     PurgeDataContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
-    RegisterAppContext, ReleaseTicketContext, RequireBufferContext, WritingViewContext,
+    RegisterAppContext, ReleaseTicketContext, RequireBufferContext, WritingData,
+    WritingViewContext,
 };
 
 use crate::config::{Config, HybridStoreConfig, StorageType};
@@ -68,7 +69,7 @@ use crate::store::mem::capacity::CapacitySnapshot;
 use crate::store::spill::hierarchy_event_bus::HierarchyEventBus;
 use crate::store::spill::storage_flush_handler::StorageFlushHandler;
 use crate::store::spill::storage_select_handler::StorageSelectHandler;
-use crate::store::spill::{SpillMessage, SpillWritingViewContext};
+use crate::store::spill::SpillMessage;
 use crate::store::ResponseData::Mem;
 use tokio::time::Instant;
 
@@ -227,7 +228,7 @@ impl HybridStore {
     }
 
     pub fn finish_spill_event(&self, msg: &SpillMessage) {
-        let bytes_size = msg.size as u64;
+        let bytes_size = msg.ctx.data_size;
         self.memory_spill_event_num.fetch_sub(1, SeqCst);
         self.in_flight_bytes.fetch_sub(bytes_size, SeqCst);
         GAUGE_MEMORY_SPILL_IN_FLIGHT_BYTES.sub(bytes_size as i64);
@@ -266,8 +267,7 @@ impl HybridStore {
         &self,
         spill_message: &SpillMessage,
     ) -> Result<(), WorkerError> {
-        let ctx = &spill_message.ctx;
-        if !ctx.is_valid() {
+        if !spill_message.is_valid() {
             return Err(WorkerError::APP_IS_NOT_FOUND);
         }
 
@@ -306,7 +306,7 @@ impl HybridStore {
         let ctx = spill_message.ctx.clone();
         // when throwing the data lost error, it should fast fail for this partition data.
         let result = candidate_store
-            .spill_insert(ctx)
+            .insert(ctx)
             .instrument_await("inserting into the persistent store, invoking [write]")
             .await;
 
@@ -330,10 +330,10 @@ impl HybridStore {
         spill_message: &SpillMessage,
     ) -> Result<StorageType, WorkerError> {
         let ctx = &spill_message.ctx;
-        if !ctx.is_valid() {
+        if !spill_message.is_valid() {
             return Err(WorkerError::APP_IS_NOT_FOUND);
         }
-        let spill_size = spill_message.size;
+        let spill_size = spill_message.ctx.data_size as i64;
 
         let warm = self
             .warm_store
@@ -466,20 +466,16 @@ impl HybridStore {
     }
 
     pub async fn publish_spill_event(&self, message: SpillMessage) -> Result<()> {
-        let size = message.size;
+        let size = message.ctx.data_size;
         self.event_bus.publish(message.into()).await?;
-        self.start_spill_event(size as u64);
+        self.start_spill_event(size);
         Ok(())
     }
 
-    pub async fn release_memory_buffer(
-        &self,
-        data_size: i64,
-        message: &SpillMessage,
-    ) -> Result<()> {
+    pub async fn release_memory_buffer(&self, message: &SpillMessage) -> Result<()> {
         let uid = &message.ctx.uid;
         self.hot_store
-            .clear_spilled_buffer(uid.clone(), message.flight_id, data_size as u64)
+            .clear_spilled_buffer(uid.clone(), message.flight_id, message.ctx.data_size)
             .await?;
         Ok(())
     }
@@ -533,11 +529,14 @@ impl HybridStore {
             app_ref.as_ref().unwrap().app_is_exist(&app_id)
         };
 
-        let writing_ctx =
-            SpillWritingViewContext::new(uid.clone(), spill_result.blocks(), app_is_exist_func);
+        let writing_ctx = WritingViewContext {
+            uid: uid.clone(),
+            data_blocks: WritingData::Shared(spill_result.blocks()),
+            data_size: flight_len,
+        };
         let message = SpillMessage {
             ctx: writing_ctx,
-            size: flight_len as i64,
+            app_is_exist_func: Arc::new(app_is_exist_func),
             retry_cnt: Default::default(),
             flight_id: spill_result.flight_id(),
             candidate_store_type: Arc::new(parking_lot::Mutex::new(None)),
@@ -813,10 +812,6 @@ impl Store for HybridStore {
 
     async fn name(&self) -> StorageType {
         unimplemented!()
-    }
-
-    async fn spill_insert(&self, _ctx: SpillWritingViewContext) -> Result<(), WorkerError> {
-        todo!()
     }
 
     async fn pre_check(&self) -> Result<(), WorkerError> {

@@ -129,13 +129,14 @@ impl HierarchyEventBus<SpillMessage> {
 
 #[cfg(test)]
 mod tests {
+    use crate::app_manager::request_context::{WritingData, WritingViewContext};
     use crate::config::Config;
     use crate::config::StorageType::{HDFS, LOCALFILE};
     use crate::config_reconfigure::ReconfigurableConfManager;
     use crate::event_bus::{Event, Subscriber};
     use crate::runtime::manager::RuntimeManager;
     use crate::store::spill::hierarchy_event_bus::{HierarchyEventBus, MAX_CONCURRENCY};
-    use crate::store::spill::{SpillMessage, SpillWritingViewContext};
+    use crate::store::spill::SpillMessage;
     use anyhow::Result;
     use async_trait::async_trait;
     use std::sync::atomic::Ordering::SeqCst;
@@ -278,12 +279,12 @@ mod tests {
         event_bus.subscribe(select_handler, flush_handler);
 
         let spill_msg = SpillMessage {
-            ctx: SpillWritingViewContext {
+            ctx: WritingViewContext {
                 uid: Default::default(),
-                data_blocks: Arc::new(Default::default()),
-                app_is_exist_func: Arc::new(Box::new((|app| true))),
+                data_blocks: WritingData::Shared(Arc::new(Default::default())),
+                data_size: 0,
             },
-            size: 0,
+            app_is_exist_func: Arc::new(|_| true),
             retry_cnt: Default::default(),
             flight_id: 0,
             candidate_store_type: Arc::new(parking_lot::Mutex::new(None)),

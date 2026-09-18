@@ -1,5 +1,5 @@
 use crate::app_manager::application_identifier::ApplicationId;
-use crate::app_manager::partition_identifier::PartitionUId;
+use crate::app_manager::request_context::WritingViewContext;
 use crate::config::StorageType;
 use crate::error::WorkerError;
 use crate::metric::{
@@ -8,7 +8,6 @@ use crate::metric::{
     TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND,
 };
 use crate::store::hybrid::{HybridStore, PersistentStore};
-use crate::store::mem::buffer::MemBlockBatch;
 use log::{debug, error, warn};
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
@@ -25,8 +24,8 @@ pub mod storage_select_handler;
 
 #[derive(Clone)]
 pub struct SpillMessage {
-    pub ctx: SpillWritingViewContext,
-    pub size: i64,
+    pub ctx: WritingViewContext,
+    pub(crate) app_is_exist_func: Arc<dyn Fn(&ApplicationId) -> bool + Send + Sync>,
     pub retry_cnt: Arc<AtomicU32>,
     pub flight_id: u64,
     pub candidate_store_type: Arc<Mutex<Option<StorageType>>>,
@@ -34,6 +33,10 @@ pub struct SpillMessage {
 }
 
 impl SpillMessage {
+    pub fn is_valid(&self) -> bool {
+        (self.app_is_exist_func)(&self.ctx.uid.app_id)
+    }
+
     pub fn has_candidate_storage(&self) -> bool {
         let guard = self.candidate_store_type.lock();
         guard.is_some()
@@ -68,41 +71,11 @@ impl Display for SpillMessage {
             f,
             "uid: {:?}. size: {}. storage_type: {:?}. is_huge_partition: {:?}. retry_cnt: {}",
             &self.ctx.uid,
-            self.size,
+            self.ctx.data_size,
             self.get_candidate_storage_type(),
             self.huge_partition_tag.get(),
             self.get_retry_counter()
         )
-    }
-}
-
-unsafe impl Send for SpillMessage {}
-unsafe impl Sync for SpillMessage {}
-
-#[derive(Clone)]
-pub struct SpillWritingViewContext {
-    pub uid: PartitionUId,
-    pub data_blocks: Arc<MemBlockBatch>,
-    app_is_exist_func: Arc<Box<dyn Fn(&ApplicationId) -> bool + 'static>>,
-}
-unsafe impl Send for SpillWritingViewContext {}
-unsafe impl Sync for SpillWritingViewContext {}
-
-impl SpillWritingViewContext {
-    pub fn new<F>(uid: PartitionUId, blocks: Arc<MemBlockBatch>, func: F) -> Self
-    where
-        F: Fn(&ApplicationId) -> bool + 'static,
-    {
-        Self {
-            uid,
-            data_blocks: blocks,
-            app_is_exist_func: Arc::new(Box::new(func)),
-        }
-    }
-
-    pub fn is_valid(&self) -> bool {
-        let app_id = &self.uid.app_id;
-        (self.app_is_exist_func)(app_id)
     }
 }
 
@@ -112,8 +85,7 @@ async fn handle_spill_failure_whatever_error(
     flush_error: WorkerError,
 ) {
     // Ignore all errors when app is not found. Because the pending spill operation may happen after app has been purged.
-    let ctx = &message.ctx;
-    let is_valid_app = ctx.is_valid();
+    let is_valid_app = message.is_valid();
     let is_app_not_found_or_purged = match flush_error {
         WorkerError::APP_HAS_BEEN_PURGED
         | WorkerError::APP_IS_NOT_FOUND
@@ -128,10 +100,7 @@ async fn handle_spill_failure_whatever_error(
             "Dropping the spill event for uid: {:?}. Attention: this will make data lost! error: {}",
             &message.ctx.uid, flush_error
         );
-        if let Err(err) = store_ref
-            .release_memory_buffer(message.size, &message)
-            .await
-        {
+        if let Err(err) = store_ref.release_memory_buffer(message).await {
             error!("Errors on releasing memory data when dropping the spill event, that should not happen. err: {:#?}. flush_error: {}", err, flush_error);
         }
         TOTAL_SPILL_EVENTS_DROPPED.inc();
@@ -180,10 +149,7 @@ async fn handle_spill_failure(
 }
 
 async fn handle_spill_success(message: &SpillMessage, store_ref: Arc<HybridStore>) {
-    if let Err(err) = store_ref
-        .release_memory_buffer(message.size, &message)
-        .await
-    {
+    if let Err(err) = store_ref.release_memory_buffer(message).await {
         debug!(
             "Errors on releasing memory data for uid: {:?}, that should not happen. err: {:#?}",
             &message.ctx.uid, err

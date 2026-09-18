@@ -22,8 +22,7 @@ use std::io::ErrorKind;
 
 use crate::metric::TOTAL_HDFS_USED;
 use crate::store::{
-    Block, DataBytes, Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex,
-    SpillWritingViewContext, Store,
+    Block, DataBytes, Persistent, RequireBufferResponse, ResponseData, ResponseDataIndex, Store,
 };
 use anyhow::{anyhow, Result};
 
@@ -420,9 +419,10 @@ impl Store for HdfsStore {
     }
 
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
-        let uid = ctx.uid;
-        let blocks: Vec<&Block> = ctx.data_blocks.iter().collect();
-        self.data_insert(uid, blocks).await
+        let blocks = ctx.data_blocks.as_persistent_blocks();
+        self.data_insert(ctx.uid, blocks)
+            .instrument_await("data insert")
+            .await
     }
 
     async fn get(&self, _ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
@@ -656,22 +656,6 @@ impl Store for HdfsStore {
 
     async fn name(&self) -> StorageType {
         StorageType::HDFS
-    }
-
-    async fn spill_insert(&self, ctx: SpillWritingViewContext) -> Result<(), WorkerError> {
-        let uid = ctx.uid;
-        let mut data = vec![];
-        let batch_memory_block = ctx.data_blocks;
-        for blocks in batch_memory_block.iter() {
-            for block in blocks {
-                data.push(block);
-            }
-        }
-        // for AQE
-        data.sort_by_key(|block| block.task_attempt_id);
-        self.data_insert(uid, data)
-            .instrument_await("data insert")
-            .await
     }
 
     async fn pre_check(&self) -> Result<(), WorkerError> {
