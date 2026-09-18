@@ -28,8 +28,8 @@ pub mod memory;
 pub mod spill;
 pub mod test_utils;
 use crate::app_manager::request_context::{
-    PurgeDataContext, ReadingIndexViewContext, ReadingViewContext, RegisterAppContext,
-    ReleaseTicketContext, RequireBufferContext, WritingViewContext,
+    AcquireTicketContext, PurgeDataContext, ReadingIndexViewContext, ReadingViewContext,
+    RegisterAppContext, ReleaseTicketContext, WritingViewContext,
 };
 use crate::config::{Config, StorageType};
 use crate::error::WorkerError;
@@ -254,26 +254,29 @@ impl RequireBufferResponse {
 
 #[async_trait]
 pub trait Store {
-    fn start(self: Arc<Self>);
+    fn initialize(self: Arc<Self>) -> Result<(), WorkerError>;
+    async fn check_health(&self) -> Result<bool>;
+    async fn storage_type(&self) -> StorageType;
+
+    // data flow
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError>;
-    async fn get(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError>;
+    async fn get_data(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError>;
     async fn get_index(
         &self,
         ctx: ReadingIndexViewContext,
     ) -> Result<ResponseDataIndex, WorkerError>;
     async fn purge(&self, ctx: &PurgeDataContext) -> Result<i64>;
-    async fn is_healthy(&self) -> Result<bool>;
 
-    async fn require_buffer(
+    // ticket / app management
+    fn register_app(&self, ctx: RegisterAppContext) -> Result<()>;
+    async fn acquire_ticket(
         &self,
-        ctx: RequireBufferContext,
+        ctx: AcquireTicketContext,
     ) -> Result<RequireBufferResponse, WorkerError>;
     async fn release_ticket(&self, ctx: ReleaseTicketContext) -> Result<i64, WorkerError>;
-    fn register_app(&self, ctx: RegisterAppContext) -> Result<()>;
 
-    async fn name(&self) -> StorageType;
-
-    fn create_shuffle_format(&self, blocks: Vec<&Block>, offset: i64) -> Result<ShuffleFileFormat> {
+    // shareable utils
+    fn as_format(&self, blocks: Vec<&Block>, offset: i64) -> Result<ShuffleFileFormat> {
         let mut offset = offset;
 
         let blocks_len = blocks.len();
@@ -299,8 +302,6 @@ pub trait Store {
             offset,
         })
     }
-
-    async fn pre_check(&self) -> Result<(), WorkerError>;
 }
 
 pub struct ShuffleFileFormat {

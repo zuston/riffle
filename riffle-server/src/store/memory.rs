@@ -17,8 +17,8 @@
 
 use crate::app_manager::request_context::ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE;
 use crate::app_manager::request_context::{
-    PurgeDataContext, ReadingIndexViewContext, ReadingViewContext, RegisterAppContext,
-    ReleaseTicketContext, RequireBufferContext, WritingData, WritingViewContext,
+    AcquireTicketContext, PurgeDataContext, ReadingIndexViewContext, ReadingViewContext,
+    RegisterAppContext, ReleaseTicketContext, WritingData, WritingViewContext,
 };
 use crate::config::{MemoryStoreConfig, StorageType};
 use crate::error::WorkerError;
@@ -269,8 +269,8 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
 
 #[async_trait]
 impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
-    fn start(self: Arc<Self>) {
-        // ignore
+    fn initialize(self: Arc<Self>) -> Result<(), WorkerError> {
+        Ok(())
     }
     #[trace]
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
@@ -287,7 +287,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
         Ok(())
     }
     #[trace]
-    async fn get(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
+    async fn get_data(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
         let uid = ctx.uid;
         let buffer = self.get_buffer(&uid)?;
         let options = ctx.reading_options;
@@ -354,14 +354,14 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
     }
 
     #[trace]
-    async fn is_healthy(&self) -> Result<bool> {
+    async fn check_health(&self) -> Result<bool> {
         Ok(self.budget.is_healthy())
     }
 
     #[trace]
-    async fn require_buffer(
+    async fn acquire_ticket(
         &self,
-        ctx: RequireBufferContext,
+        ctx: AcquireTicketContext,
     ) -> Result<RequireBufferResponse, WorkerError> {
         let (succeed, ticket_id) = self.budget.require_allocated(ctx.size)?;
         debug!(
@@ -396,12 +396,8 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
     }
 
     #[trace]
-    async fn name(&self) -> StorageType {
+    async fn storage_type(&self) -> StorageType {
         StorageType::MEMORY
-    }
-
-    async fn pre_check(&self) -> Result<(), WorkerError> {
-        Ok(())
     }
 }
 
@@ -424,7 +420,7 @@ impl From<(i64, i64, i64)> for MemorySnapshot {
 #[cfg(test)]
 mod test {
     use crate::app_manager::request_context::{
-        PurgeDataContext, ReadingOptions, ReadingViewContext, RequireBufferContext, RpcType,
+        AcquireTicketContext, PurgeDataContext, ReadingOptions, ReadingViewContext, RpcType,
         WritingData, WritingViewContext,
     };
 
@@ -649,7 +645,7 @@ mod test {
             ),
             RpcType::GRPC,
         );
-        if let Ok(data) = store.get(ctx).await {
+        if let Ok(data) = store.get_data(ctx).await {
             match data {
                 Mem(mem_data) => mem_data,
                 _ => panic!(),
@@ -688,12 +684,12 @@ mod test {
         let runtime = store.runtime_manager.clone();
 
         let app_id = ApplicationId::from("application_1_1_2");
-        let ctx = RequireBufferContext {
+        let ctx = AcquireTicketContext {
             uid: PartitionUId::new(&app_id, 0, 0),
             size: 10000,
             partition_ids: vec![],
         };
-        match runtime.default_runtime.block_on(store.require_buffer(ctx)) {
+        match runtime.default_runtime.block_on(store.acquire_ticket(ctx)) {
             Ok(_) => {
                 let _ = runtime
                     .default_runtime
@@ -726,7 +722,7 @@ mod test {
         let app_id = ApplicationId::from("application_timeout_ticket");
         let uid = PartitionUId::new(&app_id, 0, 0);
         runtime
-            .wait(store.require_buffer(RequireBufferContext::create_for_test(uid, 10000)))
+            .wait(store.acquire_ticket(AcquireTicketContext::create_for_test(uid, 10000)))
             .expect("require buffer should succeed");
 
         assert_eq!(10000, store.budget.snapshot().allocated());
@@ -754,7 +750,7 @@ mod test {
         // the buffer requested
 
         let _buffer = runtime
-            .wait(store.require_buffer(RequireBufferContext::create_for_test(uid.clone(), 40)))
+            .wait(store.acquire_ticket(AcquireTicketContext::create_for_test(uid.clone(), 40)))
             .expect("");
 
         let writing_ctx = WritingViewContext::create_for_test(
@@ -775,7 +771,7 @@ mod test {
             ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE(-1, 1000000),
             RpcType::GRPC,
         );
-        let data = runtime.wait(store.get(reading_ctx.clone())).expect("");
+        let data = runtime.wait(store.get_data(reading_ctx.clone())).expect("");
         assert_eq!(1, data.from_memory().shuffle_data_block_segments.len());
 
         // get weak reference to ensure purge can successfully free memory
@@ -811,7 +807,7 @@ mod test {
         let snapshot = store.budget.snapshot();
         assert_eq!(snapshot.used(), 0);
         assert_eq!(snapshot.capacity(), 1024);
-        let data = runtime.wait(store.get(reading_ctx.clone()));
+        let data = runtime.wait(store.get_data(reading_ctx.clone()));
         if let Ok(_) = data {
             panic!();
         }
@@ -857,7 +853,7 @@ mod test {
             RpcType::GRPC,
         );
 
-        match runtime.wait(store.get(reading_ctx)).unwrap() {
+        match runtime.wait(store.get_data(reading_ctx)).unwrap() {
             ResponseData::Mem(data) => {
                 assert_eq!(data.shuffle_data_block_segments.len(), 2);
                 assert_eq!(data.shuffle_data_block_segments.get(0).unwrap().offset, 0);
@@ -908,7 +904,7 @@ mod test {
             RpcType::GRPC,
         );
 
-        match runtime.wait(store.get(reading_ctx)).unwrap() {
+        match runtime.wait(store.get_data(reading_ctx)).unwrap() {
             Mem(data) => {
                 assert_eq!(data.shuffle_data_block_segments.len(), 2);
             }
@@ -924,7 +920,7 @@ mod test {
             RpcType::GRPC,
         );
 
-        match runtime.wait(store.get(reading_ctx)).unwrap() {
+        match runtime.wait(store.get_data(reading_ctx)).unwrap() {
             Mem(data) => {
                 assert_eq!(data.shuffle_data_block_segments.len(), 1);
                 assert_eq!(data.shuffle_data_block_segments.get(0).unwrap().offset, 0);

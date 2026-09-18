@@ -39,7 +39,7 @@ pub async fn start(config: &Config) -> anyhow::Result<AppManagerRef> {
     let (tx, rx) = oneshot::channel::<()>();
 
     let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
-    let storage = StorageService::init(&runtime_manager, &config, &reconf_manager);
+    let storage = StorageService::init(&runtime_manager, &config, &reconf_manager)?;
     let app_manager_ref = AppManager::get_ref(
         runtime_manager.clone(),
         config.clone(),

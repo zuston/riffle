@@ -19,8 +19,8 @@ use crate::app_manager::app_configs::{AppConfigOptions, DataDistribution, Remote
 use crate::app_manager::application_identifier::ApplicationId;
 use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::request_context::{
-    GetShuffleResultContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
-    ReportShuffleResultContext, RequireBufferContext, RpcType, WritingViewContext,
+    AcquireTicketContext, GetShuffleResultContext, ReadingIndexViewContext, ReadingOptions,
+    ReadingViewContext, ReportShuffleResultContext, RpcType, WritingViewContext,
 };
 use crate::app_manager::AppManagerRef;
 use crate::client_configs::ClientRssConf;
@@ -904,7 +904,7 @@ impl ShuffleServer for DefaultShuffleServer {
         let partition_id = PartitionUId::new(&app_id, shuffle_id, 1);
         let app = app
             .unwrap()
-            .require_buffer(RequireBufferContext {
+            .require_buffer(AcquireTicketContext {
                 uid: partition_id.clone(),
                 size: req.require_size as i64,
                 partition_ids: req.partition_ids.clone(),

@@ -40,8 +40,8 @@ use crate::app_manager::application_identifier::ApplicationId;
 use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::purge_event::PurgeReason;
 use crate::app_manager::request_context::{
-    PurgeDataContext, ReadingIndexViewContext, ReadingViewContext, RegisterAppContext,
-    ReleaseTicketContext, RequireBufferContext, WritingViewContext,
+    AcquireTicketContext, PurgeDataContext, ReadingIndexViewContext, ReadingViewContext,
+    RegisterAppContext, ReleaseTicketContext, WritingViewContext,
 };
 use crate::app_manager::SHUFFLE_SERVER_ID;
 use crate::client_configs::HDFS_CLIENT_EAGER_LOADING_ENABLED_OPTION;
@@ -162,7 +162,7 @@ impl HdfsStore {
         uid: PartitionUId,
         data_blocks: Vec<&Block>,
     ) -> Result<(), WorkerError> {
-        if !self.is_healthy().await? {
+        if !self.check_health().await? {
             return Err(WorkerError::HDFS_UNHEALTHY);
         }
 
@@ -275,7 +275,7 @@ impl HdfsStore {
         let data_file_path = format!("{}_{}.data", &data_file_path_prefix, retry_time);
         let index_file_path = format!("{}_{}.index", &index_file_path_prefix, retry_time);
 
-        let shuffle_file_format = self.create_shuffle_format(data_blocks, next_offset)?;
+        let shuffle_file_format = self.as_format(data_blocks, next_offset)?;
         debug!("Writing path: {}", &data_file_path);
         match self
             .write_data_and_index(
@@ -398,24 +398,20 @@ impl HdfsStore {
         }
         Ok(())
     }
-
-    async fn pre_check_hadoop_env(&self) -> Result<(), WorkerError> {
-        if self.precheck_enable {
-            // try to initialize hdfs client, it will connect to the namenode
-            const ROOT: &str = "hdfs://default/";
-            get_hdfs_client(ROOT, Default::default()).map_err(|e| {
-                error!("Errors on pre-checking hdfs client: {}", e);
-                e
-            })?;
-        }
-        Ok(())
-    }
 }
 
 #[async_trait]
 impl Store for HdfsStore {
-    fn start(self: Arc<Self>) {
-        info!("There is nothing to do in hdfs store");
+    fn initialize(self: Arc<Self>) -> Result<(), WorkerError> {
+        if self.precheck_enable {
+            // Validate the default HDFS client before accepting work.
+            const ROOT: &str = "hdfs://default/";
+            get_hdfs_client(ROOT, Default::default()).map_err(|e| {
+                error!("Failed to initialize the default HDFS client: {}", e);
+                e
+            })?;
+        }
+        Ok(())
     }
 
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
@@ -425,7 +421,7 @@ impl Store for HdfsStore {
             .await
     }
 
-    async fn get(&self, _ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
+    async fn get_data(&self, _ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
         Err(WorkerError::NOT_READ_HDFS_DATA_FROM_SERVER)
     }
 
@@ -596,13 +592,13 @@ impl Store for HdfsStore {
         Ok(removed_size)
     }
 
-    async fn is_healthy(&self) -> Result<bool> {
+    async fn check_health(&self) -> Result<bool> {
         Ok(self.health.load(SeqCst))
     }
 
-    async fn require_buffer(
+    async fn acquire_ticket(
         &self,
-        _ctx: RequireBufferContext,
+        _ctx: AcquireTicketContext,
     ) -> Result<RequireBufferResponse, WorkerError> {
         todo!()
     }
@@ -654,12 +650,8 @@ impl Store for HdfsStore {
         Ok(())
     }
 
-    async fn name(&self) -> StorageType {
+    async fn storage_type(&self) -> StorageType {
         StorageType::HDFS
-    }
-
-    async fn pre_check(&self) -> Result<(), WorkerError> {
-        self.pre_check_hadoop_env().await
     }
 }
 
@@ -690,6 +682,16 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
     use url::Url;
+
+    #[test]
+    fn test_initialize_without_precheck() {
+        let runtime_manager = RuntimeManager::default();
+        let store = Arc::new(HdfsStore::from(
+            HdfsStoreConfig::default(),
+            &runtime_manager,
+        ));
+        store.initialize().unwrap();
+    }
 
     #[test]
     fn url_test() {
@@ -805,7 +807,7 @@ mod tests {
         assert!(result.is_err());
         assert!(!runtime_manager
             .default_runtime
-            .block_on(hdfs.is_healthy())?);
+            .block_on(hdfs.check_health())?);
         Ok(())
     }
 

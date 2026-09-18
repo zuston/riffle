@@ -17,8 +17,8 @@
 
 use crate::app_manager::request_context::ReadingOptions::FILE_OFFSET_AND_LEN;
 use crate::app_manager::request_context::{
-    PurgeDataContext, ReadingIndexViewContext, ReadingOptions, ReadingViewContext,
-    RegisterAppContext, ReleaseTicketContext, RequireBufferContext, RpcType, WritingViewContext,
+    AcquireTicketContext, PurgeDataContext, ReadingIndexViewContext, ReadingOptions,
+    ReadingViewContext, RegisterAppContext, ReleaseTicketContext, RpcType, WritingViewContext,
 };
 use crate::config::{LocalfileStoreConfig, StorageType, UrpcNetEngine};
 use crate::error::WorkerError;
@@ -283,7 +283,7 @@ impl LocalFileStore {
             return Err(WorkerError::LOCAL_DISK_UNHEALTHY(local_disk.root()));
         }
 
-        let shuffle_file_format = self.create_shuffle_format(blocks, next_offset as i64)?;
+        let shuffle_file_format = self.as_format(blocks, next_offset as i64)?;
         let options = if self.direct_io_append_enable {
             WriteOptions::with_append_of_direct_io(shuffle_file_format.data, next_offset)
         } else {
@@ -438,8 +438,8 @@ impl LocalFileStore {
 
 #[async_trait]
 impl Store for LocalFileStore {
-    fn start(self: Arc<Self>) {
-        todo!()
+    fn initialize(self: Arc<Self>) -> Result<(), WorkerError> {
+        Ok(())
     }
 
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
@@ -453,7 +453,7 @@ impl Store for LocalFileStore {
             .await
     }
 
-    async fn get(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
+    async fn get_data(&self, ctx: ReadingViewContext) -> Result<ResponseData, WorkerError> {
         let timer = Instant::now();
         let uid = ctx.uid;
         let rpc_source = ctx.rpc_source;
@@ -648,13 +648,13 @@ impl Store for LocalFileStore {
         Ok(removed_data_size as i64)
     }
 
-    async fn is_healthy(&self) -> Result<bool> {
+    async fn check_health(&self) -> Result<bool> {
         self.healthy_check()
     }
 
-    async fn require_buffer(
+    async fn acquire_ticket(
         &self,
-        _ctx: RequireBufferContext,
+        _ctx: AcquireTicketContext,
     ) -> Result<RequireBufferResponse, WorkerError> {
         todo!()
     }
@@ -667,13 +667,8 @@ impl Store for LocalFileStore {
         Ok(())
     }
 
-    async fn name(&self) -> StorageType {
+    async fn storage_type(&self) -> StorageType {
         StorageType::LOCALFILE
-    }
-
-    async fn pre_check(&self) -> Result<(), WorkerError> {
-        // todo: check the localfile permission
-        Ok(())
     }
 }
 
@@ -757,7 +752,7 @@ mod test {
             assert_eq!(1, entry.length);
         }
         let data = runtime
-            .wait(store.get(ReadingViewContext::new(
+            .wait(store.get_data(ReadingViewContext::new(
                 uid,
                 ReadingOptions::FILE_OFFSET_AND_LEN(0, 5),
                 RpcType::GRPC,
@@ -813,7 +808,9 @@ mod test {
         )
         .with_io_mode(IoMode::SENDFILE);
 
-        let data = runtime.wait(local_store.get(reading_ctx))?.from_local();
+        let data = runtime
+            .wait(local_store.get_data(reading_ctx))?
+            .from_local();
         assert!(matches!(data, DataBytes::Direct(_)));
         Ok(())
     }
@@ -1032,7 +1029,7 @@ mod test {
                 RpcType::GRPC,
             );
 
-            let read_result = local_store.get(reading_ctx).await;
+            let read_result = local_store.get_data(reading_ctx).await;
             if read_result.is_err() {
                 error!("failed to get the localfile data: {:?}", read_result.err());
                 panic!()
@@ -1219,7 +1216,8 @@ mod test {
             RpcType::GRPC,
         )
         .with_io_mode(IoMode::BUFFER_IO);
-        let ResponseData::Local(partitioned_data) = runtime.wait(local_store.get(reading_ctx))?
+        let ResponseData::Local(partitioned_data) =
+            runtime.wait(local_store.get_data(reading_ctx))?
         else {
             panic!("expected local data");
         };
