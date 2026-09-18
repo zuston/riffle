@@ -38,12 +38,14 @@ impl ServiceTagsManager {
     }
 
     pub fn all_tags(&self) -> Vec<String> {
-        let tags = self.tags.read();
-        self.builtin_tags
+        let mut tags: Vec<_> = self
+            .builtin_tags
             .iter()
-            .chain(tags.iter())
+            .chain(self.tags.read().iter())
             .cloned()
-            .collect()
+            .collect();
+        tags.sort_unstable();
+        tags
     }
 
     pub fn update_tags(&self, new_tags: Vec<String>) {
