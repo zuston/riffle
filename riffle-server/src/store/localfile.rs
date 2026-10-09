@@ -70,13 +70,13 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tracing::Instrument;
 
-struct PartitionCoordinator {
+struct PartitionDataInfo {
     disk: LocalDiskDelegator,
     pointer: Arc<AtomicU64>,
     write_lock: Arc<Mutex<()>>,
 }
 
-impl From<LocalDiskDelegator> for PartitionCoordinator {
+impl From<LocalDiskDelegator> for PartitionDataInfo {
     fn from(value: LocalDiskDelegator) -> Self {
         Self {
             disk: value,
@@ -90,7 +90,7 @@ pub struct LocalFileStore {
     local_disks: Vec<LocalDiskDelegator>,
     min_number_of_available_disks: i32,
     runtime_manager: RuntimeManager,
-    partition_coordinators: DDashMap<String, Arc<PartitionCoordinator>>,
+    partition_coordinators: DDashMap<String, Arc<PartitionDataInfo>>,
 
     // just control whether to use the direct_io for append operations.
     // for the read, this is determined by the client side.
@@ -192,7 +192,7 @@ impl LocalFileStore {
     }
 
     fn gen_relative_path_for_app(app_id: &str) -> String {
-        format!("{}", app_id)
+        format!("{}/", app_id)
     }
 
     fn gen_relative_path_for_shuffle(app_id: &str, shuffle_id: i32) -> String {
@@ -261,7 +261,7 @@ impl LocalFileStore {
             Entry::Vacant(e) => {
                 parent_dir_is_created = false;
                 let disk = self.select_disk(&uid)?;
-                let obj = e.insert_entry(Arc::new(PartitionCoordinator::from(disk)));
+                let obj = e.insert_entry(Arc::new(PartitionDataInfo::from(disk)));
                 obj.get().clone()
             }
             Entry::Occupied(v) => v.get().clone(),
