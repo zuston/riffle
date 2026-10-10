@@ -36,7 +36,7 @@ strum_macros = { workspace = true }
 
 sqlparser = { workspace = true }
 log = { workspace = true }
-logforth = { workspace = true }
+logforth = { workspace = true, features = ["starter-log"] }
 toml = { workspace = true }
 dirs = { workspace = true }
 
