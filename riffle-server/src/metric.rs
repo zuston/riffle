@@ -511,6 +511,17 @@ pub static GAUGE_MEMORY_SPILL_IN_FLUSHING_OPERATION: Lazy<IntGaugeVec> = Lazy::n
     )
     .unwrap()
 });
+pub static GAUGE_LOCALFILE_SPILL_PARTITION_LOCK_WAITING_NUMBER: Lazy<IntGaugeVec> =
+    Lazy::new(|| {
+        IntGaugeVec::new(
+            prometheus::Opts::new(
+                "localfile_spill_partition_lock_waiting_number",
+                "Localfile spill operations currently waiting for a partition lock",
+            ),
+            &["root"],
+        )
+        .expect("metric should be created")
+    });
 pub static GAUGE_MEMORY_SPILL_TO_LOCALFILE: Lazy<IntGauge> = Lazy::new(|| {
     IntGauge::new("memory_spill_to_localfile", "memory spill to localfile")
         .expect("metric should be created")
@@ -1065,6 +1076,11 @@ fn register_custom_metrics() {
     REGISTRY
         .register(Box::new(GAUGE_MEMORY_SPILL_IN_FLUSHING_OPERATION.clone()))
         .expect("memory_spill_operation must be registered");
+    REGISTRY
+        .register(Box::new(
+            GAUGE_LOCALFILE_SPILL_PARTITION_LOCK_WAITING_NUMBER.clone(),
+        ))
+        .expect("localfile_spill_partition_lock_waiting_number must be registered");
 
     REGISTRY
         .register(Box::new(SERVICE_IS_HEALTHY.clone()))
