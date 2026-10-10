@@ -23,7 +23,8 @@ use crate::app_manager::request_context::{
 use crate::config::{LocalfileStoreConfig, StorageType, UrpcNetEngine};
 use crate::error::WorkerError;
 use crate::metric::{
-    GAUGE_LOCAL_DISK_SERVICE_USED, LCOALFILE_GET_DATA_RPC_LATENCY_HISTOGRAM_WITH_DATA_BYTES,
+    GAUGE_LOCALFILE_SPILL_PARTITION_LOCK_WAITING_NUMBER, GAUGE_LOCAL_DISK_SERVICE_USED,
+    LCOALFILE_GET_DATA_RPC_LATENCY_HISTOGRAM_WITH_DATA_BYTES,
     LOCALFILE_GET_DATA_RPC_SIZE_HISTOGRAM, RPC_BATCH_BYTES_OPERATION,
     RPC_BATCH_DATA_BYTES_HISTOGRAM, TOTAL_DETECTED_LOCALFILE_IN_CONSISTENCY, TOTAL_LOCALFILE_USED,
 };
@@ -63,6 +64,7 @@ use crate::util::get_crc;
 use dashmap::mapref::entry::Entry;
 use futures::AsyncReadExt;
 use fxhash::FxHasher;
+use prometheus::IntGauge;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -83,6 +85,21 @@ impl From<LocalDiskDelegator> for PartitionDataInfo {
             pointer: Default::default(),
             write_lock: Arc::new(Default::default()),
         }
+    }
+}
+
+struct PartitionLockWaitMetricsMonitor(IntGauge);
+
+impl PartitionLockWaitMetricsMonitor {
+    fn new(gauge: IntGauge) -> Self {
+        gauge.inc();
+        Self(gauge)
+    }
+}
+
+impl Drop for PartitionLockWaitMetricsMonitor {
+    fn drop(&mut self) {
+        self.0.dec();
     }
 }
 
@@ -111,6 +128,7 @@ impl LocalFileStore {
         let runtime_manager: RuntimeManager = Default::default();
         let config = LocalfileStoreConfig::new(local_disks.clone());
         for path in &local_disks {
+            GAUGE_LOCALFILE_SPILL_PARTITION_LOCK_WAITING_NUMBER.with_label_values(&[path]);
             local_disk_instances.push(LocalDiskDelegator::new(&runtime_manager, &path, &config));
         }
         LocalFileStore {
@@ -135,6 +153,7 @@ impl LocalFileStore {
     pub fn from(localfile_config: LocalfileStoreConfig, runtime_manager: RuntimeManager) -> Self {
         let mut local_disk_instances = vec![];
         for path in &localfile_config.data_paths {
+            GAUGE_LOCALFILE_SPILL_PARTITION_LOCK_WAITING_NUMBER.with_label_values(&[path]);
             if localfile_config.launch_purge_enable {
                 info!("Launch purging for [{}]...", path.as_str());
                 if let Err(e) = LocalFileStore::remove_dir_children(path.as_str()) {
@@ -267,11 +286,17 @@ impl LocalFileStore {
             Entry::Occupied(v) => v.get().clone(),
         };
 
-        let partition_write_lock = partition_coordinator
-            .write_lock
-            .lock()
-            .instrument_await(format!("waiting the localfile partition lock. {:?}", &uid))
-            .await;
+        let partition_write_lock = {
+            let _waiting = PartitionLockWaitMetricsMonitor::new(
+                GAUGE_LOCALFILE_SPILL_PARTITION_LOCK_WAITING_NUMBER
+                    .with_label_values(&[&partition_coordinator.disk.root()]),
+            );
+            partition_coordinator
+                .write_lock
+                .lock()
+                .instrument_await(format!("waiting the localfile partition lock. {:?}", &uid))
+                .await
+        };
         let local_disk = &partition_coordinator.disk;
         let next_offset = partition_coordinator.pointer.load(SeqCst);
 
@@ -688,6 +713,7 @@ mod test {
     use crate::app_manager::purge_event::PurgeReason;
     use crate::config::{LocalfileStoreConfig, UrpcNetEngine};
     use crate::error::WorkerError;
+    use crate::metric::GAUGE_LOCALFILE_SPILL_PARTITION_LOCK_WAITING_NUMBER;
     use crate::runtime::manager::RuntimeManager;
     use crate::store::index_codec::{IndexBlock, IndexCodec, INDEX_BLOCK_SIZE};
     use crate::store::local::read_options::IoMode;
@@ -1092,6 +1118,52 @@ mod test {
         }
 
         temp_dir.close().unwrap();
+    }
+
+    #[test]
+    fn data_insert_tracks_partition_lock_waiters() -> anyhow::Result<()> {
+        use std::time::Duration;
+        use tokio::time::timeout;
+
+        let temp_dir = tempfile::tempdir()?;
+        let temp_path = temp_dir.path().display().to_string();
+        let local_store = LocalFileStore::new(vec![temp_path.clone()]);
+        let runtime = local_store.runtime_manager.clone();
+        let waiting =
+            GAUGE_LOCALFILE_SPILL_PARTITION_LOCK_WAITING_NUMBER.with_label_values(&[&temp_path]);
+        let ctx = create_writing_ctx();
+
+        runtime.wait(async {
+            local_store.insert(ctx.clone()).await?;
+            assert_eq!(0, waiting.get());
+
+            let data_path = LocalFileStore::gen_relative_path_for_partition(&ctx.uid).0;
+            let write_lock = local_store
+                .partition_coordinators
+                .get(&data_path)
+                .unwrap()
+                .write_lock
+                .clone();
+            let held_lock = write_lock.lock().await;
+
+            let mut pending_insert = Box::pin(local_store.insert(ctx.clone()));
+            assert!(futures::poll!(pending_insert.as_mut()).is_pending());
+            assert_eq!(1, waiting.get());
+
+            let mut cancelled_insert = Box::pin(local_store.insert(ctx));
+            assert!(futures::poll!(cancelled_insert.as_mut()).is_pending());
+            assert_eq!(2, waiting.get());
+            drop(cancelled_insert);
+            assert_eq!(1, waiting.get());
+
+            drop(held_lock);
+            timeout(Duration::from_secs(1), pending_insert).await??;
+            assert_eq!(0, waiting.get());
+
+            Ok::<(), anyhow::Error>(())
+        })?;
+
+        Ok(())
     }
 
     #[test]
