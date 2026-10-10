@@ -15,11 +15,53 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use riffle_server::config::LogConfig;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct LogConfig {
+    pub path: String,
+    #[serde(default = "default_rotation")]
+    pub rotation: RotationConfig,
+    #[serde(default = "default_max_file_size")]
+    pub max_file_size: String,
+    #[serde(default = "default_max_log_files")]
+    pub max_log_files: usize,
+    #[serde(default = "default_log_level")]
+    pub log_level: LogLevel,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum RotationConfig {
+    Hourly,
+    Daily,
+    Never,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum LogLevel {
+    DEBUG,
+    INFO,
+    WARN,
+}
+
+fn default_rotation() -> RotationConfig {
+    RotationConfig::Daily
+}
+
+fn default_max_file_size() -> String {
+    "512M".to_string()
+}
+
+fn default_max_log_files() -> usize {
+    10
+}
+
+fn default_log_level() -> LogLevel {
+    LogLevel::INFO
+}
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

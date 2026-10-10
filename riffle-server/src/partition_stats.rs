@@ -81,8 +81,8 @@ pub struct TaskToRecordStat {
 
 pub type TaskToRecordStatRef = Arc<TaskToRecordStat>;
 
-impl Into<crate::grpc::protobuf::uniffle::TaskAttemptIdToRecords> for &TaskToRecordStatRef {
-    fn into(self) -> crate::grpc::protobuf::uniffle::TaskAttemptIdToRecords {
+impl TaskToRecordStat {
+    fn to_proto(&self) -> crate::grpc::protobuf::uniffle::TaskAttemptIdToRecords {
         crate::grpc::protobuf::uniffle::TaskAttemptIdToRecords {
             task_attempt_id: self.task_attempt_id,
             record_number: self.record_number,
@@ -96,11 +96,15 @@ pub struct PartitionStats {
     records: Vec<TaskToRecordStatRef>,
 }
 
-impl Into<crate::grpc::protobuf::uniffle::PartitionStats> for PartitionStats {
-    fn into(self) -> crate::grpc::protobuf::uniffle::PartitionStats {
+impl From<PartitionStats> for crate::grpc::protobuf::uniffle::PartitionStats {
+    fn from(value: PartitionStats) -> Self {
         crate::grpc::protobuf::uniffle::PartitionStats {
-            partition_id: self.partition_id,
-            task_attempt_id_to_records: self.records.iter().map(|a| a.into()).collect(),
+            partition_id: value.partition_id,
+            task_attempt_id_to_records: value
+                .records
+                .iter()
+                .map(|record| record.as_ref().to_proto())
+                .collect(),
         }
     }
 }
