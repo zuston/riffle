@@ -270,7 +270,7 @@ impl LocalFileStore {
         let partition_write_lock = partition_coordinator
             .write_lock
             .lock()
-            .instrument_await("waiting the localfile partition lock")
+            .instrument_await(format!("waiting the localfile partition lock. {:?}", &uid))
             .await;
         let local_disk = &partition_coordinator.disk;
         let next_offset = partition_coordinator.pointer.load(SeqCst);
