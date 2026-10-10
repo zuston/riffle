@@ -11,8 +11,11 @@ use await_tree::{InstrumentAwait, SpanExt};
 use log::info;
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::Instrument;
+
+pub(crate) mod queue;
+use queue::{EventQueue, FifoQueue, QueueCompletion};
 
 #[async_trait]
 pub trait Subscriber: Send + Sync {
@@ -50,11 +53,7 @@ pub struct EventBus<T> {
 struct Inner<T> {
     subscriber: OnceCell<Arc<Box<dyn Subscriber<Input = T> + 'static>>>,
 
-    /// Using the async_channel to keep the immutable self to
-    /// the self as the Arc<xxx> rather than mpsc::channel, which
-    /// uses the recv(&mut self). I don't hope so.
-    queue_recv: async_channel::Receiver<Event<T>>,
-    queue_send: async_channel::Sender<Event<T>>,
+    queue: Arc<dyn EventQueue<T>>,
 
     name: String,
     runtime: RuntimeRef,
@@ -72,7 +71,15 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
         name: String,
         concurrency_ref: ConfigOption<usize>,
     ) -> EventBus<T> {
-        let (send, recv) = async_channel::unbounded();
+        Self::new_with_queue(runtime, name, concurrency_ref, Arc::new(FifoQueue::new()))
+    }
+
+    pub(crate) fn new_with_queue(
+        runtime: &RuntimeRef,
+        name: String,
+        concurrency_ref: ConfigOption<usize>,
+        queue: Arc<dyn EventQueue<T>>,
+    ) -> EventBus<T> {
         let concurrency_limiter = Arc::new(Semaphore::new(concurrency_ref.get()));
 
         // attach the callback into the dynamic concurrency ref
@@ -92,32 +99,32 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
         let event_bus = EventBus {
             inner: Arc::new(Inner {
                 subscriber: OnceCell::new(),
-                queue_recv: recv,
-                queue_send: send,
+                queue,
                 name: name.to_string(),
                 runtime: runtime.clone(),
                 concurrency_num: concurrency_ref,
                 concurrency_limit: concurrency_limiter,
             }),
         };
-
         let cloned = event_bus.clone();
-        runtime.spawn_with_await_tree(format!("EventBus - [{}]", &name).as_str(), async move {
-            EventBus::handle(cloned).await;
-        });
-
+        runtime.spawn_with_await_tree(
+            format!("EventBus - [{}]", &event_bus.inner.name).as_str(),
+            async move {
+                EventBus::handle(cloned).await;
+            },
+        );
         event_bus
     }
 
     async fn handle(event_bus: EventBus<T>) {
-        while let Ok(message) = event_bus
+        while let Ok((message, completion)) = event_bus
             .inner
-            .queue_recv
-            .recv()
+            .queue
+            .pop()
             .instrument_await("receiving event".long_running())
             .await
         {
-            let concurrency_guarder = event_bus
+            let permit = event_bus
                 .inner
                 .concurrency_limit
                 .clone()
@@ -125,37 +132,46 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
                 .instrument_await("waiting for the spill concurrent reject.")
                 .await
                 .unwrap();
-
-            let bus = event_bus.clone();
-            event_bus.inner.runtime.spawn_with_await_tree(
-                format!("EventBus - [{}] - Handler", &event_bus.inner.name).as_str(),
-                async move {
-                    let timer = EVENT_BUS_HANDLE_DURATION
-                        .with_label_values(&[&bus.inner.name])
-                        .start_timer();
-                    GAUGE_EVENT_BUS_QUEUE_HANDLING_SIZE
-                        .with_label_values(&[&bus.inner.name])
-                        .inc();
-                    GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE
-                        .with_label_values(&[&bus.inner.name])
-                        .dec();
-
-                    let binding = bus.inner.subscriber.get();
-                    let subscriber = binding.as_ref().unwrap();
-                    let _ = subscriber.on_event(message).await;
-
-                    timer.observe_duration();
-                    GAUGE_EVENT_BUS_QUEUE_HANDLING_SIZE
-                        .with_label_values(&[&bus.inner.name])
-                        .dec();
-                    TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE
-                        .with_label_values(&[&bus.inner.name])
-                        .inc();
-
-                    drop(concurrency_guarder);
-                },
-            );
+            event_bus.spawn_handler(message, permit, completion);
         }
+    }
+
+    fn spawn_handler(
+        &self,
+        message: Event<T>,
+        concurrency_guarder: OwnedSemaphorePermit,
+        completion: QueueCompletion,
+    ) {
+        let bus = self.clone();
+        self.inner.runtime.spawn_with_await_tree(
+            format!("EventBus - [{}] - Handler", &self.inner.name).as_str(),
+            async move {
+                let timer = EVENT_BUS_HANDLE_DURATION
+                    .with_label_values(&[&bus.inner.name])
+                    .start_timer();
+                GAUGE_EVENT_BUS_QUEUE_HANDLING_SIZE
+                    .with_label_values(&[&bus.inner.name])
+                    .inc();
+                GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE
+                    .with_label_values(&[&bus.inner.name])
+                    .dec();
+
+                let binding = bus.inner.subscriber.get();
+                let subscriber = binding.as_ref().unwrap();
+                let _ = subscriber.on_event(message).await;
+
+                timer.observe_duration();
+                GAUGE_EVENT_BUS_QUEUE_HANDLING_SIZE
+                    .with_label_values(&[&bus.inner.name])
+                    .dec();
+                TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE
+                    .with_label_values(&[&bus.inner.name])
+                    .inc();
+
+                drop(completion);
+                drop(concurrency_guarder);
+            },
+        );
     }
 
     pub fn subscribe<R: Subscriber<Input = T> + 'static + Send + Sync>(&self, listener: R) {
@@ -163,19 +179,11 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
     }
 
     pub async fn publish(&self, event: Event<T>) -> anyhow::Result<()> {
-        self.inner.queue_send.send(event).await?;
-
-        GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE
-            .with_label_values(&[&self.inner.name])
-            .inc();
-        TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE
-            .with_label_values(&[&self.inner.name])
-            .inc();
-        Ok(())
+        self.sync_publish(event)
     }
 
     pub fn sync_publish(&self, event: Event<T>) -> anyhow::Result<()> {
-        self.inner.queue_send.send_blocking(event)?;
+        self.inner.queue.push(event)?;
 
         GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE
             .with_label_values(&[&self.inner.name])
@@ -193,9 +201,14 @@ impl<T: Send + Sync + Clone + 'static> EventBus<T> {
 
 #[cfg(test)]
 mod test {
+    use crate::app_manager::partition_identifier::PartitionUId;
     use crate::config_ref::{ConfRef, ConfigOption, DynamicConfRef, StaticConfRef};
+    use crate::event_bus::queue::PartitionPriorityQueue;
     use crate::event_bus::{Event, EventBus, Subscriber};
-    use crate::metric::{TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE, TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE};
+    use crate::metric::{
+        GAUGE_EVENT_BUS_QUEUE_HANDLING_SIZE, GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE,
+        TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE, TOTAL_EVENT_BUS_EVENT_PUBLISHED_SIZE,
+    };
     use crate::runtime::manager::create_runtime;
     use async_trait::async_trait;
     use std::sync::atomic::Ordering::{Relaxed, SeqCst};
@@ -203,6 +216,157 @@ mod test {
     use std::sync::Arc;
     use std::thread::sleep;
     use std::time::Duration;
+    use tokio::sync::Semaphore;
+
+    #[test]
+    fn test_keyed_bus_prioritizes_idle_partitions() -> anyhow::Result<()> {
+        const NAME: &str = "test_keyed_bus_prioritizes_idle_partitions";
+
+        struct BlockingCallback {
+            started: async_channel::Sender<(PartitionUId, u64)>,
+            gates: Arc<Vec<Arc<Semaphore>>>,
+        }
+
+        #[async_trait]
+        impl Subscriber for BlockingCallback {
+            type Input = (PartitionUId, u64);
+
+            async fn on_event(&self, event: Event<Self::Input>) -> bool {
+                self.started.send(event.data.clone()).await.unwrap();
+                self.gates[event.data.0.shuffle_id as usize]
+                    .acquire()
+                    .await
+                    .unwrap()
+                    .forget();
+                true
+            }
+        }
+
+        let runtime = create_runtime(2, NAME);
+        let bus = EventBus::new_with_queue(
+            &runtime,
+            NAME.to_string(),
+            StaticConfRef::new(2usize).into(),
+            Arc::new(PartitionPriorityQueue::new(
+                |message: &(PartitionUId, u64)| message.0.clone(),
+            )),
+        );
+        let (started, received) = async_channel::unbounded();
+        let gates: Arc<Vec<_>> = Arc::new((0..3).map(|_| Arc::new(Semaphore::new(0))).collect());
+        bus.subscribe(BlockingCallback {
+            started,
+            gates: gates.clone(),
+        });
+        let message = |shuffle_id, sequence| {
+            (
+                PartitionUId {
+                    shuffle_id,
+                    ..Default::default()
+                },
+                sequence,
+            )
+        };
+        let next_started = || async {
+            tokio::time::timeout(Duration::from_secs(2), received.recv())
+                .await
+                .unwrap()
+                .unwrap()
+        };
+
+        runtime.block_on(async {
+            bus.publish(message(0, 0).into()).await?;
+            assert_eq!(message(0, 0), next_started().await);
+            bus.publish(message(0, 1).into()).await?;
+            bus.publish(message(0, 2).into()).await?;
+            bus.publish(message(1, 0).into()).await?;
+            bus.publish(message(1, 1).into()).await?;
+
+            // Another full UID must fill the second slot despite a hot partition backlog.
+            assert_eq!(message(1, 0), next_started().await);
+            bus.publish(message(2, 0).into()).await?;
+            assert!(received.try_recv().is_err());
+
+            // Queued events for active partitions do not occupy execution slots.
+            gates[1].add_permits(1);
+            assert_eq!(message(2, 0), next_started().await);
+            gates[2].add_permits(1);
+            assert_eq!(message(1, 1), next_started().await);
+            gates[1].add_permits(1);
+
+            // The hot partition's queued events remain FIFO.
+            gates[0].add_permits(3);
+            assert_eq!(message(0, 1), next_started().await);
+            assert_eq!(message(0, 2), next_started().await);
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while TOTAL_EVENT_BUS_EVENT_HANDLED_SIZE
+                    .with_label_values(&[NAME])
+                    .get()
+                    != 6
+                {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await?;
+            assert_eq!(
+                0,
+                GAUGE_EVENT_BUS_QUEUE_PENDING_SIZE
+                    .with_label_values(&[NAME])
+                    .get()
+            );
+            assert_eq!(
+                0,
+                GAUGE_EVENT_BUS_QUEUE_HANDLING_SIZE
+                    .with_label_values(&[NAME])
+                    .get()
+            );
+
+            // A drained key can be scheduled again.
+            bus.publish(message(0, 3).into()).await?;
+            assert_eq!(message(0, 3), next_started().await);
+            gates[0].add_permits(1);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn test_key_released_after_handler_panics() -> anyhow::Result<()> {
+        struct Callback {
+            handled: async_channel::Sender<u32>,
+        }
+
+        #[async_trait]
+        impl Subscriber for Callback {
+            type Input = u32;
+
+            async fn on_event(&self, event: Event<u32>) -> bool {
+                if event.data == 0 {
+                    panic!("handler failed");
+                }
+                self.handled.send(event.data).await.unwrap();
+                true
+            }
+        }
+
+        let runtime = create_runtime(2, "test_key_released_after_handler_panics");
+        let bus = EventBus::new_with_queue(
+            &runtime,
+            "test_key_released_after_handler_panics".to_string(),
+            StaticConfRef::new(1usize).into(),
+            Arc::new(PartitionPriorityQueue::new(|_: &u32| 0)),
+        );
+        let (handled, received) = async_channel::unbounded();
+        bus.subscribe(Callback { handled });
+
+        runtime.block_on(async {
+            bus.publish(0.into()).await?;
+            bus.publish(1.into()).await?;
+            assert_eq!(
+                1,
+                tokio::time::timeout(Duration::from_secs(1), received.recv()).await??
+            );
+            Ok(())
+        })
+    }
 
     #[test]
     fn test_dynamic_limiter() -> anyhow::Result<()> {

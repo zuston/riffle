@@ -1,13 +1,16 @@
 use crate::config::StorageType::{HDFS, LOCALFILE};
-use crate::config::{Config, StorageType};
+use crate::config::{Config, SpillSchedulingPolicy, StorageType};
 use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::config_ref::StaticConfRef;
 use crate::ddashmap::DDashMap;
+use crate::event_bus::queue::{EventQueue, FifoQueue, PartitionPriorityQueue};
 use crate::event_bus::{Event, EventBus, Subscriber};
 use crate::runtime::manager::RuntimeManager;
 use crate::store::spill::SpillMessage;
 use anyhow::Result;
 use dashmap::DashMap;
+use log::info;
+use std::sync::Arc;
 use tokio::sync::Semaphore;
 // This is the predefined event bus for the spill operations.
 // The parent is the dispatcher, it will firstly get the candidate
@@ -90,11 +93,30 @@ impl HierarchyEventBus<SpillMessage> {
             "Hierarchy-Parent".to_string(),
             StaticConfRef::new(MAX_CONCURRENCY).into(),
         );
-        let child_localfile: EventBus<SpillMessage> = EventBus::new(
+
+        // init the localfile flushing event bus with scheduling policy to reduce lock contention
+        let scheduling_policy = config
+            .localfile_store
+            .as_ref()
+            .map(|localfile| localfile.spill_scheduling_policy)
+            .unwrap_or_default();
+        info!("Localfile spill scheduling policy: {:?}", scheduling_policy);
+        let queue: Arc<dyn EventQueue<SpillMessage>> = match scheduling_policy {
+            SpillSchedulingPolicy::Fifo => Arc::new(FifoQueue::new()),
+            SpillSchedulingPolicy::PartitionPriority => {
+                Arc::new(PartitionPriorityQueue::new(|message: &SpillMessage| {
+                    message.ctx.uid.clone()
+                }))
+            }
+        };
+        let child_localfile = EventBus::new_with_queue(
             &runtime_manager.localfile_write_runtime,
             "Hierarchy-Child-localfile".to_string(),
             localfile_concurrency,
+            queue,
         );
+
+        // init the hdfs flushing event bus
         let child_hdfs: EventBus<SpillMessage> = EventBus::new(
             &runtime_manager.hdfs_write_runtime,
             "Hierarchy-Child-hdfs".to_string(),
@@ -129,9 +151,10 @@ impl HierarchyEventBus<SpillMessage> {
 
 #[cfg(test)]
 mod tests {
+    use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::request_context::{WritingData, WritingViewContext};
-    use crate::config::Config;
     use crate::config::StorageType::{HDFS, LOCALFILE};
+    use crate::config::{Config, LocalfileStoreConfig, RuntimeConfig, SpillSchedulingPolicy};
     use crate::config_reconfigure::ReconfigurableConfManager;
     use crate::event_bus::{Event, Subscriber};
     use crate::runtime::manager::RuntimeManager;
@@ -199,6 +222,87 @@ mod tests {
     }
 
     #[test]
+    fn test_localfile_scheduling_policy() -> Result<()> {
+        struct BlockingHandler {
+            started: async_channel::Sender<u64>,
+            gate: Arc<Semaphore>,
+        }
+
+        #[async_trait]
+        impl Subscriber for BlockingHandler {
+            type Input = SpillMessage;
+
+            async fn on_event(&self, event: Event<SpillMessage>) -> bool {
+                self.started.send(event.data.flight_id).await.unwrap();
+                self.gate.acquire().await.unwrap().forget();
+                true
+            }
+        }
+
+        let runtime_manager = RuntimeManager::from(RuntimeConfig {
+            read_thread_num: 1,
+            localfile_write_thread_num: 1,
+            hdfs_write_thread_num: 1,
+            http_thread_num: 1,
+            default_thread_num: 1,
+            dispatch_thread_num: 1,
+            read_ahead_thread_number: 1,
+        });
+        for (policy, expected_second) in [
+            (SpillSchedulingPolicy::Fifo, 1),
+            (SpillSchedulingPolicy::PartitionPriority, 2),
+        ] {
+            let mut config = Config::create_simple_config();
+            let mut localfile = LocalfileStoreConfig::new(vec!["/data1".to_string()]);
+            localfile.write_concurrency_per_disk = 2;
+            localfile.spill_scheduling_policy = policy;
+            config.localfile_store = Some(localfile);
+            let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
+            let event_bus = HierarchyEventBus::new(&runtime_manager, &config, &reconf_manager);
+            let bus = event_bus.children.get(&LOCALFILE).unwrap();
+            let (started, received) = async_channel::unbounded();
+            let gate = Arc::new(Semaphore::new(0));
+            bus.subscribe(BlockingHandler {
+                started,
+                gate: gate.clone(),
+            });
+            let message = |partition_id, flight_id| SpillMessage {
+                ctx: WritingViewContext {
+                    uid: PartitionUId {
+                        partition_id,
+                        ..Default::default()
+                    },
+                    data_blocks: WritingData::Shared(Arc::new(Default::default())),
+                    data_size: 0,
+                },
+                app_is_exist_func: Arc::new(|_| true),
+                retry_cnt: Default::default(),
+                flight_id,
+                candidate_store_type: Default::default(),
+                huge_partition_tag: Default::default(),
+            };
+
+            runtime_manager.wait(async {
+                bus.publish(message(0, 0).into()).await?;
+                assert_eq!(
+                    0,
+                    tokio::time::timeout(Duration::from_secs(2), received.recv()).await??
+                );
+                bus.publish(message(0, 1).into()).await?;
+                bus.publish(message(1, 2).into()).await?;
+                assert_eq!(
+                    expected_second,
+                    tokio::time::timeout(Duration::from_secs(2), received.recv()).await??
+                );
+                assert!(received.try_recv().is_err());
+                gate.add_permits(3);
+                Ok::<_, anyhow::Error>(())
+            })?;
+        }
+        Ok(())
+    }
+
+    #[test]
     fn test_concurrency() -> Result<()> {
         let runtime_manager = RuntimeManager::default();
         let config = Config::create_simple_config();
@@ -243,8 +347,21 @@ mod tests {
 
     #[test]
     fn test_event_bus() -> Result<()> {
+        verify_event_bus(SpillSchedulingPolicy::Fifo)
+    }
+
+    #[test]
+    fn test_partition_priority_event_bus() -> Result<()> {
+        verify_event_bus(SpillSchedulingPolicy::PartitionPriority)
+    }
+
+    fn verify_event_bus(policy: SpillSchedulingPolicy) -> Result<()> {
         let runtime_manager = RuntimeManager::default();
-        let config = Config::create_simple_config();
+        let mut config = Config::create_simple_config();
+        config.localfile_store = Some(LocalfileStoreConfig {
+            spill_scheduling_policy: policy,
+            ..Default::default()
+        });
         let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
         let event_bus = Arc::new(HierarchyEventBus::new(
             &runtime_manager,
