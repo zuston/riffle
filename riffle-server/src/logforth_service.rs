@@ -12,7 +12,7 @@ use std::num::NonZeroUsize;
 
 const LOG_FILE_NAME_PREFIX: &str = "riffle-server";
 // Bound the backlog when request logging outpaces disk writes.
-const LOG_BUFFERED_LINES_LIMIT: usize = 16_384;
+const LOG_BUFFERED_LINES_LIMIT: usize = 262_144;
 
 pub struct LogGuard;
 
@@ -27,12 +27,7 @@ impl LogService {
     pub fn init(log: Option<&LogConfig>) -> LogGuard {
         let logger = match log {
             Some(log) => file_logger(log),
-            None => logforth::core::builder()
-                .dispatch(|d| {
-                    d.filter(LevelFilter::MoreSevereEqual(Level::Info))
-                        .append(Stdout::default().with_layout(TextLayout::default()))
-                })
-                .build(),
+            _ => stdout_logger(),
         };
 
         log::set_boxed_logger(Box::new(LogBridge::new(logger)))
@@ -40,6 +35,15 @@ impl LogService {
         log::set_max_level(log::LevelFilter::Trace);
         LogGuard
     }
+}
+
+fn stdout_logger() -> Logger {
+    logforth::core::builder()
+        .dispatch(|d| {
+            d.filter(LevelFilter::MoreSevereEqual(Level::Info))
+                .append(Stdout::default().with_layout(TextLayout::default()))
+        })
+        .build()
 }
 
 fn file_logger(log: &LogConfig) -> Logger {
