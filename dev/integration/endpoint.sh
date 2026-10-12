@@ -163,7 +163,7 @@ case "$ROLE" in
     exec nohup /riffle/target/debug/riffle-server --config config.toml &
     sleep 5
     echo_info "Tailing logs:"
-    exec tail -f /tmp/riffle-server-1/log/riffle-server.0
+    exec tail -F /tmp/riffle-server-1/log/riffle-server.log
     ;;
 
   riffle-server-2)
@@ -179,7 +179,7 @@ case "$ROLE" in
     exec nohup /riffle/target/debug/riffle-server --config config.toml &
     sleep 5
     echo_info "Tailing logs:"
-    exec tail -f /tmp/riffle-server-2/log/riffle-server.0
+    exec tail -F /tmp/riffle-server-2/log/riffle-server.log
     ;;
 
   spark-client)
