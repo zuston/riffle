@@ -49,9 +49,7 @@ use anyhow::Result;
 use bytesize::ByteSize;
 use clap::builder::Str;
 use clap::{Arg, Parser};
-use log::{info, LevelFilter};
-#[cfg(feature = "logforth")]
-use logforth::append;
+use log::info;
 use std::str::FromStr;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -130,33 +128,10 @@ fn main() -> Result<()> {
     let args = Args::parse();
     let mut config = Config::from(&args.config);
 
-    let _guard = match &config.log {
-        None => {
-            #[cfg(feature = "logforth")]
-            {
-                logforth::builder()
-                    .dispatch(|d| {
-                        d.filter(LevelFilter::Info)
-                            .append(append::Stdout::default())
-                    })
-                    .apply();
-            }
-            None
-        }
-        Some(log_config) => {
-            #[cfg(not(feature = "logforth"))]
-            {
-                let _guard = LogService::init(log_config);
-                Some(_guard)
-            }
-
-            #[cfg(feature = "logforth")]
-            {
-                let _guard = LogService::init(log_config);
-                Some(_guard)
-            }
-        }
-    };
+    #[cfg(feature = "logforth")]
+    let _guard = LogService::init(config.log.as_ref());
+    #[cfg(not(feature = "logforth"))]
+    let _guard = config.log.as_ref().map(LogService::init);
 
     info!(
         "Riffle is built on the git commit hash: {}",

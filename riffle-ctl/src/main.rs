@@ -15,8 +15,8 @@ use crate::actions::status_action::StatusAction;
 use crate::actions::tag_action::{TagAction, TagOperation};
 use crate::actions::{Action, ValidateAction};
 use clap::{Parser, Subcommand};
-use log::{info, LevelFilter};
-use logforth::append;
+use log::info;
+use logforth::record::{Level, LevelFilter};
 use riffle_server::server_state_manager::ServerState;
 use tokio::runtime::Runtime;
 
@@ -239,11 +239,8 @@ enum ConfigCommands {
 }
 
 fn main() -> anyhow::Result<()> {
-    logforth::builder()
-        .dispatch(|d| {
-            d.filter(LevelFilter::Info)
-                .append(append::Stderr::default())
-        })
+    logforth::starter_log::stderr()
+        .filter(LevelFilter::MoreSevereEqual(Level::Info))
         .apply();
 
     let args = Args::parse();

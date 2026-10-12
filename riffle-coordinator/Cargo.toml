@@ -41,7 +41,7 @@ clap = { workspace = true, features = ["derive"] }
 chrono = { workspace = true, features = ["serde"] }
 rand = { workspace = true }
 toml = { workspace = true }
-logforth = { workspace = true, features = ["append-rolling-file"], optional = true }
+logforth = { workspace = true, features = ["starter-log"], optional = true }
 
 # Reuse riffle-server's gRPC generated code
 riffle-server = { workspace = true }

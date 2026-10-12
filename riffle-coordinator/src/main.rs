@@ -27,8 +27,8 @@ use crate::config::Config;
 use crate::grpc::protobuf::uniffle::coordinator_server_server::CoordinatorServerServer;
 use crate::grpc::service::DefaultCoordinatorServer;
 use clap::Parser;
-use log::{info, LevelFilter};
-use logforth::append;
+use log::info;
+use logforth::record::{Level, LevelFilter};
 use riffle_server::log_service::LogService;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tonic::transport::Server;
@@ -52,11 +52,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
     let _log_guard = match &config.log {
         None => {
-            logforth::builder()
-                .dispatch(|d| {
-                    d.filter(LevelFilter::Info)
-                        .append(append::Stdout::default())
-                })
+            logforth::starter_log::stdout()
+                .filter(LevelFilter::MoreSevereEqual(Level::Info))
                 .apply();
             None
         }
