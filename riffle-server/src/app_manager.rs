@@ -588,6 +588,7 @@ pub(crate) mod test {
                 memory_single_buffer_max_spill_size: None,
                 memory_spill_to_cold_threshold_size: None,
                 memory_spill_to_hdfs_concurrency: None,
+                localfile_spill_scheduling_policy: Default::default(),
                 huge_partition_memory_single_buffer_max_spill_size: None,
                 huge_partition_memory_spill_to_hdfs_threshold_size: Some("64M".to_string()),
                 huge_partition_fallback_enable: false,

@@ -95,11 +95,7 @@ impl HierarchyEventBus<SpillMessage> {
         );
 
         // init the localfile flushing event bus with scheduling policy to reduce lock contention
-        let scheduling_policy = config
-            .localfile_store
-            .as_ref()
-            .map(|localfile| localfile.spill_scheduling_policy)
-            .unwrap_or_default();
+        let scheduling_policy = config.hybrid_store.localfile_spill_scheduling_policy;
         info!("Localfile spill scheduling policy: {:?}", scheduling_policy);
         let queue: Arc<dyn EventQueue<SpillMessage>> = match scheduling_policy {
             SpillSchedulingPolicy::Fifo => Arc::new(FifoQueue::new()),
@@ -255,8 +251,8 @@ mod tests {
             let mut config = Config::create_simple_config();
             let mut localfile = LocalfileStoreConfig::new(vec!["/data1".to_string()]);
             localfile.write_concurrency_per_disk = 2;
-            localfile.spill_scheduling_policy = policy;
             config.localfile_store = Some(localfile);
+            config.hybrid_store.localfile_spill_scheduling_policy = policy;
             let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
             let event_bus = HierarchyEventBus::new(&runtime_manager, &config, &reconf_manager);
             let bus = event_bus.children.get(&LOCALFILE).unwrap();
@@ -358,10 +354,8 @@ mod tests {
     fn verify_event_bus(policy: SpillSchedulingPolicy) -> Result<()> {
         let runtime_manager = RuntimeManager::default();
         let mut config = Config::create_simple_config();
-        config.localfile_store = Some(LocalfileStoreConfig {
-            spill_scheduling_policy: policy,
-            ..Default::default()
-        });
+        config.localfile_store = Some(LocalfileStoreConfig::default());
+        config.hybrid_store.localfile_spill_scheduling_policy = policy;
         let reconf_manager = ReconfigurableConfManager::new(&config, None).unwrap();
         let event_bus = Arc::new(HierarchyEventBus::new(
             &runtime_manager,

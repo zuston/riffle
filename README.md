@@ -50,9 +50,9 @@ dashmap_shard_amount = 128
 data_paths = ["/data1/uniffle/t1", "/data2/uniffle/t1", "/data3/uniffle/t1", "/data4/uniffle/t1"]
 min_number_of_available_disks = 0
 write_concurrency_per_disk = 4
-spill_scheduling_policy = "FIFO"
 
 [hybrid_store]
+localfile_spill_scheduling_policy = "FIFO"
 memory_spill_high_watermark = 0.5
 memory_spill_low_watermark = 0.2
 
@@ -171,9 +171,6 @@ min_number_of_available_disks = 1
 disk_high_watermark = 0.8
 disk_low_watermark = 0.7
 write_concurrency_per_disk = 4
-# FIFO by default. PARTITION_PRIORITY keeps active partitions queued before admission.
-# Applied at startup; restart the worker after changing this policy.
-spill_scheduling_policy = "FIFO"
 disk_write_buf_capacity = "1M"
 disk_read_buf_capacity = "1M"
 disk_healthy_check_interval_sec = 60
@@ -187,6 +184,9 @@ keytab_path = "/path/to/keytab"
 principal = "principal@REALM"
 
 [hybrid_store]
+# FIFO by default. PARTITION_PRIORITY keeps active localfile partitions queued before admission.
+# Applied at startup; restart the worker after changing this policy.
+localfile_spill_scheduling_policy = "FIFO"
 memory_spill_high_watermark = 0.8
 memory_spill_low_watermark = 0.2
 memory_single_buffer_max_spill_size = "1G"
