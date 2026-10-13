@@ -155,6 +155,11 @@ impl ApplicationManager {
         }
     }
 
+    pub fn snapshot(&self, app_id: &str) -> Option<ApplicationSnapshot> {
+        self.remove_expired();
+        self.apps.get(app_id).map(|app| app.snapshot())
+    }
+
     pub fn snapshots(&self) -> Vec<ApplicationSnapshot> {
         self.remove_expired();
         let mut snapshots: Vec<_> = self.apps.iter().map(|app| app.snapshot()).collect();
