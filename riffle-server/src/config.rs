@@ -124,14 +124,6 @@ pub struct KerberosSecurityConfig {
 
 // =========================================================
 
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum SpillSchedulingPolicy {
-    #[default]
-    Fifo,
-    PartitionPriority,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct LocalfileStoreConfig {
     pub data_paths: Vec<String>,
@@ -142,10 +134,6 @@ pub struct LocalfileStoreConfig {
         deserialize_with = "deserialize_write_concurrency_per_disk"
     )]
     pub write_concurrency_per_disk: usize,
-
-    // Selected when the localfile spill event bus starts.
-    #[serde(default)]
-    pub spill_scheduling_policy: SpillSchedulingPolicy,
 
     #[serde(default = "bool::default")]
     pub launch_purge_enable: bool,
@@ -312,7 +300,6 @@ impl LocalfileStoreConfig {
             data_paths,
             min_number_of_available_disks: Some(1),
             write_concurrency_per_disk: as_default_write_concurrency_per_disk(),
-            spill_scheduling_policy: SpillSchedulingPolicy::default(),
             launch_purge_enable: false,
             disk_high_watermark: as_default_disk_high_watermark(),
             disk_low_watermark: as_default_disk_low_watermark(),
@@ -372,6 +359,14 @@ pub struct HealthServiceConfig {
 
 // =========================================================
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SpillSchedulingPolicy {
+    #[default]
+    Fifo,
+    PartitionPriority,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct HybridStoreConfig {
     #[serde(default = "as_default_memory_spill_high_watermark")]
@@ -383,6 +378,10 @@ pub struct HybridStoreConfig {
     pub memory_spill_to_cold_threshold_size: Option<String>,
 
     pub memory_spill_to_hdfs_concurrency: Option<i32>,
+
+    // Selected when the localfile spill event bus starts.
+    #[serde(default)]
+    pub localfile_spill_scheduling_policy: SpillSchedulingPolicy,
 
     pub huge_partition_memory_single_buffer_max_spill_size: Option<String>,
     pub huge_partition_memory_spill_to_hdfs_threshold_size: Option<String>,
@@ -436,6 +435,7 @@ impl HybridStoreConfig {
             memory_single_buffer_max_spill_size,
             memory_spill_to_cold_threshold_size: None,
             memory_spill_to_hdfs_concurrency: None,
+            localfile_spill_scheduling_policy: SpillSchedulingPolicy::default(),
             huge_partition_memory_single_buffer_max_spill_size: None,
             huge_partition_memory_spill_to_hdfs_threshold_size: None,
             huge_partition_fallback_enable: as_default_huge_partition_fallback_enable(),
@@ -455,6 +455,7 @@ impl Default for HybridStoreConfig {
             memory_single_buffer_max_spill_size: None,
             memory_spill_to_cold_threshold_size: None,
             memory_spill_to_hdfs_concurrency: None,
+            localfile_spill_scheduling_policy: SpillSchedulingPolicy::default(),
             huge_partition_memory_single_buffer_max_spill_size: None,
             huge_partition_memory_spill_to_hdfs_threshold_size: None,
             huge_partition_fallback_enable: as_default_huge_partition_fallback_enable(),
