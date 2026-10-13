@@ -1,4 +1,5 @@
 use crate::app_manager::app_configs::AppConfigOptions;
+use crate::app_manager::app_stats::AppStats;
 use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::purge_event::PurgeReason;
 use crate::config::UrpcNetEngine;
@@ -17,12 +18,14 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct PurgeDataContext {
     pub purge_reason: PurgeReason,
+    pub app_stats: AppStats,
 }
 
 impl PurgeDataContext {
-    pub fn new(reason: &PurgeReason) -> PurgeDataContext {
+    pub fn new(reason: &PurgeReason, app_stats: AppStats) -> PurgeDataContext {
         PurgeDataContext {
             purge_reason: reason.clone(),
+            app_stats,
         }
     }
 }
@@ -98,33 +101,46 @@ pub struct WritingViewContext {
     pub uid: PartitionUId,
     pub data_blocks: WritingData,
     pub data_size: u64,
+    pub app_stats: AppStats,
 }
 
 impl WritingViewContext {
     // only for test
-    pub fn create_for_test(uid: PartitionUId, data_blocks: Vec<Block>) -> Self {
+    pub fn create_for_test(
+        uid: PartitionUId,
+        data_blocks: Vec<Block>,
+        app_stats: AppStats,
+    ) -> Self {
         WritingViewContext {
             uid,
             data_blocks: WritingData::Owned(data_blocks),
             data_size: 0,
+            app_stats,
         }
     }
 
     // only for test
-    pub fn new_with_size(uid: PartitionUId, data_blocks: Vec<Block>, data_size: u64) -> Self {
+    pub fn new_with_size(
+        uid: PartitionUId,
+        data_blocks: Vec<Block>,
+        data_size: u64,
+        app_stats: AppStats,
+    ) -> Self {
         WritingViewContext {
             uid,
             data_blocks: WritingData::Owned(data_blocks),
             data_size,
+            app_stats,
         }
     }
 
-    pub fn new(uid: PartitionUId, data_blocks: Vec<Block>) -> Self {
+    pub fn new(uid: PartitionUId, data_blocks: Vec<Block>, app_stats: AppStats) -> Self {
         let len: u64 = data_blocks.iter().map(|block| block.length).sum::<i32>() as u64;
         WritingViewContext {
             uid,
             data_blocks: WritingData::Owned(data_blocks),
             data_size: len,
+            app_stats,
         }
     }
 }

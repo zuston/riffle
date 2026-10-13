@@ -1,4 +1,5 @@
 use crate::app_manager::app_configs::AppConfigOptions;
+use crate::app_manager::app_stats::{AppStats, AppStatsSnapshot};
 use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::partition_meta::PartitionMeta;
 use crate::app_manager::purge_event::PurgeReason;
@@ -17,7 +18,7 @@ use crate::ddashmap::DDashMap;
 use crate::error::WorkerError;
 use crate::metric::{
     BLOCK_ID_NUMBER, GAUGE_HUGE_PARTITION_NUMBER, GAUGE_PARTITION_NUMBER, HARD_SPLIT_COUNTER,
-    RESIDENT_BYTES, TOTAL_HUGE_PARTITION_NUMBER, TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED,
+    TOTAL_HUGE_PARTITION_NUMBER, TOTAL_HUGE_PARTITION_REQUIRE_BUFFER_FAILED,
     TOTAL_PARTITION_NUMBER, TOTAL_READ_DATA, TOTAL_READ_DATA_FROM_LOCALFILE,
     TOTAL_READ_DATA_FROM_MEMORY, TOTAL_READ_INDEX_FROM_LOCALFILE, TOTAL_RECEIVED_DATA,
     TOTAL_REQUIRE_BUFFER_FAILED,
@@ -36,7 +37,7 @@ use log::{error, info, warn};
 use parking_lot::RwLock;
 use std::collections::HashSet;
 use std::hash::BuildHasherDefault;
-use std::sync::atomic::Ordering::{Relaxed, SeqCst};
+use std::sync::atomic::Ordering::SeqCst;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -53,8 +54,7 @@ pub struct App {
     partition_limit_threshold: ConfigOption<ByteString>,
     partition_limit_mem_backpressure_ratio: ConfigOption<f64>,
 
-    total_received_data_size: AtomicU64,
-    total_resident_data_size: AtomicU64,
+    stats: AppStats,
 
     // when exceeding the partition-limit-threshold, it will be marked as huge partition
     huge_partition_number: AtomicU64,
@@ -158,8 +158,7 @@ impl App {
             partition_limit_threshold,
             partition_limit_mem_backpressure_ratio,
             partition_meta_infos: DDashMap::default(),
-            total_received_data_size: Default::default(),
-            total_resident_data_size: Default::default(),
+            stats: Default::default(),
             huge_partition_number: Default::default(),
             start_timestamp: now_timestamp_as_millis(),
             block_id_manager,
@@ -211,12 +210,8 @@ impl App {
         let len: u64 = ctx.data_size;
 
         TOTAL_RECEIVED_DATA.inc_by(len);
-        RESIDENT_BYTES.add(len as i64);
 
-        self.total_received_data_size
-            .fetch_add(len, Ordering::Relaxed);
-        self.total_resident_data_size
-            .fetch_add(len, Ordering::Relaxed);
+        self.stats.inc_received(len);
 
         // add the partition size into the meta and check its constraint
         let partition_meta = self.get_partition_meta(&ctx.uid);
@@ -484,11 +479,9 @@ impl App {
 
     pub async fn purge(&self, reason: &PurgeReason) -> anyhow::Result<()> {
         let (app_id, shuffle_id) = reason.extract();
-        let removed_size = self.store.purge(&PurgeDataContext::new(reason)).await?;
-        self.total_resident_data_size
-            .fetch_sub(removed_size as u64, SeqCst);
-
-        RESIDENT_BYTES.sub(removed_size);
+        self.store
+            .purge(&PurgeDataContext::new(reason, self.stats.clone()))
+            .await?;
 
         if let Some(shuffle_id) = shuffle_id {
             // shuffle level bitmap deletion
@@ -527,11 +520,19 @@ impl App {
     }
 
     pub fn total_received_data_size(&self) -> u64 {
-        self.total_received_data_size.load(SeqCst)
+        self.stats.snapshot().received_bytes
     }
 
     pub fn total_resident_data_size(&self) -> u64 {
-        self.total_resident_data_size.load(SeqCst)
+        self.stats.snapshot().resident_bytes
+    }
+
+    pub fn stats_snapshot(&self) -> AppStatsSnapshot {
+        self.stats.snapshot()
+    }
+
+    pub fn stats(&self) -> AppStats {
+        self.stats.clone()
     }
 }
 

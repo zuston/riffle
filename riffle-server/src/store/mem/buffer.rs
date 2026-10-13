@@ -1,3 +1,4 @@
+use crate::app_manager::app_stats::AppStats;
 pub mod configured_buffer;
 pub mod default_buffer;
 pub mod indexed_buffer;
@@ -33,6 +34,7 @@ impl Default for BufferType {
 #[derive(Default)]
 pub struct BufferOptions {
     pub buffer_type: BufferType,
+    pub app_stats: AppStats,
 }
 
 #[derive(Default, Debug)]
@@ -89,7 +91,11 @@ pub trait MemoryBuffer {
         Self: Send + Sync;
 
     /// Clears a specific flight by ID and size.
-    fn clear(&self, flight_id: u64, flight_size: u64) -> Result<()>
+    fn clear(&self, flight_id: u64, flight_size: u64) -> Result<u64>
+    where
+        Self: Send + Sync;
+
+    fn purge(&self) -> Result<u64>
     where
         Self: Send + Sync;
 

@@ -115,8 +115,7 @@ impl HeartbeatTask {
                         version: Some(version.to_string()),
                         git_commit_id: Some(git_commit_id.clone()),
                         start_time_ms: Some(start_time_ms),
-                        // todo: add active application infos
-                        application_info: vec![],
+                        application_info: app_manager.get_application_infos(),
                         display_metrics: Default::default(),
                     };
 

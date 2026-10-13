@@ -470,12 +470,16 @@ impl HybridStore {
         Ok(())
     }
 
-    pub async fn release_memory_buffer(&self, message: &SpillMessage) -> Result<()> {
+    pub async fn release_memory_buffer(&self, message: &SpillMessage) -> Result<u64> {
         let uid = &message.ctx.uid;
         self.hot_store
-            .clear_spilled_buffer(uid.clone(), message.flight_id, message.ctx.data_size)
-            .await?;
-        Ok(())
+            .clear_spilled_buffer(
+                uid.clone(),
+                &message.buffer,
+                message.flight_id,
+                message.ctx.data_size,
+            )
+            .await
     }
 
     async fn single_buffer_spill(&self, uid: &PartitionUId) -> Result<u64> {
@@ -531,9 +535,11 @@ impl HybridStore {
             uid: uid.clone(),
             data_blocks: WritingData::Shared(spill_result.blocks()),
             data_size: flight_len,
+            app_stats: buffer.app_stats(),
         };
         let message = SpillMessage {
             ctx: writing_ctx,
+            buffer,
             app_is_exist_func: Arc::new(app_is_exist_func),
             retry_cnt: Default::default(),
             flight_id: spill_result.flight_id(),
@@ -749,21 +755,19 @@ impl Store for HybridStore {
         self.warm_store.as_ref().unwrap().get_index(ctx).await
     }
 
-    async fn purge(&self, ctx: &PurgeDataContext) -> Result<i64> {
-        let app_id = &ctx.extract_app_id();
-        let mut removed_size = 0i64;
-
-        removed_size += self.hot_store.purge(&ctx).await?;
+    async fn purge(&self, ctx: &PurgeDataContext) -> Result<()> {
+        let app_id = &ctx.get_app_id();
+        self.hot_store.purge(ctx).await?;
         info!("Removed data of app:[{}] in hot store", app_id);
-        if self.warm_store.is_some() {
-            removed_size += self.warm_store.as_ref().unwrap().purge(&ctx).await?;
+        if let Some(store) = &self.warm_store {
+            store.purge(ctx).await?;
             info!("Removed data of app:[{}] in warm store", app_id);
         }
-        if self.cold_store.is_some() {
-            removed_size += self.cold_store.as_ref().unwrap().purge(&ctx).await?;
+        if let Some(store) = &self.cold_store {
+            store.purge(ctx).await?;
             info!("Removed data of app:[{}] in cold store", app_id);
         }
-        Ok(removed_size)
+        Ok(())
     }
 
     async fn check_health(&self) -> Result<bool> {
@@ -932,6 +936,7 @@ pub(crate) mod tests {
         batch_size: i64,
     ) -> Vec<i64> {
         let mut block_ids = vec![];
+        let app_stats = crate::app_manager::app_stats::AppStats::default();
         for i in 0..batch_size {
             block_ids.push(i);
             let writing_ctx = WritingViewContext::new_with_size(
@@ -945,6 +950,7 @@ pub(crate) mod tests {
                     task_attempt_id: 0,
                 }],
                 data_len as u64,
+                app_stats.clone(),
             );
             let _ = store.inc_used(data_len as i64);
             let _ = store.insert(writing_ctx).await;

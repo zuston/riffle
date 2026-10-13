@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use crate::app_manager::app_stats::AppStats;
 use crate::app_manager::request_context::ReadingOptions::MEMORY_LAST_BLOCK_ID_AND_MAX_SIZE;
 use crate::app_manager::request_context::{
     AcquireTicketContext, PurgeDataContext, ReadingIndexViewContext, ReadingViewContext,
@@ -196,26 +197,27 @@ impl<B: MemoryBuffer + Send + Sync + 'static> MemoryStore<B> {
     pub async fn clear_spilled_buffer(
         &self,
         uid: PartitionUId,
+        buffer: &Arc<B>,
         flight_id: u64,
         flight_len: u64,
-    ) -> Result<()> {
-        let buffer = self.get_buffer(&uid)?;
-        buffer.clear(flight_id, flight_len)?;
-        self.dec_used(flight_len as i64)?;
+    ) -> Result<u64> {
+        let released_size = buffer.clear(flight_id, flight_len)?;
+        self.dec_used(released_size as i64)?;
 
         self.mark_buffer_changed(uid).await;
 
-        Ok(())
+        Ok(released_size)
     }
 
     // only invoked when inserting
-    pub fn get_or_create_buffer(&self, uid: PartitionUId) -> Arc<B> {
+    pub fn get_or_create_buffer(&self, uid: PartitionUId, app_stats: AppStats) -> Arc<B> {
         let buf_opts = BufferOptions {
             buffer_type: self
                 .cfg
                 .as_ref()
                 .map(|x| x.buffer_type)
                 .unwrap_or(BufferType::DEFAULT),
+            app_stats,
         };
 
         let uid_clone = uid.clone();
@@ -279,7 +281,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
             return Err(anyhow!("Memory store only accepts owned writing data").into());
         };
 
-        let buffer = self.get_or_create_buffer(uid.clone());
+        let buffer = self.get_or_create_buffer(uid.clone(), ctx.app_stats);
         buffer.append(blocks, ctx.data_size)?;
 
         // Mark as changed when data is appended
@@ -313,7 +315,7 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
     }
 
     #[trace]
-    async fn purge(&self, ctx: &PurgeDataContext) -> Result<i64> {
+    async fn purge(&self, ctx: &PurgeDataContext) -> Result<()> {
         let (app_id, shuffle_id_option) = ctx.extract();
 
         // remove the corresponding app's data
@@ -338,19 +340,21 @@ impl<B: MemoryBuffer + Send + Sync + 'static> Store for MemoryStore<B> {
             // Mark as changed before removing
             self.mark_buffer_changed(removed_pid.clone()).await;
             if let Some(entry) = self.state.remove(removed_pid) {
-                used += entry.1.total_size()?;
+                let released_size = entry.1.purge()?;
+                ctx.app_stats.dec_memory(released_size);
+                used += released_size;
             }
         }
 
         // free used
-        self.budget.dec_used(used)?;
+        self.budget.dec_used(used as i64)?;
 
         info!(
             "Removed used memory buffer size:[{}] for [{}], [{:?}]",
             used, &app_id, shuffle_id_option
         );
 
-        Ok(used)
+        Ok(())
     }
 
     #[trace]
@@ -419,6 +423,7 @@ impl From<(i64, i64, i64)> for MemorySnapshot {
 
 #[cfg(test)]
 mod test {
+    use crate::app_manager::app_stats::AppStats;
     use crate::app_manager::request_context::{
         AcquireTicketContext, PurgeDataContext, ReadingOptions, ReadingViewContext, RpcType,
         WritingData, WritingViewContext,
@@ -439,9 +444,11 @@ mod test {
     use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::purge_event::PurgeReason;
     use crate::runtime::manager::RuntimeManager;
+    use crate::store::mem::buffer::configured_buffer::ConfiguredMemoryBuffer;
     use crate::store::mem::buffer::default_buffer::DefaultMemoryBuffer;
     use crate::store::mem::buffer::indexed_buffer::IndexedMemoryBuffer;
-    use crate::store::mem::buffer::MemoryBuffer;
+    use crate::store::mem::buffer::{BufferType, MemoryBuffer};
+    use crate::store::test_utils::create_blocks;
     use anyhow::Result;
     use croaring::Treemap;
 
@@ -449,6 +456,7 @@ mod test {
     fn insert_rejects_shared_batches_without_creating_a_buffer() {
         let store: MemoryStore = MemoryStore::new(1024);
         let ctx = WritingViewContext {
+            app_stats: Default::default(),
             uid: Default::default(),
             data_blocks: WritingData::Shared(Arc::new(Default::default())),
             data_size: 0,
@@ -673,9 +681,9 @@ mod test {
             });
         }
         if enable_actual_size {
-            WritingViewContext::new(uid, data_blocks)
+            WritingViewContext::new(uid, data_blocks, Default::default())
         } else {
-            WritingViewContext::create_for_test(uid, data_blocks)
+            WritingViewContext::create_for_test(uid, data_blocks, Default::default())
         }
     }
 
@@ -694,6 +702,7 @@ mod test {
                 let _ = runtime
                     .default_runtime
                     .block_on(store.purge(&PurgeDataContext {
+                        app_stats: Default::default(),
                         purge_reason: PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(app_id),
                     }));
             }
@@ -763,6 +772,7 @@ mod test {
                 data: Default::default(),
                 task_attempt_id: 0,
             }],
+            Default::default(),
         );
         runtime.wait(store.insert(writing_ctx)).expect("");
 
@@ -788,6 +798,7 @@ mod test {
         runtime
             .wait(store.purge(&PurgeDataContext::new(
                 &PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(app_id.to_owned(), shuffle_id),
+                Default::default(),
             )))
             .expect("");
         assert!(!store
@@ -798,6 +809,7 @@ mod test {
         runtime
             .wait(store.purge(&PurgeDataContext::new(
                 &PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(app_id.to_owned()),
+                Default::default(),
             )))
             .expect("");
         assert!(
@@ -844,6 +856,7 @@ mod test {
                     task_attempt_id: 1,
                 },
             ],
+            Default::default(),
         );
         runtime.wait(store.insert(writing_ctx)).unwrap();
 
@@ -894,6 +907,7 @@ mod test {
                     task_attempt_id: 1,
                 },
             ],
+            Default::default(),
         );
         runtime.wait(store.insert(writing_ctx)).unwrap();
 
@@ -957,6 +971,9 @@ mod test {
         let ctx1 = create_writing_ctx_with_blocks(1, 10, uid1.clone(), true);
         let ctx2 = create_writing_ctx_with_blocks(1, 20, uid2.clone(), true);
         let ctx3 = create_writing_ctx_with_blocks(1, 30, uid3.clone(), true);
+        let app_stats = ctx3.app_stats.clone();
+        // These raw buffers do not account for app stats on append.
+        app_stats.inc_memory(ctx3.data_size);
 
         runtime.wait(store.insert(ctx1)).unwrap();
         runtime.wait(store.insert(ctx2)).unwrap();
@@ -971,11 +988,12 @@ mod test {
         );
 
         // Purge shuffle_id 3
-        let purge_ctx = PurgeDataContext::new(&PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(
-            app_id.clone(),
-            3,
-        ));
+        let purge_ctx = PurgeDataContext::new(
+            &PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(app_id.clone(), 3),
+            app_stats.clone(),
+        );
         runtime.wait(store.purge(&purge_ctx)).unwrap();
+        assert_eq!(0, app_stats.snapshot().memory_bytes);
 
         // Verify purged buffer is not in spill candidates
         let spill_candidates_after_purge = runtime.wait(store.lookup_spill_buffers(150)).unwrap();

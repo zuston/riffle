@@ -17,6 +17,7 @@
 
 pub mod app;
 pub mod app_configs;
+pub mod app_stats;
 pub mod application_identifier;
 pub mod partition_identifier;
 mod partition_meta;
@@ -61,7 +62,7 @@ use crate::config_reconfigure::ReconfigurableConfManager;
 use crate::config_ref::{ByteString, ConfRef, ConfigOption};
 use crate::constant::ALL_LABEL;
 use crate::ddashmap::DDashMap;
-use crate::grpc::protobuf::uniffle::{BlockIdLayout, RemoteStorage};
+use crate::grpc::protobuf::uniffle::{ApplicationInfo, BlockIdLayout, RemoteStorage};
 use crate::historical_apps::HistoricalAppManager;
 use crate::id_layout::IdLayout;
 use crate::storage::HybridStorage;
@@ -279,6 +280,26 @@ impl AppManager {
         self.apps.len()
     }
 
+    pub fn get_application_infos(&self) -> Vec<ApplicationInfo> {
+        let to_i64 = |size| i64::try_from(size).unwrap_or(i64::MAX);
+        self.apps
+            .iter()
+            .map(|entry| {
+                let app = entry.value();
+                let stats = app.stats_snapshot();
+                ApplicationInfo {
+                    app_id: app.app_id.clone(),
+                    partition_num: i64::try_from(app.partition_number()).unwrap_or(i64::MAX),
+                    memory_size: to_i64(stats.memory_bytes),
+                    local_total_size: to_i64(stats.localfile_bytes),
+                    hadoop_total_size: to_i64(stats.hdfs_bytes),
+                    total_size: to_i64(stats.received_bytes),
+                    ..Default::default()
+                }
+            })
+            .collect()
+    }
+
     pub fn get_apps(&self) -> Vec<Arc<App>> {
         self.apps
             .clone()
@@ -410,6 +431,7 @@ pub(crate) mod test {
         partition_id: i32,
         block_batch: i32,
         block_len: i32,
+        app_stats: crate::app_manager::app_stats::AppStats,
     ) -> WritingViewContext {
         let mut blocks = vec![];
         for idx in 0..block_batch {
@@ -427,6 +449,7 @@ pub(crate) mod test {
             PartitionUId::new(&app_id, shuffle_id, partition_id),
             blocks,
             (block_len * block_batch) as u64,
+            app_stats,
         );
         writing_ctx
     }
@@ -466,7 +489,7 @@ pub(crate) mod test {
             .unwrap();
 
         let app = app_manager_ref.get_app(&app_id).unwrap();
-        let ctx = mock_writing_context(&app_id, shuffle_id, partition_id, 2, 3);
+        let ctx = mock_writing_context(&app_id, shuffle_id, partition_id, 2, 3, app.stats());
         let f = app.insert(ctx);
         if runtime_manager.wait(f).is_err() {
             panic!()
@@ -508,7 +531,7 @@ pub(crate) mod test {
 
         // case1: exceeding the partition split, but not exceeding the partition limit.
         let app = app_manager_ref.get_app(&app_id).unwrap();
-        let ctx = mock_writing_context(&app_id, 1, 0, 2, 3);
+        let ctx = mock_writing_context(&app_id, 1, 0, 2, 3, app.stats());
         let f = app.insert(ctx);
         if runtime_manager.wait(f).is_err() {
             panic!()
@@ -532,7 +555,7 @@ pub(crate) mod test {
         // case2: exceeding the partition split and also exceeding the partition limit.
         // this happens when the client is not responded to.
         // now the partition=0 data len = 6 * 2 = 12
-        let ctx = mock_writing_context(&app_id, 1, 0, 2, 3);
+        let ctx = mock_writing_context(&app_id, 1, 0, 2, 3, app.stats());
         let f = app.insert(ctx.clone());
         if runtime_manager.wait(f).is_err() {
             panic!()
@@ -622,7 +645,7 @@ pub(crate) mod test {
             .unwrap();
 
         let app = app_manager_ref.get_app(&app_id).unwrap();
-        let ctx = mock_writing_context(&app_id, 1, 0, 2, 10);
+        let ctx = mock_writing_context(&app_id, 1, 0, 2, 10, app.stats());
         let f = app.insert(ctx);
         if runtime_manager.wait(f).is_err() {
             panic!()
@@ -656,7 +679,7 @@ pub(crate) mod test {
             .unwrap();
 
         if let Some(app) = app_manager_ref.get_app(&app_id) {
-            let writing_ctx = mock_writing_context(&app_id, 1, 0, 2, 20);
+            let writing_ctx = mock_writing_context(&app_id, 1, 0, 2, 20, app.stats());
 
             // case1: put
             let f = app.insert(writing_ctx);

@@ -154,6 +154,7 @@ mod tests {
     use crate::config_reconfigure::ReconfigurableConfManager;
     use crate::event_bus::{Event, Subscriber};
     use crate::runtime::manager::RuntimeManager;
+    use crate::store::mem::buffer::MemoryBuffer;
     use crate::store::spill::hierarchy_event_bus::{HierarchyEventBus, MAX_CONCURRENCY};
     use crate::store::spill::SpillMessage;
     use anyhow::Result;
@@ -263,7 +264,13 @@ mod tests {
                 gate: gate.clone(),
             });
             let message = |partition_id, flight_id| SpillMessage {
+                buffer: Arc::new(
+                    crate::store::mem::buffer::configured_buffer::ConfiguredMemoryBuffer::new(
+                        Default::default(),
+                    ),
+                ),
                 ctx: WritingViewContext {
+                    app_stats: Default::default(),
                     uid: PartitionUId {
                         partition_id,
                         ..Default::default()
@@ -390,7 +397,13 @@ mod tests {
         event_bus.subscribe(select_handler, flush_handler);
 
         let spill_msg = SpillMessage {
+            buffer: Arc::new(
+                crate::store::mem::buffer::configured_buffer::ConfiguredMemoryBuffer::new(
+                    Default::default(),
+                ),
+            ),
             ctx: WritingViewContext {
+                app_stats: Default::default(),
                 uid: Default::default(),
                 data_blocks: WritingData::Shared(Arc::new(Default::default())),
                 data_size: 0,

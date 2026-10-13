@@ -425,7 +425,7 @@ impl ShuffleServer for DefaultShuffleServer {
             }
             let app_id_ref = app_id.clone();
             let uid = PartitionUId::new(&app_id, shuffle_id, partition_id);
-            let ctx = WritingViewContext::new(uid, blocks);
+            let ctx = WritingViewContext::new(uid, blocks, app.stats());
             let inserted = app.insert(ctx).await;
 
             if inserted.is_err() {

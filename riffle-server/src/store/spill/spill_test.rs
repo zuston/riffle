@@ -144,7 +144,13 @@ pub mod tests {
         let app_exists = Arc::new(AtomicBool::new(true));
         let app_exists_for_message = app_exists.clone();
         let message = SpillMessage {
+            buffer: Arc::new(
+                crate::store::mem::buffer::configured_buffer::ConfiguredMemoryBuffer::new(
+                    Default::default(),
+                ),
+            ),
             ctx: WritingViewContext {
+                app_stats: Default::default(),
                 uid: Default::default(),
                 data_blocks: WritingData::Shared(Arc::new(Default::default())),
                 data_size: 0,
@@ -202,7 +208,7 @@ pub mod tests {
 
         // case1: the app don't exist in the app manager, so the spill will fail.
         let app_id = ApplicationId::mock();
-        let ctx = mock_writing_context(&app_id, 1, 0, 1, 20);
+        let ctx = mock_writing_context(&app_id, 1, 0, 1, 20, Default::default());
         let _ = store.insert(ctx).await;
 
         awaitility::at_most(Duration::from_secs(1))
@@ -260,7 +266,7 @@ pub mod tests {
         let store = create_hybrid_store(&config, &warm, None, &reconf_manager);
 
         let app_id = ApplicationId::mock();
-        let ctx = mock_writing_context(&app_id, 1, 0, 1, 20);
+        let ctx = mock_writing_context(&app_id, 1, 0, 1, 20, Default::default());
         let _ = store.insert(ctx).await;
 
         // case1: flush failed with multi retry.
@@ -333,7 +339,14 @@ pub mod tests {
         store.with_app_manager(&app_manager);
 
         store.hot_store.inc_used(9);
-        let ctx = mock_writing_context(&application_id, shuffle_id, partition, 1, 9);
+        let ctx = mock_writing_context(
+            &application_id,
+            shuffle_id,
+            partition,
+            1,
+            9,
+            app_manager.get_app(&application_id).unwrap().stats(),
+        );
         let _ = store.insert(ctx).await;
 
         // Verify BufferSizeTracking tracks the huge partition
@@ -349,7 +362,14 @@ pub mod tests {
 
         // and then insert the 10B data. If sensitive watermark-spill is disabled, this will not trigger spill.
         store.hot_store.inc_used(3);
-        let ctx = mock_writing_context(&application_id, shuffle_id, partition, 1, 3);
+        let ctx = mock_writing_context(
+            &application_id,
+            shuffle_id,
+            partition,
+            1,
+            3,
+            app_manager.get_app(&application_id).unwrap().stats(),
+        );
         let _ = store.insert(ctx).await;
 
         // Due to the hang writing, the spill event num is still 1. This time inserting will not trigger watermark spill.
@@ -358,7 +378,14 @@ pub mod tests {
         // and then enable sensitive watermark spill
         store.enable_sensitive_watermark_spill();
         store.hot_store.inc_used(2);
-        let ctx = mock_writing_context(&application_id, shuffle_id, partition + 1, 1, 2);
+        let ctx = mock_writing_context(
+            &application_id,
+            shuffle_id,
+            partition + 1,
+            1,
+            2,
+            app_manager.get_app(&application_id).unwrap().stats(),
+        );
         let _ = store.insert(ctx).await;
 
         // This will trigger watermark spill, but only one buffer of partition=1 will be spilled.
@@ -430,7 +457,7 @@ pub mod tests {
         let store = create_hybrid_store(&config, &warm, Some(&cold), &reconf_manager);
 
         let app_id = ApplicationId::mock();
-        let ctx = mock_writing_context(&app_id, 1, 0, 1, 20);
+        let ctx = mock_writing_context(&app_id, 1, 0, 1, 20, Default::default());
         let _ = store.insert(ctx).await;
 
         awaitility::at_most(Duration::from_secs(1))
@@ -501,6 +528,7 @@ pub mod tests {
             normal_partition_id,
             1,
             20,
+            app.stats(),
         ))
         .await?;
         awaitility::at_most(Duration::from_secs(1))
@@ -512,6 +540,7 @@ pub mod tests {
             huge_partition_id,
             1,
             101,
+            app.stats(),
         ))
         .await?;
         app.insert(mock_writing_context(
@@ -520,6 +549,7 @@ pub mod tests {
             huge_partition_id,
             1,
             27,
+            app.stats(),
         ))
         .await?;
 
@@ -545,6 +575,7 @@ pub mod tests {
             huge_partition_id,
             1,
             1,
+            app.stats(),
         ))
         .await?;
         awaitility::at_most(Duration::from_secs(1)).until(|| {
@@ -596,7 +627,7 @@ pub mod tests {
 
         warm_healthy.store(false, SeqCst);
         let app_id = ApplicationId::mock();
-        let ctx = mock_writing_context(&app_id, 1, 0, 1, 20);
+        let ctx = mock_writing_context(&app_id, 1, 0, 1, 20, Default::default());
         let _ = store.insert(ctx).await;
 
         awaitility::at_most(Duration::from_secs(1))
@@ -670,7 +701,7 @@ pub mod tests {
         app.mark_huge_partition(&PartitionUId::new(&app_id, shuffle_id, partition_id))?;
 
         // due to the huge partition, it will flush to HDFS
-        let ctx = mock_writing_context(&app_id, shuffle_id, partition_id, 1, 20);
+        let ctx = mock_writing_context(&app_id, shuffle_id, partition_id, 1, 20, app.stats());
         store.insert(ctx).await?;
 
         // step1: but the hdfs is broken, it should fallback to localfile after 1 retry time
@@ -772,7 +803,7 @@ pub mod mock {
             todo!()
         }
 
-        async fn purge(&self, ctx: &PurgeDataContext) -> anyhow::Result<i64> {
+        async fn purge(&self, ctx: &PurgeDataContext) -> anyhow::Result<()> {
             todo!()
         }
 

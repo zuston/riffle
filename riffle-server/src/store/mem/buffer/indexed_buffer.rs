@@ -100,7 +100,7 @@ impl MemoryBuffer for IndexedMemoryBuffer {
         return Ok(self.buffer.lock().staging_size);
     }
 
-    fn clear(&self, flight_id: u64, flight_size: u64) -> anyhow::Result<()>
+    fn clear(&self, flight_id: u64, flight_size: u64) -> anyhow::Result<u64>
     where
         Self: Send + Sync,
     {
@@ -110,8 +110,16 @@ impl MemoryBuffer for IndexedMemoryBuffer {
         if let Some(block_ref) = removed {
             buffer.total_size -= flight_size as i64;
             buffer.flight_size -= flight_size as i64;
+            return Ok(flight_size);
         }
-        Ok(())
+        Ok(0)
+    }
+
+    fn purge(&self) -> anyhow::Result<u64> {
+        let mut buffer = self.buffer.lock();
+        let size = buffer.total_size as u64;
+        *buffer = IndexedBufferInternal::new();
+        Ok(size)
     }
 
     fn get(
