@@ -43,7 +43,7 @@ impl PurgeReason {
         }
     }
 
-    pub fn extract_app_id(&self) -> ApplicationId {
+    pub fn get_app_id(&self) -> ApplicationId {
         match &self {
             PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(x, y) => x.to_owned(),
             PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(x) => x.to_owned(),

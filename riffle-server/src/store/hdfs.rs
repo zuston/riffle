@@ -36,6 +36,7 @@ use log::{error, info, warn};
 
 use std::path::Path;
 
+use crate::app_manager::app_stats::AppStats;
 use crate::app_manager::application_identifier::ApplicationId;
 use crate::app_manager::partition_identifier::PartitionUId;
 use crate::app_manager::purge_event::PurgeReason;
@@ -63,6 +64,7 @@ use tracing::{debug, Instrument};
 struct WritingHandler {
     is_file_created: bool,
     data_len: i64,
+    committed_data_size: u64,
     retry_time: usize,
 }
 
@@ -81,6 +83,7 @@ impl Default for WritingHandler {
         Self {
             is_file_created: true,
             data_len: 0,
+            committed_data_size: 0,
             retry_time: 0,
         }
     }
@@ -161,6 +164,7 @@ impl HdfsStore {
         &self,
         uid: PartitionUId,
         data_blocks: Vec<&Block>,
+        app_stats: AppStats,
     ) -> Result<(), WorkerError> {
         if !self.check_health().await? {
             return Err(WorkerError::HDFS_UNHEALTHY);
@@ -328,6 +332,8 @@ impl HdfsStore {
                     .ok_or(WorkerError::APP_HAS_BEEN_PURGED)?;
 
                 partition_cached_meta.reset_offset(shuffle_file_format.offset);
+                partition_cached_meta.committed_data_size += shuffle_file_format.len as u64;
+                app_stats.inc_hdfs(shuffle_file_format.len as u64);
                 debug!("Finish path: {}", &data_file_path);
             }
         }
@@ -416,7 +422,7 @@ impl Store for HdfsStore {
 
     async fn insert(&self, ctx: WritingViewContext) -> Result<(), WorkerError> {
         let blocks = ctx.data_blocks.as_persistent_blocks();
-        self.data_insert(ctx.uid, blocks)
+        self.data_insert(ctx.uid, blocks, ctx.app_stats)
             .instrument_await("data insert")
             .await
     }
@@ -432,7 +438,7 @@ impl Store for HdfsStore {
         Err(WorkerError::NOT_READ_HDFS_DATA_FROM_SERVER)
     }
 
-    async fn purge(&self, ctx: &PurgeDataContext) -> Result<i64> {
+    async fn purge(&self, ctx: &PurgeDataContext) -> Result<()> {
         let (app_id, shuffle_id_option) = ctx.extract();
 
         let fs_option = if shuffle_id_option.is_none() {
@@ -452,17 +458,17 @@ impl Store for HdfsStore {
         };
         if fs_option.is_none() {
             warn!("The app has been purged. app_id: {}", &app_id);
-            return Ok(0);
+            return Ok(());
         }
 
         let fs = fs_option.unwrap();
         if !fs.is_initialized() {
-            return Ok(0);
+            return Ok(());
         }
         let filesystem = fs.get_or_init();
         // maybe initialization failed.
         if filesystem.is_none() {
-            return Ok(0);
+            return Ok(());
         }
         let filesystem = filesystem.unwrap();
 
@@ -477,17 +483,6 @@ impl Store for HdfsStore {
             .filter(|entry| entry.key().starts_with(dir.as_str()))
             .map(|entry| entry.key().to_string())
             .collect();
-
-        let mut removed_size = 0i64;
-        for deleted_key in &keys_to_delete {
-            self.partition_file_locks.remove(deleted_key);
-            for idx in 0..self.partition_write_concurrency {
-                let prefix = format!("{}_{}", &deleted_key, idx);
-                if let Some(meta) = self.partition_cached_meta.remove(&prefix) {
-                    removed_size += meta.1.data_len;
-                }
-            }
-        }
 
         let is_app_level_explicit_unregister =
             if let PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(_) = ctx.purge_reason {
@@ -589,7 +584,16 @@ impl Store for HdfsStore {
             }
         }
 
-        Ok(removed_size)
+        for deleted_key in &keys_to_delete {
+            self.partition_file_locks.remove(deleted_key);
+            for idx in 0..self.partition_write_concurrency {
+                let prefix = format!("{}_{}", &deleted_key, idx);
+                if let Some(meta) = self.partition_cached_meta.remove(&prefix) {
+                    ctx.app_stats.dec_hdfs(meta.1.committed_data_size);
+                }
+            }
+        }
+        Ok(())
     }
 
     async fn check_health(&self) -> Result<bool> {
@@ -657,6 +661,7 @@ impl Store for HdfsStore {
 
 #[cfg(test)]
 mod tests {
+    use crate::app_manager::app_stats::AppStats;
     use crate::app_manager::application_identifier::ApplicationId;
     use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::purge_event::PurgeReason;
@@ -798,6 +803,7 @@ mod tests {
                 data: Bytes::copy_from_slice(&vec![0; 10]),
                 task_attempt_id: 0,
             }],
+            Default::default(),
         );
 
         let hdfs_store = Arc::new(hdfs_store);
@@ -816,6 +822,7 @@ mod tests {
         SHUFFLE_SERVER_ID.get_or_init(|| "10.0.0.1".to_owned());
         let app_id = ApplicationId::mock();
         let raw_app_id = app_id.to_string();
+        let app_stats = AppStats::default();
 
         let config = HdfsStoreConfig::default();
         let runtime_manager = RuntimeManager::default();
@@ -912,6 +919,7 @@ mod tests {
                 data: Bytes::copy_from_slice(&vec![0; 10]),
                 task_attempt_id: 0,
             }],
+            app_stats.clone(),
         );
         let hdfs_store = Arc::new(hdfs_store);
         let hdfs = hdfs_store.clone();
@@ -931,6 +939,7 @@ mod tests {
                 data: Bytes::copy_from_slice(&vec![0; 10]),
                 task_attempt_id: 0,
             }],
+            app_stats.clone(),
         );
         let result = runtime_manager
             .default_runtime
@@ -955,6 +964,7 @@ mod tests {
             file_count
         }
         assert_eq!(4, file_number_recursively(temp_path.as_str()));
+        assert_eq!(20, app_stats.snapshot().hdfs_bytes);
 
         // touch file with another shuffle_server_id
         let complete_file = format!(
@@ -976,8 +986,10 @@ mod tests {
         runtime_manager
             .default_runtime
             .block_on(hdfs_store.purge(&PurgeDataContext {
+                app_stats: app_stats.clone(),
                 purge_reason: PurgeReason::SHUFFLE_LEVEL_EXPLICIT_UNREGISTER(app_id.clone(), 1),
             }))?;
+        assert_eq!(10, app_stats.snapshot().hdfs_bytes);
         assert_eq!(2 + 1, file_number_recursively(temp_path.as_str()));
         println!("Done with shuffle_level purge");
 
@@ -985,8 +997,10 @@ mod tests {
         runtime_manager
             .default_runtime
             .block_on(hdfs_store.purge(&PurgeDataContext {
+                app_stats: app_stats.clone(),
                 purge_reason: PurgeReason::APP_LEVEL_HEARTBEAT_TIMEOUT(app_id.clone()),
             }))?;
+        assert_eq!(0, app_stats.snapshot().hdfs_bytes);
         assert_eq!(1, file_number_recursively(temp_path.as_str()));
 
         let app_abs_dir = format!("{}/{}", &temp_path, &app_id);
@@ -1004,9 +1018,11 @@ mod tests {
         runtime_manager
             .default_runtime
             .block_on(hdfs_store.purge(&PurgeDataContext {
+                app_stats: app_stats.clone(),
                 purge_reason: PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(app_id.clone()),
             }))?;
         assert!(!fs::exists(app_abs_dir.as_str())?);
+        assert_eq!(0, app_stats.snapshot().hdfs_bytes);
 
         Ok(())
     }
@@ -1016,6 +1032,7 @@ mod tests {
         SHUFFLE_SERVER_ID.get_or_init(|| "10.0.0.1".to_owned());
         let app_id = ApplicationId::mock();
         let raw_app_id = app_id.to_string();
+        let app_stats = AppStats::default();
 
         let config = HdfsStoreConfig::default();
         let runtime_manager = RuntimeManager::default();
@@ -1055,6 +1072,7 @@ mod tests {
                     task_attempt_id: 0,
                 },
             ],
+            app_stats.clone(),
         );
 
         let hdfs_store = Arc::new(hdfs_store);
@@ -1076,6 +1094,7 @@ mod tests {
         assert_eq!(true, meta.is_file_created);
         assert_eq!(20, meta.data_len);
         drop(meta);
+        assert_eq!(20, app_stats.snapshot().hdfs_bytes);
 
         // case2
         mark_failure_tag.store(true, SeqCst);
@@ -1090,6 +1109,7 @@ mod tests {
         assert_eq!(true, meta.is_file_created);
         assert_eq!(0, meta.data_len);
         drop(meta);
+        assert_eq!(20, app_stats.snapshot().hdfs_bytes);
 
         // case3
         mark_failure_tag.store(false, SeqCst);
@@ -1104,13 +1124,20 @@ mod tests {
         assert_eq!(true, meta.is_file_created);
         assert_eq!(20, meta.data_len);
         drop(meta);
+        assert_eq!(40, app_stats.snapshot().hdfs_bytes);
 
         // case4: purge test
+        let purge_ctx = PurgeDataContext {
+            app_stats: app_stats.clone(),
+            purge_reason: PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(app_id.to_owned()),
+        };
         runtime_manager
             .default_runtime
-            .block_on(hdfs_store.purge(&PurgeDataContext {
-                purge_reason: PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(app_id.to_owned()),
-            }))?;
+            .block_on(hdfs_store.purge(&purge_ctx))?;
+        runtime_manager
+            .default_runtime
+            .block_on(hdfs_store.purge(&purge_ctx))?;
+        assert_eq!(0, app_stats.snapshot().hdfs_bytes);
         assert_eq!(0, hdfs_store.app_remote_clients.len());
         assert_eq!(0, hdfs_store.partition_cached_meta.len());
         assert_eq!(0, hdfs_store.partition_file_locks.len());

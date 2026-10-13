@@ -818,7 +818,7 @@ impl SendDataRequestCommand {
 
         for (partition_id, partition_blocks) in blocks {
             let uid = PartitionUId::new(&application_id, shuffle_id, partition_id);
-            let ctx = WritingViewContext::new(uid, partition_blocks);
+            let ctx = WritingViewContext::new(uid, partition_blocks, app.stats());
             match app.insert(ctx).await {
                 Ok(size) => insert_len += size as i64,
                 Err(e) => {

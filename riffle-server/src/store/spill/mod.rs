@@ -8,6 +8,7 @@ use crate::metric::{
     TOTAL_SPILL_EVENTS_DROPPED_WITH_APP_NOT_FOUND,
 };
 use crate::store::hybrid::{HybridStore, PersistentStore};
+use crate::store::mem::buffer::configured_buffer::ConfiguredMemoryBuffer;
 use log::{debug, error, warn};
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
@@ -25,6 +26,7 @@ pub mod storage_select_handler;
 #[derive(Clone)]
 pub struct SpillMessage {
     pub ctx: WritingViewContext,
+    pub buffer: Arc<ConfiguredMemoryBuffer>,
     pub(crate) app_is_exist_func: Arc<dyn Fn(&ApplicationId) -> bool + Send + Sync>,
     pub retry_cnt: Arc<AtomicU32>,
     pub flight_id: u64,

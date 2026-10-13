@@ -49,6 +49,7 @@ use dashmap::DashMap;
 
 use log::{debug, error, info, warn};
 
+use crate::app_manager::app_stats::AppStats;
 use crate::app_manager::partition_identifier::PartitionUId;
 use crate::await_tree::AWAIT_TREE_REGISTRY;
 use crate::composed_bytes::ComposedBytes;
@@ -270,7 +271,12 @@ impl LocalFileStore {
         }
     }
 
-    async fn data_insert(&self, uid: PartitionUId, blocks: Vec<&Block>) -> Result<(), WorkerError> {
+    async fn data_insert(
+        &self,
+        uid: PartitionUId,
+        blocks: Vec<&Block>,
+        app_stats: AppStats,
+    ) -> Result<(), WorkerError> {
         let (data_file_path, index_file_path) =
             LocalFileStore::gen_relative_path_for_partition(&uid);
 
@@ -369,6 +375,7 @@ impl LocalFileStore {
             .deref()
             .pointer
             .store(shuffle_file_format.offset as u64, SeqCst);
+        app_stats.inc_localfile(shuffle_file_format.len as u64);
         drop(disk_write_permit);
 
         Ok(())
@@ -473,7 +480,7 @@ impl Store for LocalFileStore {
             return Ok(());
         }
 
-        self.data_insert(ctx.uid, blocks)
+        self.data_insert(ctx.uid, blocks, ctx.app_stats)
             .instrument_await("data insert")
             .await
     }
@@ -635,7 +642,7 @@ impl Store for LocalFileStore {
         }
     }
 
-    async fn purge(&self, ctx: &PurgeDataContext) -> Result<i64> {
+    async fn purge(&self, ctx: &PurgeDataContext) -> Result<()> {
         let (app_id, shuffle_id_option) = ctx.extract();
         let raw_app_id = app_id.to_string();
         let data_relative_dir_path = match shuffle_id_option {
@@ -657,20 +664,19 @@ impl Store for LocalFileStore {
             .map(|entry| entry.key().to_string())
             .collect();
 
-        let mut removed_data_size = 0u64;
         for key in keys_to_delete {
             let meta = self.partition_coordinators.remove(&key);
             if let Some(x) = meta {
                 let p_lock = x.1.write_lock.lock().await;
                 let size = x.1.pointer.load(SeqCst);
-                removed_data_size += size;
+                ctx.app_stats.dec_localfile(size);
                 GAUGE_LOCAL_DISK_SERVICE_USED
                     .with_label_values(&[&x.1.disk.root()])
                     .sub(size as i64);
             }
         }
 
-        Ok(removed_data_size as i64)
+        Ok(())
     }
 
     async fn check_health(&self) -> Result<bool> {
@@ -708,6 +714,7 @@ mod test {
     };
     use crate::store::localfile::LocalFileStore;
 
+    use crate::app_manager::app_stats::AppStats;
     use crate::app_manager::application_identifier::ApplicationId;
     use crate::app_manager::partition_identifier::PartitionUId;
     use crate::app_manager::purge_event::PurgeReason;
@@ -741,6 +748,7 @@ mod test {
         runtime.wait(store.insert(WritingViewContext::new(
             uid.clone(),
             vec![block(9, 3), block(8, 1)],
+            Default::default(),
         )))?;
 
         let batches = Arc::new(MemBlockBatch(vec![
@@ -748,6 +756,7 @@ mod test {
             vec![block(2, 1)],
         ]));
         let ctx = WritingViewContext {
+            app_stats: Default::default(),
             uid: uid.clone(),
             data_blocks: WritingData::Shared(batches.clone()),
             data_size: 3,
@@ -812,6 +821,7 @@ mod test {
                     task_attempt_id: 0,
                 },
             ],
+            Default::default(),
         );
 
         writing_ctx
@@ -913,6 +923,7 @@ mod test {
                     task_attempt_id: 0,
                 },
             ],
+            Default::default(),
         );
         writing_ctx
     }
@@ -925,6 +936,8 @@ mod test {
         let local_store = LocalFileStore::new(vec![temp_path.clone()]);
 
         let runtime = local_store.runtime_manager.clone();
+        let app_stats = AppStats::default();
+        let shuffle_size = b"hello world!hello china!".len() as u64 * 2;
 
         let app_id = "application_1747379850000_7237726_1749434628480";
         let application_id = ApplicationId::from(app_id);
@@ -936,7 +949,8 @@ mod test {
         let uid_2 = PartitionUId::new(&application_id, shuffle_id_2, 0);
 
         // for shuffle_id = 1
-        let writing_ctx_1 = create_writing_ctx_by_uid(&uid_1);
+        let mut writing_ctx_1 = create_writing_ctx_by_uid(&uid_1);
+        writing_ctx_1.app_stats = app_stats.clone();
         let insert_result = runtime.wait(local_store.insert(writing_ctx_1));
         if insert_result.is_err() {
             println!("{:?}", insert_result.err());
@@ -951,7 +965,8 @@ mod test {
         );
 
         // for shuffle_id = 13
-        let writing_ctx_2 = create_writing_ctx_by_uid(&uid_2);
+        let mut writing_ctx_2 = create_writing_ctx_by_uid(&uid_2);
+        writing_ctx_2.app_stats = app_stats.clone();
         let insert_result = runtime.wait(local_store.insert(writing_ctx_2));
         if insert_result.is_err() {
             println!("{:?}", insert_result.err());
@@ -965,6 +980,8 @@ mod test {
             )))?
         );
 
+        assert_eq!(shuffle_size * 2, app_stats.snapshot().localfile_bytes);
+
         // shuffle level purge
         runtime
             .wait(local_store.purge(&PurgeDataContext::new(
@@ -972,8 +989,10 @@ mod test {
                     application_id.to_owned(),
                     shuffle_id_1,
                 ),
+                app_stats.clone(),
             )))
             .expect("");
+        assert_eq!(shuffle_size, app_stats.snapshot().localfile_bytes);
         assert_eq!(
             false,
             runtime.wait(tokio::fs::try_exists(format!(
@@ -991,9 +1010,13 @@ mod test {
         }
 
         // app level purge
-        runtime.wait(local_store.purge(&PurgeDataContext {
+        let purge_ctx = PurgeDataContext {
+            app_stats: app_stats.clone(),
             purge_reason: PurgeReason::APP_LEVEL_EXPLICIT_UNREGISTER(application_id.to_owned()),
-        }))?;
+        };
+        runtime.wait(local_store.purge(&purge_ctx))?;
+        runtime.wait(local_store.purge(&purge_ctx))?;
+        assert_eq!(0, app_stats.snapshot().localfile_bytes);
         assert_eq!(
             false,
             runtime.wait(tokio::fs::try_exists(format!("{}/{}", &temp_path, &app_id)))?
@@ -1035,6 +1058,7 @@ mod test {
                     task_attempt_id: 0,
                 },
             ],
+            Default::default(),
         );
 
         let insert_result = runtime.wait(local_store.insert(writing_ctx));
@@ -1256,10 +1280,12 @@ mod test {
         runtime.wait(local_store.insert(WritingViewContext::create_for_test(
             uid.clone(),
             vec![first_block],
+            Default::default(),
         )))?;
         runtime.wait(local_store.insert(WritingViewContext::create_for_test(
             uid.clone(),
             vec![second_block],
+            Default::default(),
         )))?;
 
         let ResponseDataIndex::Local(index) =

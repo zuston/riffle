@@ -265,7 +265,7 @@ pub trait Store {
         &self,
         ctx: ReadingIndexViewContext,
     ) -> Result<ResponseDataIndex, WorkerError>;
-    async fn purge(&self, ctx: &PurgeDataContext) -> Result<i64>;
+    async fn purge(&self, ctx: &PurgeDataContext) -> Result<()>;
 
     // ticket / app management
     fn register_app(&self, ctx: RegisterAppContext) -> Result<()>;

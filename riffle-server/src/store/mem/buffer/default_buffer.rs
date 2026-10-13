@@ -44,7 +44,7 @@ impl Inner {
 }
 
 impl MemoryBuffer for DefaultMemoryBuffer {
-    fn new(opt: BufferOptions) -> DefaultMemoryBuffer {
+    fn new(_options: BufferOptions) -> DefaultMemoryBuffer {
         DefaultMemoryBuffer {
             buffer: Mutex::new(Inner::new()),
         }
@@ -71,7 +71,7 @@ impl MemoryBuffer for DefaultMemoryBuffer {
         return Ok(self.buffer.lock().staging_size);
     }
 
-    fn clear(&self, flight_id: u64, flight_size: u64) -> Result<()>
+    fn clear(&self, flight_id: u64, flight_size: u64) -> Result<u64>
     where
         Self: Send + Sync,
     {
@@ -81,8 +81,16 @@ impl MemoryBuffer for DefaultMemoryBuffer {
         if let Some(block_ref) = removed {
             buffer.total_size -= flight_size as i64;
             buffer.flight_size -= flight_size as i64;
+            return Ok(flight_size);
         }
-        Ok(())
+        Ok(0)
+    }
+
+    fn purge(&self) -> Result<u64> {
+        let mut buffer = self.buffer.lock();
+        let size = buffer.total_size as u64;
+        *buffer = Inner::new();
+        Ok(size)
     }
 
     fn get(
