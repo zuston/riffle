@@ -320,6 +320,8 @@ impl CoordinatorServer for DefaultCoordinatorServer {
         };
 
         self.cluster_manager.heartbeat(heartbeat_info);
+        self.application_manager
+            .update_app_stats(inner.application_info, &server_id.id);
 
         Ok(Response::new(ShuffleServerHeartBeatResponse {
             status: StatusCode::Success.into(),
@@ -398,12 +400,7 @@ impl CoordinatorServer for DefaultCoordinatorServer {
         if inner.app_id.is_empty() {
             return Err(Status::invalid_argument("app_id must not be empty"));
         }
-        self.application_manager.register(
-            inner.app_id,
-            inner.user,
-            inner.version,
-            inner.git_commit_id,
-        );
+        self.application_manager.register(inner.app_id, inner.user);
 
         Ok(Response::new(ApplicationInfoResponse {
             status: StatusCode::Success.into(),

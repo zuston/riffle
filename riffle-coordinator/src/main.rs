@@ -20,6 +20,7 @@ mod application;
 mod cluster;
 mod config;
 mod grpc;
+mod http;
 
 use crate::application::ApplicationManager;
 use crate::cluster::ClusterManager;
@@ -77,7 +78,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Start gRPC server
     info!("Starting gRPC server on {addr}");
-    Server::builder().add_service(service).serve(addr).await?;
+    tokio::select! {
+        result = Server::builder().add_service(service).serve(addr) => result?,
+        result = http::serve(application_manager, config.http_port) => result?,
+    }
 
     Ok(())
 }
