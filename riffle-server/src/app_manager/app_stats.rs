@@ -1,4 +1,6 @@
+use crate::grpc::protobuf::uniffle;
 use crate::metric::RESIDENT_BYTES;
+use serde::Serialize;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::Arc;
 
@@ -17,6 +19,7 @@ pub struct Inner {
     hdfs_bytes: AtomicU64,
 }
 
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct AppStatsSnapshot {
     pub received_bytes: u64,
     pub resident_bytes: u64,
@@ -73,5 +76,17 @@ impl AppStats {
             localfile_bytes,
             hdfs_bytes,
         }
+    }
+}
+
+impl From<uniffle::ApplicationInfo> for AppStats {
+    fn from(app_info: uniffle::ApplicationInfo) -> Self {
+        let inner = Arc::new(Inner {
+            received_bytes: AtomicU64::new(app_info.total_size as u64),
+            memory_bytes: AtomicU64::new(app_info.memory_size as u64),
+            localfile_bytes: AtomicU64::new(app_info.local_total_size as u64),
+            hdfs_bytes: AtomicU64::new(app_info.hadoop_total_size as u64),
+        });
+        Self { inner }
     }
 }

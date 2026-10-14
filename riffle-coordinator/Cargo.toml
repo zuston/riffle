@@ -32,6 +32,7 @@ logforth = ["dep:logforth"]
 boa_engine = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tonic = { workspace = true }
+poem = { workspace = true }
 thiserror = { workspace = true }
 dashmap = { workspace = true }
 log = { workspace = true }
@@ -42,6 +43,7 @@ chrono = { workspace = true, features = ["serde"] }
 rand = { workspace = true }
 toml = { workspace = true }
 logforth = { workspace = true, features = ["starter-log"], optional = true }
+parking_lot = { workspace = true }
 
 # Reuse riffle-server's gRPC generated code
 riffle-server = { workspace = true }
