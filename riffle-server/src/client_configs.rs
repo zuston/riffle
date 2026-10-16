@@ -149,6 +149,29 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
+    fn test_list_key_string_values() {
+        let option = ClientConfigOption::<Vec<String>>::list_key("test.list");
+        for (value, expected) in [
+            ("server-1:19999", vec!["server-1:19999"]),
+            (
+                "server-2:19999,server-1:19999,server-2:19999",
+                vec!["server-2:19999", "server-1:19999", "server-2:19999"],
+            ),
+            (
+                " , server-1:19999, ,\tserver-2:19999\n, ",
+                vec!["server-1:19999", "server-2:19999"],
+            ),
+        ] {
+            let conf = ClientRssConf::from(HashMap::from([(option.get_key(), value.to_string())]));
+            assert_eq!(
+                conf.get(&option),
+                Some(expected.into_iter().map(str::to_string).collect()),
+                "value: {value:?}"
+            );
+        }
+    }
+
+    #[test]
     fn test_get_memory_data_option() {
         // case1: default rpc version is V1
         let mut props = HashMap::new();
