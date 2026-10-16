@@ -1,0 +1,24 @@
+syntax = "proto3";
+package riffle.client;
+
+service ShuffleManagerService {
+  rpc GetAssignment(GetAssignmentRequest) returns (GetAssignmentResponse);
+}
+
+message GetAssignmentRequest {
+  int32 shuffle_id = 1;
+}
+
+message GetAssignmentResponse {
+  repeated PartitionAssignment assignments = 1;
+}
+
+message PartitionAssignment {
+  int32 partitionId = 1;
+  Endpoint endpoint = 2;
+}
+
+message Endpoint {
+  string host = 1;
+  int32 port = 2;
+}

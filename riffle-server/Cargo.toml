@@ -81,7 +81,7 @@ tonic = { workspace = true }
 prost = { workspace = true }
 bytes = { workspace = true }
 thiserror = { workspace = true }
-dashmap = { workspace = true }
+dashmap = { workspace = true, features = ["serde"] }
 log = { workspace = true }
 crossbeam = { workspace = true }
 crossbeam-utils = { workspace = true }

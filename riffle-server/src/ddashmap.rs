@@ -17,10 +17,13 @@
 
 use dashmap::DashMap;
 use fxhash::FxHasher;
+use serde::{Deserialize, Serialize};
 use std::hash::{BuildHasherDefault, Hash};
 use std::ops::Deref;
 
-pub struct DDashMap<K, V>(DashMap<K, V, BuildHasherDefault<FxHasher>>);
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct DDashMap<K: Eq + Hash, V>(DashMap<K, V, BuildHasherDefault<FxHasher>>);
 
 impl<K: Eq + Hash, V> DDashMap<K, V> {
     pub fn new(capacity: usize, shard_amount: usize) -> Self {

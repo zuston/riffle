@@ -61,10 +61,11 @@ pub mod server_state_manager;
 pub mod service_tags_manager;
 
 pub mod config_ref;
-mod ddashmap;
+pub mod ddashmap;
 pub mod mini_riffle;
 mod partition_stats;
 mod raw_io;
 mod system_libc;
 
 pub mod raw_pipe;
+pub mod scheduled_task;
