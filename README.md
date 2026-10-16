@@ -44,7 +44,6 @@ tags = ["riffle2", "datanode", "GRPC", "ss_v5"]
 
 [memory_store]
 capacity = "10G"
-dashmap_shard_amount = 128
 
 [localfile_store]
 data_paths = ["/data1/uniffle/t1", "/data2/uniffle/t1", "/data3/uniffle/t1", "/data4/uniffle/t1"]
@@ -163,7 +162,6 @@ buffer_ticket_check_interval_sec = 10
 # Restart after repair to clear the unhealthy latch.
 # allocated_buffer_high_watermark_duration_sec = 60
 # allocated_buffer_high_watermark_ratio = 0.5
-dashmap_shard_amount = 128
 
 [localfile_store]
 data_paths = ["/var/data/path1", "/var/data/path2"]
@@ -230,18 +228,6 @@ alive_app_number_max_limit = 100
 
 </details>
 
-## Grafana dashboard for riffle
-
-Before importing the template json(./grafana) into grafana, you must specify the prometheus configs in riffle's toml file.
-Like the following configs:
-
-```
-[metrics]
-push_gateway_endpoint = "http://example.com/metrics"
-push_interval_sec = 10
-labels = { env = "production", service = "my_service" }
-```
-
 ## Profiling
 
 1. build with profile support
@@ -275,16 +261,15 @@ Buffered I/O in Linux relies on the page cache, which can introduce latency spik
 To achieve predictable performance, flushing via direct I/O is recommended to bypass the page cache.
 However, read requests can benefit from buffered I/O to achieve better long-tail latency performance.
 
-To enable this feature, add the following configuration to your config.toml file.
+Direct I/O appends are enabled by default. To configure them explicitly, use:
 
-```shell
+```toml
 [localfile_store]
-...
 data_paths = ["xxxxx"]
-direct_io_enable = true
-direct_io_read_enable = false
-...
+direct_io_append_enable = true
 ```
+
+Read I/O mode is controlled by the client option `spark.rss.riffle.readIoMode` and defaults to `BUFFER_IO`.
 
 ### Disk IO Throttle
 
@@ -300,10 +285,10 @@ You can apply pressure to the system using the following command:
 
 To enable this feature, add the following configuration to your config.toml file.
 
-```shell
-[io_limiter]
+```toml
+[localfile_store.io_limiter]
 # Maximum throughput per second for a single disk
-capacity = 1G
+capacity = "1G"
 ```
 
 ## Cluster Inspection and Maintenance with SQL

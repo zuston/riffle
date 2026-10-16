@@ -134,7 +134,7 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
-        validate_positive("shuffle_nodes_max", self.max_assignment_servers)?;
+        validate_positive("max_assignment_servers", self.max_assignment_servers)?;
         if self.server_heartbeat_timeout_seconds == 0 {
             return Err(ConfigError::Invalid(
                 "server_heartbeat_timeout_seconds must be positive".to_string(),

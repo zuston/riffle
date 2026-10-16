@@ -267,13 +267,6 @@ where
     Ok(value)
 }
 
-fn as_default_direct_io_enable() -> bool {
-    false
-}
-
-fn as_default_direct_io_read_enable() -> bool {
-    true
-}
 fn as_default_direct_io_append_enable() -> bool {
     true
 }
@@ -413,9 +406,6 @@ fn as_default_sensitive_watermark_spill_enable() -> bool {
     false
 }
 
-fn as_default_memory_spill_to_hdfs_concurrency() -> i32 {
-    500
-}
 fn as_default_memory_spill_high_watermark() -> f32 {
     0.8
 }
@@ -580,10 +570,6 @@ pub fn as_default_streaming_parse_enabled() -> bool {
     true
 }
 
-fn as_default_get_memory_rpc_version() -> RpcVersion {
-    RpcVersion::V1
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum RpcVersion {
     V1,
@@ -678,9 +664,6 @@ fn as_default_partition_limit_memory_backpressure_ratio() -> f64 {
 
 fn as_default_partition_limit_threshold() -> String {
     "20G".to_owned()
-}
-fn as_default_partition_limit_enable() -> bool {
-    true
 }
 
 impl Default for AppConfig {
