@@ -55,11 +55,11 @@ async fn main() -> anyhow::Result<()> {
 
     let mut coordinator = Coordinator::start(config).await?;
     let mut sigterm = signal(SignalKind::terminate())?;
+    let mut sigint = signal(SignalKind::interrupt())?;
     tokio::select! {
-        result = coordinator.wait() => result,
-        _ = sigterm.recv() => {
-            info!("Received SIGTERM, shutting down coordinator");
-            coordinator.shutdown().await
-        }
+        result = coordinator.wait() => return result,
+        _ = sigterm.recv() => info!("Received SIGTERM, shutting down coordinator"),
+        _ = sigint.recv() => info!("Received SIGINT, shutting down coordinator"),
     }
+    coordinator.shutdown().await
 }

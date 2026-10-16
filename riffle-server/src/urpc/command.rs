@@ -234,15 +234,15 @@ pub struct GetLocalDataResponseCommand {
 
 #[derive(Debug, Default)]
 pub struct GetLocalDataRequestCommand {
-    pub(crate) request_id: i64,
-    pub(crate) app_id: String,
-    pub(crate) shuffle_id: i32,
-    pub(crate) partition_id: i32,
-    pub(crate) partition_num_per_range: i32,
-    pub(crate) partition_num: i32,
-    pub(crate) offset: i64,
-    pub(crate) length: i32,
-    pub(crate) timestamp: i64,
+    pub request_id: i64,
+    pub app_id: String,
+    pub shuffle_id: i32,
+    pub partition_id: i32,
+    pub partition_num_per_range: i32,
+    pub partition_num: i32,
+    pub offset: i64,
+    pub length: i32,
+    pub timestamp: i64,
 }
 
 #[derive(Debug, Default)]

@@ -102,7 +102,6 @@ once_cell = { workspace = true }
 tower = { workspace = true, features = ["util", "load-shed"] }
 hyper = { workspace = true }
 pin-project-lite = { workspace = true }
-signal-hook = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 socket2 = { workspace = true, features = ["all"] }
 #fastrace = { version = "0.6", features = ["enable"] }

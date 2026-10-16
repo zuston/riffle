@@ -199,25 +199,12 @@ mod test {
     #[ignore]
     async fn rpc_start_test() -> anyhow::Result<()> {
         let mut config = Config::create_simple_config();
-        config.grpc_port = 21100;
-        config.urpc_port = Some(21101);
-
-        let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
-        let runtime_manager = RuntimeManager::from(config.clone().runtime_config.clone());
-        let storage = StorageService::init(&runtime_manager, &config, &reconf_manager)?;
-        let app_manager_ref = AppManager::get_ref(
-            runtime_manager.clone(),
-            config.clone(),
-            &storage,
-            &reconf_manager,
-        );
-
-        DefaultRpcService {}.start(
-            &config,
-            runtime_manager.clone(),
-            app_manager_ref.clone(),
-            &ServerStateManager::new(&app_manager_ref, &config),
-        )?;
+        config.grpc_port = 0;
+        config.http_port = 0;
+        config.urpc_port = Some(0);
+        config.coordinator_quorum.clear();
+        let server = crate::server::Server::start(config).await?;
+        server.shutdown().await?;
 
         Ok(())
     }

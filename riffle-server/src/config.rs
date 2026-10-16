@@ -486,6 +486,10 @@ pub enum HistoricalAppStoreBackend {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 pub struct Config {
+    /// Source file used for configuration reloads, when loaded from disk.
+    #[serde(skip)]
+    pub config_path: Option<String>,
+
     #[serde(default = "as_default_hybrid_store_config")]
     pub hybrid_store: HybridStoreConfig,
 
@@ -839,7 +843,9 @@ impl Config {
         // Read the file content as a string
         let file_content = fs::read_to_string(path).expect("Failed to read file");
 
-        toml::from_str(&file_content).unwrap()
+        let mut config: Self = toml::from_str(&file_content).unwrap();
+        config.config_path = Some(cfg_path.to_string());
+        config
     }
 
     pub fn create_from_env() -> Config {

@@ -30,11 +30,12 @@ pub mod grpc;
 mod heartbeat;
 pub mod http;
 pub mod log_service;
+#[cfg(feature = "logforth")]
+pub mod logforth_service;
 pub mod mem_allocator;
 pub mod metric;
 pub mod rpc;
 pub mod runtime;
-pub mod signal;
 pub mod store;
 pub mod tracing;
 pub mod urpc;
@@ -57,12 +58,12 @@ mod config_reconfigure;
 pub mod deadlock;
 pub mod historical_apps;
 pub mod panic_hook;
+pub mod server;
 pub mod server_state_manager;
 pub mod service_tags_manager;
 
 pub mod config_ref;
 mod ddashmap;
-pub mod mini_riffle;
 mod partition_stats;
 mod raw_io;
 mod system_libc;

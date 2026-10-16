@@ -7,30 +7,34 @@ use crate::grpc::protobuf::uniffle::{
 use crate::health_service::HealthService;
 use crate::metric::SERVICE_IS_HEALTHY;
 use crate::runtime::manager::RuntimeManager;
+use crate::runtime::JoinHandle;
 use crate::server_state_manager::ServerStateManager;
 use crate::service_tags_manager::SERVICE_TAGS_MANAGER_REF;
 use crate::util::now_timestamp_as_millis;
 use await_tree::InstrumentAwait;
 use log::{error, info};
 use std::time::Duration;
-use tonic::transport::{Channel, Error};
+use tokio::sync::broadcast;
 
 pub struct HeartbeatTask;
 
 impl HeartbeatTask {
-    pub fn run(
+    pub async fn run(
         config: &Config,
         runtime_manager: &RuntimeManager,
         app_manager: &AppManagerRef,
         health_service: &HealthService,
         server_state_manager: &ServerStateManager,
-    ) {
+        mut shutdown: broadcast::Receiver<()>,
+    ) -> anyhow::Result<Option<JoinHandle<()>>> {
+        if config.coordinator_quorum.is_empty() {
+            info!("No coordinators configured; skipping heartbeat task");
+            return Ok(None);
+        }
         let runtime_manager = runtime_manager.clone();
         let app_manager = app_manager.clone();
         let health_service = health_service.clone();
         let server_state_manager = server_state_manager.clone();
-
-        let coordinator_quorum = config.coordinator_quorum.clone();
 
         let grpc_port = config.grpc_port;
         let urpc_port = config.urpc_port.unwrap_or(0);
@@ -53,22 +57,19 @@ impl HeartbeatTask {
         let git_commit_id = env!("GIT_COMMIT_HASH").to_string();
         let version = env!("CARGO_PKG_VERSION").to_string();
 
-        let mut multi_coordinator_clients = runtime_manager.default_runtime.block_on(async move {
-            let mut clients = vec![];
-            for quorum in &coordinator_quorum {
-                match CoordinatorServerClient::connect(format!("http://{}", &quorum)).await {
-                    Ok(client) => clients.push(client),
-                    Err(error) => error!(
-                        "Failed to connect to coordinator server: {}. error: {}",
-                        quorum, error
-                    ),
-                }
+        let mut multi_coordinator_clients = vec![];
+        for quorum in &config.coordinator_quorum {
+            match CoordinatorServerClient::connect(format!("http://{}", quorum)).await {
+                Ok(client) => multi_coordinator_clients.push(client),
+                Err(error) => error!(
+                    "Failed to connect to coordinator server: {}. error: {}",
+                    quorum, error
+                ),
             }
-            clients
-        });
+        }
 
-        if multi_coordinator_clients.len() <= 0 {
-            panic!("No active coordinator server found");
+        if multi_coordinator_clients.is_empty() {
+            anyhow::bail!("No active coordinator server found");
         }
 
         let service_tags_manager = SERVICE_TAGS_MANAGER_REF
@@ -76,67 +77,74 @@ impl HeartbeatTask {
             .expect("ServiceTagsManager must be initialized before heartbeat task");
         info!("Service tags: {:?}", service_tags_manager.all_tags());
 
-        runtime_manager.default_runtime.spawn_with_await_tree(
+        let task = runtime_manager.default_runtime.spawn_with_await_tree(
             "Heartbeat task with multi coordinators",
             async move {
-                loop {
-                    tokio::time::sleep(Duration::from_secs(interval_seconds as u64))
-                        .instrument_await("sleeping")
-                        .await;
+                let heartbeat = async move {
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(interval_seconds as u64))
+                            .instrument_await("sleeping")
+                            .await;
 
-                    let mut healthy = health_service.is_healthy().await.unwrap_or(false);
-                    SERVICE_IS_HEALTHY.set(if healthy { 0 } else { 1 });
+                        let mut healthy = health_service.is_healthy().await.unwrap_or(false);
+                        SERVICE_IS_HEALTHY.set(if healthy { 0 } else { 1 });
 
-                    let memory_snapshot = app_manager
-                        .store_memory_snapshot()
-                        .await
-                        .unwrap_or((0, 0, 0).into());
-                    let memory_spill_event_num =
-                        app_manager.store_memory_spill_event_num().unwrap_or(0) as i32;
-
-                    let server_state = server_state_manager.get_server_status();
-
-                    // Compatible with uniffle coordinator's logic
-                    // https://github.com/apache/uniffle/blob/6843c06b1b1e4fe8c8c2be84e6a15f831c4b9a4c/coordinator/src/main/java/org/apache/uniffle/coordinator/CoordinatorGrpcService.java#L512
-                    if server_state != ServerStatus::Active {
-                        healthy = false;
-                    }
-
-                    let heartbeat_req = ShuffleServerHeartBeatRequest {
-                        server_id: Some(shuffle_server_id.clone()),
-                        used_memory: memory_snapshot.used(),
-                        pre_allocated_memory: memory_snapshot.allocated(),
-                        available_memory: memory_snapshot.available(),
-                        event_num_in_flush: memory_spill_event_num,
-                        tags: service_tags_manager.all_tags(),
-                        is_healthy: Some(healthy),
-                        status: server_state.into(),
-                        storage_info: Default::default(),
-                        version: Some(version.to_string()),
-                        git_commit_id: Some(git_commit_id.clone()),
-                        start_time_ms: Some(start_time_ms),
-                        application_info: app_manager.get_application_infos(),
-                        display_metrics: Default::default(),
-                    };
-
-                    // It must use the 0..len to avoid borrow check in loop.
-                    for idx in 0..multi_coordinator_clients.len() {
-                        let client = multi_coordinator_clients.get_mut(idx).unwrap();
-                        match client
-                            .heartbeat(tonic::Request::new(heartbeat_req.clone()))
+                        let memory_snapshot = app_manager
+                            .store_memory_snapshot()
                             .await
-                        {
-                            Err(err) => {
-                                error!(
-                                    "Errors on heartbeat with coordinator idx: {}. errors: {}",
-                                    idx, err
-                                );
+                            .unwrap_or((0, 0, 0).into());
+                        let memory_spill_event_num =
+                            app_manager.store_memory_spill_event_num().unwrap_or(0) as i32;
+
+                        let server_state = server_state_manager.get_server_status();
+
+                        // Compatible with uniffle coordinator's logic
+                        // https://github.com/apache/uniffle/blob/6843c06b1b1e4fe8c8c2be84e6a15f831c4b9a4c/coordinator/src/main/java/org/apache/uniffle/coordinator/CoordinatorGrpcService.java#L512
+                        if server_state != ServerStatus::Active {
+                            healthy = false;
+                        }
+
+                        let heartbeat_req = ShuffleServerHeartBeatRequest {
+                            server_id: Some(shuffle_server_id.clone()),
+                            used_memory: memory_snapshot.used(),
+                            pre_allocated_memory: memory_snapshot.allocated(),
+                            available_memory: memory_snapshot.available(),
+                            event_num_in_flush: memory_spill_event_num,
+                            tags: service_tags_manager.all_tags(),
+                            is_healthy: Some(healthy),
+                            status: server_state.into(),
+                            storage_info: Default::default(),
+                            version: Some(version.to_string()),
+                            git_commit_id: Some(git_commit_id.clone()),
+                            start_time_ms: Some(start_time_ms),
+                            application_info: app_manager.get_application_infos(),
+                            display_metrics: Default::default(),
+                        };
+
+                        // It must use the 0..len to avoid borrow check in loop.
+                        for idx in 0..multi_coordinator_clients.len() {
+                            let client = multi_coordinator_clients.get_mut(idx).unwrap();
+                            match client
+                                .heartbeat(tonic::Request::new(heartbeat_req.clone()))
+                                .await
+                            {
+                                Err(err) => {
+                                    error!(
+                                        "Errors on heartbeat with coordinator idx: {}. errors: {}",
+                                        idx, err
+                                    );
+                                }
+                                _ => {}
                             }
-                            _ => {}
                         }
                     }
+                };
+                tokio::select! {
+                    _ = heartbeat => {},
+                    _ = shutdown.recv() => info!("Heartbeat task stopped"),
                 }
             },
         );
+        Ok(Some(task))
     }
 }
