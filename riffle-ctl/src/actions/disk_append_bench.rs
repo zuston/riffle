@@ -7,7 +7,7 @@ use log::info;
 use riffle_server::config::{Config, IoLimiterConfig, RuntimeConfig};
 use riffle_server::http::HttpMonitorService;
 use riffle_server::runtime::manager::{create_runtime, RuntimeManager};
-use riffle_server::runtime::{Runtime, RuntimeRef};
+use riffle_server::runtime::{JoinHandle, Runtime, RuntimeRef};
 use riffle_server::store::local::options::WriteOptions;
 use riffle_server::store::local::sync_io::SyncLocalIO;
 use riffle_server::store::DataBytes;
@@ -31,7 +31,7 @@ pub struct DiskAppendBenchAction {
     throttle_enabled: bool,
     throttle_runtime: RuntimeRef,
 
-    http_server: Box<riffle_server::http::http_service::PoemHTTPServer>,
+    http_server: JoinHandle<std::io::Result<()>>,
     runtime_manager: RuntimeManager,
 }
 
@@ -59,7 +59,9 @@ impl DiskAppendBenchAction {
             dispatch_thread_num: 4,
             read_ahead_thread_number: 1,
         });
-        let http = HttpMonitorService::init(&config, runtime_manager.clone());
+        let http =
+            HttpMonitorService::init(&config, runtime_manager.clone(), std::future::pending())
+                .expect("failed to start disk benchmark HTTP monitor");
 
         let throttle_runtime = create_runtime(10, "throttle layer pool");
 
