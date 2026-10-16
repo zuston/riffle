@@ -665,7 +665,7 @@ where
     Ok(())
 }
 
-fn get_bytes(src: &mut impl Buf) -> Result<Option<Bytes>, WorkerError> {
+pub fn get_bytes(src: &mut impl Buf) -> Result<Option<Bytes>, WorkerError> {
     if !src.has_remaining() {
         return Err(STREAM_INCORRECT("get_bytes".into()));
     }

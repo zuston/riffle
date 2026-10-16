@@ -70,13 +70,17 @@ impl ClientRssConf {
         Self { properties }
     }
 
-    pub fn get<T: std::str::FromStr + Clone + Send + Sync + 'static>(
+    pub fn properties(&self) -> &HashMap<String, String> {
+        &self.properties
+    }
+
+    pub fn get<T: Clone + Send + Sync + 'static>(
         &self,
         option: &ClientConfigOption<T>,
     ) -> Option<T> {
         match self.properties.get(&option.key) {
             None => option.default.as_ref().cloned(),
-            Some(s) => s.parse::<T>().ok(),
+            Some(s) => (option.parser)(s),
         }
     }
 
@@ -90,14 +94,19 @@ pub struct ClientConfigOption<T: Clone + Send + Sync + 'static> {
     key: String,
     default: Option<T>,
     description: Option<String>,
+    parser: fn(&str) -> Option<T>,
 }
 
 impl<T: Clone + Send + Sync + 'static> ClientConfigOption<T> {
-    pub fn key(key: &str) -> Self {
+    pub fn key(key: &str) -> Self
+    where
+        T: std::str::FromStr,
+    {
         ClientConfigOption {
             key: key.to_string(),
             default: None,
             description: None,
+            parser: |value| value.parse().ok(),
         }
     }
     pub fn default_value(mut self, value: T) -> Self {
@@ -114,10 +123,53 @@ impl<T: Clone + Send + Sync + 'static> ClientConfigOption<T> {
         self.key.clone()
     }
 }
+
+impl<T: std::str::FromStr + Clone + Send + Sync + 'static> ClientConfigOption<Vec<T>> {
+    pub fn list_key(key: &str) -> Self {
+        Self {
+            key: key.to_string(),
+            default: None,
+            description: None,
+            parser: |value| {
+                value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|item| !item.is_empty())
+                    .map(str::parse)
+                    .collect::<Result<Vec<T>, _>>()
+                    .ok()
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn test_list_key_string_values() {
+        let option = ClientConfigOption::<Vec<String>>::list_key("test.list");
+        for (value, expected) in [
+            ("server-1:19999", vec!["server-1:19999"]),
+            (
+                "server-2:19999,server-1:19999,server-2:19999",
+                vec!["server-2:19999", "server-1:19999", "server-2:19999"],
+            ),
+            (
+                " , server-1:19999, ,\tserver-2:19999\n, ",
+                vec!["server-1:19999", "server-2:19999"],
+            ),
+        ] {
+            let conf = ClientRssConf::from(HashMap::from([(option.get_key(), value.to_string())]));
+            assert_eq!(
+                conf.get(&option),
+                Some(expected.into_iter().map(str::to_string).collect()),
+                "value: {value:?}"
+            );
+        }
+    }
 
     #[test]
     fn test_get_memory_data_option() {
