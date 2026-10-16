@@ -15,8 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::fs;
-use std::path::Path;
 use std::process::Command;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -43,22 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tonic_build::configure()
         .build_server(true)
-        .out_dir("src/grpc/protobuf")
         .compile_with_config(config, &["src/grpc/protobuf/uniffle.proto"], &["."])?;
 
-    // rename the generated filename to uniffle.rs
-    rename_file(
-        "src/grpc/protobuf/rss.common.rs",
-        "src/grpc/protobuf/uniffle.rs",
-    );
-
     Ok(())
-}
-
-fn rename_file(file_path: impl AsRef<Path>, renamed_path: impl AsRef<Path>) {
-    let f = file_path.as_ref();
-    if !f.exists() || !f.is_file() {
-        panic!("The file is missing or not a file.");
-    }
-    fs::rename(&f, renamed_path).expect("Errors on renaming file.");
 }

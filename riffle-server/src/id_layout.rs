@@ -3,7 +3,7 @@ use log::warn;
 use once_cell::sync::Lazy;
 use std::ops::Deref;
 
-pub const DEFAULT_BLOCK_ID_LAYOUT: Lazy<IdLayout> = Lazy::new(|| {
+pub static DEFAULT_BLOCK_ID_LAYOUT: Lazy<IdLayout> = Lazy::new(|| {
     IdLayout::new(
         DEFAULT_SEQUENCE_NO_BIT,
         DEFAULT_PARTITION_ID_BIT,
