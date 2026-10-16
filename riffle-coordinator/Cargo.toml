@@ -29,6 +29,7 @@ default = ["logforth"]
 logforth = ["dep:logforth"]
 
 [dependencies]
+anyhow = { workspace = true }
 boa_engine = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tonic = { workspace = true }
