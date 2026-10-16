@@ -130,7 +130,6 @@ mod tests {
     use crate::config::Config;
     use crate::config_reconfigure::ReconfigurableConfManager;
     use crate::runtime::manager::RuntimeManager;
-    use crate::server_state_manager::ServerStateManager;
     use crate::storage::StorageService;
     use crate::urpc::client::UrpcClient;
     use crate::urpc::command::GetLocalDataRequestCommand;
@@ -157,9 +156,7 @@ mod tests {
         let (shutdown_sender, shutdown_rx) = tokio::sync::broadcast::channel(1);
         crate::rpc::DefaultRpcService {}.start_urpc(
             &config,
-            runtime_manager.clone(),
             app_manager_ref.clone(),
-            &ServerStateManager::new(&app_manager_ref, &config),
             shutdown_rx,
         )?;
 

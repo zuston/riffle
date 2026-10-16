@@ -8,12 +8,11 @@ use crate::grpc::protobuf::uniffle::shuffle_server_internal_server::ShuffleServe
 use crate::grpc::protobuf::uniffle::shuffle_server_server::ShuffleServerServer;
 use crate::grpc::service::{DefaultShuffleServer, MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use crate::metric::GRPC_LATENCY_TIME_SEC;
-use crate::runtime::manager::RuntimeManager;
 use crate::server_state_manager::ServerStateManager;
 use crate::urpc;
 use crate::util::is_port_in_used;
 use anyhow::{Context, Result};
-use async_trait::async_trait;
+use futures::{stream::FuturesUnordered, StreamExt};
 use log::{debug, info};
 use once_cell::sync::Lazy;
 use std::future::Future;
@@ -44,25 +43,18 @@ pub static URPC_PARALLELISM: Lazy<NonZeroUsize> = Lazy::new(|| {
     })
 });
 
-#[async_trait]
-pub trait RpcService {
-    async fn start(
-        &self,
-        config: Config,
-        runtime_manager: RuntimeManager,
-        app_manager_ref: AppManagerRef,
-    ) -> Result<()>;
-}
-
 type RpcCompletion = oneshot::Receiver<Result<()>>;
 
 pub struct RpcServiceHandle {
-    task: crate::runtime::JoinHandle<Result<()>>,
+    completions: FuturesUnordered<RpcCompletion>,
 }
 
 impl RpcServiceHandle {
     pub async fn wait(&mut self) -> Result<()> {
-        (&mut self.task).await?
+        while let Some(result) = self.completions.next().await {
+            result.context("RPC thread exited unexpectedly")??;
+        }
+        Ok(())
     }
 }
 
@@ -70,7 +62,6 @@ pub struct DefaultRpcService;
 impl DefaultRpcService {
     fn _start_urpc(
         config: &Config,
-        _runtime_manager: RuntimeManager,
         shutdown_rx: Receiver<()>,
         app_manager_ref: AppManagerRef,
     ) -> Result<Vec<RpcCompletion>> {
@@ -95,23 +86,17 @@ impl DefaultRpcService {
 
         info!("Starting urpc server with port:[{}] ......", urpc_port);
 
-        async fn shutdown(mut rx: Receiver<()>) -> Result<()> {
-            let _ = rx.recv().await;
-            debug!("urpc service has been graceful stopped.");
-            Ok(())
-        }
-
-        let mut tasks = Vec::new();
+        let mut completions = Vec::new();
         #[cfg(target_arch = "aarch64")]
         {
             let rx = shutdown_rx.resubscribe();
             let app_manager = app_manager_ref.clone();
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port);
             let listener = bind_rpc_listener(addr)?;
-            tasks.push(spawn_rpc_thread(
+            completions.push(spawn_rpc_thread(
                 None,
                 URPC_PARALLELISM.get(),
-                async move { urpc_serve(listener, shutdown(rx), app_manager).await },
+                async move { urpc_serve(listener, rx, app_manager).await },
             )?);
         }
 
@@ -126,13 +111,13 @@ impl DefaultRpcService {
                 let app_manager = app_manager_ref.clone();
                 let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port);
                 let listener = bind_rpc_listener(addr)?;
-                tasks.push(spawn_rpc_thread(Some(core_id), 1, async move {
-                    urpc_serve(listener, shutdown(rx), app_manager).await
+                completions.push(spawn_rpc_thread(Some(core_id), 1, async move {
+                    urpc_serve(listener, rx, app_manager).await
                 })?);
             }
         }
 
-        Ok(tasks)
+        Ok(completions)
     }
 
     /// Serves urpc with the pluggable io_uring net engine: per-core engine
@@ -182,11 +167,7 @@ impl DefaultRpcService {
         std::thread::Builder::new()
             .name("urpc-uring-shutdown".to_string())
             .spawn(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap();
-                let _ = rt.block_on(shutdown_rx.recv());
+                let _ = shutdown_rx.blocking_recv();
                 info!("Shutting down the urpc io_uring net engine...");
                 server.shutdown();
                 let _ = completed_tx.send(Ok(()));
@@ -197,7 +178,6 @@ impl DefaultRpcService {
 
     fn start_grpc(
         config: &Config,
-        runtime_manager: RuntimeManager,
         shutdown_rx: Receiver<()>,
         app_manager_ref: AppManagerRef,
         server_state_manager: &ServerStateManager,
@@ -207,7 +187,7 @@ impl DefaultRpcService {
         info!("Starting grpc server with port:[{}] ......", grpc_port);
         let parallelism = GRPC_PARALLELISM.get();
         info!("grpc service with parallelism: [{}]", &parallelism);
-        let mut tasks = Vec::new();
+        let mut completions = Vec::new();
 
         #[cfg(not(target_arch = "aarch64"))]
         {
@@ -232,7 +212,7 @@ impl DefaultRpcService {
                 // 1. the p99 transport time reduce from 4sec to 800ms.
                 // 2. the p99 processing time reduce from 600ms to 60ms.
                 let listener = bind_rpc_listener(addr)?;
-                tasks.push(spawn_rpc_thread(Some(core_id), 1, async move {
+                completions.push(spawn_rpc_thread(Some(core_id), 1, async move {
                     grpc_serve(service, internal_service, listener, service_rx).await
                 })?);
             }
@@ -251,38 +231,30 @@ impl DefaultRpcService {
             let internal_service = ShuffleServerInternalServer::new(shuffle_server.clone());
 
             let listener = bind_rpc_listener(addr)?;
-            tasks.push(spawn_rpc_thread(
+            completions.push(spawn_rpc_thread(
                 None,
                 GRPC_PARALLELISM.get(),
                 async move { grpc_serve(service, internal_service, listener, service_rx).await },
             )?);
         }
 
-        Ok(tasks)
+        Ok(completions)
     }
 
     // Only for tests.
     pub fn start_urpc(
         &self,
         config: &Config,
-        runtime_manager: RuntimeManager,
         app_manager_ref: AppManagerRef,
-        server_state_manager: &ServerStateManager,
         shutdown_rx: Receiver<()>,
     ) -> Result<()> {
-        DefaultRpcService::_start_urpc(
-            config,
-            runtime_manager.clone(),
-            shutdown_rx,
-            app_manager_ref.clone(),
-        )?;
+        Self::_start_urpc(config, shutdown_rx, app_manager_ref)?;
         Ok(())
     }
 
     pub fn start(
         &self,
         config: &Config,
-        runtime_manager: RuntimeManager,
         app_manager_ref: AppManagerRef,
         server_state_manager: &ServerStateManager,
         shutdown_rx: Receiver<()>,
@@ -293,30 +265,18 @@ impl DefaultRpcService {
         {
             anyhow::ensure!(!is_port_in_used(port), "RPC port {port} is already in use");
         }
-        let mut tasks = Self::start_grpc(
+        let mut completions = Self::start_grpc(
             config,
-            runtime_manager.clone(),
             shutdown_rx.resubscribe(),
             app_manager_ref.clone(),
             server_state_manager,
         )?;
         if config.urpc_port.is_some() {
-            tasks.extend(Self::_start_urpc(
-                config,
-                runtime_manager.clone(),
-                shutdown_rx,
-                app_manager_ref,
-            )?);
+            completions.extend(Self::_start_urpc(config, shutdown_rx, app_manager_ref)?);
         }
-        let task =
-            runtime_manager.default_runtime.spawn(async move {
-                futures::future::try_join_all(tasks.into_iter().map(|task| async move {
-                    task.await.context("RPC thread exited unexpectedly")?
-                }))
-                .await?;
-                Ok(())
-            });
-        Ok(RpcServiceHandle { task })
+        Ok(RpcServiceHandle {
+            completions: completions.into_iter().collect(),
+        })
     }
 }
 
@@ -366,10 +326,16 @@ fn bind_rpc_listener(addr: SocketAddr) -> Result<std::net::TcpListener> {
 
 async fn urpc_serve(
     listener: std::net::TcpListener,
-    shutdown: impl Future,
+    shutdown_rx: Receiver<()>,
     app_manager_ref: AppManagerRef,
 ) -> Result<()> {
-    urpc::server::run(TcpListener::from_std(listener)?, shutdown, app_manager_ref).await;
+    urpc::server::run(
+        TcpListener::from_std(listener)?,
+        shutdown_rx,
+        app_manager_ref,
+    )
+    .await;
+    debug!("urpc service has been gracefully stopped.");
     Ok(())
 }
 
@@ -395,8 +361,8 @@ async fn grpc_serve(
         .add_service(internal_service)
         .serve_with_incoming_shutdown(incoming, async {
             let _ = rx.recv().await;
-            info!("GRPC service has been graceful stopped.");
         })
         .await?;
+    info!("GRPC service has been gracefully stopped.");
     Ok(())
 }

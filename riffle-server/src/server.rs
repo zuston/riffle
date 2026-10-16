@@ -87,7 +87,6 @@ impl Server {
         let (shutdown_tx, _) = broadcast::channel(1);
         let mut rpc = DefaultRpcService {}.start(
             &config,
-            runtime_manager.clone(),
             app_manager.clone(),
             &server_state_manager,
             shutdown_tx.subscribe(),
