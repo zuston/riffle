@@ -15,5 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#[rustfmt::skip]
-pub mod uniffle;
+pub mod uniffle {
+    include!(concat!(env!("OUT_DIR"), "/rss.common.rs"));
+}
