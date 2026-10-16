@@ -36,7 +36,6 @@ docker-compose up -d
 
 This starts all services including:
 - Prometheus (monitoring)
-- Grafana (visualization)
 - Pushgateway (metrics gateway)
 - Uniffle Coordinator
 - Two Riffle Servers
@@ -45,8 +44,8 @@ This starts all services including:
 ### Start only monitoring services
 
 ```bash
-# Start Prometheus, Grafana, and Pushgateway only
-docker-compose up -d prometheus grafana pushgateway
+# Start Prometheus and Pushgateway only
+docker-compose up -d prometheus pushgateway
 ```
 
 ### Start only Prometheus
@@ -97,9 +96,9 @@ spark-sql --master local[*]
 docker-compose --profile test up riffle-test
 ```
 
-### 使用 Riffle coordinator 运行 Spark SQL 测试
+### Run Spark SQL tests with the Riffle coordinator
 
-该流程复用相同的 Spark SQL 用例和 Riffle server，仅将 coordinator 切换为 native Riffle 实现：
+This workflow reuses the same Spark SQL test cases and Riffle servers, switching only the coordinator to the native Riffle implementation:
 
 ```bash
 COORDINATOR_HOST=riffle-coordinator \
@@ -124,7 +123,6 @@ docker-compose down
 - **Spark UI**: http://localhost:4040 (when Spark jobs are running)
 - **Prometheus**: http://localhost:9090
 - **Prometheus Pushgateway**: http://localhost:9091
-- **Grafana**: http://localhost:3000 (default credentials: admin/admin)
 
 ## Port Mapping
 
@@ -132,7 +130,6 @@ docker-compose down
 |---------|------|-------------|
 | prometheus | 9090 | Prometheus UI |
 | pushgateway | 9091 | Prometheus Pushgateway UI |
-| grafana | 3000 | Grafana UI |
 | uniffle-coordinator | 19995 | Web UI |
 | uniffle-coordinator | 21000 | RPC |
 | riffle-coordinator | 21001 | RPC (host mapping) |
@@ -147,10 +144,9 @@ docker-compose down
 Services start in the following order to ensure correct dependencies:
 
 1. **prometheus** starts first (monitoring service)
-2. **grafana** starts after prometheus (depends on prometheus)
-3. **uniffle-coordinator** starts in parallel with prometheus
-4. **riffle-server-1** and **riffle-server-2** wait for coordinator health check
-5. **spark-client** waits for both riffle-servers to be healthy
+2. **uniffle-coordinator** starts in parallel with prometheus
+3. **riffle-server-1** and **riffle-server-2** wait for coordinator health check
+4. **spark-client** waits for both riffle-servers to be healthy
 
 Each service has `healthcheck` configured to ensure readiness.
 
@@ -201,30 +197,6 @@ curl -X DELETE http://localhost:9091/metrics/job/my_job
 - Short-lived services that don't expose HTTP endpoints
 - One-off scripts that need to report metrics
 - Spark jobs that need to push custom metrics
-
-### Grafana
-
-Grafana is pre-configured with Prometheus as the default data source and includes a pre-loaded Riffle dashboard.
-
-1. Access Grafana at http://localhost:3000
-2. Login with default credentials:
-   - Username: `admin`
-   - Password: `admin`
-3. The **Riffle Dashboard** is automatically loaded and available in the **Dashboards** menu
-4. Prometheus data source is automatically configured at `http://prometheus:9090`
-
-**Pre-loaded Dashboard:**
-- **Riffle Dashboard**: A comprehensive dashboard showing Riffle cluster metrics, server statistics, and performance indicators
-
-**To explore metrics manually:**
-- Navigate to **Explore** to query metrics using PromQL
-- Example queries:
-  - `up{job="riffle-server-1"}` - Check if server is up
-  - `rate(http_requests_total[5m])` - Request rate
-
-**To create custom dashboards:**
-- Go to **Dashboards** → **New Dashboard**
-- Add panels and use PromQL queries to visualize metrics
 
 ## Partial Startup
 
@@ -338,7 +310,7 @@ capacity = "4G"  # Increase memory capacity
 
 [runtime_config]
 read_thread_num = 40   # Increase read threads
-write_thread_num = 100 # Increase write threads
+localfile_write_thread_num = 100 # Increase local file write threads
 ```
 
 Then restart services:
