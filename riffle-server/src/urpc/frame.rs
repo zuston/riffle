@@ -591,16 +591,7 @@ async fn write_data_bytes(
     Ok(())
 }
 
-#[cfg(feature = "bench")]
-#[doc(hidden)]
-pub async fn write_composed_bytes_for_bench(
-    stream: &mut TcpStream,
-    chunks: &[Bytes],
-) -> Result<()> {
-    write_composed_bytes(stream, chunks.iter()).await
-}
-
-async fn write_composed_bytes<'a, I>(stream: &mut TcpStream, chunks: I) -> Result<()>
+pub async fn write_composed_bytes<'a, I>(stream: &mut TcpStream, chunks: I) -> Result<()>
 where
     I: Iterator<Item = &'a Bytes>,
 {
@@ -665,7 +656,7 @@ where
     Ok(())
 }
 
-fn get_bytes(src: &mut impl Buf) -> Result<Option<Bytes>, WorkerError> {
+pub fn get_bytes(src: &mut impl Buf) -> Result<Option<Bytes>, WorkerError> {
     if !src.has_remaining() {
         return Err(STREAM_INCORRECT("get_bytes".into()));
     }

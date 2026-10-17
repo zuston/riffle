@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use criterion::{criterion_group, criterion_main, Criterion};
 use prost::Message;
 use rand::rngs::StdRng;
