@@ -1,9 +1,10 @@
 use fastrace::collector::SpanContext;
 use fastrace::future::FutureExt;
 use fastrace::Span;
-use hyper::Body;
 use std::future::Future;
 use std::task::{Context, Poll};
+use tonic::body::Body;
+use tonic::codegen::http::Request;
 use tower::layer::util::Identity;
 use tower::util::Either;
 use tower::{Layer, Service};
@@ -32,9 +33,9 @@ impl<S> Layer<S> for TracingMiddleWareLayer {
     }
 }
 
-impl<S> Service<hyper::Request<Body>> for TracingMiddleWare<S>
+impl<S> Service<Request<Body>> for TracingMiddleWare<S>
 where
-    S: Service<hyper::Request<Body>> + Clone + Send + 'static,
+    S: Service<Request<Body>> + Clone + Send + 'static,
     S::Future: Send + 'static,
 {
     type Response = S::Response;
@@ -46,7 +47,7 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: hyper::Request<Body>) -> Self::Future {
+    fn call(&mut self, req: Request<Body>) -> Self::Future {
         // This is necessary because tonic internally uses `tower::buffer::Buffer`.
         // See https://github.com/tower-rs/tower/issues/547#issuecomment-767629149
         // for details on why this is necessary

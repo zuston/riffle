@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = prost_build::Config::new();
     config.bytes(&["."]);
 
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .build_server(true)
         .out_dir("src/grpc/protobuf")
         .compile_with_config(config, &["src/grpc/protobuf/uniffle.proto"], &["."])?;

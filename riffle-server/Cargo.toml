@@ -78,6 +78,7 @@ tracing = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 tonic = { workspace = true }
+tonic-prost = { workspace = true }
 prost = { workspace = true }
 bytes = { workspace = true }
 thiserror = { workspace = true }
@@ -136,7 +137,7 @@ nix= { workspace = true, optional = true }
 io-uring = { workspace = true, optional = true }
 
 [build-dependencies]
-tonic-build = { workspace = true }
+tonic-prost-build = { workspace = true }
 prost-build = { workspace = true }
 
 [dev-dependencies]
