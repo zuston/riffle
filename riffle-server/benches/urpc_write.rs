@@ -1,7 +1,7 @@
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use riffle_server::urpc::frame::write_composed_bytes_for_bench;
+use riffle_server::urpc::frame::write_composed_bytes;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -96,10 +96,8 @@ fn bench_urpc_composed_write(c: &mut Criterion) {
             .expect("vectored benchmark connection should be created");
         group.bench_function(BenchmarkId::new("vectored", &case_name), |b| {
             b.iter(|| {
-                let result = runtime.block_on(write_composed_bytes_for_bench(
-                    &mut writer,
-                    black_box(&chunks),
-                ));
+                let result =
+                    runtime.block_on(write_composed_bytes(&mut writer, black_box(&chunks).iter()));
                 black_box(result).expect("vectored write should succeed");
             });
         });
