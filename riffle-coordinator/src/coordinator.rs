@@ -51,8 +51,7 @@ impl Coordinator {
             .context("failed to bind coordinator HTTP listener")?;
         let grpc_addr = grpc_listener.local_addr()?;
         let http_addr = http_listener.local_addr()?;
-        let incoming = TcpIncoming::from_listener(grpc_listener, true, None)
-            .map_err(anyhow::Error::from_boxed)?;
+        let incoming = TcpIncoming::from(grpc_listener).with_nodelay(Some(true));
 
         let application_manager = ApplicationManager::default();
         let cluster_manager = ClusterManager::new(&config);
