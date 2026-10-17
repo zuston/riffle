@@ -1,9 +1,9 @@
 use crate::metric::{GAUGE_GRPC_REQUEST_QUEUE_SIZE, TOTAL_GRPC_REQUEST};
+use hyper::service::Service;
+use hyper::Body;
 use prometheus::{HistogramTimer, HistogramVec};
 use std::task::{Context, Poll};
-use tonic::body::Body;
-use tonic::codegen::http::Request;
-use tower::{Layer, Service};
+use tower::Layer;
 
 #[derive(Clone)]
 pub struct MetricsMiddlewareLayer {
@@ -33,9 +33,9 @@ pub struct MetricsMiddleware<S> {
     metric: HistogramVec,
 }
 
-impl<S> Service<Request<Body>> for MetricsMiddleware<S>
+impl<S> Service<hyper::Request<Body>> for MetricsMiddleware<S>
 where
-    S: Service<Request<Body>> + Clone + Send + 'static,
+    S: Service<hyper::Request<Body>> + Clone + Send + 'static,
     S::Future: Send + 'static,
 {
     type Response = S::Response;
@@ -46,7 +46,7 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: Request<Body>) -> Self::Future {
+    fn call(&mut self, req: hyper::Request<Body>) -> Self::Future {
         // This is necessary because tonic internally uses `tower::buffer::Buffer`.
         // See https://github.com/tower-rs/tower/issues/547#issuecomment-767629149
         // for details on why this is necessary
