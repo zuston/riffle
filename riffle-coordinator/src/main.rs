@@ -15,24 +15,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-pub mod access;
-mod application;
-mod cluster;
-mod config;
-mod grpc;
-mod http;
-
-use crate::application::ApplicationManager;
-use crate::cluster::ClusterManager;
-use crate::config::Config;
-use crate::grpc::protobuf::uniffle::coordinator_server_server::CoordinatorServerServer;
-use crate::grpc::service::DefaultCoordinatorServer;
 use clap::Parser;
 use log::info;
 use logforth::record::{Level, LevelFilter};
+use riffle_coordinator::config::Config;
+use riffle_coordinator::coordinator::Coordinator;
 use riffle_server::log_service::LogService;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use tonic::transport::Server;
+use tokio::signal::unix::{signal, SignalKind};
 
 #[derive(Parser, Debug)]
 #[command(name = "riffle-coordinator")]
@@ -46,7 +35,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let config = Config::load(args.config.as_deref())?;
 
@@ -64,24 +53,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let application_manager = ApplicationManager::default();
-    let cluster_manager = ClusterManager::new(&config);
-
-    // Create gRPC service
-    let coordinator_server = DefaultCoordinatorServer::new(&cluster_manager, &application_manager);
-    let service = CoordinatorServerServer::new(coordinator_server)
-        .max_decoding_message_size(usize::MAX)
-        .max_encoding_message_size(usize::MAX);
-
-    // Build socket address
-    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), config.grpc_port);
-
-    // Start gRPC server
-    info!("Starting gRPC server on {addr}");
+    let mut coordinator = Coordinator::start(config).await?;
+    let mut sigterm = signal(SignalKind::terminate())?;
+    let mut sigint = signal(SignalKind::interrupt())?;
     tokio::select! {
-        result = Server::builder().add_service(service).serve(addr) => result?,
-        result = http::serve(application_manager, config.http_port) => result?,
+        result = coordinator.wait() => return result,
+        _ = sigterm.recv() => info!("Received SIGTERM, shutting down coordinator"),
+        _ = sigint.recv() => info!("Received SIGINT, shutting down coordinator"),
     }
-
-    Ok(())
+    coordinator.shutdown().await
 }

@@ -20,14 +20,15 @@ use crate::error::WorkerError;
 use poem::endpoint::make_sync;
 use poem::error::ResponseError;
 use poem::http::StatusCode;
-use poem::listener::TcpListener;
+use poem::listener::TcpAcceptor;
 use poem::{get, Route, RouteMethod, Server};
 
 use crate::constant::CPU_ARCH;
 use crate::http::{HTTPServer, Handler};
 use crate::runtime::manager::RuntimeManager;
-use crate::util::is_port_in_used;
 use await_tree::{InstrumentAwait, SpanExt};
+use std::future::Future;
+use std::net::TcpListener;
 use std::sync::Mutex;
 
 impl ResponseError for WorkerError {
@@ -81,10 +82,12 @@ impl PoemHTTPServer {
 }
 
 impl HTTPServer for PoemHTTPServer {
-    fn start(&self, runtime_manager: RuntimeManager, port: u16) {
-        if is_port_in_used(port) {
-            panic!("The http service port:{:?} has been used.", port);
-        }
+    fn start(
+        &self,
+        runtime_manager: RuntimeManager,
+        listener: TcpListener,
+        shutdown: impl Future<Output = ()> + Send + 'static,
+    ) -> crate::runtime::JoinHandle<std::io::Result<()>> {
         let mut app = Route::new();
         let handlers = self.handlers.lock().unwrap();
         for handler in handlers.iter() {
@@ -93,12 +96,12 @@ impl HTTPServer for PoemHTTPServer {
         runtime_manager
             .http_runtime
             .spawn_with_await_tree("Http service", async move {
-                let _ = Server::new(TcpListener::bind(format!("0.0.0.0:{}", port)))
+                Server::new_with_acceptor(TcpAcceptor::from_std(listener)?)
                     .name("uniffle-server-http-service")
-                    .run(app)
+                    .run_with_graceful_shutdown(app, shutdown, None)
                     .instrument_await("listening".long_running())
-                    .await;
-            });
+                    .await
+            })
     }
 
     fn register_handler(&self, handler: impl Handler + 'static) {

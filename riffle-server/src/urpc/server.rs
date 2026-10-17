@@ -1,5 +1,4 @@
 use log::{debug, error, info};
-use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -148,7 +147,11 @@ impl Handler {
     }
 }
 
-pub async fn run(listener: TcpListener, shutdown: impl Future, app_manager_ref: AppManagerRef) {
+pub async fn run(
+    listener: TcpListener,
+    mut shutdown: broadcast::Receiver<()>,
+    app_manager_ref: AppManagerRef,
+) {
     let (notify_shutdown, _) = broadcast::channel(1);
     let (shutdown_complete_tx, mut shutdown_complete_rx) = mpsc::channel(1);
 
@@ -165,7 +168,7 @@ pub async fn run(listener: TcpListener, shutdown: impl Future, app_manager_ref: 
                 error!("Errors on running urpc server. err: {:#?}", err);
             }
         }
-        _ = shutdown => {
+        _ = shutdown.recv() => {
             info!("Accepting the shutdown signal for the urpc net service");
         }
     }
@@ -199,25 +202,12 @@ mod test {
     #[ignore]
     async fn rpc_start_test() -> anyhow::Result<()> {
         let mut config = Config::create_simple_config();
-        config.grpc_port = 21100;
-        config.urpc_port = Some(21101);
-
-        let reconf_manager = ReconfigurableConfManager::new(&config, None)?;
-        let runtime_manager = RuntimeManager::from(config.clone().runtime_config.clone());
-        let storage = StorageService::init(&runtime_manager, &config, &reconf_manager)?;
-        let app_manager_ref = AppManager::get_ref(
-            runtime_manager.clone(),
-            config.clone(),
-            &storage,
-            &reconf_manager,
-        );
-
-        DefaultRpcService {}.start(
-            &config,
-            runtime_manager.clone(),
-            app_manager_ref.clone(),
-            &ServerStateManager::new(&app_manager_ref, &config),
-        )?;
+        config.grpc_port = 0;
+        config.http_port = 0;
+        config.urpc_port = Some(0);
+        config.coordinator_quorum.clear();
+        let server = crate::server::Server::start(config).await?;
+        server.shutdown().await?;
 
         Ok(())
     }

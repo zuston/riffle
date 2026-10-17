@@ -39,18 +39,28 @@ use crate::http::profile_heap::ProfileHeapHandler;
 use log::info;
 use poem::RouteMethod;
 use serde::{Deserialize, Serialize};
+use std::future::Future;
+use std::net::{Ipv4Addr, SocketAddr, TcpListener};
 
 pub struct HttpMonitorService;
 impl HttpMonitorService {
-    pub fn init(config: &Config, runtime_manager: RuntimeManager) -> Box<PoemHTTPServer> {
+    pub fn init(
+        config: &Config,
+        runtime_manager: RuntimeManager,
+        shutdown: impl Future<Output = ()> + Send + 'static,
+    ) -> std::io::Result<crate::runtime::JoinHandle<std::io::Result<()>>> {
         let http_port = config.http_port;
         info!(
             "Starting http monitor service with port:[{}] ......",
             http_port
         );
+        let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
+        socket.set_reuse_address(true)?;
+        socket.set_nonblocking(true)?;
+        socket.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, http_port)).into())?;
+        socket.listen(1024)?;
         let server = new_server();
-        server.start(runtime_manager, http_port);
-        server
+        Ok(server.start(runtime_manager, socket.into(), shutdown))
     }
 }
 
@@ -61,7 +71,12 @@ pub trait Handler {
 }
 
 pub trait HTTPServer: Send + Sync {
-    fn start(&self, runtime_manager: RuntimeManager, port: u16);
+    fn start(
+        &self,
+        runtime_manager: RuntimeManager,
+        listener: TcpListener,
+        shutdown: impl Future<Output = ()> + Send + 'static,
+    ) -> crate::runtime::JoinHandle<std::io::Result<()>>;
     fn register_handler(&self, handler: impl Handler + 'static);
 }
 

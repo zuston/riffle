@@ -20,9 +20,11 @@ mod application;
 use crate::application::ApplicationManager;
 use application::ApplicationHandler;
 use log::info;
-use poem::listener::TcpListener;
+use poem::listener::TcpAcceptor;
 use poem::{get, EndpointExt, Route, Server};
 use riffle_server::http::Handler;
+use std::future::Future;
+use tokio::net::TcpListener;
 
 fn routes(application_manager: ApplicationManager) -> Route {
     let handler = ApplicationHandler::new(application_manager.clone());
@@ -34,10 +36,14 @@ fn routes(application_manager: ApplicationManager) -> Route {
         )
 }
 
-pub async fn serve(application_manager: ApplicationManager, port: u16) -> std::io::Result<()> {
-    info!("Starting HTTP server on 0.0.0.0:{port}");
-    Server::new(TcpListener::bind(("0.0.0.0", port)))
-        .run(routes(application_manager))
+pub async fn serve(
+    application_manager: ApplicationManager,
+    listener: TcpListener,
+    shutdown: impl Future<Output = ()>,
+) -> std::io::Result<()> {
+    info!("Starting HTTP server on {}", listener.local_addr()?);
+    Server::new_with_acceptor(TcpAcceptor::from_tokio(listener)?)
+        .run_with_graceful_shutdown(routes(application_manager), shutdown, None)
         .await
 }
 
