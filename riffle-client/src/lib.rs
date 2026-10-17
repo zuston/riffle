@@ -18,6 +18,7 @@ pub use manager::{ApplicationOptions, ShuffleManager};
 pub use reader::ShuffleReader;
 use riffle_server::ddashmap::DDashMap;
 pub use writer::ShuffleWriter;
+use crate::manager::task_id_manager::TaskIdManager;
 
 mod rpc {
     tonic::include_proto!("riffle.client");
@@ -78,31 +79,19 @@ pub struct ShuffleHandle {
     assignment: ShuffleAssignment,
 }
 
-pub struct TaskInfo {
-    pub shuffle: ShuffleHandle,
-    /// Engine-assigned ID, unique per shuffle and different for every retry.
-    pub task_id: TaskId,
+pub struct WriteTaskInfo {
+    pub job_id: u64,
+    pub stage_id: usize,
+    pub map_id: usize,
+    pub attempt_id: usize,
+    pub num_mappers: usize,
+    pub num_partitions: usize,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct WriteResult {
-    app_id: ApplicationId,
-    shuffle_id: ShuffleId,
-    task_id: TaskId,
-    /// Block IDs in writer sequence order.
-    block_ids: Vec<i64>,
-}
-
-impl WriteResult {
-    pub fn task_id(&self) -> TaskId {
-        self.task_id
-    }
-}
-
-pub struct ReadContext {
-    pub shuffle: ShuffleHandle,
-    pub partitions: Vec<PartitionId>,
-    pub write_results: Vec<WriteResult>,
+pub struct ReadTaskInfo {
+    pub job_id: u64,
+    pub upstream_stage_id: usize,
+    pub partitions: Vec<usize>,
 }
 
 pub struct ShuffleRecord {

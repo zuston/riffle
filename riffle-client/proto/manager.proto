@@ -2,15 +2,39 @@ syntax = "proto3";
 package riffle.client;
 
 service ShuffleManagerService {
-  rpc GetAssignment(GetAssignmentRequest) returns (GetAssignmentResponse);
+  rpc GetWriteShuffleHandle(GetWriteShuffleHandleRequest) returns (GetWriteShuffleHandleResponse);
+  rpc ReportShuffleResult(ReportShuffleResultRequest) returns (ReportShuffleResultResponse);
+
+  rpc GetReadShuffleHandle(GetReadShuffleHandleRequest) returns (GetReadShuffleHandleResponse);
 }
 
-message GetAssignmentRequest {
-  int32 shuffle_id = 1;
+message GetWriteShuffleHandleRequest {
+  oneof shuffle_identifier {
+    string shuffle_key = 1;
+    uint64 shuffle_id = 2;
+  }
+  uint64 map_id = 3;
+  uint64 attempt_id = 4;
 }
 
-message GetAssignmentResponse {
-  repeated PartitionAssignment assignments = 1;
+message GetWriteShuffleHandleResponse {
+  uint64 shuffle_id = 1;
+  repeated PartitionAssignment assignments = 2;
+  uint64 task_id = 3;
+}
+
+message GetReadShuffleHandleRequest {
+  oneof shuffle_identifier {
+    string shuffle_key = 1;
+    uint64 shuffle_id = 2;
+  }
+  repeated uint64 partition_ids = 3;
+}
+
+message GetReadShuffleHandleResponse {
+  uint64 shuffle_id = 1;
+  repeated PartitionAssignment assignments = 2;
+  repeated uint64 task_ids = 3;
 }
 
 message PartitionAssignment {
@@ -20,5 +44,13 @@ message PartitionAssignment {
 
 message Endpoint {
   string host = 1;
-  int32 port = 2;
+  int32 grpc_port = 2;
+  optional int32 urpc_port = 3;
 }
+
+message ReportShuffleResultRequest {
+  uint64 shuffle_id = 1;
+  uint64 task_id = 2;
+}
+
+message ReportShuffleResultResponse {}
