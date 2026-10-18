@@ -1,6 +1,6 @@
 pub mod shuffle_id_manager;
-pub mod task_id_manager;
-pub mod manager_client;
+pub mod shuffle_task_manager;
+pub mod manager_rpc_client;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -12,12 +12,10 @@ use log::{info, warn};
 use riffle_server::client_configs::ClientRssConf;
 use riffle_server::ddashmap::DDashMap;
 use riffle_server::grpc::protobuf::uniffle::{
-    AppHeartBeatRequest, ShufflePartitionRange, ShuffleRegisterRequest,
+    AppHeartBeatRequest, ShuffleRegisterRequest,
     ShuffleUnregisterByAppIdRequest, ShuffleUnregisterRequest,
 };
 use riffle_server::scheduled_task::ScheduledTask;
-use riffle_server::util::get_local_ip;
-use tokio::net::TcpListener;
 use tokio::sync::{watch, Mutex as AsyncMutex};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::TcpListenerStream;
@@ -34,8 +32,10 @@ use crate::rpc_client::{
     CoordinatorQuorumClient, GetAssignmentContext, ServerClient, ServerConnOptions, ServerCoonPool,
 };
 use crate::{
-    check_status, rpc, Endpoint, ShuffleHandle, ShuffleId, TaskId, MAX_MESSAGE_BYTES, TASK_ID_LIMIT,
+    ensure_success, rpc, Endpoint, ShuffleHandle, ShuffleId, TaskId, MAX_MESSAGE_BYTES, TASK_ID_LIMIT,
 };
+use crate::manager::shuffle_id_manager::{ShuffleIdManager, ShuffleKey};
+use crate::manager::shuffle_task_manager::ShuffleTaskManager;
 
 pub struct ApplicationOptions {
     pub app_id: String,
@@ -57,18 +57,20 @@ pub struct ShuffleManager {
     app_id: String,
     user: String,
     configs: ClientRssConf,
-    manager_endpoint: Endpoint,
+    // assignment options
+    assignment_tags: Vec<String>,
+    assignment_server_num: i32,
+    // shuffle meta info
+    shuffle_id_manager: ShuffleIdManager,
     shuffles: Arc<DDashMap<ShuffleId, RegisteredShuffle>>,
-    shuffle_ids: Arc<DDashMap<String, ShuffleId>>,
-    retired_shuffle_ids: Mutex<HashSet<ShuffleId>>,
+    // connections
     coordinator_client: CoordinatorQuorumClient,
-    server_client_factory: Arc<ServerCoonPool>,
-    lifecycle_lock: AsyncMutex<()>,
-    coordinator_task: ScheduledTask,
+    server_conn: Arc<ServerCoonPool>,
+    // heartbeat tasks
+    heartbeat_coordinator_task: ScheduledTask,
     heartbeat_server_task: ScheduledTask,
-    // close signal
-    rpc_shutdown: watch::Sender<bool>,
-    rpc_task: Mutex<Option<JoinHandle<()>>>,
+    // global lock for app level
+    lifecycle_lock: AsyncMutex<()>,
 }
 
 impl ShuffleManager {
@@ -79,24 +81,18 @@ impl ShuffleManager {
             configs,
         } = app_options;
         let configs = ClientRssConf::from(configs);
-        let quorum = configs
-            .get(&COORDINATOR_QUORUM)
-            .context(format!("{:?} is required", COORDINATOR_QUORUM.get_key()))?
+
+        // register app to coordinator
+        let coordinator_quorum = configs
+            .get_or_panic(&COORDINATOR_QUORUM)
             .into_iter()
             .map(|address| address.parse())
             .collect::<Result<Vec<Endpoint>>>()?;
-        let coordinator_client = CoordinatorQuorumClient::new(quorum)?;
-        let interval = Duration::from_secs(configs.get(&HEARTBEAT_INTERVAL_SECONDS).context(
-            format!("{:?} is required", HEARTBEAT_INTERVAL_SECONDS.get_key()),
-        )?);
-        ensure!(!interval.is_zero(), "heartbeat interval must be positive");
-        let listener = TcpListener::bind("0.0.0.0:0").await?;
-        let manager_endpoint = Endpoint {
-            host: get_local_ip()?.to_string(),
-            grpc_port: listener.local_addr()?.port(),
-        };
+        let coordinator_client = CoordinatorQuorumClient::new(coordinator_quorum)?;
         coordinator_client.app_register(&app_id, &user).await?;
 
+        // set up the coordinator heartbeat task
+        let interval = Duration::from_secs(configs.get_or_panic(&HEARTBEAT_INTERVAL_SECONDS));
         let coordinator_task = ScheduledTask::new(interval, {
             let client = coordinator_client.clone();
             let app_id = app_id.clone();
@@ -112,88 +108,32 @@ impl ShuffleManager {
         });
 
         let shuffles = Arc::new(DDashMap::<ShuffleId, RegisteredShuffle>::default());
-        let shuffle_ids = Arc::new(DDashMap::default());
-        let shuffle_server_clients = Arc::new(ServerCoonPool::new());
+        let server_conns = Arc::new(ServerCoonPool::new());
 
+        // set up the servers heartbeat task
         let heartbeat_server_task = ScheduledTask::new(interval, {
             let shuffles = shuffles.clone();
-            let clients = shuffle_server_clients.clone();
+            let server_conns = server_conns.clone();
             let app_id = app_id.clone();
-            move || {
-                let mut endpoints = HashSet::new();
-                for shuffle in shuffles.iter() {
-                    for assignment in shuffle.handle.assignment.assignments.iter() {
-                        endpoints.extend(assignment.value().iter().cloned());
-                    }
-                }
-                let clients = clients.clone();
-                let app_id = app_id.clone();
-                async move {
-                    join_all(endpoints.into_iter().map(|endpoint| {
-                        let clients = &clients;
-                        let app_id = app_id.clone();
-                        async move {
-                            let result = async {
-                                let mut client = clients.get_or_create_client(
-                                    ServerConnOptions::new(endpoint.clone()),
-                                )?;
-                                let response = client
-                                    .app_heartbeat(AppHeartBeatRequest {
-                                        app_id: app_id.clone(),
-                                    })
-                                    .await?
-                                    .into_inner();
-                                check_status("appHeartbeat", response.status, &response.ret_msg)
-                            }
-                            .await;
-                            if let Err(error) = result {
-                                warn!(
-                                    "Server heartbeat failed for app {app_id} at {}: {error:#}",
-                                    endpoint.uri()
-                                );
-                            }
-                        }
-                    }))
-                    .await;
-                }
-            }
+            move || heartbeat_servers(shuffles.clone(), server_conns.clone(), app_id.clone())
         });
 
-        let service = ManagerService {
-            shuffles: shuffles.clone(),
-            shuffle_ids: shuffle_ids.clone(),
-        };
-        let (rpc_shutdown, mut shutdown) = watch::channel(false);
-        let rpc_task = tokio::spawn(async move {
-            let result = Server::builder()
-                .add_service(
-                    ShuffleManagerServiceServer::new(service)
-                        .max_encoding_message_size(MAX_MESSAGE_BYTES)
-                        .max_decoding_message_size(MAX_MESSAGE_BYTES),
-                )
-                .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async move {
-                    let _ = shutdown.changed().await;
-                })
-                .await;
-            if let Err(error) = result {
-                warn!("Shuffle manager gRPC server failed: {error}");
-            }
-        });
+        let tags = configs.get_or_panic(&ASSIGNMENT_TAGS);
+        let server_num = configs.get_or_panic(&ASSIGNMENT_SERVER_NUMBER);
+
         Ok(Self {
             app_id,
             user,
             configs,
-            manager_endpoint,
+            assignment_tags: tags,
+            assignment_server_num: server_num,
+            shuffle_id_manager: ShuffleIdManager::new(),
             shuffles,
-            shuffle_ids,
-            retired_shuffle_ids: Mutex::new(HashSet::new()),
             coordinator_client,
-            server_client_factory: shuffle_server_clients,
+            server_conn: server_conns,
             lifecycle_lock: AsyncMutex::new(()),
-            coordinator_task,
+            heartbeat_coordinator_task: coordinator_task,
             heartbeat_server_task,
-            rpc_shutdown,
-            rpc_task: Mutex::new(Some(rpc_task)),
         })
     }
 
@@ -204,115 +144,64 @@ impl ShuffleManager {
             .with_context(|| format!("shuffle {shuffle_id} is not registered"))
     }
 
-    /// Registers routing before writers and readers request handles over RPC.
-    /// The engine supplies the same key for a writer stage and its downstream readers.
-    /// Shuffle IDs must not be reused during the app lifetime.
     pub async fn register_shuffle(
         &self,
-        shuffle_id: ShuffleId,
-        shuffle_key: String,
+        shuffle_key: ShuffleKey,
         partition_count: u32,
     ) -> Result<ShuffleHandle> {
         let _guard = self.lifecycle_lock.lock().await;
-        ensure!(!shuffle_key.is_empty(), "shuffle key must not be empty");
-        ensure!(
-            shuffle_id <= i32::MAX as usize,
-            "shuffle ID exceeds server protocol i32 range"
-        );
-        ensure!(
-            partition_count > 0 && partition_count <= 1 << 24,
-            "partition count exceeds 24-bit block ID range or is zero"
-        );
-        ensure!(
-            !self
-                .retired_shuffle_ids
-                .lock()
-                .unwrap()
-                .contains(&shuffle_id),
-            "shuffle {shuffle_id} has been unregistered and cannot be reused"
-        );
-        if let Some(registered_id) = self.shuffle_ids.get(&shuffle_key) {
-            ensure!(
-                *registered_id == shuffle_id,
-                "shuffle key {shuffle_key} is already registered with ID {}",
-                *registered_id
-            );
-        }
+        let shuffle_id = self.shuffle_id_manager.get(&shuffle_key);
         if let Some(shuffle) = self.shuffles.get(&shuffle_id) {
-            ensure!(
-                shuffle.shuffle_key == shuffle_key
-                    && shuffle.handle.partition_count == partition_count,
-                "shuffle {shuffle_id} is already registered with different metadata"
-            );
             info!(
                 "Shuffle {shuffle_id} is already registered for app {}",
                 self.app_id
             );
             return Ok(shuffle.handle.clone());
         }
+
+        // request the assignment for this shuffle
         let assignment = self
             .coordinator_client
             .get_assignment(GetAssignmentContext {
                 app_id: self.app_id.clone(),
                 shuffle_id,
                 partition_count,
-                required_tags: self.configs.get(&ASSIGNMENT_TAGS).unwrap(),
-                required_server_number: self
-                    .configs
-                    .get(&ASSIGNMENT_SERVER_NUMBER)
-                    .context("invalid assignment server number")?,
+                required_tags: self.assignment_tags.clone(),
+                required_server_number: self.assignment_server_num,
             })
             .await?;
-        let mut ranges: HashMap<Endpoint, Vec<ShufflePartitionRange>> = HashMap::new();
-        for entry in assignment.assignments.iter() {
-            let partition = *entry.key() as i32;
-            for endpoint in entry.value() {
-                ranges
-                    .entry(endpoint.clone())
-                    .or_default()
-                    .push(ShufflePartitionRange {
-                        start: partition,
-                        end: partition,
-                    });
-            }
-        }
-        let mut registrations = Vec::with_capacity(ranges.len());
-        for (endpoint, partition_ranges) in ranges {
-            let client = self
-                .server_client_factory
+
+        // do the server registration after assignment
+        let endpoints: HashSet<_> = assignment
+            .assignments
+            .iter()
+            .flat_map(|entry| entry.value().clone())
+            .collect();
+        let results = join_all(endpoints.into_iter().map(|endpoint| async move {
+            let mut client = self
+                .server_conn
                 .get_or_create_client(ServerConnOptions::new(endpoint.clone()))?;
-            registrations.push((
-                endpoint,
-                client,
-                ShuffleRegisterRequest {
+            let response = client
+                .register_shuffle(ShuffleRegisterRequest {
                     app_id: self.app_id.clone(),
                     shuffle_id: shuffle_id as i32,
-                    partition_ranges,
                     user: self.user.clone(),
                     properties: self.configs.properties().clone(),
                     ..Default::default()
-                },
-            ));
-        }
-        let results = join_all(registrations.into_iter().map(
-            |(endpoint, mut client, request)| async move {
-                let response = client
-                    .register_shuffle(request)
-                    .await
-                    .with_context(|| format!("register shuffle on {}", endpoint.uri()))?
-                    .into_inner();
-                check_status("registerShuffle", response.status, &response.ret_msg)
-            },
-        ))
+                })
+                .await
+                .with_context(|| format!("register shuffle on {}", endpoint.uri()))?
+                .into_inner();
+            ensure_success("registerShuffle", response.status, &response.ret_msg)
+        }))
         .await;
-        // Keep partial registrations until app cleanup: asynchronous server purges
-        // could otherwise delete a successful registration retry.
-        results.into_iter().collect::<Result<Vec<_>>>()?;
+        results.into_iter().collect::<Result<()>>()?;
+
+        // store the shuffle handle
         let handle = ShuffleHandle {
             app_id: self.app_id.clone(),
             shuffle_id,
             partition_count,
-            manager_endpoint: self.manager_endpoint.clone(),
             assignment,
         };
         self.shuffles.insert(
@@ -320,10 +209,9 @@ impl ShuffleManager {
             RegisteredShuffle {
                 shuffle_key: shuffle_key.clone(),
                 handle: handle.clone(),
-                tasks: Mutex::new(ShuffleTasks::default()),
+                shuffle_task_manager: ShuffleTaskManager::new(),
             },
         );
-        self.shuffle_ids.insert(shuffle_key, shuffle_id);
         Ok(handle)
     }
 
@@ -340,29 +228,21 @@ impl ShuffleManager {
             .into_iter()
             .map(|endpoint| {
                 let client = self
-                    .server_client_factory
+                    .server_conn
                     .get_or_create_client(ServerConnOptions::new(endpoint.clone()))?;
                 Ok((endpoint, client))
             })
             .collect::<Result<_>>()?;
         self.unregister_servers(shuffle_id as i32, clients).await?;
-        if let Some((_, shuffle)) = self.shuffles.remove(&shuffle_id) {
-            self.shuffle_ids.remove(&shuffle.shuffle_key);
-            self.retired_shuffle_ids.lock().unwrap().insert(shuffle_id);
-        }
         Ok(())
     }
 
     pub async fn close(&self) -> Result<()> {
         let _guard = self.lifecycle_lock.lock().await;
-        self.coordinator_task.close().await;
+        self.heartbeat_coordinator_task.close().await;
         self.heartbeat_server_task.close().await;
-        let _ = self.rpc_shutdown.send(true);
-        let task = self.rpc_task.lock().unwrap().take();
-        if let Some(task) = task {
-            task.await?;
-        }
-        let results = join_all(self.server_client_factory.clients().into_iter().map(
+        // do app unregistration to shuffle servers
+        join_all(self.server_conn.clients().into_iter().map(
             |(endpoint, mut client)| async move {
                 let response = client
                     .unregister_shuffle_by_app_id(ShuffleUnregisterByAppIdRequest {
@@ -371,22 +251,13 @@ impl ShuffleManager {
                     .await
                     .with_context(|| format!("unregister app on {}", endpoint.uri()))?
                     .into_inner();
-                check_status(
+                ensure_success(
                     "unregisterShuffleByAppId",
                     response.status,
                     &response.ret_msg,
                 )
             },
-        ))
-        .await;
-        results.into_iter().collect::<Result<Vec<_>>>()?;
-        self.retired_shuffle_ids
-            .lock()
-            .unwrap()
-            .extend(self.shuffles.iter().map(|entry| *entry.key()));
-        self.shuffle_ids.clear();
-        self.shuffles.clear();
-        self.server_client_factory.clear();
+        )).await.into_iter().collect::<Result<Vec<_>>>()?;
         Ok(())
     }
 
@@ -407,7 +278,7 @@ impl ShuffleManager {
                         .await
                         .with_context(|| format!("unregister shuffle on {}", endpoint.uri()))?
                         .into_inner();
-                    check_status("unregisterShuffle", response.status, &response.ret_msg)
+                    ensure_success("unregisterShuffle", response.status, &response.ret_msg)
                 }),
         )
         .await;
@@ -416,229 +287,74 @@ impl ShuffleManager {
     }
 }
 
-impl Drop for ShuffleManager {
-    fn drop(&mut self) {
-        let _ = self.rpc_shutdown.send(true);
-    }
-}
-
 struct RegisteredShuffle {
-    shuffle_key: String,
+    shuffle_key: ShuffleKey,
     handle: ShuffleHandle,
-    tasks: Mutex<ShuffleTasks>,
+    shuffle_task_manager: ShuffleTaskManager,
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
-struct MapAttempt {
-    map_id: u64,
-    attempt_id: u64,
-}
-
-#[derive(Default)]
-struct ShuffleTasks {
-    next_task_id: TaskId,
-    task_ids: HashMap<MapAttempt, TaskId>,
-    attempts: HashMap<TaskId, MapAttempt>,
-    successful_tasks: HashMap<u64, TaskId>,
-}
-
-impl ShuffleTasks {
-    fn allocate(&mut self, attempt: MapAttempt) -> Result<TaskId, Status> {
-        if let Some(&task_id) = self.task_ids.get(&attempt) {
-            return Ok(task_id);
-        }
-        if self.next_task_id >= TASK_ID_LIMIT {
-            return Err(Status::resource_exhausted(
-                "shuffle task ID range exhausted",
-            ));
-        }
-        let task_id = self.next_task_id;
-        self.next_task_id += 1;
-        self.task_ids.insert(attempt, task_id);
-        self.attempts.insert(task_id, attempt);
-        Ok(task_id)
-    }
-
-    fn report_success(&mut self, task_id: TaskId) -> Result<(), Status> {
-        let attempt = self
-            .attempts
-            .get(&task_id)
-            .ok_or_else(|| Status::not_found(format!("task {task_id} is not registered")))?;
-        let selected = self
-            .successful_tasks
-            .entry(attempt.map_id)
-            .or_insert(task_id);
-        // Completion order must not let an older attempt replace a newer successful one.
-        if attempt.attempt_id > self.attempts[selected].attempt_id {
-            *selected = task_id;
-        }
-        Ok(())
-    }
-
-    fn successful_task_ids(&self) -> Vec<u64> {
-        let mut task_ids: Vec<_> = self
-            .successful_tasks
-            .values()
-            .map(|&id| id as u64)
-            .collect();
-        task_ids.sort_unstable();
-        task_ids
-    }
-}
-
-// The RPC service shares metadata without retaining the manager's background tasks.
-struct ManagerService {
+async fn heartbeat_servers(
     shuffles: Arc<DDashMap<ShuffleId, RegisteredShuffle>>,
-    shuffle_ids: Arc<DDashMap<String, ShuffleId>>,
+    server_conns: Arc<ServerCoonPool>,
+    app_id: String,
+) {
+    let mut endpoints = HashSet::new();
+    for shuffle in shuffles.iter() {
+        for assignment in shuffle.handle.assignment.assignments.iter() {
+            endpoints.extend(assignment.value().iter().cloned());
+        }
+    }
 
-    // 要么是 string, 需要做唯一性映射
-    // 要么直接是 usize, 就不需要做映射了
-
+    let server_conns = server_conns.as_ref();
+    let app_id = app_id.as_str();
+    join_all(endpoints.iter().map(|endpoint| async move {
+        if let Err(error) = heartbeat_server(server_conns, app_id, endpoint).await {
+            warn!(
+                "Server heartbeat failed for app {app_id} at {}: {error:#}",
+                endpoint.uri()
+            );
+        }
+    }))
+    .await;
 }
 
-impl ManagerService {
-    fn resolve_key(&self, shuffle_key: &str) -> Result<ShuffleId, Status> {
-        if shuffle_key.is_empty() {
-            return Err(Status::invalid_argument("shuffle key must not be empty"));
-        }
-        self.shuffle_ids
-            .get(shuffle_key)
-            .map(|entry| *entry.value())
-            .ok_or_else(|| {
-                Status::not_found(format!("shuffle key {shuffle_key} is not registered"))
-            })
-    }
-
-    fn parse_shuffle_id(shuffle_id: u64) -> Result<ShuffleId, Status> {
-        if shuffle_id > i32::MAX as u64 {
-            return Err(Status::invalid_argument(
-                "shuffle ID exceeds server protocol i32 range",
-            ));
-        }
-        Ok(shuffle_id as ShuffleId)
-    }
-
-    fn assignment(
-        handle: &ShuffleHandle,
-        partition_id: u64,
-    ) -> Result<rpc::PartitionAssignment, Status> {
-        if partition_id >= u64::from(handle.partition_count) {
-            return Err(Status::invalid_argument(format!(
-                "partition {partition_id} is out of range"
-            )));
-        }
-        let endpoint = handle
-            .assignment
-            .get_endpoint(partition_id as usize)
-            .map_err(|error| Status::internal(error.to_string()))?;
-        Ok(rpc::PartitionAssignment {
-            partition_id: partition_id as i32,
-            endpoint: Some(rpc::Endpoint {
-                host: endpoint.host,
-                grpc_port: endpoint.grpc_port.into(),
-                urpc_port: None,
-            }),
+async fn heartbeat_server(
+    server_conns: &ServerCoonPool,
+    app_id: &str,
+    endpoint: &Endpoint,
+) -> Result<()> {
+    let mut client = server_conns.get_or_create_client(ServerConnOptions::new(endpoint.clone()))?;
+    let response = client
+        .app_heartbeat(AppHeartBeatRequest {
+            app_id: app_id.to_owned(),
         })
-    }
+        .await?
+        .into_inner();
+    ensure_success("appHeartbeat", response.status, &response.ret_msg)
 }
+
+struct ManagerRpcService {}
 
 #[tonic::async_trait]
-impl ShuffleManagerService for ManagerService {
+impl ShuffleManagerService for ManagerRpcService {
     async fn get_write_shuffle_handle(
         &self,
         request: Request<rpc::GetWriteShuffleHandleRequest>,
     ) -> Result<Response<rpc::GetWriteShuffleHandleResponse>, Status> {
-        use rpc::get_write_shuffle_handle_request::ShuffleIdentifier;
-
-        let request = request.into_inner();
-        let shuffle_id = match request.shuffle_identifier {
-            Some(ShuffleIdentifier::ShuffleKey(key)) => self.resolve_key(&key)?,
-            Some(ShuffleIdentifier::ShuffleId(id)) => Self::parse_shuffle_id(id)?,
-            None => return Err(Status::invalid_argument("shuffle identifier is required")),
-        };
-        let shuffle = self
-            .shuffles
-            .get(&shuffle_id)
-            .ok_or_else(|| Status::not_found(format!("shuffle {shuffle_id} is not registered")))?;
-        let assignments = (0..shuffle.handle.partition_count)
-            .map(|partition| Self::assignment(&shuffle.handle, partition.into()))
-            .collect::<Result<_, _>>()?;
-        let task_id = shuffle
-            .tasks
-            .lock()
-            .map_err(|_| Status::internal("shuffle task state is poisoned"))?
-            .allocate(MapAttempt {
-                map_id: request.map_id,
-                attempt_id: request.attempt_id,
-            })?;
-        Ok(Response::new(rpc::GetWriteShuffleHandleResponse {
-            shuffle_id: shuffle_id as u64,
-            assignments,
-            task_id: task_id as u64,
-        }))
+        todo!()
     }
 
     async fn report_shuffle_result(
         &self,
         request: Request<rpc::ReportShuffleResultRequest>,
     ) -> Result<Response<rpc::ReportShuffleResultResponse>, Status> {
-        let request = request.into_inner();
-        let shuffle_id = Self::parse_shuffle_id(request.shuffle_id)?;
-        if request.task_id >= TASK_ID_LIMIT as u64 {
-            return Err(Status::invalid_argument(
-                "task ID exceeds 23-bit block ID range",
-            ));
-        }
-        let shuffle = self
-            .shuffles
-            .get(&shuffle_id)
-            .ok_or_else(|| Status::not_found(format!("shuffle {shuffle_id} is not registered")))?;
-        shuffle
-            .tasks
-            .lock()
-            .map_err(|_| Status::internal("shuffle task state is poisoned"))?
-            .report_success(request.task_id as TaskId)?;
-        Ok(Response::new(rpc::ReportShuffleResultResponse {}))
+        todo!()
     }
 
     async fn get_read_shuffle_handle(
         &self,
         request: Request<rpc::GetReadShuffleHandleRequest>,
     ) -> Result<Response<rpc::GetReadShuffleHandleResponse>, Status> {
-        use rpc::get_read_shuffle_handle_request::ShuffleIdentifier;
-
-        let request = request.into_inner();
-        let shuffle_id = match request.shuffle_identifier {
-            Some(ShuffleIdentifier::ShuffleKey(key)) => self.resolve_key(&key)?,
-            Some(ShuffleIdentifier::ShuffleId(id)) => Self::parse_shuffle_id(id)?,
-            None => return Err(Status::invalid_argument("shuffle identifier is required")),
-        };
-        let shuffle = self
-            .shuffles
-            .get(&shuffle_id)
-            .ok_or_else(|| Status::not_found(format!("shuffle {shuffle_id} is not registered")))?;
-        let mut partitions = request.partition_ids;
-        partitions.sort_unstable();
-        partitions.dedup();
-        let assignments = partitions
-            .into_iter()
-            .map(|partition| Self::assignment(&shuffle.handle, partition))
-            .collect::<Result<Vec<_>, _>>()?;
-        // An empty partition list reads nothing. Otherwise return the shuffle-wide
-        // winners; server block metadata determines which tasks wrote each partition.
-        let task_ids = if assignments.is_empty() {
-            Vec::new()
-        } else {
-            shuffle
-                .tasks
-                .lock()
-                .map_err(|_| Status::internal("shuffle task state is poisoned"))?
-                .successful_task_ids()
-        };
-        Ok(Response::new(rpc::GetReadShuffleHandleResponse {
-            shuffle_id: shuffle_id as u64,
-            assignments,
-            task_ids,
-        }))
+        todo!()
     }
 }

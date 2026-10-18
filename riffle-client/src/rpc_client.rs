@@ -13,7 +13,7 @@ use riffle_server::grpc::protobuf::uniffle::{
 };
 use tonic::transport::Channel;
 
-use crate::check_status;
+use crate::ensure_success;
 use crate::{
     ApplicationId, Endpoint, ShuffleAssignment, ShuffleId, MAX_MESSAGE_BYTES, RPC_TIMEOUT,
 };
@@ -60,7 +60,7 @@ impl CoordinatorQuorumClient {
                     .register_application_info(request)
                     .await?
                     .into_inner();
-                check_status(
+                ensure_success(
                     "registerApplicationInfo",
                     response.status,
                     &response.ret_msg,
@@ -79,7 +79,7 @@ impl CoordinatorQuorumClient {
             let request = request.clone();
             async move {
                 let response = client.app_heartbeat(request).await?.into_inner();
-                check_status("appHeartbeat", response.status, &response.ret_msg)
+                ensure_success("appHeartbeat", response.status, &response.ret_msg)
             }
         }))
         .await;
@@ -105,7 +105,7 @@ impl CoordinatorQuorumClient {
                     .get_shuffle_assignments(request.clone())
                     .await?
                     .into_inner();
-                check_status("getShuffleAssignments", response.status, &response.ret_msg)?;
+                ensure_success("getShuffleAssignments", response.status, &response.ret_msg)?;
                 Ok::<_, anyhow::Error>(response)
             }
             .await;
@@ -224,10 +224,6 @@ impl ServerCoonPool {
             .iter()
             .map(|entry| (entry.key().endpoint.clone(), entry.value().clone()))
             .collect()
-    }
-
-    pub(crate) fn clear(&self) {
-        self.clients.clear();
     }
 }
 

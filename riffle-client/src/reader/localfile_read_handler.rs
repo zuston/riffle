@@ -10,7 +10,7 @@ use riffle_server::util::now_timestamp_as_millis;
 
 use super::buffer::ReadBatch;
 use super::read_handler::{PartitionReadContext, ReadHandler, READ_BATCH_BYTES};
-use crate::rpc_client::transport::{call, check_status, request, retry};
+use crate::rpc_client::transport::{call, ensure_success, request, retry};
 
 pub(super) struct LocalfileReadHandler<'a> {
     context: PartitionReadContext<'a>,
@@ -40,7 +40,7 @@ impl<'a> LocalfileReadHandler<'a> {
             let message = message.clone();
             async move {
                 let response = call(client.get_local_shuffle_index(request(message))).await?;
-                check_status("getLocalShuffleIndex", response.status, &response.ret_msg)?;
+                ensure_success("getLocalShuffleIndex", response.status, &response.ret_msg)?;
                 Ok(response)
             }
         })
@@ -67,7 +67,7 @@ impl<'a> LocalfileReadHandler<'a> {
             message.timestamp = now_timestamp_as_millis() as i64;
             async move {
                 let response = call(client.get_local_shuffle_data(request(message))).await?;
-                check_status("getLocalShuffleData", response.status, &response.ret_msg)?;
+                ensure_success("getLocalShuffleData", response.status, &response.ret_msg)?;
                 Ok(response)
             }
         })

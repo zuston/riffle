@@ -84,6 +84,19 @@ impl ClientRssConf {
         }
     }
 
+    /// Returns the configured value, or the option's default if it is not set.
+    ///
+    /// # Panics
+    /// Panics if the option is unset and has no default, or its configured value cannot be parsed.
+    #[track_caller]
+    pub fn get_or_panic<T: Clone + Send + Sync + 'static>(
+        &self,
+        option: &ClientConfigOption<T>,
+    ) -> T {
+        self.get(option)
+            .unwrap_or_else(|| panic!("Configuration '{}' is missing or invalid", option.key))
+    }
+
     pub fn get_byte_size(&self, option: &ClientConfigOption<String>) -> Option<u64> {
         self.get(option).map(|s| util::to_bytes(&s))
     }
@@ -224,5 +237,18 @@ mod tests {
     fn test_no_default_value() {
         let conf = ClientRssConf::default();
         assert_eq!(None, conf.get(&READ_AHEAD_BATCH_SIZE));
+    }
+
+    #[test]
+    #[should_panic(expected = "Configuration 'test.required' is missing or invalid")]
+    fn test_get_or_panic() {
+        // should pass
+        let option = ClientConfigOption::key("test.number").default_value(10u64);
+        let conf = ClientRssConf::default();
+        assert_eq!(conf.get_or_panic(&option), 10);
+
+        // should panic
+        let option = ClientConfigOption::<String>::key("test.required");
+        ClientRssConf::default().get_or_panic(&option);
     }
 }

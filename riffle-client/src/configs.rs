@@ -13,4 +13,4 @@ pub static ASSIGNMENT_TAGS: Lazy<ClientConfigOption<Vec<String>>> = Lazy::new(||
 });
 
 pub static ASSIGNMENT_SERVER_NUMBER: Lazy<ClientConfigOption<i32>> =
-    Lazy::new(|| ClientConfigOption::key("riffle.client.assignment.serverNumber"));
+    Lazy::new(|| ClientConfigOption::key("riffle.client.assignment.serverNumber").default_value(1));

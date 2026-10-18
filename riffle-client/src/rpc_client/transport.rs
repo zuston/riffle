@@ -45,7 +45,7 @@ pub(crate) async fn call<T>(
     }
 }
 
-pub(crate) fn check_status(
+pub(crate) fn ensure_success(
     operation: &str,
     status: i32,
     message: &str,

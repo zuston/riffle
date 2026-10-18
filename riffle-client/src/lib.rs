@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 pub use manager::{ApplicationOptions, ShuffleManager};
 pub use reader::ShuffleReader;
 use riffle_server::ddashmap::DDashMap;
+use riffle_server::grpc::protobuf::uniffle::StatusCode;
 pub use writer::ShuffleWriter;
-use crate::manager::task_id_manager::TaskIdManager;
 
 mod rpc {
     tonic::include_proto!("riffle.client");
@@ -75,7 +75,6 @@ pub struct ShuffleHandle {
     app_id: String,
     shuffle_id: ShuffleId,
     partition_count: u32,
-    manager_endpoint: Endpoint,
     assignment: ShuffleAssignment,
 }
 
@@ -124,7 +123,6 @@ impl ShuffleAssignment {
         }
     }
 
-    /// Returns an owned endpoint so callers do not hold a map guard across awaits.
     pub fn get_endpoint(&self, partition_id: PartitionId) -> Result<Endpoint> {
         let endpoints = self
             .assignments
@@ -139,8 +137,8 @@ impl ShuffleAssignment {
 
 pub type ShuffleStream = Pin<Box<dyn Stream<Item = Result<ShuffleRecord>> + Send>>;
 
-fn check_status(operation: &str, status: i32, message: &str) -> Result<()> {
-    if status != 0 {
+fn ensure_success(operation: &str, status: i32, message: &str) -> Result<()> {
+    if status != StatusCode::Success as i32 {
         bail!("{operation} failed with status {status}: {message}");
     }
     Ok(())
