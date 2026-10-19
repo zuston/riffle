@@ -36,9 +36,6 @@ path = "src/lib.rs"
 [features]
 default = ["logforth", "hdfs", "memory-prof"]
 
-# Exposes narrow benchmark hooks without adding them to normal builds.
-bench = []
-
 # whether to use jemalloc as the global allocator or not
 jemalloc = [
     "dep:tikv-jemalloc-ctl",
