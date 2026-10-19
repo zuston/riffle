@@ -18,7 +18,9 @@ use tokio::task::JoinSet;
 use self::buffer::ReadBatch;
 use self::data_fetcher::DataFetcher;
 use crate::rpc_client::manager_rpc_client::ManagerRpcClient;
-use crate::rpc_client::{call, ensure_success, request, retry, ServerConnOptions, ServerCoonPool};
+use crate::rpc_client::{
+    call, ensure_attempt_success, request, retry, ServerConnOptions, ServerCoonPool,
+};
 use crate::{
     ApplicationId, Endpoint, PartitionId, ReadTaskInfo, ShuffleStream, TaskId, TASK_ID_LIMIT,
 };
@@ -69,7 +71,7 @@ impl ShuffleReader {
                 async move {
                     let response =
                         call(client.get_shuffle_result_for_multi_part(request(message))).await?;
-                    ensure_success(
+                    ensure_attempt_success(
                         "getShuffleResultForMultiPart",
                         response.status,
                         &response.ret_msg,

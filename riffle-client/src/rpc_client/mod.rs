@@ -52,7 +52,7 @@ pub(crate) async fn call<T>(
     }
 }
 
-pub(crate) fn ensure_success(
+pub(crate) fn ensure_attempt_success(
     operation: &str,
     status: i32,
     message: &str,

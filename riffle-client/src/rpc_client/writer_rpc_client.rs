@@ -11,7 +11,7 @@ use riffle_server::id_layout::DEFAULT_BLOCK_ID_LAYOUT;
 use riffle_server::util::now_timestamp_as_millis;
 
 use crate::rpc_client::{
-    call, ensure_success, request, retry, ServerClient, ServerConnOptions, ServerCoonPool,
+    call, ensure_attempt_success, request, retry, ServerClient, ServerConnOptions, ServerCoonPool,
 };
 use crate::{
     ApplicationId, Endpoint, PartitionId, ShuffleAssignment, ShuffleId, TaskId, MAX_MESSAGE_BYTES,
@@ -88,11 +88,11 @@ impl WriterRpcClient {
                 // A previous attempt may have consumed its ticket and inserted only part of the batch.
                 // Always reserve a new ticket while preserving the original block IDs and bytes.
                 let buffer = call(client.require_buffer(request(buffer_request))).await?;
-                ensure_success("requireBuffer", buffer.status, &buffer.ret_msg)?;
+                ensure_attempt_success("requireBuffer", buffer.status, &buffer.ret_msg)?;
                 data_request.require_buffer_id = buffer.require_buffer_id;
                 data_request.timestamp = now_timestamp_as_millis() as i64;
                 let response = call(client.send_shuffle_data(request(data_request))).await?;
-                ensure_success("sendShuffleData", response.status, &response.ret_msg)
+                ensure_attempt_success("sendShuffleData", response.status, &response.ret_msg)
             }
         })
         .await
@@ -190,7 +190,7 @@ async fn report_chunk(
         let report = report.clone();
         async move {
             let response = call(client.report_shuffle_result(request(report))).await?;
-            ensure_success("reportShuffleResult", response.status, &response.ret_msg)
+            ensure_attempt_success("reportShuffleResult", response.status, &response.ret_msg)
         }
     })
     .await

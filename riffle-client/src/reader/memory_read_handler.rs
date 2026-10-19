@@ -11,7 +11,7 @@ use riffle_server::util::now_timestamp_as_millis;
 
 use super::buffer::ReadBatch;
 use super::read_handler::{PartitionReadContext, ReadHandler, READ_BATCH_BYTES};
-use crate::rpc_client::{call, ensure_success, request, retry};
+use crate::rpc_client::{call, ensure_attempt_success, request, retry};
 use crate::{MAX_MESSAGE_BYTES, TASK_ID_LIMIT};
 
 pub(super) struct MemoryReadHandler<'a> {
@@ -57,7 +57,7 @@ impl<'a> MemoryReadHandler<'a> {
             message.timestamp = now_timestamp_as_millis() as i64;
             async move {
                 let response = call(client.get_memory_shuffle_data(request(message))).await?;
-                ensure_success("getMemoryShuffleData", response.status, &response.ret_msg)?;
+                ensure_attempt_success("getMemoryShuffleData", response.status, &response.ret_msg)?;
                 Ok(response)
             }
         })
