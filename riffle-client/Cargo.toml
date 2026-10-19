@@ -21,3 +21,7 @@ rand = { workspace = true }
 
 [build-dependencies]
 tonic-prost-build = { workspace = true }
+
+[dev-dependencies]
+riffle-coordinator = { path = "../riffle-coordinator", default-features = false }
+tempfile = { workspace = true }

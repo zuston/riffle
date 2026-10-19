@@ -19,6 +19,7 @@ pub use manager::{ApplicationOptions, ManagerRpcService, ShuffleManager, Shuffle
 pub use reader::ShuffleReader;
 use riffle_server::ddashmap::DDashMap;
 use riffle_server::grpc::protobuf::uniffle::StatusCode;
+pub use rpc::shuffle_manager_service_server::ShuffleManagerServiceServer;
 pub use writer::ShuffleWriter;
 
 mod rpc {
@@ -27,7 +28,8 @@ mod rpc {
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
-const MAX_PAYLOAD_BYTES: usize = 16 * 1024 * 1024;
+/// Maximum size of one record passed to [`ShuffleWriter::write`].
+pub const MAX_PAYLOAD_BYTES: usize = 16 * 1024 * 1024;
 const RECORD_HEADER_BYTES: usize = std::mem::size_of::<u32>();
 const TASK_ID_LIMIT: usize = 1 << 23;
 const BLOCK_SEQUENCE_LIMIT: u32 = 1 << 16;
@@ -77,6 +79,12 @@ pub struct ShuffleHandle {
     shuffle_id: ShuffleId,
     partition_count: u32,
     assignment: ShuffleAssignment,
+}
+
+impl ShuffleHandle {
+    pub fn shuffle_id(&self) -> ShuffleId {
+        self.shuffle_id
+    }
 }
 
 pub struct WriteTaskInfo {

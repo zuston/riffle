@@ -2,7 +2,7 @@ pub mod shuffle_id_manager;
 pub mod shuffle_task_manager;
 
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -16,10 +16,7 @@ use riffle_server::grpc::protobuf::uniffle::{
     ShuffleUnregisterRequest,
 };
 use riffle_server::scheduled_task::ScheduledTask;
-use tokio::net::TcpListener;
 use tokio::sync::Mutex as AsyncMutex;
-use tokio_stream::wrappers::TcpListenerStream;
-use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
 use crate::configs::{
@@ -27,15 +24,10 @@ use crate::configs::{
 };
 use crate::manager::shuffle_id_manager::{ShuffleIdManager, ShuffleKey};
 use crate::manager::shuffle_task_manager::{ShuffleTaskManager, TaskKey};
-use crate::rpc::shuffle_manager_service_server::{
-    ShuffleManagerService, ShuffleManagerServiceServer,
-};
+use crate::rpc::shuffle_manager_service_server::ShuffleManagerService;
 use crate::rpc_client::coordinator_rpc_client::{CoordinatorQuorumClient, GetAssignmentContext};
 use crate::rpc_client::{ServerClient, ServerConnOptions, ServerCoonPool};
-use crate::{
-    ensure_success, rpc, ApplicationId, Endpoint, PartitionId, ShuffleHandle, ShuffleId,
-    MAX_MESSAGE_BYTES,
-};
+use crate::{ensure_success, rpc, ApplicationId, Endpoint, PartitionId, ShuffleHandle, ShuffleId};
 
 pub struct ApplicationOptions {
     pub app_id: String,
@@ -71,6 +63,7 @@ pub struct ShuffleManager {
     heartbeat_server_task: ScheduledTask,
     // global lock for app level
     lifecycle_lock: AsyncMutex<()>,
+    closed: AtomicBool,
 }
 
 impl ShuffleManager {
@@ -80,16 +73,28 @@ impl ShuffleManager {
             user,
             configs,
         } = app_options;
+        ensure!(!app_id.is_empty(), "application ID is empty");
         let configs = ClientRssConf::from(configs);
 
         // set up the coordinator heartbeat task
         let coordinator_quorum = configs
-            .get_or_panic(&COORDINATOR_QUORUM)
+            .get(&COORDINATOR_QUORUM)
+            .context("missing or invalid riffle.client.coordinator.quorum")?
             .into_iter()
             .map(|address| address.parse())
             .collect::<Result<Vec<Endpoint>>>()?;
         let coordinator_client = CoordinatorQuorumClient::new(coordinator_quorum)?;
-        let interval = Duration::from_secs(configs.get_or_panic(&HEARTBEAT_INTERVAL_SECONDS));
+        let interval = configs
+            .get(&HEARTBEAT_INTERVAL_SECONDS)
+            .context("invalid riffle.client.heartbeat.intervalSeconds")?;
+        ensure!(interval > 0, "heartbeat interval must be positive");
+        let interval = Duration::from_secs(interval);
+        let tags = configs
+            .get(&ASSIGNMENT_TAGS)
+            .context("invalid assignment tags")?;
+        let server_num = configs
+            .get(&ASSIGNMENT_SERVER_NUMBER)
+            .context("invalid riffle.client.assignment.serverNumber")?;
         let coordinator_task = ScheduledTask::new(interval, {
             let client = coordinator_client.clone();
             let app_id = app_id.clone();
@@ -120,9 +125,6 @@ impl ShuffleManager {
             move || heartbeat_servers(shuffles.clone(), server_conns.clone(), app_id.clone())
         });
 
-        let tags = configs.get_or_panic(&ASSIGNMENT_TAGS);
-        let server_num = configs.get_or_panic(&ASSIGNMENT_SERVER_NUMBER);
-
         Ok(Self {
             app_id,
             user,
@@ -134,6 +136,7 @@ impl ShuffleManager {
             coordinator_client,
             server_conn: server_conns,
             lifecycle_lock: AsyncMutex::new(()),
+            closed: AtomicBool::new(false),
             heartbeat_coordinator_task: coordinator_task,
             heartbeat_server_task,
         })
@@ -152,8 +155,22 @@ impl ShuffleManager {
         partition_count: u32,
     ) -> Result<ShuffleHandle> {
         let _guard = self.lifecycle_lock.lock().await;
+        ensure!(
+            !self.closed.load(Ordering::Acquire),
+            "application is closed"
+        );
+        ensure!(
+            partition_count > 0 && partition_count <= 1 << 24,
+            "partition count must be between 1 and {}",
+            1 << 24
+        );
         let shuffle_id = self.shuffle_id_manager.get_or_create(&shuffle_key);
         if let Some(shuffle) = self.shuffles.get(&shuffle_id) {
+            ensure!(
+                shuffle.handle.partition_count == partition_count,
+                "shuffle {shuffle_id} was registered with {} partitions, requested {partition_count}",
+                shuffle.handle.partition_count
+            );
             info!(
                 "Shuffle {shuffle_id} is already registered for app {}",
                 self.app_id
@@ -209,7 +226,6 @@ impl ShuffleManager {
         self.shuffles.insert(
             shuffle_id,
             RegisteredShuffle {
-                shuffle_key: shuffle_key.clone(),
                 handle: handle.clone(),
                 shuffle_task_manager: ShuffleTaskManager::new(),
             },
@@ -219,7 +235,13 @@ impl ShuffleManager {
 
     pub async fn unregister_shuffle(&self, shuffle_id: ShuffleId) -> Result<()> {
         let _guard = self.lifecycle_lock.lock().await;
-        let handle = self.get_shuffle_handle(shuffle_id)?;
+        let Some(handle) = self
+            .shuffles
+            .get(&shuffle_id)
+            .map(|entry| entry.handle.clone())
+        else {
+            return Ok(());
+        };
         let endpoints: HashSet<_> = handle
             .assignment
             .assignments
@@ -242,6 +264,7 @@ impl ShuffleManager {
 
     pub async fn close(&self) -> Result<()> {
         let _guard = self.lifecycle_lock.lock().await;
+        self.closed.store(true, Ordering::Release);
         self.heartbeat_coordinator_task.close().await;
         self.heartbeat_server_task.close().await;
         // do app unregistration to shuffle servers
@@ -302,7 +325,6 @@ impl ShuffleManager {
 }
 
 struct RegisteredShuffle {
-    shuffle_key: ShuffleKey,
     handle: ShuffleHandle,
     shuffle_task_manager: ShuffleTaskManager,
 }
@@ -384,6 +406,7 @@ pub type ShuffleManagerRef = Arc<ShuffleManager>;
 #[derive(Default)]
 pub struct ManagerRpcService {
     app_shuffle_managers: DDashMap<ApplicationId, ShuffleManagerRef>,
+    lifecycle_lock: AsyncMutex<()>,
 }
 
 impl ManagerRpcService {
@@ -397,32 +420,49 @@ impl ManagerRpcService {
         user: &str,
         configs: HashMap<String, String>,
     ) -> Result<ShuffleManagerRef> {
-        let app_managers = self
-            .app_shuffle_managers
-            .entry(app_id.to_owned())
-            .or_insert_with(|| {
-                let manager = ShuffleManager::new(ApplicationOptions::new(
-                    app_id.to_owned(),
-                    user.to_owned(),
-                    configs,
-                ))
-                .unwrap();
-                Arc::new(manager)
-            });
-        Ok(app_managers.clone())
+        let _guard = self.lifecycle_lock.lock().await;
+        if let Some(manager) = self.app_shuffle_managers.get(app_id) {
+            ensure!(
+                !manager.closed.load(Ordering::Acquire),
+                "application is closed"
+            );
+            return Ok(manager.clone());
+        }
+        let manager = Arc::new(ShuffleManager::new(ApplicationOptions::new(
+            app_id.to_owned(),
+            user.to_owned(),
+            configs,
+        ))?);
+        self.app_shuffle_managers
+            .insert(app_id.to_owned(), manager.clone());
+        Ok(manager)
     }
 
     pub fn get_shuffle_manager(&self, app_id: &str) -> Result<ShuffleManagerRef, Status> {
         if app_id.is_empty() {
             return Err(Status::invalid_argument("application ID is empty"));
         }
-        self.app_shuffle_managers
+        let manager = self
+            .app_shuffle_managers
             .get(app_id)
             .map(|entry| entry.clone())
-            .ok_or_else(|| Status::not_found(format!("application {app_id} is not registered")))
+            .ok_or_else(|| Status::not_found(format!("application {app_id} is not registered")))?;
+        if manager.closed.load(Ordering::Acquire) {
+            return Err(Status::failed_precondition("application is closed"));
+        }
+        Ok(manager)
     }
 
-    pub fn remove_shuffle_manager(&self, app_id: &str) -> Result<()> {
+    /// Stops the application before removing it. Failed remote cleanup can be retried.
+    pub async fn remove_shuffle_manager(&self, app_id: &str) -> Result<()> {
+        let _guard = self.lifecycle_lock.lock().await;
+        let manager = self
+            .app_shuffle_managers
+            .get(app_id)
+            .map(|entry| entry.clone());
+        if let Some(manager) = manager {
+            manager.close().await?;
+        }
         self.app_shuffle_managers.remove(app_id);
         Ok(())
     }
