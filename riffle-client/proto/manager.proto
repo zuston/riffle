@@ -16,6 +16,7 @@ message GetWriteShuffleHandleRequest {
   }
   uint64 map_id = 4;
   uint64 attempt_id = 5;
+  uint32 num_partitions = 6;
 }
 
 message GetWriteShuffleHandleResponse {

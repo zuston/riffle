@@ -501,8 +501,10 @@ impl ShuffleManagerService for ManagerRpcService {
             None => return Err(Status::invalid_argument("shuffle identifier is missing")),
         };
         let shuffle_id = manager
-            .find_shuffle_id(key)
-            .ok_or_else(|| Status::not_found("shuffle is not registered"))?;
+            .register_shuffle(key, request.num_partitions)
+            .await
+            .map_err(|error| Status::internal(format!("register shuffle: {error:#}")))?
+            .shuffle_id();
         let shuffle = manager
             .shuffles
             .get(&shuffle_id)

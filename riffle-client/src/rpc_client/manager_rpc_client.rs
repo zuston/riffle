@@ -46,6 +46,8 @@ impl ManagerRpcClient {
             ))),
             map_id: task.map_id as u64,
             attempt_id: task.attempt_id as u64,
+            num_partitions: u32::try_from(task.num_partitions)
+                .context("partition count exceeds u32 range")?,
         };
         let response = retry(&self.endpoint, "getWriteShuffleHandle", || {
             let mut client = self.client.clone();

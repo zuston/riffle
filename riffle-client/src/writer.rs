@@ -40,8 +40,8 @@ pub struct ShuffleWriter {
 }
 
 impl ShuffleWriter {
-    /// Opens a task in a shuffle already registered with the manager under
-    /// the key `<job_id>_<stage_id>`. The application ID must match that manager.
+    /// Opens a task, registering the shuffle on first use under the key
+    /// `<job_id>_<stage_id>`. The application ID must match the manager.
     pub async fn new(
         app_id: ApplicationId,
         manager_endpoint: Endpoint,
