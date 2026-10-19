@@ -1,6 +1,6 @@
+pub mod manager_rpc_client;
 pub mod shuffle_id_manager;
 pub mod shuffle_task_manager;
-pub mod manager_rpc_client;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -12,8 +12,8 @@ use log::{info, warn};
 use riffle_server::client_configs::ClientRssConf;
 use riffle_server::ddashmap::DDashMap;
 use riffle_server::grpc::protobuf::uniffle::{
-    AppHeartBeatRequest, ShuffleRegisterRequest,
-    ShuffleUnregisterByAppIdRequest, ShuffleUnregisterRequest,
+    AppHeartBeatRequest, ShuffleRegisterRequest, ShuffleUnregisterByAppIdRequest,
+    ShuffleUnregisterRequest,
 };
 use riffle_server::scheduled_task::ScheduledTask;
 use tokio::sync::{watch, Mutex as AsyncMutex};
@@ -25,6 +25,8 @@ use tonic::{Request, Response, Status};
 use crate::configs::{
     ASSIGNMENT_SERVER_NUMBER, ASSIGNMENT_TAGS, COORDINATOR_QUORUM, HEARTBEAT_INTERVAL_SECONDS,
 };
+use crate::manager::shuffle_id_manager::{ShuffleIdManager, ShuffleKey};
+use crate::manager::shuffle_task_manager::ShuffleTaskManager;
 use crate::rpc::shuffle_manager_service_server::{
     ShuffleManagerService, ShuffleManagerServiceServer,
 };
@@ -32,10 +34,9 @@ use crate::rpc_client::{
     CoordinatorQuorumClient, GetAssignmentContext, ServerClient, ServerConnOptions, ServerCoonPool,
 };
 use crate::{
-    ensure_success, rpc, Endpoint, ShuffleHandle, ShuffleId, TaskId, MAX_MESSAGE_BYTES, TASK_ID_LIMIT,
+    ensure_success, rpc, ApplicationId, Endpoint, ShuffleHandle, ShuffleId, TaskId,
+    MAX_MESSAGE_BYTES, TASK_ID_LIMIT,
 };
-use crate::manager::shuffle_id_manager::{ShuffleIdManager, ShuffleKey};
-use crate::manager::shuffle_task_manager::ShuffleTaskManager;
 
 pub struct ApplicationOptions {
     pub app_id: String,
@@ -242,22 +243,28 @@ impl ShuffleManager {
         self.heartbeat_coordinator_task.close().await;
         self.heartbeat_server_task.close().await;
         // do app unregistration to shuffle servers
-        join_all(self.server_conn.clients().into_iter().map(
-            |(endpoint, mut client)| async move {
-                let response = client
-                    .unregister_shuffle_by_app_id(ShuffleUnregisterByAppIdRequest {
-                        app_id: self.app_id.clone(),
-                    })
-                    .await
-                    .with_context(|| format!("unregister app on {}", endpoint.uri()))?
-                    .into_inner();
-                ensure_success(
-                    "unregisterShuffleByAppId",
-                    response.status,
-                    &response.ret_msg,
-                )
-            },
-        )).await.into_iter().collect::<Result<Vec<_>>>()?;
+        join_all(
+            self.server_conn
+                .clients()
+                .into_iter()
+                .map(|(endpoint, mut client)| async move {
+                    let response = client
+                        .unregister_shuffle_by_app_id(ShuffleUnregisterByAppIdRequest {
+                            app_id: self.app_id.clone(),
+                        })
+                        .await
+                        .with_context(|| format!("unregister app on {}", endpoint.uri()))?
+                        .into_inner();
+                    ensure_success(
+                        "unregisterShuffleByAppId",
+                        response.status,
+                        &response.ret_msg,
+                    )
+                }),
+        )
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>>>()?;
         Ok(())
     }
 
@@ -333,7 +340,34 @@ async fn heartbeat_server(
     ensure_success("appHeartbeat", response.status, &response.ret_msg)
 }
 
-struct ManagerRpcService {}
+pub type ShuffleManagerRef = Arc<ShuffleManager>;
+
+struct ManagerRpcService {
+    app_shuffle_managers: DDashMap<ApplicationId, ShuffleManagerRef>,
+}
+
+impl ManagerRpcService {
+    pub fn new() -> Self {
+        Self {
+            app_shuffle_managers: DDashMap::default(),
+        }
+    }
+
+    pub fn create_shuffle_manager(
+        &self,
+        app_id: &str,
+        user: &str,
+        configs: HashMap<String, String>,
+    ) -> Result<ShuffleManagerRef> {
+        todo!()
+    }
+
+    pub fn get_shuffle_manager(&self, app_id: &str) -> Option<ShuffleManagerRef> {
+        self.app_shuffle_managers
+            .get(app_id)
+            .map(|entry| entry.clone())
+    }
+}
 
 #[tonic::async_trait]
 impl ShuffleManagerService for ManagerRpcService {

@@ -9,12 +9,13 @@ service ShuffleManagerService {
 }
 
 message GetWriteShuffleHandleRequest {
+  string app_id = 1;
   oneof shuffle_identifier {
-    string shuffle_key = 1;
-    uint64 shuffle_id = 2;
+    string shuffle_key = 2;
+    uint64 shuffle_id = 3;
   }
-  uint64 map_id = 3;
-  uint64 attempt_id = 4;
+  uint64 map_id = 4;
+  uint64 attempt_id = 5;
 }
 
 message GetWriteShuffleHandleResponse {
@@ -24,11 +25,12 @@ message GetWriteShuffleHandleResponse {
 }
 
 message GetReadShuffleHandleRequest {
+  string app_id = 1;
   oneof shuffle_identifier {
-    string shuffle_key = 1;
-    uint64 shuffle_id = 2;
+    string shuffle_key = 2;
+    uint64 shuffle_id = 3;
   }
-  repeated uint64 partition_ids = 3;
+  repeated uint64 partition_ids = 4;
 }
 
 message GetReadShuffleHandleResponse {
@@ -49,8 +51,9 @@ message Endpoint {
 }
 
 message ReportShuffleResultRequest {
-  uint64 shuffle_id = 1;
-  uint64 task_id = 2;
+  string app_id = 1;
+  uint64 shuffle_id = 2;
+  uint64 task_id = 3;
 }
 
 message ReportShuffleResultResponse {}

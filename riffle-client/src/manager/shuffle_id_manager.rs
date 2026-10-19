@@ -1,6 +1,6 @@
-use std::sync::atomic::AtomicUsize;
-use riffle_server::ddashmap::DDashMap;
 use crate::ShuffleId;
+use riffle_server::ddashmap::DDashMap;
+use std::sync::atomic::AtomicUsize;
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub enum ShuffleKey {
