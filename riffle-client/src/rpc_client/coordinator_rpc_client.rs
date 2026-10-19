@@ -1,22 +1,18 @@
-pub(crate) mod transport;
-
-use std::time::Duration;
-
-use anyhow::{anyhow, ensure, Context, Result};
+use crate::rpc_client::lazy_channel;
+use crate::{
+    ensure_success, ApplicationId, Endpoint, ShuffleAssignment, ShuffleId, MAX_MESSAGE_BYTES,
+    RPC_TIMEOUT,
+};
+use anyhow::Result;
+use anyhow::{anyhow, ensure, Context};
 use futures::future::join_all;
 use log::warn;
 use riffle_server::ddashmap::DDashMap;
 use riffle_server::grpc::protobuf::uniffle::coordinator_server_client::CoordinatorServerClient;
-use riffle_server::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
 use riffle_server::grpc::protobuf::uniffle::{
     AppHeartBeatRequest, ApplicationInfoRequest, GetShuffleServerRequest,
 };
 use tonic::transport::Channel;
-
-use crate::ensure_success;
-use crate::{
-    ApplicationId, Endpoint, ShuffleAssignment, ShuffleId, MAX_MESSAGE_BYTES, RPC_TIMEOUT,
-};
 
 pub struct GetAssignmentContext {
     pub app_id: ApplicationId,
@@ -172,64 +168,4 @@ fn check_coordinator_results(operation: &str, results: Vec<Result<()>>) -> Resul
     } else {
         Err(last_error)
     }
-}
-
-pub type ServerClient = ShuffleServerClient<Channel>;
-
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct ServerConnOptions {
-    pub endpoint: Endpoint,
-    pub timeout: Duration,
-}
-
-impl ServerConnOptions {
-    pub fn new(endpoint: Endpoint) -> Self {
-        Self {
-            endpoint,
-            timeout: RPC_TIMEOUT,
-        }
-    }
-}
-
-impl From<Endpoint> for ServerConnOptions {
-    fn from(endpoint: Endpoint) -> Self {
-        Self::new(endpoint)
-    }
-}
-
-#[derive(Default)]
-pub struct ServerCoonPool {
-    clients: DDashMap<ServerConnOptions, ServerClient>,
-}
-
-impl ServerCoonPool {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn get_or_create_client(&self, conn_options: ServerConnOptions) -> Result<ServerClient> {
-        if let Some(client) = self.clients.get(&conn_options) {
-            return Ok(client.value().clone());
-        }
-        let channel = lazy_channel(&conn_options.endpoint, conn_options.timeout)?;
-        Ok(self.clients.compute_if_absent(conn_options, || {
-            ServerClient::new(channel)
-                .max_encoding_message_size(MAX_MESSAGE_BYTES)
-                .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        }))
-    }
-
-    pub(crate) fn clients(&self) -> Vec<(Endpoint, ServerClient)> {
-        self.clients
-            .iter()
-            .map(|entry| (entry.key().endpoint.clone(), entry.value().clone()))
-            .collect()
-    }
-}
-
-fn lazy_channel(endpoint: &Endpoint, timeout: Duration) -> Result<Channel> {
-    Ok(tonic::transport::Endpoint::from_shared(endpoint.uri())?
-        .connect_timeout(timeout)
-        .timeout(timeout)
-        .connect_lazy())
 }

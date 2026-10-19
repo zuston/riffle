@@ -1,4 +1,3 @@
-pub mod manager_rpc_client;
 pub mod shuffle_id_manager;
 pub mod shuffle_task_manager;
 
@@ -31,9 +30,8 @@ use crate::manager::shuffle_task_manager::{ShuffleTaskManager, TaskKey};
 use crate::rpc::shuffle_manager_service_server::{
     ShuffleManagerService, ShuffleManagerServiceServer,
 };
-use crate::rpc_client::{
-    CoordinatorQuorumClient, GetAssignmentContext, ServerClient, ServerConnOptions, ServerCoonPool,
-};
+use crate::rpc_client::coordinator_rpc_client::{CoordinatorQuorumClient, GetAssignmentContext};
+use crate::rpc_client::{ServerClient, ServerConnOptions, ServerCoonPool};
 use crate::{
     ensure_success, rpc, ApplicationId, Endpoint, PartitionId, ShuffleHandle, ShuffleId,
     MAX_MESSAGE_BYTES,

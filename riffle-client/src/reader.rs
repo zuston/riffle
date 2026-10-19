@@ -17,9 +17,8 @@ use tokio::task::JoinSet;
 
 use self::buffer::ReadBatch;
 use self::data_fetcher::DataFetcher;
-use crate::manager::manager_rpc_client::ManagerRpcClient;
-use crate::rpc_client::transport::{call, ensure_success, request, retry};
-use crate::rpc_client::{ServerConnOptions, ServerCoonPool};
+use crate::rpc_client::manager_rpc_client::ManagerRpcClient;
+use crate::rpc_client::{call, ensure_success, request, retry, ServerConnOptions, ServerCoonPool};
 use crate::{
     ApplicationId, Endpoint, PartitionId, ReadTaskInfo, ShuffleStream, TaskId, TASK_ID_LIMIT,
 };

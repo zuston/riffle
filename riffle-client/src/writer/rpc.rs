@@ -12,8 +12,7 @@ use riffle_server::id_layout::DEFAULT_BLOCK_ID_LAYOUT;
 use riffle_server::util::now_timestamp_as_millis;
 
 use super::{BufferedBlock, WriterContext, MAX_IN_FLIGHT_REQUESTS};
-use crate::rpc_client::transport::{call, ensure_success, request, retry};
-use crate::rpc_client::{ServerClient, ServerConnOptions};
+use crate::rpc_client::{call, ensure_success, request, retry, ServerClient, ServerConnOptions};
 use crate::{Endpoint, PartitionId, ShuffleAssignment, MAX_MESSAGE_BYTES};
 
 const REPORT_BLOCKS_PER_REQUEST: usize = 16 * 1024;

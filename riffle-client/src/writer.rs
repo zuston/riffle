@@ -13,7 +13,7 @@ use riffle_server::grpc::protobuf::uniffle::ShuffleBlock;
 use self::buffer_manager::BufferManager;
 use self::data_pusher::DataPusher;
 use self::memory_tracker::{MemoryReservation, MemoryTracker};
-use crate::manager::manager_rpc_client::ManagerRpcClient;
+use crate::rpc_client::manager_rpc_client::ManagerRpcClient;
 use crate::rpc_client::ServerCoonPool;
 use crate::{
     ApplicationId, Endpoint, PartitionId, ShuffleAssignment, ShuffleId, TaskId, WriteTaskInfo,

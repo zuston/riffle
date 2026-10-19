@@ -11,7 +11,7 @@ use riffle_server::util::now_timestamp_as_millis;
 
 use super::buffer::ReadBatch;
 use super::read_handler::{PartitionReadContext, ReadHandler, READ_BATCH_BYTES};
-use crate::rpc_client::transport::{call, ensure_success, request, retry};
+use crate::rpc_client::{call, ensure_success, request, retry};
 use crate::{MAX_MESSAGE_BYTES, TASK_ID_LIMIT};
 
 pub(super) struct MemoryReadHandler<'a> {

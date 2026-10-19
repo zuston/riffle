@@ -7,7 +7,7 @@ use crate::rpc::shuffle_manager_service_client::ShuffleManagerServiceClient;
 use crate::rpc::{
     GetReadShuffleHandleRequest, GetWriteShuffleHandleRequest, ReportShuffleResultRequest,
 };
-use crate::rpc_client::transport::{call, request, retry};
+use crate::rpc_client::{call, request, retry};
 use crate::{
     ApplicationId, Endpoint, ReadTaskInfo, ShuffleAssignment, ShuffleHandle, ShuffleId, TaskId,
     WriteTaskInfo, MAX_MESSAGE_BYTES, RPC_TIMEOUT,
