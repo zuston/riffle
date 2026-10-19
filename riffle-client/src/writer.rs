@@ -2,7 +2,6 @@ mod buffer;
 mod buffer_manager;
 mod data_pusher;
 mod memory_tracker;
-mod rpc;
 
 use std::sync::Arc;
 
@@ -14,23 +13,15 @@ use self::buffer_manager::BufferManager;
 use self::data_pusher::DataPusher;
 use self::memory_tracker::{MemoryReservation, MemoryTracker};
 use crate::rpc_client::manager_rpc_client::ManagerRpcClient;
-use crate::rpc_client::ServerCoonPool;
+use crate::rpc_client::writer_rpc_client::WriterRpcClient;
 use crate::{
-    ApplicationId, Endpoint, PartitionId, ShuffleAssignment, ShuffleId, TaskId, WriteTaskInfo,
+    ApplicationId, Endpoint, PartitionId, ShuffleAssignment, TaskId, WriteTaskInfo,
     MAX_PAYLOAD_BYTES, TASK_ID_LIMIT,
 };
 
 const BLOCK_OVERHEAD_BYTES: usize = 128;
 const BUFFER_CAPACITY_BYTES: usize = 64 * 1024 * 1024;
-const MAX_IN_FLIGHT_REQUESTS: usize = 20;
 const PARTITION_ID_LIMIT: usize = 1 << 24;
-
-struct WriterContext {
-    app_id: ApplicationId,
-    shuffle_id: ShuffleId,
-    task_id: TaskId,
-    conn: ServerCoonPool,
-}
 
 struct BufferedBlock {
     endpoint: Endpoint,
@@ -40,7 +31,8 @@ struct BufferedBlock {
 }
 
 pub struct ShuffleWriter {
-    context: Arc<WriterContext>,
+    rpc_client: Arc<WriterRpcClient>,
+    task_id: TaskId,
     manager: ManagerRpcClient,
     assignment: Arc<ShuffleAssignment>,
     buffer_manager: BufferManager,
@@ -70,17 +62,13 @@ impl ShuffleWriter {
         );
         let memory = MemoryTracker::new(BUFFER_CAPACITY_BYTES);
         let assignment = Arc::new(assignment);
-        let context = Arc::new(WriterContext {
-            app_id,
-            shuffle_id: assignment.shuffle_id,
-            task_id,
-            conn: ServerCoonPool::new(),
-        });
-        let pusher = Arc::new(DataPusher::new(context.clone()));
+        let rpc_client = Arc::new(WriterRpcClient::new(app_id, assignment.shuffle_id, task_id));
+        let pusher = Arc::new(DataPusher::new(rpc_client.clone()));
         let buffer_manager =
             BufferManager::new(task_id, assignment.clone(), memory, pusher.clone());
         Ok(Self {
-            context,
+            rpc_client,
+            task_id,
             manager,
             assignment,
             buffer_manager,
@@ -114,9 +102,11 @@ impl ShuffleWriter {
             .context("shuffle data pusher is still shared")?
             .finish()
             .await?;
-        rpc::report_results(&self.context, &self.assignment, &block_ids).await?;
+        self.rpc_client
+            .report_results(&self.assignment, &block_ids)
+            .await?;
         self.manager
-            .report_shuffle_result(self.context.shuffle_id, self.context.task_id)
+            .report_shuffle_result(self.assignment.shuffle_id, self.task_id)
             .await
     }
 

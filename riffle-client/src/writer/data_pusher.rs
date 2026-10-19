@@ -5,7 +5,8 @@ use anyhow::{anyhow, Context, Result};
 use tokio::sync::{mpsc, watch, Mutex};
 use tokio::task::JoinSet;
 
-use super::{rpc, BufferedBlock, WriterContext, BLOCK_OVERHEAD_BYTES, MAX_IN_FLIGHT_REQUESTS};
+use super::{BufferedBlock, BLOCK_OVERHEAD_BYTES};
+use crate::rpc_client::writer_rpc_client::{WriterRpcClient, MAX_IN_FLIGHT_REQUESTS};
 use crate::Endpoint;
 
 const BATCH_SIZE_BYTES: usize = 4 * 1024 * 1024;
@@ -19,14 +20,14 @@ pub struct DataPusher {
 }
 
 impl DataPusher {
-    pub fn new(context: Arc<WriterContext>) -> Self {
+    pub fn new(rpc_client: Arc<WriterRpcClient>) -> Self {
         let (queue, receiver) = mpsc::unbounded_channel();
         let receiver = Arc::new(Mutex::new(receiver));
         let (failure, _) = watch::channel(None);
         let mut workers = JoinSet::new();
         for _ in 0..MAX_IN_FLIGHT_REQUESTS {
             workers.spawn(send_worker(
-                context.clone(),
+                rpc_client.clone(),
                 receiver.clone(),
                 failure.clone(),
             ));
@@ -118,7 +119,7 @@ impl DataPusher {
 }
 
 async fn send_worker(
-    context: Arc<WriterContext>,
+    rpc_client: Arc<WriterRpcClient>,
     receiver: Arc<Mutex<mpsc::UnboundedReceiver<(Endpoint, Batch)>>>,
     failure: watch::Sender<Option<String>>,
 ) {
@@ -134,7 +135,15 @@ async fn send_worker(
         if failure.borrow().is_some() {
             continue;
         }
-        if let Err(error) = rpc::send_batch(context.clone(), endpoint, batch.blocks).await {
+        let (blocks, reservations): (Vec<_>, Vec<_>) = batch
+            .blocks
+            .into_iter()
+            .map(|block| ((block.partition_id, block.block), block.memory))
+            .unzip();
+        let result = rpc_client.send_batch(endpoint, blocks).await;
+        // Account for the payload until the entire batch succeeds or exhausts its retries.
+        drop(reservations);
+        if let Err(error) = result {
             record_failure(&failure, error);
         }
     }
