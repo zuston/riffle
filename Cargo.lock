@@ -5169,14 +5169,15 @@ dependencies = [
  "futures",
  "log",
  "once_cell",
- "prost 0.12.6",
+ "prost 0.14.4",
  "rand 0.8.5",
  "riffle-server",
  "serde",
  "tokio",
  "tokio-stream",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
 ]
 
 [[package]]

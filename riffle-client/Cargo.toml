@@ -14,9 +14,10 @@ serde = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true, features = ["net"] }
 tonic = { workspace = true }
+tonic-prost = { workspace = true }
 prost = { workspace = true }
 once_cell = { workspace = true }
 rand = { workspace = true }
 
 [build-dependencies]
-tonic-build = { workspace = true }
+tonic-prost-build = { workspace = true }
