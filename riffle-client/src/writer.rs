@@ -62,7 +62,7 @@ impl ShuffleWriter {
             task.num_partitions > 0 && task.num_partitions <= PARTITION_ID_LIMIT,
             "partition count must be between 1 and {PARTITION_ID_LIMIT}"
         );
-        let manager = ManagerRpcClient::new(manager_endpoint)?;
+        let manager = ManagerRpcClient::new(app_id.clone(), manager_endpoint)?;
         let (assignment, task_id) = manager.get_write_shuffle_handle(&task).await?;
         ensure!(
             task_id < TASK_ID_LIMIT,
@@ -77,12 +77,13 @@ impl ShuffleWriter {
             conn: ServerCoonPool::new(),
         });
         let pusher = Arc::new(DataPusher::new(context.clone()));
-        let buffers = BufferManager::new(task_id, assignment.clone(), memory, pusher.clone());
+        let buffer_manager =
+            BufferManager::new(task_id, assignment.clone(), memory, pusher.clone());
         Ok(Self {
             context,
             manager,
             assignment,
-            buffer_manager: buffers,
+            buffer_manager,
             pusher,
         })
     }

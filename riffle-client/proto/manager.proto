@@ -37,6 +37,7 @@ message GetReadShuffleHandleResponse {
   uint64 shuffle_id = 1;
   repeated PartitionAssignment assignments = 2;
   repeated uint64 task_ids = 3;
+  uint32 partition_count = 4;
 }
 
 message PartitionAssignment {

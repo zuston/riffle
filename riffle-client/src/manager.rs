@@ -3,7 +3,8 @@ pub mod shuffle_id_manager;
 pub mod shuffle_task_manager;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::future::Future;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{ensure, Context, Result};
@@ -16,8 +17,8 @@ use riffle_server::grpc::protobuf::uniffle::{
     ShuffleUnregisterRequest,
 };
 use riffle_server::scheduled_task::ScheduledTask;
-use tokio::sync::{watch, Mutex as AsyncMutex};
-use tokio::task::JoinHandle;
+use tokio::net::TcpListener;
+use tokio::sync::Mutex as AsyncMutex;
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
@@ -26,7 +27,7 @@ use crate::configs::{
     ASSIGNMENT_SERVER_NUMBER, ASSIGNMENT_TAGS, COORDINATOR_QUORUM, HEARTBEAT_INTERVAL_SECONDS,
 };
 use crate::manager::shuffle_id_manager::{ShuffleIdManager, ShuffleKey};
-use crate::manager::shuffle_task_manager::ShuffleTaskManager;
+use crate::manager::shuffle_task_manager::{ShuffleTaskManager, TaskKey};
 use crate::rpc::shuffle_manager_service_server::{
     ShuffleManagerService, ShuffleManagerServiceServer,
 };
@@ -34,8 +35,8 @@ use crate::rpc_client::{
     CoordinatorQuorumClient, GetAssignmentContext, ServerClient, ServerConnOptions, ServerCoonPool,
 };
 use crate::{
-    ensure_success, rpc, ApplicationId, Endpoint, ShuffleHandle, ShuffleId, TaskId,
-    MAX_MESSAGE_BYTES, TASK_ID_LIMIT,
+    ensure_success, rpc, ApplicationId, Endpoint, PartitionId, ShuffleHandle, ShuffleId,
+    MAX_MESSAGE_BYTES,
 };
 
 pub struct ApplicationOptions {
@@ -75,7 +76,7 @@ pub struct ShuffleManager {
 }
 
 impl ShuffleManager {
-    pub async fn new(app_options: ApplicationOptions) -> Result<Self> {
+    pub fn new(app_options: ApplicationOptions) -> Result<Self> {
         let ApplicationOptions {
             app_id,
             user,
@@ -83,24 +84,26 @@ impl ShuffleManager {
         } = app_options;
         let configs = ClientRssConf::from(configs);
 
-        // register app to coordinator
+        // set up the coordinator heartbeat task
         let coordinator_quorum = configs
             .get_or_panic(&COORDINATOR_QUORUM)
             .into_iter()
             .map(|address| address.parse())
             .collect::<Result<Vec<Endpoint>>>()?;
         let coordinator_client = CoordinatorQuorumClient::new(coordinator_quorum)?;
-        coordinator_client.app_register(&app_id, &user).await?;
-
-        // set up the coordinator heartbeat task
         let interval = Duration::from_secs(configs.get_or_panic(&HEARTBEAT_INTERVAL_SECONDS));
         let coordinator_task = ScheduledTask::new(interval, {
             let client = coordinator_client.clone();
             let app_id = app_id.clone();
+            let user = user.clone();
             move || {
                 let client = client.clone();
                 let app_id = app_id.clone();
+                let user = user.clone();
                 async move {
+                    if let Err(err) = client.app_register(&app_id, &user).await {
+                        warn!("Coordinator app registration failed for app {app_id} and user {user}: {err:#}");
+                    }
                     if let Err(error) = client.app_heartbeat(&app_id).await {
                         warn!("Coordinator heartbeat failed for app {app_id}: {error:#}");
                     }
@@ -151,7 +154,7 @@ impl ShuffleManager {
         partition_count: u32,
     ) -> Result<ShuffleHandle> {
         let _guard = self.lifecycle_lock.lock().await;
-        let shuffle_id = self.shuffle_id_manager.get(&shuffle_key);
+        let shuffle_id = self.shuffle_id_manager.get_or_create(&shuffle_key);
         if let Some(shuffle) = self.shuffles.get(&shuffle_id) {
             info!(
                 "Shuffle {shuffle_id} is already registered for app {}",
@@ -235,6 +238,7 @@ impl ShuffleManager {
             })
             .collect::<Result<_>>()?;
         self.unregister_servers(shuffle_id as i32, clients).await?;
+        self.shuffles.remove(&shuffle_id);
         Ok(())
     }
 
@@ -265,6 +269,7 @@ impl ShuffleManager {
         .await
         .into_iter()
         .collect::<Result<Vec<_>>>()?;
+        self.shuffles.clear();
         Ok(())
     }
 
@@ -292,12 +297,48 @@ impl ShuffleManager {
         results.into_iter().collect::<Result<Vec<_>>>()?;
         Ok(())
     }
+
+    pub fn find_shuffle_id(&self, shuffle_key: ShuffleKey) -> Option<ShuffleId> {
+        self.shuffle_id_manager.find(&shuffle_key)
+    }
 }
 
 struct RegisteredShuffle {
     shuffle_key: ShuffleKey,
     handle: ShuffleHandle,
     shuffle_task_manager: ShuffleTaskManager,
+}
+
+impl RegisteredShuffle {
+    fn assignments(
+        &self,
+        partitions: impl IntoIterator<Item = PartitionId>,
+    ) -> Result<Vec<rpc::PartitionAssignment>, Status> {
+        partitions
+            .into_iter()
+            .map(|partition_id| {
+                if partition_id >= self.handle.partition_count as usize {
+                    return Err(Status::invalid_argument(format!(
+                        "partition {partition_id} is out of range"
+                    )));
+                }
+                let endpoint = self
+                    .handle
+                    .assignment
+                    .get_endpoint(partition_id)
+                    .map_err(|error| Status::internal(error.to_string()))?;
+                Ok(rpc::PartitionAssignment {
+                    partition_id: i32::try_from(partition_id)
+                        .map_err(|_| Status::internal("partition ID exceeds protocol i32 range"))?,
+                    endpoint: Some(rpc::Endpoint {
+                        host: endpoint.host,
+                        grpc_port: i32::from(endpoint.grpc_port),
+                        urpc_port: None,
+                    }),
+                })
+            })
+            .collect()
+    }
 }
 
 async fn heartbeat_servers(
@@ -342,31 +383,63 @@ async fn heartbeat_server(
 
 pub type ShuffleManagerRef = Arc<ShuffleManager>;
 
-struct ManagerRpcService {
+#[derive(Default)]
+pub struct ManagerRpcService {
     app_shuffle_managers: DDashMap<ApplicationId, ShuffleManagerRef>,
 }
 
 impl ManagerRpcService {
     pub fn new() -> Self {
-        Self {
-            app_shuffle_managers: DDashMap::default(),
-        }
+        Self::default()
     }
 
-    pub fn create_shuffle_manager(
+    pub async fn create_shuffle_manager(
         &self,
         app_id: &str,
         user: &str,
         configs: HashMap<String, String>,
     ) -> Result<ShuffleManagerRef> {
-        todo!()
+        let app_managers = self
+            .app_shuffle_managers
+            .entry(app_id.to_owned())
+            .or_insert_with(|| {
+                let manager = ShuffleManager::new(ApplicationOptions::new(
+                    app_id.to_owned(),
+                    user.to_owned(),
+                    configs,
+                ))
+                .unwrap();
+                Arc::new(manager)
+            });
+        Ok(app_managers.clone())
     }
 
-    pub fn get_shuffle_manager(&self, app_id: &str) -> Option<ShuffleManagerRef> {
+    pub fn get_shuffle_manager(&self, app_id: &str) -> Result<ShuffleManagerRef, Status> {
+        if app_id.is_empty() {
+            return Err(Status::invalid_argument("application ID is empty"));
+        }
         self.app_shuffle_managers
             .get(app_id)
             .map(|entry| entry.clone())
+            .ok_or_else(|| Status::not_found(format!("application {app_id} is not registered")))
     }
+
+    pub fn remove_shuffle_manager(&self, app_id: &str) -> Result<()> {
+        self.app_shuffle_managers.remove(app_id);
+        Ok(())
+    }
+}
+
+macro_rules! checked_task_id {
+    ($value:expr) => {
+        checked_task_id!($value, ::tonic::Status::invalid_argument)
+    };
+    ($value:expr, $error:path) => {
+        match $crate::TaskId::try_from($value) {
+            Ok(task_id) if task_id < $crate::TASK_ID_LIMIT => task_id,
+            _ => return Err($error("task ID exceeds 23-bit block ID range")),
+        }
+    };
 }
 
 #[tonic::async_trait]
@@ -375,20 +448,97 @@ impl ShuffleManagerService for ManagerRpcService {
         &self,
         request: Request<rpc::GetWriteShuffleHandleRequest>,
     ) -> Result<Response<rpc::GetWriteShuffleHandleResponse>, Status> {
-        todo!()
+        use rpc::get_write_shuffle_handle_request::ShuffleIdentifier;
+
+        let request = request.into_inner();
+        let app_id = request.app_id;
+        let shuffle_identifier = request.shuffle_identifier;
+        let map_id = request.map_id as usize;
+        let attempt_id = request.attempt_id as usize;
+
+        let manager = self.get_shuffle_manager(&app_id)?;
+        let key = match shuffle_identifier {
+            Some(ShuffleIdentifier::ShuffleKey(key)) => ShuffleKey::JobIdAndStageId(key),
+            Some(ShuffleIdentifier::ShuffleId(id)) => ShuffleKey::ShuffleId(id as ShuffleId),
+            None => return Err(Status::invalid_argument("shuffle identifier is missing")),
+        };
+        let shuffle_id = manager
+            .find_shuffle_id(key)
+            .ok_or_else(|| Status::not_found("shuffle is not registered"))?;
+        let shuffle = manager
+            .shuffles
+            .get(&shuffle_id)
+            .ok_or_else(|| Status::not_found(format!("shuffle {shuffle_id} is not registered")))?;
+
+        let assignments = shuffle.assignments(0..shuffle.handle.partition_count as usize)?;
+        let task_id = checked_task_id!(
+            shuffle
+                .shuffle_task_manager
+                .register_task(&TaskKey::MapIdAndAttemptId(map_id, attempt_id)),
+            Status::resource_exhausted
+        );
+        Ok(Response::new(rpc::GetWriteShuffleHandleResponse {
+            shuffle_id: shuffle_id as u64,
+            assignments,
+            task_id: task_id as u64,
+        }))
     }
 
     async fn report_shuffle_result(
         &self,
         request: Request<rpc::ReportShuffleResultRequest>,
     ) -> Result<Response<rpc::ReportShuffleResultResponse>, Status> {
-        todo!()
+        let request = request.into_inner();
+        let app_id = request.app_id;
+        let shuffle_id = request.shuffle_id as ShuffleId;
+        let task_id = checked_task_id!(request.task_id);
+
+        let manager = self.get_shuffle_manager(&app_id)?;
+        let shuffle = manager
+            .shuffles
+            .get(&shuffle_id)
+            .ok_or_else(|| Status::not_found(format!("shuffle {shuffle_id} is not registered")))?;
+        shuffle
+            .shuffle_task_manager
+            .report_finished_task(&TaskKey::TaskId(task_id))
+            .map_err(|error| Status::not_found(error.to_string()))?;
+        Ok(Response::new(rpc::ReportShuffleResultResponse {}))
     }
 
     async fn get_read_shuffle_handle(
         &self,
         request: Request<rpc::GetReadShuffleHandleRequest>,
     ) -> Result<Response<rpc::GetReadShuffleHandleResponse>, Status> {
-        todo!()
+        use rpc::get_read_shuffle_handle_request::ShuffleIdentifier;
+
+        let request = request.into_inner();
+        let app_id = request.app_id;
+        let partitions = request.partition_ids;
+
+        let manager = self.get_shuffle_manager(&app_id)?;
+        let key = match request.shuffle_identifier {
+            Some(ShuffleIdentifier::ShuffleKey(key)) => ShuffleKey::JobIdAndStageId(key),
+            Some(ShuffleIdentifier::ShuffleId(id)) => ShuffleKey::ShuffleId(id as ShuffleId),
+            None => return Err(Status::invalid_argument("shuffle identifier is missing")),
+        };
+        let shuffle_id = manager
+            .find_shuffle_id(key)
+            .ok_or_else(|| Status::not_found("shuffle is not registered"))?;
+        let shuffle = manager
+            .shuffles
+            .get(&shuffle_id)
+            .ok_or_else(|| Status::not_found(format!("shuffle {shuffle_id} is not registered")))?;
+
+        Ok(Response::new(rpc::GetReadShuffleHandleResponse {
+            shuffle_id: shuffle_id as u64,
+            assignments: shuffle.assignments(partitions.into_iter().map(|id| id as PartitionId))?,
+            task_ids: shuffle
+                .shuffle_task_manager
+                .get_finished_tasks()
+                .into_iter()
+                .map(|id| id as u64)
+                .collect(),
+            partition_count: shuffle.handle.partition_count,
+        }))
     }
 }

@@ -21,7 +21,7 @@ impl ShuffleIdManager {
         }
     }
 
-    pub fn get(&self, key: &ShuffleKey) -> ShuffleId {
+    pub fn get_or_create(&self, key: &ShuffleKey) -> ShuffleId {
         self.key_to_id
             .entry(key.clone())
             .or_insert_with(|| match key {
@@ -32,5 +32,12 @@ impl ShuffleIdManager {
             })
             .value()
             .clone()
+    }
+
+    pub fn find(&self, key: &ShuffleKey) -> Option<ShuffleId> {
+        match key {
+            ShuffleKey::ShuffleId(id) => Some(*id),
+            ShuffleKey::JobIdAndStageId(_) => self.key_to_id.get(key).map(|entry| *entry),
+        }
     }
 }

@@ -14,7 +14,8 @@ use bytes::Bytes;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 
-pub use manager::{ApplicationOptions, ShuffleManager};
+pub use manager::shuffle_id_manager::ShuffleKey;
+pub use manager::{ApplicationOptions, ManagerRpcService, ShuffleManager, ShuffleManagerRef};
 pub use reader::ShuffleReader;
 use riffle_server::ddashmap::DDashMap;
 use riffle_server::grpc::protobuf::uniffle::StatusCode;

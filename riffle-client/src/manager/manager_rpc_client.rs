@@ -1,31 +1,32 @@
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result};
 use riffle_server::ddashmap::DDashMap;
 use tonic::transport::Channel;
 
 use crate::rpc::get_write_shuffle_handle_request::ShuffleIdentifier;
 use crate::rpc::shuffle_manager_service_client::ShuffleManagerServiceClient;
-use crate::rpc::{GetWriteShuffleHandleRequest, ReportShuffleResultRequest};
+use crate::rpc::{
+    GetReadShuffleHandleRequest, GetWriteShuffleHandleRequest, ReportShuffleResultRequest,
+};
 use crate::rpc_client::transport::{call, request, retry};
 use crate::{
-    Endpoint, ShuffleAssignment, ShuffleId, TaskId, WriteTaskInfo, MAX_MESSAGE_BYTES, RPC_TIMEOUT,
+    ApplicationId, Endpoint, ReadTaskInfo, ShuffleAssignment, ShuffleHandle, ShuffleId, TaskId,
+    WriteTaskInfo, MAX_MESSAGE_BYTES, RPC_TIMEOUT,
 };
 
 pub struct ManagerRpcClient {
+    app_id: ApplicationId,
     endpoint: Endpoint,
     client: ShuffleManagerServiceClient<Channel>,
 }
 
 impl ManagerRpcClient {
-    pub fn new(endpoint: Endpoint) -> Result<Self> {
-        ensure!(
-            !endpoint.host.is_empty() && endpoint.grpc_port != 0,
-            "invalid manager endpoint"
-        );
+    pub fn new(app_id: ApplicationId, endpoint: Endpoint) -> Result<Self> {
         let channel = tonic::transport::Endpoint::from_shared(endpoint.uri())?
             .connect_timeout(RPC_TIMEOUT)
             .timeout(RPC_TIMEOUT)
             .connect_lazy();
         Ok(Self {
+            app_id,
             endpoint,
             client: ShuffleManagerServiceClient::new(channel)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES)
@@ -38,6 +39,7 @@ impl ManagerRpcClient {
         task: &WriteTaskInfo,
     ) -> Result<(ShuffleAssignment, TaskId)> {
         let message = GetWriteShuffleHandleRequest {
+            app_id: self.app_id.clone(),
             shuffle_identifier: Some(ShuffleIdentifier::ShuffleKey(format!(
                 "{}_{}",
                 task.job_id, task.stage_id
@@ -51,41 +53,20 @@ impl ManagerRpcClient {
             async move { call(client.get_write_shuffle_handle(request(message))).await }
         })
         .await?;
-        let shuffle_id = usize::try_from(response.shuffle_id).context("shuffle ID is too large")?;
-        ensure!(
-            i32::try_from(shuffle_id).is_ok(),
-            "shuffle ID exceeds protocol i32 range"
-        );
-        let task_id = usize::try_from(response.task_id).context("task ID is too large")?;
+        let shuffle_id = response.shuffle_id as usize;
+        let task_id = response.task_id as usize;
         let assignments = DDashMap::with_capacity(response.assignments.len());
         for assignment in response.assignments {
-            let partition_id = usize::try_from(assignment.partition_id)
-                .context("negative assignment partition ID")?;
-            ensure!(
-                partition_id < task.num_partitions,
-                "assignment partition {partition_id} is out of range"
-            );
+            let partition_id = assignment.partition_id as usize;
             let endpoint = assignment.endpoint.context("assignment has no endpoint")?;
             let endpoint = Endpoint {
                 host: endpoint.host,
-                grpc_port: u16::try_from(endpoint.grpc_port)
-                    .context("invalid shuffle server port")?,
+                grpc_port: endpoint.grpc_port as u16,
             };
-            ensure!(
-                !endpoint.host.is_empty() && endpoint.grpc_port != 0,
-                "invalid shuffle server endpoint"
-            );
             tonic::transport::Endpoint::from_shared(endpoint.uri())
                 .context("invalid shuffle server address")?;
-            ensure!(
-                assignments.insert(partition_id, vec![endpoint]).is_none(),
-                "duplicate assignment for partition {partition_id}"
-            );
+            assignments.insert(partition_id, vec![endpoint]);
         }
-        ensure!(
-            assignments.len() == task.num_partitions,
-            "incomplete shuffle assignment"
-        );
         Ok((ShuffleAssignment::new(shuffle_id, assignments), task_id))
     }
 
@@ -95,6 +76,7 @@ impl ManagerRpcClient {
         task_id: TaskId,
     ) -> Result<()> {
         let message = ReportShuffleResultRequest {
+            app_id: self.app_id.clone(),
             shuffle_id: shuffle_id as u64,
             task_id: task_id as u64,
         };
@@ -105,5 +87,52 @@ impl ManagerRpcClient {
         })
         .await?;
         Ok(())
+    }
+
+    pub async fn get_read_shuffle_handle(
+        &self,
+        task: &ReadTaskInfo,
+    ) -> Result<(ShuffleHandle, Vec<TaskId>)> {
+        use crate::rpc::get_read_shuffle_handle_request::ShuffleIdentifier;
+
+        let message = GetReadShuffleHandleRequest {
+            app_id: self.app_id.clone(),
+            shuffle_identifier: Some(ShuffleIdentifier::ShuffleKey(format!(
+                "{}_{}",
+                task.job_id, task.upstream_stage_id
+            ))),
+            partition_ids: task.partitions.iter().map(|&id| id as u64).collect(),
+        };
+        let response = retry(&self.endpoint, "getReadShuffleHandle", || {
+            let mut client = self.client.clone();
+            let message = message.clone();
+            async move { call(client.get_read_shuffle_handle(request(message))).await }
+        })
+        .await?;
+        let shuffle_id = response.shuffle_id as usize;
+        let task_ids = response
+            .task_ids
+            .into_iter()
+            .map(|id| id as usize)
+            .collect();
+        let assignments = DDashMap::with_capacity(response.assignments.len());
+        for assignment in response.assignments {
+            let partition_id = assignment.partition_id as usize;
+            let endpoint = assignment.endpoint.context("assignment has no endpoint")?;
+            let endpoint = Endpoint {
+                host: endpoint.host,
+                grpc_port: endpoint.grpc_port as u16,
+            };
+            assignments.insert(partition_id, vec![endpoint]);
+        }
+        Ok((
+            ShuffleHandle {
+                app_id: self.app_id.clone(),
+                shuffle_id,
+                partition_count: response.partition_count,
+                assignment: ShuffleAssignment::new(shuffle_id, assignments),
+            },
+            task_ids,
+        ))
     }
 }

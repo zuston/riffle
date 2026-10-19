@@ -23,12 +23,13 @@ impl DataFetcher {
         shuffle: ShuffleHandle,
         partitions: BTreeMap<PartitionId, HashSet<i64>>,
         sender: Sender<ReadBatch>,
+        clients: ServerCoonPool,
     ) -> Self {
         Self {
             shuffle,
             partitions,
             sender,
-            clients: ServerCoonPool::new(),
+            clients,
         }
     }
 
