@@ -11,7 +11,7 @@ service ShuffleManagerService {
 message GetWriteShuffleHandleRequest {
   string app_id = 1;
   oneof shuffle_identifier {
-    string shuffle_key = 2;
+    JobIdAndStageId job_id_and_stage_id = 2;
     uint64 shuffle_id = 3;
   }
   uint64 map_id = 4;
@@ -28,7 +28,7 @@ message GetWriteShuffleHandleResponse {
 message GetReadShuffleHandleRequest {
   string app_id = 1;
   oneof shuffle_identifier {
-    string shuffle_key = 2;
+    JobIdAndStageId job_id_and_stage_id = 2;
     uint64 shuffle_id = 3;
   }
   repeated uint64 partition_ids = 4;
@@ -59,3 +59,8 @@ message ReportShuffleResultRequest {
 }
 
 message ReportShuffleResultResponse {}
+
+message JobIdAndStageId {
+  uint64 job_id = 1;
+  uint64 stage_id = 2;
+}

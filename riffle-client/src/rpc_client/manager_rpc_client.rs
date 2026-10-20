@@ -5,7 +5,8 @@ use tonic::transport::Channel;
 use crate::rpc::get_write_shuffle_handle_request::ShuffleIdentifier;
 use crate::rpc::shuffle_manager_service_client::ShuffleManagerServiceClient;
 use crate::rpc::{
-    GetReadShuffleHandleRequest, GetWriteShuffleHandleRequest, ReportShuffleResultRequest,
+    GetReadShuffleHandleRequest, GetWriteShuffleHandleRequest, JobIdAndStageId,
+    ReportShuffleResultRequest,
 };
 use crate::rpc_client::{call, request, retry};
 use crate::{
@@ -40,10 +41,10 @@ impl ManagerRpcClient {
     ) -> Result<(ShuffleAssignment, TaskId)> {
         let message = GetWriteShuffleHandleRequest {
             app_id: self.app_id.clone(),
-            shuffle_identifier: Some(ShuffleIdentifier::ShuffleKey(format!(
-                "{}_{}",
-                task.job_id, task.stage_id
-            ))),
+            shuffle_identifier: Some(ShuffleIdentifier::JobIdAndStageId(JobIdAndStageId {
+                job_id: task.job_id,
+                stage_id: task.stage_id,
+            })),
             map_id: task.map_id as u64,
             attempt_id: task.attempt_id as u64,
             num_partitions: u32::try_from(task.num_partitions)
@@ -99,10 +100,10 @@ impl ManagerRpcClient {
 
         let message = GetReadShuffleHandleRequest {
             app_id: self.app_id.clone(),
-            shuffle_identifier: Some(ShuffleIdentifier::ShuffleKey(format!(
-                "{}_{}",
-                task.job_id, task.upstream_stage_id
-            ))),
+            shuffle_identifier: Some(ShuffleIdentifier::JobIdAndStageId(JobIdAndStageId {
+                job_id: task.job_id,
+                stage_id: task.upstream_stage_id,
+            })),
             partition_ids: task.partitions.iter().map(|&id| id as u64).collect(),
         };
         let response = retry(&self.endpoint, "getReadShuffleHandle", || {

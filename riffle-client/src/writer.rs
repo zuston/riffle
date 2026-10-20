@@ -41,7 +41,7 @@ pub struct ShuffleWriter {
 
 impl ShuffleWriter {
     /// Opens a task, registering the shuffle on first use under the key
-    /// `<job_id>_<stage_id>`. The application ID must match the manager.
+    /// `(job_id, stage_id)`. The application ID must match the manager.
     pub async fn new(
         app_id: ApplicationId,
         manager_endpoint: Endpoint,

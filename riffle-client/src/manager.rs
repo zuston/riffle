@@ -235,6 +235,27 @@ impl ShuffleManager {
 
     pub async fn unregister_shuffle(&self, shuffle_id: ShuffleId) -> Result<()> {
         let _guard = self.lifecycle_lock.lock().await;
+        self.unregister_shuffle_locked(shuffle_id).await
+    }
+
+    /// Unregisters all shuffles keyed by `(job_id, stage_id)` for this job in this application.
+    /// Missing or already removed shuffles are ignored. All matching shuffles are
+    /// attempted; failures remain registered so the operation can be retried.
+    /// Registration is serialized with cleanup, but the job may register again afterward.
+    pub async fn unregister_job(&self, job_id: u64) -> Result<()> {
+        let _guard = self.lifecycle_lock.lock().await;
+        let mut result = Ok(());
+        for shuffle_id in self.shuffle_id_manager.find_job(job_id) {
+            let cleanup = self
+                .unregister_shuffle_locked(shuffle_id)
+                .await
+                .with_context(|| format!("unregister shuffle {shuffle_id} for job {job_id}"));
+            result = result.and(cleanup);
+        }
+        result
+    }
+
+    async fn unregister_shuffle_locked(&self, shuffle_id: ShuffleId) -> Result<()> {
         let Some(handle) = self
             .shuffles
             .get(&shuffle_id)
@@ -496,7 +517,9 @@ impl ShuffleManagerService for ManagerRpcService {
 
         let manager = self.get_shuffle_manager(&app_id)?;
         let key = match shuffle_identifier {
-            Some(ShuffleIdentifier::ShuffleKey(key)) => ShuffleKey::JobIdAndStageId(key),
+            Some(ShuffleIdentifier::JobIdAndStageId(key)) => {
+                ShuffleKey::JobIdAndStageId(key.job_id, key.stage_id)
+            }
             Some(ShuffleIdentifier::ShuffleId(id)) => ShuffleKey::ShuffleId(id as ShuffleId),
             None => return Err(Status::invalid_argument("shuffle identifier is missing")),
         };
@@ -557,7 +580,9 @@ impl ShuffleManagerService for ManagerRpcService {
 
         let manager = self.get_shuffle_manager(&app_id)?;
         let key = match request.shuffle_identifier {
-            Some(ShuffleIdentifier::ShuffleKey(key)) => ShuffleKey::JobIdAndStageId(key),
+            Some(ShuffleIdentifier::JobIdAndStageId(key)) => {
+                ShuffleKey::JobIdAndStageId(key.job_id, key.stage_id)
+            }
             Some(ShuffleIdentifier::ShuffleId(id)) => ShuffleKey::ShuffleId(id as ShuffleId),
             None => return Err(Status::invalid_argument("shuffle identifier is missing")),
         };

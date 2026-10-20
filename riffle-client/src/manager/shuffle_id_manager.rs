@@ -4,7 +4,7 @@ use std::sync::atomic::AtomicUsize;
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub enum ShuffleKey {
-    JobIdAndStageId(String),
+    JobIdAndStageId(u64, u64),
     ShuffleId(ShuffleId),
 }
 
@@ -25,7 +25,7 @@ impl ShuffleIdManager {
         self.key_to_id
             .entry(key.clone())
             .or_insert_with(|| match key {
-                ShuffleKey::JobIdAndStageId(_) => self
+                ShuffleKey::JobIdAndStageId(_, _) => self
                     .counter
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst),
                 ShuffleKey::ShuffleId(x) => *x,
@@ -37,7 +37,17 @@ impl ShuffleIdManager {
     pub fn find(&self, key: &ShuffleKey) -> Option<ShuffleId> {
         match key {
             ShuffleKey::ShuffleId(id) => Some(*id),
-            ShuffleKey::JobIdAndStageId(_) => self.key_to_id.get(key).map(|entry| *entry),
+            ShuffleKey::JobIdAndStageId(_, _) => self.key_to_id.get(key).map(|entry| *entry),
         }
+    }
+
+    pub(super) fn find_job(&self, job_id: u64) -> Vec<ShuffleId> {
+        self.key_to_id
+            .iter()
+            .filter_map(|entry| match entry.key() {
+                ShuffleKey::JobIdAndStageId(id, _) if *id == job_id => Some(*entry.value()),
+                _ => None,
+            })
+            .collect()
     }
 }

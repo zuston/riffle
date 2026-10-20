@@ -89,7 +89,7 @@ impl ShuffleHandle {
 
 pub struct WriteTaskInfo {
     pub job_id: u64,
-    pub stage_id: usize,
+    pub stage_id: u64,
     pub map_id: usize,
     pub attempt_id: usize,
     pub num_mappers: usize,
@@ -98,7 +98,7 @@ pub struct WriteTaskInfo {
 
 pub struct ReadTaskInfo {
     pub job_id: u64,
-    pub upstream_stage_id: usize,
+    pub upstream_stage_id: u64,
     pub partitions: Vec<usize>,
 }
 
