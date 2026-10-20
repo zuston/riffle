@@ -77,7 +77,7 @@ impl ReadHandler for MemoryReadHandler<'_> {
             return Ok(None);
         };
         let next_cursor = last.block_id;
-        let mut batch = ReadBatch::new(self.context.partition);
+        let mut batch = ReadBatch::new(self.context.partition, self.context.compression_codec);
         for segment in response.shuffle_data_block_segments {
             self.context.validate_block(
                 segment.block_id,
@@ -94,6 +94,7 @@ impl ReadHandler for MemoryReadHandler<'_> {
                 segment.block_id,
                 response.data.slice(start..end),
                 segment.crc,
+                segment.uncompress_length as usize,
             );
         }
         self.cursor = next_cursor;

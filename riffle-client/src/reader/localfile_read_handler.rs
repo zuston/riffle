@@ -130,11 +130,16 @@ impl ReadHandler for LocalfileReadHandler<'_> {
         };
         let offset = first.offset;
         let data = self.read_range(offset, length).await?;
-        let mut batch = ReadBatch::new(self.context.partition);
+        let mut batch = ReadBatch::new(self.context.partition, self.context.compression_codec);
         for entry in entries {
             let start = (entry.offset - offset) as usize;
             let end = start + entry.length as usize;
-            batch.push(entry.block_id, data.slice(start..end), entry.crc);
+            batch.push(
+                entry.block_id,
+                data.slice(start..end),
+                entry.crc,
+                entry.uncompress_length as usize,
+            );
         }
         Ok(Some(batch))
     }

@@ -1,3 +1,4 @@
+mod codec;
 mod configs;
 mod manager;
 mod mini_cluster;
@@ -5,6 +6,7 @@ mod reader;
 pub mod rpc_client;
 mod writer;
 
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::time::Duration;
@@ -15,6 +17,7 @@ use bytes::Bytes;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 
+pub use codec::CompressionCodec;
 pub use manager::shuffle_id_manager::ShuffleKey;
 pub use manager::{ApplicationOptions, ManagerRpcService, ShuffleManager, ShuffleManagerRef};
 pub use mini_cluster::{MiniCluster, MiniClusterConfig};
@@ -81,6 +84,8 @@ pub struct ShuffleHandle {
     shuffle_id: ShuffleId,
     partition_count: u32,
     assignment: ShuffleAssignment,
+    #[serde(default)]
+    configs: HashMap<String, String>,
 }
 
 impl ShuffleHandle {

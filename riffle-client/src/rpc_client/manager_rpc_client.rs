@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::{Context, Result};
 use riffle_server::ddashmap::DDashMap;
 use tonic::transport::Channel;
@@ -38,7 +40,7 @@ impl ManagerRpcClient {
     pub async fn get_write_shuffle_handle(
         &self,
         task: &WriteTaskInfo,
-    ) -> Result<(ShuffleAssignment, TaskId)> {
+    ) -> Result<(ShuffleAssignment, TaskId, HashMap<String, String>)> {
         let message = GetWriteShuffleHandleRequest {
             app_id: self.app_id.clone(),
             shuffle_identifier: Some(ShuffleIdentifier::JobIdAndStageId(JobIdAndStageId {
@@ -70,7 +72,11 @@ impl ManagerRpcClient {
                 .context("invalid shuffle server address")?;
             assignments.insert(partition_id, vec![endpoint]);
         }
-        Ok((ShuffleAssignment::new(shuffle_id, assignments), task_id))
+        Ok((
+            ShuffleAssignment::new(shuffle_id, assignments),
+            task_id,
+            response.configs,
+        ))
     }
 
     pub async fn report_shuffle_result(
@@ -134,6 +140,7 @@ impl ManagerRpcClient {
                 shuffle_id,
                 partition_count: response.partition_count,
                 assignment: ShuffleAssignment::new(shuffle_id, assignments),
+                configs: response.configs,
             },
             task_ids,
         ))

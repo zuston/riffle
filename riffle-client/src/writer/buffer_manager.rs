@@ -4,15 +4,13 @@ use std::time::Duration;
 
 use anyhow::{ensure, Context, Result};
 use bytes::Bytes;
-use riffle_server::grpc::protobuf::uniffle::ShuffleBlock;
 use riffle_server::id_layout::DEFAULT_BLOCK_ID_LAYOUT;
-use riffle_server::util::get_crc;
 use tokio::time::timeout;
 
 use super::buffer::{Buffer, INITIAL_CAPACITY_BYTES};
 use super::data_pusher::DataPusher;
 use super::memory_tracker::{AcquireResult, MemoryReservation, MemoryTracker};
-use super::BufferedBlock;
+use super::PendingBlock;
 use crate::{PartitionId, ShuffleAssignment, TaskId, BLOCK_SEQUENCE_LIMIT};
 
 const APPEND_TIMEOUT: Duration = Duration::from_secs(10 * 60);
@@ -71,7 +69,7 @@ impl BufferManager {
                     if buffer.is_full() {
                         let buffer = self.buffers.remove(&partition_id).unwrap();
                         let (data, memory) = buffer.clear().unwrap();
-                        let block = self.create_block(partition_id, data, memory)?;
+                        let block = self.create_pending_block(partition_id, data, memory)?;
                         self.pusher.add(vec![block])?;
                     }
                     return Ok(());
@@ -97,7 +95,7 @@ impl BufferManager {
     }
 
     // todo: more fine-grained flushing policy
-    pub fn clear(&mut self) -> Result<Vec<BufferedBlock>> {
+    pub fn clear(&mut self) -> Result<Vec<PendingBlock>> {
         let partitions: Vec<_> = self
             .buffers
             .iter()
@@ -109,7 +107,7 @@ impl BufferManager {
             .map(|partition_id| {
                 let buffer = self.buffers.remove(&partition_id).unwrap();
                 let (data, memory) = buffer.clear().unwrap();
-                self.create_block(partition_id, data, memory)
+                self.create_pending_block(partition_id, data, memory)
             })
             .collect()
     }
@@ -118,12 +116,12 @@ impl BufferManager {
         self.block_ids
     }
 
-    fn create_block(
+    fn create_pending_block(
         &mut self,
         partition_id: PartitionId,
         data: Bytes,
         memory: MemoryReservation,
-    ) -> Result<BufferedBlock> {
+    ) -> Result<PendingBlock> {
         ensure!(
             self.sequence_counter < BLOCK_SEQUENCE_LIMIT,
             "block sequence limit reached"
@@ -134,20 +132,14 @@ impl BufferManager {
             partition_id as i64,
             self.task_id as i64,
         );
-        let block = ShuffleBlock {
-            block_id,
-            length: data.len() as i32,
-            uncompress_length: data.len() as i32,
-            crc: get_crc(&data),
-            data,
-            task_attempt_id: self.task_id as i64,
-        };
         self.sequence_counter += 1;
         self.block_ids.push(block_id);
-        Ok(BufferedBlock {
+        Ok(PendingBlock {
             endpoint,
             partition_id,
-            block,
+            block_id,
+            task_attempt_id: self.task_id as i64,
+            data,
             memory,
         })
     }

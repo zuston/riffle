@@ -7,11 +7,12 @@ use std::sync::Arc;
 
 use anyhow::{ensure, Context, Result};
 use bytes::Bytes;
-use riffle_server::grpc::protobuf::uniffle::ShuffleBlock;
+use riffle_server::client_configs::ClientRssConf;
 
 use self::buffer_manager::BufferManager;
 use self::data_pusher::DataPusher;
 use self::memory_tracker::{MemoryReservation, MemoryTracker};
+use crate::configs::COMPRESSION_CODEC;
 use crate::rpc_client::manager_rpc_client::ManagerRpcClient;
 use crate::rpc_client::writer_rpc_client::WriterRpcClient;
 use crate::{
@@ -23,10 +24,12 @@ const BLOCK_OVERHEAD_BYTES: usize = 128;
 const BUFFER_CAPACITY_BYTES: usize = 64 * 1024 * 1024;
 const PARTITION_ID_LIMIT: usize = 1 << 24;
 
-struct BufferedBlock {
+struct PendingBlock {
     endpoint: Endpoint,
     partition_id: PartitionId,
-    block: ShuffleBlock,
+    block_id: i64,
+    task_attempt_id: i64,
+    data: Bytes,
     memory: MemoryReservation,
 }
 
@@ -55,7 +58,10 @@ impl ShuffleWriter {
             "partition count must be between 1 and {PARTITION_ID_LIMIT}"
         );
         let manager = ManagerRpcClient::new(app_id.clone(), manager_endpoint)?;
-        let (assignment, task_id) = manager.get_write_shuffle_handle(&task).await?;
+        let (assignment, task_id, configs) = manager.get_write_shuffle_handle(&task).await?;
+        let compression_codec = ClientRssConf::from(configs)
+            .get(&COMPRESSION_CODEC)
+            .context("invalid riffle.client.compression.codec; expected lz4 or zstd")?;
         ensure!(
             task_id < TASK_ID_LIMIT,
             "task ID exceeds 23-bit block ID range"
@@ -63,7 +69,7 @@ impl ShuffleWriter {
         let memory = MemoryTracker::new(BUFFER_CAPACITY_BYTES);
         let assignment = Arc::new(assignment);
         let rpc_client = Arc::new(WriterRpcClient::new(app_id, assignment.shuffle_id, task_id));
-        let pusher = Arc::new(DataPusher::new(rpc_client.clone()));
+        let pusher = Arc::new(DataPusher::new(rpc_client.clone(), compression_codec));
         let buffer_manager =
             BufferManager::new(task_id, assignment.clone(), memory, pusher.clone());
         Ok(Self {
@@ -76,7 +82,8 @@ impl ShuffleWriter {
         })
     }
 
-    /// Accepts one payload into the bounded send buffer. Finish waits for server acknowledgements.
+    /// Accepts one payload into the bounded send buffer. Blocks use the user's configured codec
+    /// off the async runtime before sending. Finish waits for compression and server acknowledgements.
     /// Cancellation while waiting for capacity does not enqueue data.
     pub async fn write(&mut self, partition_id: PartitionId, data: Bytes) -> Result<()> {
         self.pusher.check_failure()?;
@@ -111,7 +118,7 @@ impl ShuffleWriter {
     }
 
     /// Cancels local work without marking the task complete. Accepted remote blocks
-    /// remain until shuffle or application cleanup.
+    /// remain until shuffle or application cleanup. Running codec jobs finish in the background.
     pub async fn abort(self) -> Result<()> {
         drop(self.buffer_manager);
         Arc::into_inner(self.pusher)
