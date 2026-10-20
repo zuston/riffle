@@ -1,4 +1,4 @@
-use crate::app_manager::{AppManagerRef, SHUFFLE_SERVER_ID, SHUFFLE_SERVER_IP};
+use crate::app_manager::AppManagerRef;
 use crate::config::Config;
 use crate::grpc::protobuf::uniffle::coordinator_server_client::CoordinatorServerClient;
 use crate::grpc::protobuf::uniffle::{
@@ -9,8 +9,8 @@ use crate::metric::SERVICE_IS_HEALTHY;
 use crate::runtime::manager::RuntimeManager;
 use crate::runtime::JoinHandle;
 use crate::server_state_manager::ServerStateManager;
-use crate::service_tags_manager::SERVICE_TAGS_MANAGER_REF;
-use crate::util::now_timestamp_as_millis;
+use crate::service_tags_manager::ServiceTagsManager;
+use crate::util::{generate_worker_uid, get_local_ip, now_timestamp_as_millis};
 use await_tree::InstrumentAwait;
 use log::{error, info};
 use std::time::Duration;
@@ -25,6 +25,7 @@ impl HeartbeatTask {
         app_manager: &AppManagerRef,
         health_service: &HealthService,
         server_state_manager: &ServerStateManager,
+        service_tags_manager: &ServiceTagsManager,
         mut shutdown: broadcast::Receiver<()>,
     ) -> anyhow::Result<Option<JoinHandle<()>>> {
         if config.coordinator_quorum.is_empty() {
@@ -35,6 +36,7 @@ impl HeartbeatTask {
         let app_manager = app_manager.clone();
         let health_service = health_service.clone();
         let server_state_manager = server_state_manager.clone();
+        let service_tags_manager = service_tags_manager.clone();
 
         let grpc_port = config.grpc_port;
         let urpc_port = config.urpc_port.unwrap_or(0);
@@ -42,8 +44,8 @@ impl HeartbeatTask {
 
         let interval_seconds = config.heartbeat_interval_seconds;
 
-        let ip = SHUFFLE_SERVER_IP.get().unwrap().to_string();
-        let id = SHUFFLE_SERVER_ID.get().unwrap().to_string();
+        let ip = get_local_ip()?.to_string();
+        let id = generate_worker_uid(config);
         info!("Machine ip: {}", &ip);
 
         let shuffle_server_id = ShuffleServerId {
@@ -72,9 +74,6 @@ impl HeartbeatTask {
             anyhow::bail!("No active coordinator server found");
         }
 
-        let service_tags_manager = SERVICE_TAGS_MANAGER_REF
-            .get()
-            .expect("ServiceTagsManager must be initialized before heartbeat task");
         info!("Service tags: {:?}", service_tags_manager.all_tags());
 
         let task = runtime_manager.default_runtime.spawn_with_await_tree(

@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 riffle-server = { workspace = true }
+riffle-coordinator = { path = "../riffle-coordinator", default-features = false }
 anyhow = { workspace = true }
 bytes = { workspace = true }
 croaring = { workspace = true }
@@ -23,5 +24,4 @@ rand = { workspace = true }
 tonic-prost-build = { workspace = true }
 
 [dev-dependencies]
-riffle-coordinator = { path = "../riffle-coordinator", default-features = false }
 tempfile = { workspace = true }
