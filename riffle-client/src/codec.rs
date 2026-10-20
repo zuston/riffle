@@ -1,31 +1,18 @@
 use std::str::FromStr;
-use std::sync::Arc;
 
 use anyhow::{bail, ensure, Context, Result};
 use bytes::Bytes;
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Semaphore;
 
 use crate::{MAX_MESSAGE_BYTES, RECORD_HEADER_BYTES};
-
-// todo: use the customized option to control the parallelism of codec tasks, instead of using the default available parallelism.
-static CODEC_PERMITS: Lazy<Arc<Semaphore>> = Lazy::new(|| {
-    let parallelism = std::thread::available_parallelism().map_or(1, |n| n.get());
-    Arc::new(Semaphore::new(parallelism.saturating_sub(1).max(1)))
-});
 
 pub(crate) async fn run_codec_task<T: Send + 'static>(
     task: impl FnOnce() -> Result<T> + Send + 'static,
 ) -> Result<T> {
-    let permit = CODEC_PERMITS.clone().acquire_owned().await?;
-    tokio::task::spawn_blocking(move || {
-        // A running blocking task cannot be aborted; retain its permit and input until it exits.
-        let _permit = permit;
-        task()
-    })
-    .await
-    .context("shuffle codec task failed")?
+    // todo: add concurrency limitation
+    tokio::task::spawn_blocking(task)
+        .await
+        .context("shuffle codec task failed")?
 }
 
 pub trait Codec: Send + Sync {
