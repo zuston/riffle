@@ -1,0 +1,27 @@
+[package]
+name = "riffle-client"
+version = "0.28.0"
+edition = "2021"
+
+[dependencies]
+riffle-server = { workspace = true }
+anyhow = { workspace = true }
+bytes = { workspace = true }
+croaring = { workspace = true }
+futures = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true, features = ["net"] }
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
+prost = { workspace = true }
+once_cell = { workspace = true }
+rand = { workspace = true }
+
+[build-dependencies]
+tonic-prost-build = { workspace = true }
+
+[dev-dependencies]
+riffle-coordinator = { path = "../riffle-coordinator", default-features = false }
+tempfile = { workspace = true }

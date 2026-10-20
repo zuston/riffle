@@ -70,14 +70,31 @@ impl ClientRssConf {
         Self { properties }
     }
 
-    pub fn get<T: std::str::FromStr + Clone + Send + Sync + 'static>(
+    pub fn properties(&self) -> &HashMap<String, String> {
+        &self.properties
+    }
+
+    pub fn get<T: Clone + Send + Sync + 'static>(
         &self,
         option: &ClientConfigOption<T>,
     ) -> Option<T> {
         match self.properties.get(&option.key) {
             None => option.default.as_ref().cloned(),
-            Some(s) => s.parse::<T>().ok(),
+            Some(s) => (option.parser)(s),
         }
+    }
+
+    /// Returns the configured value, or the option's default if it is not set.
+    ///
+    /// # Panics
+    /// Panics if the option is unset and has no default, or its configured value cannot be parsed.
+    #[track_caller]
+    pub fn get_or_panic<T: Clone + Send + Sync + 'static>(
+        &self,
+        option: &ClientConfigOption<T>,
+    ) -> T {
+        self.get(option)
+            .unwrap_or_else(|| panic!("Configuration '{}' is missing or invalid", option.key))
     }
 
     pub fn get_byte_size(&self, option: &ClientConfigOption<String>) -> Option<u64> {
@@ -90,14 +107,19 @@ pub struct ClientConfigOption<T: Clone + Send + Sync + 'static> {
     key: String,
     default: Option<T>,
     description: Option<String>,
+    parser: fn(&str) -> Option<T>,
 }
 
 impl<T: Clone + Send + Sync + 'static> ClientConfigOption<T> {
-    pub fn key(key: &str) -> Self {
+    pub fn key(key: &str) -> Self
+    where
+        T: std::str::FromStr,
+    {
         ClientConfigOption {
             key: key.to_string(),
             default: None,
             description: None,
+            parser: |value| value.parse().ok(),
         }
     }
     pub fn default_value(mut self, value: T) -> Self {
@@ -114,10 +136,53 @@ impl<T: Clone + Send + Sync + 'static> ClientConfigOption<T> {
         self.key.clone()
     }
 }
+
+impl<T: std::str::FromStr + Clone + Send + Sync + 'static> ClientConfigOption<Vec<T>> {
+    pub fn list_key(key: &str) -> Self {
+        Self {
+            key: key.to_string(),
+            default: None,
+            description: None,
+            parser: |value| {
+                value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|item| !item.is_empty())
+                    .map(str::parse)
+                    .collect::<Result<Vec<T>, _>>()
+                    .ok()
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn test_list_key_string_values() {
+        let option = ClientConfigOption::<Vec<String>>::list_key("test.list");
+        for (value, expected) in [
+            ("server-1:19999", vec!["server-1:19999"]),
+            (
+                "server-2:19999,server-1:19999,server-2:19999",
+                vec!["server-2:19999", "server-1:19999", "server-2:19999"],
+            ),
+            (
+                " , server-1:19999, ,\tserver-2:19999\n, ",
+                vec!["server-1:19999", "server-2:19999"],
+            ),
+        ] {
+            let conf = ClientRssConf::from(HashMap::from([(option.get_key(), value.to_string())]));
+            assert_eq!(
+                conf.get(&option),
+                Some(expected.into_iter().map(str::to_string).collect()),
+                "value: {value:?}"
+            );
+        }
+    }
 
     #[test]
     fn test_get_memory_data_option() {
@@ -172,5 +237,18 @@ mod tests {
     fn test_no_default_value() {
         let conf = ClientRssConf::default();
         assert_eq!(None, conf.get(&READ_AHEAD_BATCH_SIZE));
+    }
+
+    #[test]
+    #[should_panic(expected = "Configuration 'test.required' is missing or invalid")]
+    fn test_get_or_panic() {
+        // should pass
+        let option = ClientConfigOption::key("test.number").default_value(10u64);
+        let conf = ClientRssConf::default();
+        assert_eq!(conf.get_or_panic(&option), 10);
+
+        // should panic
+        let option = ClientConfigOption::<String>::key("test.required");
+        ClientRssConf::default().get_or_panic(&option);
     }
 }

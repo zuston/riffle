@@ -1,0 +1,66 @@
+syntax = "proto3";
+package riffle.client;
+
+service ShuffleManagerService {
+  rpc GetWriteShuffleHandle(GetWriteShuffleHandleRequest) returns (GetWriteShuffleHandleResponse);
+  rpc ReportShuffleResult(ReportShuffleResultRequest) returns (ReportShuffleResultResponse);
+
+  rpc GetReadShuffleHandle(GetReadShuffleHandleRequest) returns (GetReadShuffleHandleResponse);
+}
+
+message GetWriteShuffleHandleRequest {
+  string app_id = 1;
+  oneof shuffle_identifier {
+    JobIdAndStageId job_id_and_stage_id = 2;
+    uint64 shuffle_id = 3;
+  }
+  uint64 map_id = 4;
+  uint64 attempt_id = 5;
+  uint32 num_partitions = 6;
+}
+
+message GetWriteShuffleHandleResponse {
+  uint64 shuffle_id = 1;
+  repeated PartitionAssignment assignments = 2;
+  uint64 task_id = 3;
+}
+
+message GetReadShuffleHandleRequest {
+  string app_id = 1;
+  oneof shuffle_identifier {
+    JobIdAndStageId job_id_and_stage_id = 2;
+    uint64 shuffle_id = 3;
+  }
+  repeated uint64 partition_ids = 4;
+}
+
+message GetReadShuffleHandleResponse {
+  uint64 shuffle_id = 1;
+  repeated PartitionAssignment assignments = 2;
+  repeated uint64 task_ids = 3;
+  uint32 partition_count = 4;
+}
+
+message PartitionAssignment {
+  int32 partition_id = 1;
+  Endpoint endpoint = 2;
+}
+
+message Endpoint {
+  string host = 1;
+  int32 grpc_port = 2;
+  optional int32 urpc_port = 3;
+}
+
+message ReportShuffleResultRequest {
+  string app_id = 1;
+  uint64 shuffle_id = 2;
+  uint64 task_id = 3;
+}
+
+message ReportShuffleResultResponse {}
+
+message JobIdAndStageId {
+  uint64 job_id = 1;
+  uint64 stage_id = 2;
+}
