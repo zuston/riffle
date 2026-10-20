@@ -110,7 +110,7 @@ pub struct ShuffleRecord {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ShuffleAssignment {
     pub shuffle_id: ShuffleId,
-    // partitionId -> assigned servers
+    // partition_id -> assigned servers
     pub assignments: DDashMap<PartitionId, Vec<Endpoint>>,
 }
 

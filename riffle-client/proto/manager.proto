@@ -42,7 +42,7 @@ message GetReadShuffleHandleResponse {
 }
 
 message PartitionAssignment {
-  int32 partitionId = 1;
+  int32 partition_id = 1;
   Endpoint endpoint = 2;
 }
 
