@@ -1,7 +1,7 @@
 use fastrace::collector::SpanContext;
 use fastrace::future::FutureExt;
 use fastrace::Span;
-use std::future::Future;
+use futures::future::BoxFuture;
 use std::task::{Context, Poll};
 use tonic::body::Body;
 use tonic::codegen::http::Request;
@@ -41,7 +41,7 @@ where
     type Response = S::Response;
     type Error = S::Error;
 
-    type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -58,6 +58,6 @@ where
         let parent = SpanContext::random();
         let span = Span::root(uri, parent);
 
-        async move { inner.call(req).await }.in_span(span)
+        Box::pin(async move { inner.call(req).await }.in_span(span))
     }
 }

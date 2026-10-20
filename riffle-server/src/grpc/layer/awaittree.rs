@@ -1,6 +1,6 @@
 use crate::await_tree::AwaitTreeDelegator;
 use await_tree::span;
-use futures::Future;
+use futures::future::BoxFuture;
 use std::task::{Context, Poll};
 use tonic::body::Body;
 use tonic::codegen::http::Request;
@@ -55,7 +55,7 @@ where
     type Response = S::Response;
     type Error = S::Error;
 
-    type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -69,9 +69,9 @@ where
         let mut inner = std::mem::replace(&mut self.inner, clone);
 
         let manager = self.manager.clone();
-        async move {
+        Box::pin(async move {
             let root = manager.register(span!("{}", req.uri().path())).await;
             root.instrument(inner.call(req)).await
-        }
+        })
     }
 }
