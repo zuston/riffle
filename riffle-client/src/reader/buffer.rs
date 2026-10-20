@@ -63,7 +63,7 @@ impl ReadBatch {
             };
             let block_id = block.block_id;
             let codec = self.codec;
-            // Expand only one block at a time, even when a compressed page holds many blocks.
+            // todo: make this async and run in a separate thread pool to avoid blocking the main thread
             self.records = run_codec_task(move || {
                 ensure!(get_crc(&block.data) == block.crc, "block CRC mismatch");
                 let data = codec.decode(block.data, block.uncompress_length)?;
