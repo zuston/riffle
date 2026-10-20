@@ -12,7 +12,6 @@ pub(super) const READ_BATCH_BYTES: i32 = 14 * 1024 * 1024;
 
 #[tonic::async_trait]
 pub(super) trait ReadHandler: Send {
-    /// None exhausts this handler; only the hybrid handler guarantees partition completeness.
     async fn read(&mut self) -> Result<Option<ReadBatch>>;
 }
 
@@ -20,7 +19,6 @@ pub(super) trait ReadHandler: Send {
 pub(super) struct PartitionReadContext<'a> {
     pub shuffle: &'a ShuffleHandle,
     pub partition: PartitionId,
-    // todo: support multi server read
     pub endpoint: Endpoint,
     pub client: ServerClient,
     pub compression_codec: CompressionCodec,

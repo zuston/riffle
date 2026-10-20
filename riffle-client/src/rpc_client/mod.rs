@@ -17,9 +17,23 @@ use tonic::{Code, Request, Response, Status};
 
 const MAX_ATTEMPTS: usize = 8;
 
+#[derive(Debug)]
 pub(crate) struct AttemptError {
     error: anyhow::Error,
     retryable: bool,
+    pub(crate) reassignment_status: Option<i32>,
+}
+
+impl std::fmt::Display for AttemptError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{:#}", self.error)
+    }
+}
+
+impl std::error::Error for AttemptError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.error.as_ref())
+    }
 }
 
 pub(crate) fn request<T>(message: T) -> Request<T> {
@@ -34,6 +48,15 @@ pub(crate) async fn call<T>(
     match tokio::time::timeout(RPC_TIMEOUT, future).await {
         Ok(Ok(response)) => Ok(response.into_inner()),
         Ok(Err(status)) => Err(AttemptError {
+            reassignment_status: match status.code() {
+                Code::DeadlineExceeded => Some(StatusCode::Timeout as i32),
+                Code::Unavailable
+                | Code::ResourceExhausted
+                | Code::Aborted
+                | Code::Internal
+                | Code::Unknown => Some(StatusCode::InternalError as i32),
+                _ => None,
+            },
             retryable: matches!(
                 status.code(),
                 Code::Unavailable
@@ -48,6 +71,7 @@ pub(crate) async fn call<T>(
         Err(error) => Err(AttemptError {
             error: error.into(),
             retryable: true,
+            reassignment_status: Some(StatusCode::Timeout as i32),
         }),
     }
 }
@@ -62,6 +86,7 @@ pub(crate) fn ensure_attempt_success(
     }
     Err(AttemptError {
         error: anyhow!("{operation} failed with status {status}: {message}"),
+        reassignment_status: is_reassignable_status(status).then_some(status),
         retryable: matches!(
             StatusCode::try_from(status),
             Ok(StatusCode::NoBuffer
@@ -70,6 +95,23 @@ pub(crate) fn ensure_attempt_success(
                 | StatusCode::Timeout)
         ),
     })
+}
+
+pub(crate) fn is_reassignable_status(status: i32) -> bool {
+    matches!(
+        StatusCode::try_from(status),
+        Ok(StatusCode::NoBuffer
+            | StatusCode::InvalidStorage
+            | StatusCode::NoRegister
+            | StatusCode::NoPartition
+            | StatusCode::InternalError
+            | StatusCode::Timeout
+            | StatusCode::NoBufferForHugePartition
+            | StatusCode::ExceedHugePartitionHardLimit
+            | StatusCode::AppNotFound
+            | StatusCode::InternalNotRetryError
+            | StatusCode::HardSplitFromServer)
+    )
 }
 
 pub(crate) async fn retry<T, F, Fut>(
@@ -87,7 +129,7 @@ where
             Err(error) => error,
         };
         if !error.retryable || number == MAX_ATTEMPTS {
-            return Err(error.error.context(format!(
+            return Err(anyhow::Error::new(error).context(format!(
                 "{operation} at {} failed after {number} attempt(s)",
                 endpoint.uri(),
             )));

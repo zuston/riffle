@@ -1,8 +1,9 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use anyhow::{ensure, Context, Result};
 use futures::{stream, StreamExt, TryStreamExt};
 use prost::Message;
+use riffle_server::ddashmap::DDashMap;
 use riffle_server::grpc::protobuf::uniffle::{
     PartitionToBlockIds, ReportShuffleResultRequest, RequireBufferRequest, SendShuffleDataRequest,
     ShuffleBlock, ShuffleData,
@@ -13,9 +14,7 @@ use riffle_server::util::now_timestamp_as_millis;
 use crate::rpc_client::{
     call, ensure_attempt_success, request, retry, ServerClient, ServerConnOptions, ServerCoonPool,
 };
-use crate::{
-    ApplicationId, Endpoint, PartitionId, ShuffleAssignment, ShuffleId, TaskId, MAX_MESSAGE_BYTES,
-};
+use crate::{ApplicationId, Endpoint, PartitionId, ShuffleId, TaskId, MAX_MESSAGE_BYTES};
 
 pub(crate) const MAX_IN_FLIGHT_REQUESTS: usize = 20;
 const REPORT_BLOCKS_PER_REQUEST: usize = 16 * 1024;
@@ -25,6 +24,8 @@ pub struct WriterRpcClient {
     shuffle_id: ShuffleId,
     task_id: TaskId,
     conn: ServerCoonPool,
+    // Reassignment can leave successful blocks on several servers for one partition.
+    written_blocks: DDashMap<Endpoint, Vec<i64>>,
 }
 
 impl WriterRpcClient {
@@ -34,6 +35,7 @@ impl WriterRpcClient {
             shuffle_id,
             task_id,
             conn: ServerCoonPool::new(),
+            written_blocks: DDashMap::default(),
         }
     }
 
@@ -44,8 +46,10 @@ impl WriterRpcClient {
     ) -> Result<()> {
         let mut partitions: BTreeMap<i32, Vec<ShuffleBlock>> = BTreeMap::new();
         let mut payload_bytes = 0;
+        let mut block_ids = Vec::with_capacity(blocks.len());
         for (partition_id, block) in blocks {
             payload_bytes += block.data.len();
+            block_ids.push(block.block_id);
             partitions
                 .entry(partition_id as i32)
                 .or_default()
@@ -101,24 +105,28 @@ impl WriterRpcClient {
                 "shuffle write failed, app={}, shuffle={}, task={}",
                 self.app_id, self.shuffle_id, self.task_id
             )
-        })
+        })?;
+        self.written_blocks
+            .entry(endpoint)
+            .or_default()
+            .extend(block_ids);
+        Ok(())
     }
 
-    pub async fn report_results(
-        &self,
-        assignment: &ShuffleAssignment,
-        block_ids: &[i64],
-    ) -> Result<()> {
-        let mut servers: HashMap<Endpoint, BTreeMap<PartitionId, Vec<i64>>> = HashMap::new();
-        for &block_id in block_ids {
-            let partition = DEFAULT_BLOCK_ID_LAYOUT.get_partition_id(block_id) as PartitionId;
-            servers
-                .entry(assignment.get_endpoint(partition)?)
-                .or_default()
-                .entry(partition)
-                .or_default()
-                .push(block_id);
-        }
+    pub async fn report_results(&self) -> Result<()> {
+        let servers: Vec<_> = self
+            .written_blocks
+            .iter()
+            .map(|entry| {
+                let mut partitions: BTreeMap<PartitionId, Vec<i64>> = BTreeMap::new();
+                for &block_id in entry.value() {
+                    let partition =
+                        DEFAULT_BLOCK_ID_LAYOUT.get_partition_id(block_id) as PartitionId;
+                    partitions.entry(partition).or_default().push(block_id);
+                }
+                (entry.key().clone(), partitions)
+            })
+            .collect();
         stream::iter(servers)
             .map(|(endpoint, partitions)| self.report_server(endpoint, partitions))
             .buffer_unordered(MAX_IN_FLIGHT_REQUESTS)

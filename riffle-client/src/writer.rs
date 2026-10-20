@@ -69,7 +69,12 @@ impl ShuffleWriter {
         let memory = MemoryTracker::new(BUFFER_CAPACITY_BYTES);
         let assignment = Arc::new(assignment);
         let rpc_client = Arc::new(WriterRpcClient::new(app_id, assignment.shuffle_id, task_id));
-        let pusher = Arc::new(DataPusher::new(rpc_client.clone(), compression_codec));
+        let pusher = Arc::new(DataPusher::new(
+            rpc_client.clone(),
+            manager.clone(),
+            assignment.clone(),
+            compression_codec,
+        ));
         let buffer_manager =
             BufferManager::new(task_id, assignment.clone(), memory, pusher.clone());
         Ok(Self {
@@ -103,15 +108,13 @@ impl ShuffleWriter {
     pub async fn finish(mut self) -> Result<()> {
         self.pusher.check_failure()?;
         self.pusher.add(self.buffer_manager.clear()?)?;
-        let block_ids = self.buffer_manager.into_block_ids();
+        drop(self.buffer_manager);
         // Consuming the buffer manager leaves the writer as the only pusher owner.
         Arc::into_inner(self.pusher)
             .context("shuffle data pusher is still shared")?
             .finish()
             .await?;
-        self.rpc_client
-            .report_results(&self.assignment, &block_ids)
-            .await?;
+        self.rpc_client.report_results().await?;
         self.manager
             .report_shuffle_result(self.assignment.shuffle_id, self.task_id)
             .await

@@ -22,7 +22,6 @@ pub struct BufferManager {
     assignment: Arc<ShuffleAssignment>,
     task_id: TaskId,
     sequence_counter: u32,
-    block_ids: Vec<i64>,
 }
 
 impl BufferManager {
@@ -39,7 +38,6 @@ impl BufferManager {
             assignment,
             task_id,
             sequence_counter: 0,
-            block_ids: Vec::new(),
         }
     }
 
@@ -112,10 +110,6 @@ impl BufferManager {
             .collect()
     }
 
-    pub fn into_block_ids(self) -> Vec<i64> {
-        self.block_ids
-    }
-
     fn create_pending_block(
         &mut self,
         partition_id: PartitionId,
@@ -133,7 +127,6 @@ impl BufferManager {
             self.task_id as i64,
         );
         self.sequence_counter += 1;
-        self.block_ids.push(block_id);
         Ok(PendingBlock {
             endpoint,
             partition_id,

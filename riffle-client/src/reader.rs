@@ -3,11 +3,12 @@ mod data_fetcher;
 mod hybrid_read_handler;
 mod localfile_read_handler;
 mod memory_read_handler;
+mod multi_servers_read_handler;
 mod read_handler;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use anyhow::{Context, Result};
+use anyhow::{ensure, Context, Result};
 use croaring::{JvmLegacy, Treemap};
 use futures::StreamExt;
 use riffle_server::client_configs::ClientRssConf;
@@ -18,6 +19,7 @@ use tokio::task::JoinSet;
 
 use self::buffer::ReadBatch;
 use self::data_fetcher::DataFetcher;
+use self::multi_servers_read_handler::ServerBlockIds;
 use crate::configs::COMPRESSION_CODEC;
 use crate::rpc_client::manager_rpc_client::ManagerRpcClient;
 use crate::rpc_client::{
@@ -44,17 +46,30 @@ impl ShuffleReader {
             .get(&COMPRESSION_CODEC)
             .context("invalid riffle.client.compression.codec; expected lz4 or zstd")?;
         let expected_task_ids: HashSet<_> = expected_task_ids.into_iter().collect();
-        let mut partitions_to_block_ids: BTreeMap<PartitionId, HashSet<i64>> = read_task_info
+        let mut partitions_to_block_ids: BTreeMap<PartitionId, ServerBlockIds> = read_task_info
             .partitions
             .into_iter()
-            .map(|partition| (partition, HashSet::new()))
+            .map(|partition| (partition, HashMap::new()))
             .collect();
         let mut servers: HashMap<Endpoint, Vec<i32>> = HashMap::new();
-        for &partition in partitions_to_block_ids.keys() {
-            servers
-                .entry(shuffle.assignment.get_endpoint(partition)?)
-                .or_default()
-                .push(partition as i32);
+        for (&partition, block_ids) in &mut partitions_to_block_ids {
+            let endpoints = shuffle
+                .assignment
+                .assignments
+                .get(&partition)
+                .with_context(|| format!("partition {partition} has no assignment"))?;
+            ensure!(
+                !endpoints.is_empty(),
+                "partition {partition} has no assigned servers"
+            );
+            for endpoint in endpoints.iter() {
+                if block_ids.insert(endpoint.clone(), HashSet::new()).is_none() {
+                    servers
+                        .entry(endpoint.clone())
+                        .or_default()
+                        .push(partition as i32);
+                }
+            }
         }
 
         let clients = ServerCoonPool::new();
@@ -88,11 +103,15 @@ impl ShuffleReader {
             collect_block_ids(
                 &response.serialized_bitmap,
                 &expected_task_ids,
+                &endpoint,
                 &mut partitions_to_block_ids,
             )
             .with_context(|| format!("invalid shuffle result from {}", endpoint.uri()))?;
         }
-        partitions_to_block_ids.retain(|_, expected| !expected.is_empty());
+        partitions_to_block_ids.retain(|_, servers| {
+            servers.retain(|_, expected| !expected.is_empty());
+            !servers.is_empty()
+        });
         // Reserve the queued slot before fetching, leaving one batch for the consumer.
         let (sender, batches) = mpsc::channel(1);
         Ok(Self {
@@ -143,7 +162,8 @@ impl ShuffleReader {
 fn collect_block_ids(
     serialized_bitmap: &[u8],
     expected_task_ids: &HashSet<TaskId>,
-    partitions: &mut BTreeMap<PartitionId, HashSet<i64>>,
+    endpoint: &Endpoint,
+    partitions: &mut BTreeMap<PartitionId, ServerBlockIds>,
 ) -> Result<()> {
     // The server returns empty bytes for a partition with no reported blocks.
     if serialized_bitmap.is_empty() {
@@ -158,7 +178,10 @@ fn collect_block_ids(
         }
         let block_id = block_id as i64;
         let partition_id = DEFAULT_BLOCK_ID_LAYOUT.get_partition_id(block_id) as PartitionId;
-        if let Some(expected) = partitions.get_mut(&partition_id) {
+        if let Some(expected) = partitions
+            .get_mut(&partition_id)
+            .and_then(|servers| servers.get_mut(endpoint))
+        {
             expected.insert(block_id);
         }
     }

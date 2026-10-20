@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use anyhow::{Context, Result};
+use anyhow::{ensure, Context, Result};
 use riffle_server::ddashmap::DDashMap;
 use tonic::transport::Channel;
 
@@ -8,14 +8,15 @@ use crate::rpc::get_write_shuffle_handle_request::ShuffleIdentifier;
 use crate::rpc::shuffle_manager_service_client::ShuffleManagerServiceClient;
 use crate::rpc::{
     GetReadShuffleHandleRequest, GetWriteShuffleHandleRequest, JobIdAndStageId,
-    ReportShuffleResultRequest,
+    PartitionAssignment, ReassignPartition, ReassignPartitionsRequest, ReportShuffleResultRequest,
 };
 use crate::rpc_client::{call, request, retry};
 use crate::{
-    ApplicationId, Endpoint, ReadTaskInfo, ShuffleAssignment, ShuffleHandle, ShuffleId, TaskId,
-    WriteTaskInfo, MAX_MESSAGE_BYTES, RPC_TIMEOUT,
+    ApplicationId, Endpoint, PartitionId, ReadTaskInfo, ShuffleAssignment, ShuffleHandle,
+    ShuffleId, TaskId, WriteTaskInfo, MAX_MESSAGE_BYTES, RPC_TIMEOUT,
 };
 
+#[derive(Clone)]
 pub struct ManagerRpcClient {
     app_id: ApplicationId,
     endpoint: Endpoint,
@@ -61,22 +62,55 @@ impl ManagerRpcClient {
         let shuffle_id = response.shuffle_id as usize;
         let task_id = response.task_id as usize;
         let assignments = DDashMap::with_capacity(response.assignments.len());
-        for assignment in response.assignments {
-            let partition_id = assignment.partition_id as usize;
-            let endpoint = assignment.endpoint.context("assignment has no endpoint")?;
-            let endpoint = Endpoint {
-                host: endpoint.host,
-                grpc_port: endpoint.grpc_port as u16,
-            };
-            tonic::transport::Endpoint::from_shared(endpoint.uri())
-                .context("invalid shuffle server address")?;
-            assignments.insert(partition_id, vec![endpoint]);
+        for (partition, endpoints) in parse_assignments(response.assignments)? {
+            assignments.insert(partition, endpoints);
         }
         Ok((
             ShuffleAssignment::new(shuffle_id, assignments),
             task_id,
             response.configs,
         ))
+    }
+
+    pub async fn reassign_partitions(
+        &self,
+        shuffle_id: ShuffleId,
+        partitions: &[PartitionId],
+        failed_endpoint: &Endpoint,
+        failure_status_code: i32,
+    ) -> Result<HashMap<PartitionId, Vec<Endpoint>>> {
+        let message = ReassignPartitionsRequest {
+            app_id: self.app_id.clone(),
+            shuffle_id: shuffle_id as u64,
+            reassign_partitions: partitions
+                .iter()
+                .map(|&partition_id| ReassignPartition {
+                    partition_id: partition_id as u64,
+                    endpoint: Some(crate::rpc::Endpoint {
+                        host: failed_endpoint.host.clone(),
+                        grpc_port: i32::from(failed_endpoint.grpc_port),
+                        urpc_port: None,
+                    }),
+                    failure_status_code,
+                })
+                .collect(),
+        };
+        let response = retry(&self.endpoint, "reassignPartitions", || {
+            let mut client = self.client.clone();
+            let message = message.clone();
+            async move { call(client.reassign_partitions(request(message))).await }
+        })
+        .await?;
+        let assignments = parse_assignments(response.assignments)?;
+        let expected: HashSet<_> = partitions.iter().copied().collect();
+        ensure!(
+            assignments.len() == expected.len()
+                && assignments
+                    .keys()
+                    .all(|partition| expected.contains(partition)),
+            "reassignment does not cover exactly the requested partitions"
+        );
+        Ok(assignments)
     }
 
     pub async fn report_shuffle_result(
@@ -110,7 +144,14 @@ impl ManagerRpcClient {
                 job_id: task.job_id,
                 stage_id: task.upstream_stage_id,
             })),
-            partition_ids: task.partitions.iter().map(|&id| id as u64).collect(),
+            partition_ids: task
+                .partitions
+                .iter()
+                .copied()
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .map(|id| id as u64)
+                .collect(),
         };
         let response = retry(&self.endpoint, "getReadShuffleHandle", || {
             let mut client = self.client.clone();
@@ -125,14 +166,8 @@ impl ManagerRpcClient {
             .map(|id| id as usize)
             .collect();
         let assignments = DDashMap::with_capacity(response.assignments.len());
-        for assignment in response.assignments {
-            let partition_id = assignment.partition_id as usize;
-            let endpoint = assignment.endpoint.context("assignment has no endpoint")?;
-            let endpoint = Endpoint {
-                host: endpoint.host,
-                grpc_port: endpoint.grpc_port as u16,
-            };
-            assignments.insert(partition_id, vec![endpoint]);
+        for (partition, endpoints) in parse_assignments(response.assignments)? {
+            assignments.insert(partition, endpoints);
         }
         Ok((
             ShuffleHandle {
@@ -145,4 +180,45 @@ impl ManagerRpcClient {
             task_ids,
         ))
     }
+}
+
+fn parse_assignments(
+    assignments: Vec<PartitionAssignment>,
+) -> Result<HashMap<PartitionId, Vec<Endpoint>>> {
+    let mut parsed = HashMap::with_capacity(assignments.len());
+    for assignment in assignments {
+        let partition = PartitionId::try_from(assignment.partition_id)
+            .context("negative assignment partition ID")?;
+        ensure!(
+            partition < 1 << 24,
+            "assignment partition ID exceeds block ID range"
+        );
+        ensure!(
+            !assignment.endpoints.is_empty(),
+            "assignment has no endpoints"
+        );
+        let endpoints = assignment
+            .endpoints
+            .into_iter()
+            .map(|endpoint| {
+                let endpoint = Endpoint {
+                    host: endpoint.host,
+                    grpc_port: u16::try_from(endpoint.grpc_port)
+                        .context("invalid shuffle server port")?,
+                };
+                ensure!(
+                    !endpoint.host.is_empty() && endpoint.grpc_port != 0,
+                    "invalid shuffle server address"
+                );
+                tonic::transport::Endpoint::from_shared(endpoint.uri())
+                    .context("invalid shuffle server address")?;
+                Ok(endpoint)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        ensure!(
+            parsed.insert(partition, endpoints).is_none(),
+            "duplicate assignment for partition {partition}"
+        );
+    }
+    Ok(parsed)
 }
