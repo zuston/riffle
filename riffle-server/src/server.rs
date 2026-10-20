@@ -101,6 +101,7 @@ impl Server {
             &app_manager,
             &health_service,
             &server_state_manager,
+            &service_tags_manager,
             shutdown_tx.subscribe(),
         )
         .await?;

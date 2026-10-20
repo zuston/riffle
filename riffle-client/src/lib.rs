@@ -1,5 +1,6 @@
 mod configs;
 mod manager;
+mod mini_cluster;
 mod reader;
 pub mod rpc_client;
 mod writer;
@@ -16,6 +17,7 @@ use serde::{Deserialize, Serialize};
 
 pub use manager::shuffle_id_manager::ShuffleKey;
 pub use manager::{ApplicationOptions, ManagerRpcService, ShuffleManager, ShuffleManagerRef};
+pub use mini_cluster::{MiniCluster, MiniClusterConfig};
 pub use reader::ShuffleReader;
 use riffle_server::ddashmap::DDashMap;
 use riffle_server::grpc::protobuf::uniffle::StatusCode;
