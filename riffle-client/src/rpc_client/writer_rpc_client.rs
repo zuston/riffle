@@ -39,6 +39,14 @@ impl WriterRpcClient {
         }
     }
 
+    pub(crate) fn app_id(&self) -> &str {
+        &self.app_id
+    }
+
+    pub(crate) fn task_id(&self) -> TaskId {
+        self.task_id
+    }
+
     pub async fn send_batch(
         &self,
         endpoint: Endpoint,

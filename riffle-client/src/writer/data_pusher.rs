@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, ensure, Context, Result};
 use futures::future::{join_all, BoxFuture};
+use log::info;
 use riffle_server::grpc::protobuf::uniffle::ShuffleBlock;
 use riffle_server::util::get_crc;
 use tokio::sync::{mpsc, watch, Mutex, Semaphore};
@@ -223,6 +224,13 @@ impl BatchSender {
         // A manager request must not occupy a slot needed by healthy servers.
         drop(permit);
         let Err(error) = result else {
+            if reassignments > 0 {
+                info!(
+                    "Writer resend succeeded, app={}, shuffle={}, task={}, server={}, blocks={}, reassignments={reassignments}",
+                    self.rpc_client.app_id(), self.assignment.shuffle_id,
+                    self.rpc_client.task_id(), endpoint.uri(), blocks.len()
+                );
+            }
             return Ok(());
         };
         let Some(status) = error
@@ -231,11 +239,23 @@ impl BatchSender {
         else {
             return Err(error);
         };
+        info!(
+            "Writer shuffle send requires reassignment, app={}, shuffle={}, task={}, failed_server={}, failure_status={status}, reassignments={reassignments}/{MAX_REASSIGNMENTS}, blocks={}, error={error:#}",
+            self.rpc_client.app_id(), self.assignment.shuffle_id,
+            self.rpc_client.task_id(), endpoint.uri(), blocks.len()
+        );
         if reassignments == MAX_REASSIGNMENTS {
             return Err(error.context("shuffle reassignment limit reached"));
         }
         self.reassign(&endpoint, &blocks, status)
             .await
+            .inspect_err(|error| {
+                info!(
+                    "Writer partition reassignment failed, app={}, shuffle={}, task={}, failed_server={}, error={error:#}",
+                    self.rpc_client.app_id(), self.assignment.shuffle_id,
+                    self.rpc_client.task_id(), endpoint.uri()
+                );
+            })
             .with_context(|| format!("reassignment after write failure: {error:#}"))?;
         // Route only this server's failed blocks again, preserving IDs and reservations.
         self.send_blocks(blocks, reassignments + 1).await
@@ -256,9 +276,19 @@ impl BatchSender {
         }
         // Another worker may already have obtained the replacement.
         if partitions.is_empty() {
+            info!(
+                "Writer skipped reassignment because routing already changed, app={}, shuffle={}, task={}, failed_server={}",
+                self.rpc_client.app_id(), self.assignment.shuffle_id,
+                self.rpc_client.task_id(), failed_endpoint.uri()
+            );
             return Ok(());
         }
         let partitions: Vec<_> = partitions.into_iter().collect();
+        info!(
+            "Writer requesting partition reassignment, app={}, shuffle={}, task={}, partitions={partitions:?}, failed_server={}, failure_status={status}",
+            self.rpc_client.app_id(), self.assignment.shuffle_id,
+            self.rpc_client.task_id(), failed_endpoint.uri()
+        );
         let assignments = self
             .manager
             .reassign_partitions(
@@ -284,6 +314,11 @@ impl BatchSender {
                 "reassignment lost endpoint history for partition {partition}"
             );
         }
+        info!(
+            "Writer applying partition reassignment, app={}, shuffle={}, task={}, failed_server={}, assignments={assignments:?}",
+            self.rpc_client.app_id(), self.assignment.shuffle_id,
+            self.rpc_client.task_id(), failed_endpoint.uri()
+        );
         for (partition, endpoints) in assignments {
             self.assignment.assignments.insert(partition, endpoints);
         }

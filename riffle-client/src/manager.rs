@@ -310,12 +310,25 @@ impl ShuffleManager {
                 }
                 excluded.insert(endpoint.clone());
                 if history.last() == Some(&endpoint) {
+                    info!(
+                        "Manager scheduling partition reassignment, app={}, shuffle={shuffle_id}, partition={partition}, failed_server={}, failure_status={}",
+                        self.app_id, endpoint.uri(), failure.failure_status_code
+                    );
                     pending.push(partition);
+                } else {
+                    info!(
+                        "Manager reusing current partition assignment, app={}, shuffle={shuffle_id}, partition={partition}, failed_server={}, failure_status={}, history={:?}",
+                        self.app_id, endpoint.uri(), failure.failure_status_code, history.value()
+                    );
                 }
             }
             (requested, pending, excluded)
         };
         if !pending.is_empty() {
+            info!(
+                "Manager selecting replacement servers, app={}, shuffle={shuffle_id}, partitions={pending:?}, excluded_servers={excluded_endpoints:?}",
+                self.app_id
+            );
             // The coordinator assigns a dense range; map its slots back to the failed partitions.
             let replacement = self
                 .coordinator_client
@@ -329,6 +342,10 @@ impl ShuffleManager {
                 })
                 .await
                 .map_err(|error| {
+                    info!(
+                        "Manager replacement selection failed, app={}, shuffle={shuffle_id}, error={error:#}",
+                        self.app_id
+                    );
                     Status::unavailable(format!("select replacement servers: {error:#}"))
                 })?;
             let replacements = pending
@@ -352,10 +369,18 @@ impl ShuffleManager {
             )
             .await
             .map_err(|error| {
+                info!(
+                    "Manager replacement registration failed, app={}, shuffle={shuffle_id}, replacements={replacements:?}, error={error:#}",
+                    self.app_id
+                );
                 Status::unavailable(format!("register replacement servers: {error:#}"))
             })?;
 
             // Publish only after every replacement is registered; readers retain the old locations.
+            info!(
+                "Manager applying partition reassignment after registration, app={}, shuffle={shuffle_id}, replacements={replacements:?}",
+                self.app_id
+            );
             let shuffle = self
                 .shuffles
                 .get_mut(&shuffle_id)
