@@ -288,10 +288,18 @@ mod test {
 
             // Queued events for active partitions do not occupy execution slots.
             gates[1].add_permits(1);
-            assert_eq!(message(2, 0), next_started().await);
-            gates[2].add_permits(1);
-            assert_eq!(message(1, 1), next_started().await);
-            gates[1].add_permits(1);
+            // Partition 2 may already be dequeued; otherwise the older (1, 1) goes first.
+            // Both must run while partition 0 remains blocked.
+            let mut remaining = vec![message(1, 1), message(2, 0)];
+            while !remaining.is_empty() {
+                let started = next_started().await;
+                let index = remaining
+                    .iter()
+                    .position(|expected| *expected == started)
+                    .expect("only the expected idle-partition events should start");
+                remaining.remove(index);
+                gates[started.0.shuffle_id as usize].add_permits(1);
+            }
 
             // The hot partition's queued events remain FIFO.
             gates[0].add_permits(3);
