@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use bytes::Bytes;
 use futures::TryStreamExt;
 use riffle_client::{
-    Endpoint, ManagerRpcService, MiniCluster, MiniClusterConfig, ReadTaskInfo,
+    CompressionCodec, Endpoint, ManagerRpcService, MiniCluster, MiniClusterConfig, ReadTaskInfo,
     ShuffleManagerServiceServer, ShuffleReader, ShuffleWriter, WriteTaskInfo,
 };
 use tokio::net::TcpListener;
@@ -14,6 +14,15 @@ use tokio_stream::wrappers::TcpListenerStream;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mini_cluster_client_write_read() -> Result<()> {
+    client_write_read(CompressionCodec::Lz4).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mini_cluster_client_write_read_zstd() -> Result<()> {
+    client_write_read(CompressionCodec::Zstd).await
+}
+
+async fn client_write_read(compression_codec: CompressionCodec) -> Result<()> {
     tokio::time::timeout(Duration::from_secs(30), async {
         let mut cluster = MiniCluster::new(MiniClusterConfig { num_servers: 2 });
         cluster.start().await?;
@@ -34,6 +43,10 @@ async fn mini_cluster_client_write_read() -> Result<()> {
                     (
                         "riffle.client.assignment.serverNumber".to_owned(),
                         "2".to_owned(),
+                    ),
+                    (
+                        "riffle.client.compression.codec".to_owned(),
+                        compression_codec.as_str().to_owned(),
                     ),
                 ]),
             )
@@ -64,7 +77,7 @@ async fn mini_cluster_client_write_read() -> Result<()> {
                     map_id,
                     attempt_id: 0,
                     num_mappers: 2,
-                    num_partitions: 4,
+                    num_partitions: 5,
                 },
             )
             .await?;
@@ -79,6 +92,9 @@ async fn mini_cluster_client_write_read() -> Result<()> {
                     expected.push((partition_id, data));
                 }
             }
+            // An empty record becomes a block that grows under either codec.
+            writer.write(4, Bytes::new()).await?;
+            expected.push((4, Bytes::new()));
             writer.finish().await?;
         }
 
@@ -96,7 +112,7 @@ async fn mini_cluster_client_write_read() -> Result<()> {
             ReadTaskInfo {
                 job_id: 1,
                 upstream_stage_id: 1,
-                partitions: vec![0, 1, 2, 3],
+                partitions: vec![0, 1, 2, 3, 4],
             },
         )
         .await?;

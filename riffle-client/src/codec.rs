@@ -69,29 +69,12 @@ impl FromStr for CompressionCodec {
     }
 }
 
-pub struct NoOpCodec;
-
-impl Codec for NoOpCodec {
-    fn encode(&self, block: Bytes) -> Result<Bytes> {
-        Ok(block)
-    }
-
-    fn decode(&self, block: Bytes, uncompress_length: usize) -> Result<Bytes> {
-        ensure!(block.len() == uncompress_length, "block length mismatch");
-        Ok(block)
-    }
-}
-
 /// LZ4 blocks use the existing uncompress_length metadata, without a size prefix.
-/// Equal stored and uncompressed lengths identify raw blocks, including older writes.
 pub struct Lz4Codec;
 
 impl Codec for Lz4Codec {
     fn encode(&self, block: Bytes) -> Result<Bytes> {
         let compressed = lz4_flex::block::compress(&block);
-        if compressed.len() >= block.len() {
-            return NoOpCodec.encode(block);
-        }
         // Do not retain the compressor's worst-case allocation for a small result.
         Ok(Bytes::from(compressed.into_boxed_slice()))
     }
@@ -101,11 +84,8 @@ impl Codec for Lz4Codec {
             (RECORD_HEADER_BYTES..=MAX_MESSAGE_BYTES).contains(&uncompress_length),
             "invalid uncompressed block length"
         );
-        if block.len() == uncompress_length {
-            return NoOpCodec.decode(block, uncompress_length);
-        }
         ensure!(
-            !block.is_empty() && block.len() < uncompress_length,
+            !block.is_empty() && block.len() <= MAX_MESSAGE_BYTES,
             "invalid compressed block length"
         );
         let mut decoded = vec![0; uncompress_length];
@@ -119,15 +99,15 @@ impl Codec for Lz4Codec {
     }
 }
 
-/// Zstd frames use the default compression level (3), with the same raw-block fallback as LZ4.
+/// Zstd frames use the default compression level (3).
 pub struct ZstdCodec;
+
+pub const ZSTD_LEVEL: i32 = 3;
 
 impl Codec for ZstdCodec {
     fn encode(&self, block: Bytes) -> Result<Bytes> {
-        let compressed = zstd::bulk::compress(&block, 0).context("Zstd compression failed")?;
-        if compressed.len() >= block.len() {
-            return NoOpCodec.encode(block);
-        }
+        let compressed =
+            zstd::bulk::compress(&block, ZSTD_LEVEL).context("Zstd compression failed")?;
         Ok(Bytes::from(compressed.into_boxed_slice()))
     }
 
@@ -136,11 +116,8 @@ impl Codec for ZstdCodec {
             (RECORD_HEADER_BYTES..=MAX_MESSAGE_BYTES).contains(&uncompress_length),
             "invalid uncompressed block length"
         );
-        if block.len() == uncompress_length {
-            return NoOpCodec.decode(block, uncompress_length);
-        }
         ensure!(
-            !block.is_empty() && block.len() < uncompress_length,
+            !block.is_empty() && block.len() <= MAX_MESSAGE_BYTES,
             "invalid compressed block length"
         );
         let mut decoded = vec![0; uncompress_length];

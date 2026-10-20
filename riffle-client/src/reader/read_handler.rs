@@ -46,8 +46,7 @@ impl PartitionReadContext<'_> {
         );
         ensure!(
             uncompress_length >= RECORD_HEADER_BYTES as i32
-                && uncompress_length as usize <= MAX_MESSAGE_BYTES
-                && length <= uncompress_length,
+                && uncompress_length as usize <= MAX_MESSAGE_BYTES,
             "invalid uncompressed length for block {block_id}"
         );
         Ok(())
