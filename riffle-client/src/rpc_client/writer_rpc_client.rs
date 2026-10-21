@@ -1,12 +1,12 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{ensure, Context, Result};
 use futures::{stream, StreamExt, TryStreamExt};
 use prost::Message;
 use riffle_server::ddashmap::DDashMap;
 use riffle_server::grpc::protobuf::uniffle::{
-    PartitionToBlockIds, ReportShuffleResultRequest, RequireBufferRequest, SendShuffleDataRequest,
-    ShuffleBlock, ShuffleData,
+    PartitionStats, PartitionToBlockIds, ReportShuffleResultRequest, RequireBufferRequest,
+    SendShuffleDataRequest, ShuffleBlock, ShuffleData, TaskAttemptIdToRecords,
 };
 use riffle_server::id_layout::DEFAULT_BLOCK_ID_LAYOUT;
 use riffle_server::util::now_timestamp_as_millis;
@@ -121,7 +121,8 @@ impl WriterRpcClient {
         Ok(())
     }
 
-    pub async fn report_results(&self) -> Result<()> {
+    /// Reports each partition's full task count to every server holding its blocks.
+    pub async fn report_results(&self, num_records: &HashMap<PartitionId, u64>) -> Result<()> {
         let servers: Vec<_> = self
             .written_blocks
             .iter()
@@ -136,7 +137,7 @@ impl WriterRpcClient {
             })
             .collect();
         stream::iter(servers)
-            .map(|(endpoint, partitions)| self.report_server(endpoint, partitions))
+            .map(|(endpoint, partitions)| self.report_server(endpoint, partitions, num_records))
             .buffer_unordered(MAX_IN_FLIGHT_REQUESTS)
             .try_for_each(|()| async { Ok(()) })
             .await
@@ -152,6 +153,7 @@ impl WriterRpcClient {
         &self,
         endpoint: Endpoint,
         partitions: BTreeMap<PartitionId, Vec<i64>>,
+        num_records: &HashMap<PartitionId, u64>,
     ) -> Result<()> {
         let client = self
             .conn
@@ -166,6 +168,12 @@ impl WriterRpcClient {
         };
         let mut report_count = 0;
         for (partition, block_ids) in partitions {
+            let record_number = i64::try_from(
+                *num_records
+                    .get(&partition)
+                    .with_context(|| format!("missing record count for partition {partition}"))?,
+            )
+            .context("record count exceeds protocol i64 range")?;
             let mut remaining = block_ids.as_slice();
             while !remaining.is_empty() {
                 let count = remaining
@@ -176,11 +184,20 @@ impl WriterRpcClient {
                     partition_id: partition as i32,
                     block_ids: chunk.to_vec(),
                 });
+                // Report the full task count on every server/chunk; server storage overwrites retries.
+                report.partition_stats.push(PartitionStats {
+                    partition_id: partition as i32,
+                    task_attempt_id_to_records: vec![TaskAttemptIdToRecords {
+                        task_attempt_id: self.task_id as i64,
+                        record_number,
+                    }],
+                });
                 report_count += count;
                 remaining = rest;
                 if report_count == REPORT_BLOCKS_PER_REQUEST {
                     report_chunk(&endpoint, &client, &report).await?;
                     report.partition_to_block_ids.clear();
+                    report.partition_stats.clear();
                     report_count = 0;
                 }
             }

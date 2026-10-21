@@ -32,7 +32,7 @@ mod rpc {
 }
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
-const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_MESSAGE_BYTES: usize = 1024 * 1024 * 1024;
 /// Maximum size of one record passed to [`ShuffleWriter::write`].
 pub const MAX_PAYLOAD_BYTES: usize = 16 * 1024 * 1024;
 const RECORD_HEADER_BYTES: usize = std::mem::size_of::<u32>();

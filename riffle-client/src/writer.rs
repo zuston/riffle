@@ -3,6 +3,7 @@ mod buffer_manager;
 mod data_pusher;
 mod memory_tracker;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{ensure, Context, Result};
@@ -40,6 +41,7 @@ pub struct ShuffleWriter {
     assignment: Arc<ShuffleAssignment>,
     buffer_manager: BufferManager,
     pusher: Arc<DataPusher>,
+    num_records: HashMap<PartitionId, u64>,
 }
 
 impl ShuffleWriter {
@@ -84,11 +86,13 @@ impl ShuffleWriter {
             assignment,
             buffer_manager,
             pusher,
+            num_records: HashMap::new(),
         })
     }
 
-    /// Accepts one payload into the bounded send buffer. Blocks use the user's configured codec
-    /// off the async runtime before sending. Finish waits for compression and server acknowledgements.
+    /// Accepts one record (including an empty payload) into the bounded send buffer.
+    /// Blocks use the user's configured codec off the async runtime before sending.
+    /// Finish waits for compression and server acknowledgements.
     /// Cancellation while waiting for capacity does not enqueue data.
     pub async fn write(&mut self, partition_id: PartitionId, data: Bytes) -> Result<()> {
         self.pusher.check_failure()?;
@@ -100,10 +104,12 @@ impl ShuffleWriter {
         self.buffer_manager
             .append(partition_id, data)
             .await
-            .map_err(|error| self.pusher.fail(error))
+            .map_err(|error| self.pusher.fail(error))?;
+        *self.num_records.entry(partition_id).or_default() += 1;
+        Ok(())
     }
 
-    /// Drains accepted writes and reports their block IDs before marking the task complete.
+    /// Drains accepted writes and reports block IDs and record counts before marking the task complete.
     /// This acknowledges server acceptance, not fsync or replication.
     pub async fn finish(mut self) -> Result<()> {
         self.pusher.check_failure()?;
@@ -114,7 +120,7 @@ impl ShuffleWriter {
             .context("shuffle data pusher is still shared")?
             .finish()
             .await?;
-        self.rpc_client.report_results().await?;
+        self.rpc_client.report_results(&self.num_records).await?;
         self.manager
             .report_shuffle_result(self.assignment.shuffle_id, self.task_id)
             .await

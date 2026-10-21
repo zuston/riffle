@@ -4,9 +4,14 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use futures::TryStreamExt;
+use riffle_client::rpc_client::manager_rpc_client::ManagerRpcClient;
+use riffle_client::rpc_client::{ServerConnOptions, ServerCoonPool};
 use riffle_client::{
     CompressionCodec, Endpoint, ManagerRpcService, MiniCluster, MiniClusterConfig, ReadTaskInfo,
     ShuffleManagerServiceServer, ShuffleReader, ShuffleWriter, WriteTaskInfo,
+};
+use riffle_server::grpc::protobuf::uniffle::{
+    PartitionStats, ReportShuffleResultRequest, StatusCode, TaskAttemptIdToRecords,
 };
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -108,7 +113,7 @@ async fn client_write_read(compression_codec: CompressionCodec) -> Result<()> {
 
         let reader = ShuffleReader::new(
             app_id.to_owned(),
-            manager_endpoint,
+            manager_endpoint.clone(),
             ReadTaskInfo {
                 job_id: 1,
                 upstream_stage_id: 1,
@@ -121,6 +126,88 @@ async fn client_write_read(compression_codec: CompressionCodec) -> Result<()> {
             .map_ok(|record| (record.partition_id, record.data))
             .try_collect()
             .await?;
+
+        // Verify subset reads aggregate both mappers and deduplicate requested partition IDs.
+        // Empty partitions contribute zero records; empty payloads still count as records.
+        let client = ManagerRpcClient::new(app_id.to_owned(), manager_endpoint.clone())?;
+        let subset = ReadTaskInfo {
+            job_id: 1,
+            upstream_stage_id: 1,
+            partitions: vec![0, 3, 3, 4],
+        };
+        let subset_records: Vec<_> =
+            ShuffleReader::new(app_id.to_owned(), manager_endpoint.clone(), subset)
+                .await?
+                .stream()
+                .try_collect()
+                .await?;
+        assert_eq!(subset_records.len(), 8);
+
+        // Report one record without any server blocks: EOF must not silently succeed.
+        let (assignment, task_id, _) = client
+            .get_write_shuffle_handle(&WriteTaskInfo {
+                job_id: 1,
+                stage_id: 1,
+                map_id: 2,
+                attempt_id: 0,
+                num_mappers: 3,
+                num_partitions: 5,
+            })
+            .await?;
+        let response = ServerCoonPool::new()
+            .get_or_create_client(ServerConnOptions::new(assignment.get_endpoint(3)?))?
+            .report_shuffle_result(ReportShuffleResultRequest {
+                app_id: app_id.to_owned(),
+                shuffle_id: assignment.shuffle_id as i32,
+                task_attempt_id: task_id as i64,
+                bitmap_num: 1,
+                partition_to_block_ids: vec![],
+                partition_stats: vec![PartitionStats {
+                    partition_id: 3,
+                    task_attempt_id_to_records: vec![TaskAttemptIdToRecords {
+                        task_attempt_id: task_id as i64,
+                        record_number: 1,
+                    }],
+                }],
+            })
+            .await?
+            .into_inner();
+        assert_eq!(response.status, StatusCode::Success as i32);
+        // Statistics from an unfinished upstream task must not affect the read snapshot.
+        let mut unfinished = ShuffleReader::new(
+            app_id.to_owned(),
+            manager_endpoint.clone(),
+            ReadTaskInfo {
+                job_id: 1,
+                upstream_stage_id: 1,
+                partitions: vec![3],
+            },
+        )
+        .await?
+        .stream();
+        assert!(unfinished.try_next().await?.is_none());
+        client
+            .report_shuffle_result(assignment.shuffle_id, task_id)
+            .await?;
+        let mut missing = ShuffleReader::new(
+            app_id.to_owned(),
+            manager_endpoint,
+            ReadTaskInfo {
+                job_id: 1,
+                upstream_stage_id: 1,
+                partitions: vec![3],
+            },
+        )
+        .await?
+        .stream();
+        let error = missing
+            .try_next()
+            .await
+            .err()
+            .context("missing records were not detected")?;
+        assert!(error
+            .to_string()
+            .contains("partition 3: expected 1 records, read 0"));
 
         manager.close().await?;
         drop(manager);
