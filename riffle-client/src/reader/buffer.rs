@@ -35,6 +35,10 @@ impl ReadBatch {
         self.blocks.is_empty() && self.records.is_empty()
     }
 
+    pub(super) fn block_ids(&self) -> impl Iterator<Item = i64> + '_ {
+        self.blocks.iter().map(|block| block.block_id)
+    }
+
     pub(super) fn push(&mut self, block_id: i64, data: Bytes, crc: i64, uncompress_length: usize) {
         self.blocks.push_back(ReadBlock {
             block_id,

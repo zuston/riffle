@@ -26,7 +26,7 @@ use crate::manager::shuffle_id_manager::{ShuffleIdManager, ShuffleKey};
 use crate::manager::shuffle_task_manager::{ShuffleTaskManager, TaskKey};
 use crate::rpc::shuffle_manager_service_server::ShuffleManagerService;
 use crate::rpc_client::coordinator_rpc_client::{CoordinatorQuorumClient, GetAssignmentContext};
-use crate::rpc_client::{ServerClient, ServerConnOptions, ServerCoonPool};
+use crate::rpc_client::{is_reassignable_status, ServerClient, ServerConnOptions, ServerCoonPool};
 use crate::{ensure_success, rpc, ApplicationId, Endpoint, PartitionId, ShuffleHandle, ShuffleId};
 
 pub struct ApplicationOptions {
@@ -189,6 +189,7 @@ impl ShuffleManager {
                 partition_count,
                 required_tags: self.assignment_tags.clone(),
                 required_server_number: self.assignment_server_num,
+                excluded_endpoints: HashSet::new(),
             })
             .await?;
 
@@ -198,6 +199,31 @@ impl ShuffleManager {
             .iter()
             .flat_map(|entry| entry.value().clone())
             .collect();
+        self.register_servers(shuffle_id, endpoints).await?;
+
+        // store the shuffle handle
+        let handle = ShuffleHandle {
+            app_id: self.app_id.clone(),
+            shuffle_id,
+            partition_count,
+            assignment,
+            configs: self.configs.properties().clone(),
+        };
+        self.shuffles.insert(
+            shuffle_id,
+            RegisteredShuffle {
+                handle: handle.clone(),
+                shuffle_task_manager: ShuffleTaskManager::new(),
+            },
+        );
+        Ok(handle)
+    }
+
+    async fn register_servers(
+        &self,
+        shuffle_id: ShuffleId,
+        endpoints: HashSet<Endpoint>,
+    ) -> Result<()> {
         let results = join_all(endpoints.into_iter().map(|endpoint| async move {
             let mut client = self
                 .server_conn
@@ -216,24 +242,164 @@ impl ShuffleManager {
             ensure_success("registerShuffle", response.status, &response.ret_msg)
         }))
         .await;
-        results.into_iter().collect::<Result<()>>()?;
+        results.into_iter().collect()
+    }
 
-        // store the shuffle handle
-        let handle = ShuffleHandle {
-            app_id: self.app_id.clone(),
-            shuffle_id,
-            partition_count,
-            assignment,
-            configs: self.configs.properties().clone(),
+    async fn reassign_partitions(
+        &self,
+        shuffle_id: ShuffleId,
+        failures: Vec<rpc::ReassignPartition>,
+    ) -> Result<Vec<rpc::PartitionAssignment>, Status> {
+        // Serialize assignment changes with registration and cleanup.
+        let _guard = self.lifecycle_lock.lock().await;
+        if self.closed.load(Ordering::Acquire) {
+            return Err(Status::failed_precondition("application is closed"));
+        }
+        if failures.is_empty() {
+            return Err(Status::invalid_argument("reassignment has no partitions"));
+        }
+        let (requested, pending, excluded_endpoints) = {
+            let shuffle = self.shuffles.get(&shuffle_id).ok_or_else(|| {
+                Status::not_found(format!("shuffle {shuffle_id} is not registered"))
+            })?;
+            let mut requested = HashSet::new();
+            let mut pending = Vec::new();
+            let mut excluded = HashSet::new();
+            for entry in shuffle.handle.assignment.assignments.iter() {
+                let history = entry.value();
+                excluded.extend(
+                    history
+                        .iter()
+                        .take(history.len().saturating_sub(1))
+                        .cloned(),
+                );
+            }
+            for failure in failures {
+                let partition = PartitionId::try_from(failure.partition_id)
+                    .map_err(|_| Status::invalid_argument("partition ID exceeds usize range"))?;
+                if partition >= shuffle.handle.partition_count as usize
+                    || !requested.insert(partition)
+                {
+                    return Err(Status::invalid_argument(
+                        "invalid or duplicate reassignment partition",
+                    ));
+                }
+                if !is_reassignable_status(failure.failure_status_code) {
+                    return Err(Status::invalid_argument(
+                        "status does not permit reassignment",
+                    ));
+                }
+                let endpoint = failure
+                    .endpoint
+                    .ok_or_else(|| Status::invalid_argument("failed endpoint is missing"))?;
+                let endpoint = Endpoint {
+                    host: endpoint.host,
+                    grpc_port: u16::try_from(endpoint.grpc_port)
+                        .map_err(|_| Status::invalid_argument("invalid failed endpoint port"))?,
+                };
+                let history = shuffle
+                    .handle
+                    .assignment
+                    .assignments
+                    .get(&partition)
+                    .ok_or_else(|| Status::internal("partition has no assignment"))?;
+                if !history.contains(&endpoint) {
+                    return Err(Status::invalid_argument(
+                        "failed endpoint was not assigned to partition",
+                    ));
+                }
+                excluded.insert(endpoint.clone());
+                if history.last() == Some(&endpoint) {
+                    info!(
+                        "Manager scheduling partition reassignment, app={}, shuffle={shuffle_id}, partition={partition}, failed_server={}, failure_status={}",
+                        self.app_id, endpoint.uri(), failure.failure_status_code
+                    );
+                    pending.push(partition);
+                } else {
+                    info!(
+                        "Manager reusing current partition assignment, app={}, shuffle={shuffle_id}, partition={partition}, failed_server={}, failure_status={}, history={:?}",
+                        self.app_id, endpoint.uri(), failure.failure_status_code, history.value()
+                    );
+                }
+            }
+            (requested, pending, excluded)
         };
-        self.shuffles.insert(
-            shuffle_id,
-            RegisteredShuffle {
-                handle: handle.clone(),
-                shuffle_task_manager: ShuffleTaskManager::new(),
-            },
-        );
-        Ok(handle)
+        if !pending.is_empty() {
+            info!(
+                "Manager selecting replacement servers, app={}, shuffle={shuffle_id}, partitions={pending:?}, excluded_servers={excluded_endpoints:?}",
+                self.app_id
+            );
+            // The coordinator assigns a dense range; map its slots back to the failed partitions.
+            let replacement = self
+                .coordinator_client
+                .get_assignment(GetAssignmentContext {
+                    app_id: self.app_id.clone(),
+                    shuffle_id,
+                    partition_count: pending.len() as u32,
+                    required_tags: self.assignment_tags.clone(),
+                    required_server_number: self.assignment_server_num,
+                    excluded_endpoints,
+                })
+                .await
+                .map_err(|error| {
+                    info!(
+                        "Manager replacement selection failed, app={}, shuffle={shuffle_id}, error={error:#}",
+                        self.app_id
+                    );
+                    Status::unavailable(format!("select replacement servers: {error:#}"))
+                })?;
+            let replacements = pending
+                .into_iter()
+                .enumerate()
+                .map(|(slot, partition)| {
+                    replacement
+                        .get_endpoint(slot)
+                        .map(|endpoint| (partition, endpoint))
+                })
+                .collect::<Result<Vec<_>>>()
+                .map_err(|error| {
+                    Status::internal(format!("invalid replacement assignment: {error:#}"))
+                })?;
+            self.register_servers(
+                shuffle_id,
+                replacements
+                    .iter()
+                    .map(|(_, endpoint)| endpoint.clone())
+                    .collect(),
+            )
+            .await
+            .map_err(|error| {
+                info!(
+                    "Manager replacement registration failed, app={}, shuffle={shuffle_id}, replacements={replacements:?}, error={error:#}",
+                    self.app_id
+                );
+                Status::unavailable(format!("register replacement servers: {error:#}"))
+            })?;
+
+            // Publish only after every replacement is registered; readers retain the old locations.
+            info!(
+                "Manager applying partition reassignment after registration, app={}, shuffle={shuffle_id}, replacements={replacements:?}",
+                self.app_id
+            );
+            let shuffle = self
+                .shuffles
+                .get_mut(&shuffle_id)
+                .ok_or_else(|| Status::not_found("shuffle is not registered"))?;
+            for (partition, endpoint) in replacements {
+                shuffle
+                    .handle
+                    .assignment
+                    .assignments
+                    .get_mut(&partition)
+                    .ok_or_else(|| Status::internal("partition has no assignment"))?
+                    .push(endpoint);
+            }
+        }
+        // Stale or retried failures return the current history without allocating another server.
+        self.shuffles
+            .get(&shuffle_id)
+            .ok_or_else(|| Status::not_found("shuffle is not registered"))?
+            .assignments(requested)
     }
 
     pub async fn unregister_shuffle(&self, shuffle_id: ShuffleId) -> Result<()> {
@@ -366,19 +532,23 @@ impl RegisteredShuffle {
                         "partition {partition_id} is out of range"
                     )));
                 }
-                let endpoint = self
+                let endpoints = self
                     .handle
                     .assignment
-                    .get_endpoint(partition_id)
-                    .map_err(|error| Status::internal(error.to_string()))?;
+                    .assignments
+                    .get(&partition_id)
+                    .ok_or_else(|| Status::internal("partition has no assignment"))?;
                 Ok(rpc::PartitionAssignment {
                     partition_id: i32::try_from(partition_id)
                         .map_err(|_| Status::internal("partition ID exceeds protocol i32 range"))?,
-                    endpoint: Some(rpc::Endpoint {
-                        host: endpoint.host,
-                        grpc_port: i32::from(endpoint.grpc_port),
-                        urpc_port: None,
-                    }),
+                    endpoints: endpoints
+                        .iter()
+                        .map(|endpoint| rpc::Endpoint {
+                            host: endpoint.host.clone(),
+                            grpc_port: i32::from(endpoint.grpc_port),
+                            urpc_port: None,
+                        })
+                        .collect(),
                 })
             })
             .collect()
@@ -506,6 +676,21 @@ macro_rules! checked_task_id {
 
 #[tonic::async_trait]
 impl ShuffleManagerService for ManagerRpcService {
+    async fn reassign_partitions(
+        &self,
+        request: Request<rpc::ReassignPartitionsRequest>,
+    ) -> Result<Response<rpc::ReassignPartitionsResponse>, Status> {
+        let request = request.into_inner();
+        let shuffle_id = request.shuffle_id as usize;
+        let manager = self.get_shuffle_manager(&request.app_id)?;
+        let assignments = manager
+            .reassign_partitions(shuffle_id, request.reassign_partitions)
+            .await?;
+        Ok(Response::new(rpc::ReassignPartitionsResponse {
+            assignments,
+        }))
+    }
+
     async fn get_write_shuffle_handle(
         &self,
         request: Request<rpc::GetWriteShuffleHandleRequest>,

@@ -139,13 +139,14 @@ impl ShuffleAssignment {
         }
     }
 
+    /// Returns the newest write destination; earlier endpoints retain historical blocks.
     pub fn get_endpoint(&self, partition_id: PartitionId) -> Result<Endpoint> {
         let endpoints = self
             .assignments
             .get(&partition_id)
             .with_context(|| format!("partition {partition_id} has no assignment"))?;
         endpoints
-            .first()
+            .last()
             .cloned()
             .with_context(|| format!("partition {partition_id} has no assigned server"))
     }

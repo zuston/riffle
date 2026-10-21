@@ -1,11 +1,30 @@
 syntax = "proto3";
 package riffle.client;
 
+import "grpc/protobuf/uniffle.proto";
+
 service ShuffleManagerService {
   rpc GetWriteShuffleHandle(GetWriteShuffleHandleRequest) returns (GetWriteShuffleHandleResponse);
+  rpc ReassignPartitions(ReassignPartitionsRequest) returns (ReassignPartitionsResponse);
   rpc ReportShuffleResult(ReportShuffleResultRequest) returns (ReportShuffleResultResponse);
 
   rpc GetReadShuffleHandle(GetReadShuffleHandleRequest) returns (GetReadShuffleHandleResponse);
+}
+
+message ReassignPartitionsRequest {
+  string app_id = 1;
+  uint64 shuffle_id = 2;
+  repeated ReassignPartition reassign_partitions = 3;
+}
+
+message ReassignPartition {
+  uint64 partition_id = 1;
+  Endpoint endpoint = 2;
+  rss.common.StatusCode failure_status_code = 3;
+}
+
+message ReassignPartitionsResponse {
+  repeated PartitionAssignment assignments = 1;
 }
 
 message GetWriteShuffleHandleRequest {
@@ -45,7 +64,7 @@ message GetReadShuffleHandleResponse {
 
 message PartitionAssignment {
   int32 partition_id = 1;
-  Endpoint endpoint = 2;
+  repeated Endpoint endpoints = 2;
 }
 
 message Endpoint {

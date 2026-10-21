@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use log::info;
 
 use super::buffer::ReadBatch;
@@ -75,6 +75,9 @@ impl ReadHandler for HybridReadHandler<'_> {
         if self.accepted_block_ids == self.expected_block_ids {
             return Ok(None);
         }
-        self.read_next().await.map(Some)
+        self.read_next()
+            .await
+            .map(Some)
+            .with_context(|| format!("shuffle read failed at {}", self.context.endpoint.uri()))
     }
 }

@@ -12,6 +12,7 @@ use riffle_server::grpc::protobuf::uniffle::coordinator_server_client::Coordinat
 use riffle_server::grpc::protobuf::uniffle::{
     AppHeartBeatRequest, ApplicationInfoRequest, GetShuffleServerRequest,
 };
+use std::collections::HashSet;
 use tonic::transport::Channel;
 
 pub struct GetAssignmentContext {
@@ -20,6 +21,7 @@ pub struct GetAssignmentContext {
     pub partition_count: u32,
     pub required_tags: Vec<String>,
     pub required_server_number: i32,
+    pub excluded_endpoints: HashSet<Endpoint>,
 }
 
 #[derive(Clone)]
@@ -97,10 +99,26 @@ impl CoordinatorQuorumClient {
         let mut last_error = anyhow!("no coordinator available for assignment");
         for mut client in self.clients.iter().cloned() {
             let result = async {
-                let response = client
-                    .get_shuffle_assignments(request.clone())
-                    .await?
-                    .into_inner();
+                let mut request = request.clone();
+                if !context.excluded_endpoints.is_empty() {
+                    // Server IDs can include the URPC port; resolve them through the coordinator.
+                    let servers = client
+                        .get_shuffle_server_list(())
+                        .await?
+                        .into_inner()
+                        .servers;
+                    request.faulty_server_ids = servers
+                        .into_iter()
+                        .filter(|server| {
+                            context.excluded_endpoints.iter().any(|endpoint| {
+                                endpoint.host == server.ip
+                                    && i32::from(endpoint.grpc_port) == server.port
+                            })
+                        })
+                        .map(|server| server.id)
+                        .collect();
+                }
+                let response = client.get_shuffle_assignments(request).await?.into_inner();
                 ensure_success("getShuffleAssignments", response.status, &response.ret_msg)?;
                 Ok::<_, anyhow::Error>(response)
             }
@@ -119,11 +137,17 @@ impl CoordinatorQuorumClient {
                             .server
                             .into_iter()
                             .map(|server| {
-                                Ok(Endpoint {
+                                let endpoint = Endpoint {
                                     host: server.ip,
                                     grpc_port: u16::try_from(server.port)
                                         .context("invalid shuffle server port")?,
-                                })
+                                };
+                                ensure!(
+                                    !context.excluded_endpoints.contains(&endpoint),
+                                    "coordinator assigned an excluded server: {}",
+                                    endpoint.uri()
+                                );
+                                Ok(endpoint)
                             })
                             .collect::<Result<Vec<_>>>()?;
                         ensure!(endpoints.len() == 1, "expected a single shuffle replica");
