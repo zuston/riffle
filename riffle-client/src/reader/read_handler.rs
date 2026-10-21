@@ -4,7 +4,8 @@ use riffle_server::id_layout::DEFAULT_BLOCK_ID_LAYOUT;
 use super::buffer::ReadBatch;
 use crate::rpc_client::ServerClient;
 use crate::{
-    Endpoint, PartitionId, ShuffleHandle, MAX_MESSAGE_BYTES, RECORD_HEADER_BYTES, TASK_ID_LIMIT,
+    CompressionCodec, Endpoint, PartitionId, ShuffleHandle, MAX_MESSAGE_BYTES, RECORD_HEADER_BYTES,
+    TASK_ID_LIMIT,
 };
 
 pub(super) const READ_BATCH_BYTES: i32 = 14 * 1024 * 1024;
@@ -22,6 +23,7 @@ pub(super) struct PartitionReadContext<'a> {
     // todo: support multi server read
     pub endpoint: Endpoint,
     pub client: ServerClient,
+    pub compression_codec: CompressionCodec,
 }
 
 impl PartitionReadContext<'_> {
@@ -39,12 +41,13 @@ impl PartitionReadContext<'_> {
             "block {block_id} has inconsistent partition or task ID"
         );
         ensure!(
-            length >= RECORD_HEADER_BYTES as i32 && length as usize <= MAX_MESSAGE_BYTES,
+            length > 0 && length as usize <= MAX_MESSAGE_BYTES,
             "invalid length for block {block_id}"
         );
         ensure!(
-            length == uncompress_length,
-            "compressed blocks are not supported"
+            uncompress_length >= RECORD_HEADER_BYTES as i32
+                && uncompress_length as usize <= MAX_MESSAGE_BYTES,
+            "invalid uncompressed length for block {block_id}"
         );
         Ok(())
     }

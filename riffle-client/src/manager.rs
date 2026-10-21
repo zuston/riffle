@@ -32,6 +32,8 @@ use crate::{ensure_success, rpc, ApplicationId, Endpoint, PartitionId, ShuffleHa
 pub struct ApplicationOptions {
     pub app_id: String,
     pub user: String,
+    /// Passed to writers and readers through shuffle handles.
+    /// `riffle.client.compression.codec` selects `lz4` (default) or `zstd`.
     pub configs: HashMap<String, String>,
 }
 
@@ -222,6 +224,7 @@ impl ShuffleManager {
             shuffle_id,
             partition_count,
             assignment,
+            configs: self.configs.properties().clone(),
         };
         self.shuffles.insert(
             shuffle_id,
@@ -544,6 +547,7 @@ impl ShuffleManagerService for ManagerRpcService {
             shuffle_id: shuffle_id as u64,
             assignments,
             task_id: task_id as u64,
+            configs: shuffle.handle.configs.clone(),
         }))
     }
 
@@ -604,6 +608,7 @@ impl ShuffleManagerService for ManagerRpcService {
                 .map(|id| id as u64)
                 .collect(),
             partition_count: shuffle.handle.partition_count,
+            configs: shuffle.handle.configs.clone(),
         }))
     }
 }

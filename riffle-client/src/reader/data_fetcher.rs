@@ -9,13 +9,14 @@ use super::localfile_read_handler::LocalfileReadHandler;
 use super::memory_read_handler::MemoryReadHandler;
 use super::read_handler::{PartitionReadContext, ReadHandler};
 use crate::rpc_client::{ServerConnOptions, ServerCoonPool};
-use crate::{PartitionId, ShuffleHandle};
+use crate::{CompressionCodec, PartitionId, ShuffleHandle};
 
 pub(super) struct DataFetcher {
     shuffle: ShuffleHandle,
     partitions: BTreeMap<PartitionId, HashSet<i64>>,
     sender: Sender<ReadBatch>,
     clients: ServerCoonPool,
+    compression_codec: CompressionCodec,
 }
 
 impl DataFetcher {
@@ -24,12 +25,14 @@ impl DataFetcher {
         partitions: BTreeMap<PartitionId, HashSet<i64>>,
         sender: Sender<ReadBatch>,
         clients: ServerCoonPool,
+        compression_codec: CompressionCodec,
     ) -> Self {
         Self {
             shuffle,
             partitions,
             sender,
             clients,
+            compression_codec,
         }
     }
 
@@ -44,6 +47,7 @@ impl DataFetcher {
                 partition,
                 endpoint: endpoint.clone(),
                 client,
+                compression_codec: self.compression_codec,
             };
             let handlers: Vec<Box<dyn ReadHandler + '_>> = vec![
                 Box::new(MemoryReadHandler::new(context.clone(), &expected_block_ids)),

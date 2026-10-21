@@ -1,6 +1,12 @@
 use once_cell::sync::Lazy;
 use riffle_server::client_configs::ClientConfigOption;
 
+use crate::CompressionCodec;
+
+pub static COMPRESSION_CODEC: Lazy<ClientConfigOption<CompressionCodec>> = Lazy::new(|| {
+    ClientConfigOption::key("riffle.client.compression.codec").default_value(CompressionCodec::Lz4)
+});
+
 pub static COORDINATOR_QUORUM: Lazy<ClientConfigOption<Vec<String>>> =
     Lazy::new(|| ClientConfigOption::list_key("riffle.client.coordinator.quorum"));
 

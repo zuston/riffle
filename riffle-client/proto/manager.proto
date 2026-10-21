@@ -23,6 +23,7 @@ message GetWriteShuffleHandleResponse {
   uint64 shuffle_id = 1;
   repeated PartitionAssignment assignments = 2;
   uint64 task_id = 3;
+  map<string, string> configs = 4;
 }
 
 message GetReadShuffleHandleRequest {
@@ -39,6 +40,7 @@ message GetReadShuffleHandleResponse {
   repeated PartitionAssignment assignments = 2;
   repeated uint64 task_ids = 3;
   uint32 partition_count = 4;
+  map<string, string> configs = 5;
 }
 
 message PartitionAssignment {

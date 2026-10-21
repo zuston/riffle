@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use anyhow::{Context, Result};
 use croaring::{JvmLegacy, Treemap};
 use futures::StreamExt;
+use riffle_server::client_configs::ClientRssConf;
 use riffle_server::grpc::protobuf::uniffle::{BlockIdLayout, GetShuffleResultForMultiPartRequest};
 use riffle_server::id_layout::DEFAULT_BLOCK_ID_LAYOUT;
 use tokio::sync::mpsc;
@@ -17,6 +18,7 @@ use tokio::task::JoinSet;
 
 use self::buffer::ReadBatch;
 use self::data_fetcher::DataFetcher;
+use crate::configs::COMPRESSION_CODEC;
 use crate::rpc_client::manager_rpc_client::ManagerRpcClient;
 use crate::rpc_client::{
     call, ensure_attempt_success, request, retry, ServerConnOptions, ServerCoonPool,
@@ -38,6 +40,9 @@ impl ShuffleReader {
     ) -> Result<Self> {
         let manager = ManagerRpcClient::new(application_id, manager_endpoint)?;
         let (shuffle, expected_task_ids) = manager.get_read_shuffle_handle(&read_task_info).await?;
+        let compression_codec = ClientRssConf::from(shuffle.configs.clone())
+            .get(&COMPRESSION_CODEC)
+            .context("invalid riffle.client.compression.codec; expected lz4 or zstd")?;
         let expected_task_ids: HashSet<_> = expected_task_ids.into_iter().collect();
         let mut partitions_to_block_ids: BTreeMap<PartitionId, HashSet<i64>> = read_task_info
             .partitions
@@ -91,7 +96,13 @@ impl ShuffleReader {
         // Reserve the queued slot before fetching, leaving one batch for the consumer.
         let (sender, batches) = mpsc::channel(1);
         Ok(Self {
-            fetcher: DataFetcher::new(shuffle, partitions_to_block_ids, sender, clients),
+            fetcher: DataFetcher::new(
+                shuffle,
+                partitions_to_block_ids,
+                sender,
+                clients,
+                compression_codec,
+            ),
             batches,
         })
     }
@@ -107,7 +118,7 @@ impl ShuffleReader {
                     |(mut batches, mut workers, mut current)| async move {
                         loop {
                             if let Some(batch) = &mut current {
-                                if let Some(record) = batch.next_record()? {
+                                if let Some(record) = batch.next_record().await? {
                                     return Ok(Some((record, (batches, workers, current))));
                                 }
                             }

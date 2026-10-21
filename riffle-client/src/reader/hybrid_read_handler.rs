@@ -47,10 +47,8 @@ impl<'a> HybridReadHandler<'a> {
         loop {
             if let Some(handler) = self.handlers.get_mut(self.current_handler_index) {
                 if let Some(batch) = handler.read().await? {
-                    let batch = batch.validate_and_filter(
-                        &self.expected_block_ids,
-                        &mut self.accepted_block_ids,
-                    )?;
+                    let batch =
+                        batch.filter(&self.expected_block_ids, &mut self.accepted_block_ids);
                     if !batch.is_empty() {
                         if self.accepted_block_ids == self.expected_block_ids {
                             self.finish_current_handler();

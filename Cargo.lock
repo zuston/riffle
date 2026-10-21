@@ -5168,6 +5168,7 @@ dependencies = [
  "croaring",
  "futures",
  "log",
+ "lz4_flex",
  "once_cell",
  "prost 0.14.4",
  "rand 0.8.5",
@@ -5180,6 +5181,7 @@ dependencies = [
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
+ "zstd",
 ]
 
 [[package]]
