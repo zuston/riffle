@@ -11,7 +11,10 @@ use riffle_client::{
     ShuffleManagerServiceServer, ShuffleReader, ShuffleWriter, WriteTaskInfo,
 };
 use riffle_server::app_manager::application_identifier::ApplicationId;
-use riffle_server::grpc::protobuf::uniffle::{RequireBufferRequest, StatusCode};
+use riffle_server::grpc::protobuf::uniffle::{
+    PartitionStats, ReportShuffleResultRequest, RequireBufferRequest, StatusCode,
+    TaskAttemptIdToRecords,
+};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::TcpListenerStream;
@@ -180,7 +183,36 @@ async fn reassignment_preserves_data(compression_codec: CompressionCodec) -> Res
         let mut expected_tasks = vec![task0_id, task1_id];
         expected_tasks.sort_unstable();
         assert_eq!(finished_tasks, expected_tasks);
-        let reader = ShuffleReader::new(app_id.to_owned(), manager_endpoint, read_task).await?;
+        // A task's full count may appear on multiple servers after reassignment, and on retries.
+        // Replicate task 0's partition-0 count to B; the reader must still count it only once.
+        let mut stats_client =
+            pool.get_or_create_client(ServerConnOptions::new(healthy_endpoint.clone()))?;
+        let mut stats_report = ReportShuffleResultRequest {
+            app_id: app_id.to_owned(),
+            shuffle_id: shuffle_id as i32,
+            task_attempt_id: task0_id as i64,
+            bitmap_num: 1,
+            partition_to_block_ids: vec![],
+            partition_stats: vec![PartitionStats {
+                partition_id: 0,
+                task_attempt_id_to_records: vec![TaskAttemptIdToRecords {
+                    task_attempt_id: task0_id as i64,
+                    record_number: 4,
+                }],
+            }],
+        };
+        for _ in 0..2 {
+            assert_eq!(
+                stats_client
+                    .report_shuffle_result(stats_report.clone())
+                    .await?
+                    .into_inner()
+                    .status,
+                StatusCode::Success as i32
+            );
+        }
+        let reader =
+            ShuffleReader::new(app_id.to_owned(), manager_endpoint.clone(), read_task).await?;
         let mut actual: Vec<_> = reader
             .stream()
             .map_ok(|record| (record.partition_id, record.data))
@@ -191,6 +223,32 @@ async fn reassignment_preserves_data(compression_codec: CompressionCodec) -> Res
         actual.sort_unstable();
         expected.sort_unstable();
         assert_eq!(actual, expected);
+
+        // Conflicting copies must fail instead of choosing a count based on server order.
+        stats_report.partition_stats[0].task_attempt_id_to_records[0].record_number = 5;
+        assert_eq!(
+            stats_client
+                .report_shuffle_result(stats_report)
+                .await?
+                .into_inner()
+                .status,
+            StatusCode::Success as i32
+        );
+        let error = ShuffleReader::new(
+            app_id.to_owned(),
+            manager_endpoint,
+            ReadTaskInfo {
+                job_id: 1,
+                upstream_stage_id: 1,
+                partitions: vec![0],
+            },
+        )
+        .await
+        .err()
+        .context("conflicting counts were not detected")?;
+        assert!(error
+            .to_string()
+            .contains("conflicting record counts for partition 0"));
 
         for (partitions, endpoint, status) in [
             (vec![2], failed_endpoint.clone(), StatusCode::NoBuffer),

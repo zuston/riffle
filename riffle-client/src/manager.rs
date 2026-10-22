@@ -783,15 +783,13 @@ impl ShuffleManagerService for ManagerRpcService {
             .get(&shuffle_id)
             .ok_or_else(|| Status::not_found(format!("shuffle {shuffle_id} is not registered")))?;
 
+        let assignments =
+            shuffle.assignments(partitions.into_iter().map(|id| id as PartitionId))?;
+        let task_ids = shuffle.shuffle_task_manager.get_finished_tasks();
         Ok(Response::new(rpc::GetReadShuffleHandleResponse {
             shuffle_id: shuffle_id as u64,
-            assignments: shuffle.assignments(partitions.into_iter().map(|id| id as PartitionId))?,
-            task_ids: shuffle
-                .shuffle_task_manager
-                .get_finished_tasks()
-                .into_iter()
-                .map(|id| id as u64)
-                .collect(),
+            assignments,
+            task_ids: task_ids.into_iter().map(|id| id as u64).collect(),
             partition_count: shuffle.handle.partition_count,
             configs: shuffle.handle.configs.clone(),
         }))

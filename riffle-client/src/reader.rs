@@ -32,6 +32,7 @@ use crate::{
 pub struct ShuffleReader {
     fetcher: DataFetcher,
     batches: mpsc::Receiver<ReadBatch>,
+    expected_num_records: HashMap<PartitionId, u64>,
 }
 
 impl ShuffleReader {
@@ -72,6 +73,7 @@ impl ShuffleReader {
             }
         }
 
+        let mut task_record_counts = HashMap::new();
         let clients = ServerCoonPool::new();
         for (endpoint, partitions) in servers {
             let client = clients.get_or_create_client(ServerConnOptions::new(endpoint.clone()))?;
@@ -100,6 +102,33 @@ impl ShuffleReader {
                 }
             })
             .await?;
+            for stats in response.partition_stats {
+                let partition = PartitionId::try_from(stats.partition_id)
+                    .context("negative statistics partition ID")?;
+                ensure!(
+                    partitions_to_block_ids
+                        .get(&partition)
+                        .is_some_and(|servers| servers.contains_key(&endpoint)),
+                    "unexpected statistics for partition {partition} from {}",
+                    endpoint.uri()
+                );
+                for task in stats.task_attempt_id_to_records {
+                    let task_id = TaskId::try_from(task.task_attempt_id)
+                        .context("negative statistics task ID")?;
+                    if !expected_task_ids.contains(&task_id) {
+                        continue;
+                    }
+                    let count =
+                        u64::try_from(task.record_number).context("negative record count")?;
+                    // Historical servers hold the same full task count after reassignment.
+                    if let Some(previous) = task_record_counts.insert((partition, task_id), count) {
+                        ensure!(
+                            previous == count,
+                            "conflicting record counts for partition {partition}, task {task_id}"
+                        );
+                    }
+                }
+            }
             collect_block_ids(
                 &response.serialized_bitmap,
                 &expected_task_ids,
@@ -107,6 +136,25 @@ impl ShuffleReader {
                 &mut partitions_to_block_ids,
             )
             .with_context(|| format!("invalid shuffle result from {}", endpoint.uri()))?;
+        }
+        let mut expected_num_records: HashMap<_, u64> = partitions_to_block_ids
+            .keys()
+            .map(|&partition| (partition, 0))
+            .collect();
+        for (&partition, servers) in &partitions_to_block_ids {
+            for block_id in servers.values().flatten() {
+                let task_id = (*block_id as u64 & (TASK_ID_LIMIT as u64 - 1)) as TaskId;
+                ensure!(
+                    task_record_counts.contains_key(&(partition, task_id)),
+                    "missing record count for partition {partition}, task {task_id}"
+                );
+            }
+        }
+        for ((partition, _), count) in task_record_counts {
+            let total = expected_num_records.get_mut(&partition).unwrap();
+            *total = total
+                .checked_add(count)
+                .with_context(|| format!("record count overflow for partition {partition}"))?;
         }
         partitions_to_block_ids.retain(|_, servers| {
             servers.retain(|_, expected| !expected.is_empty());
@@ -123,22 +171,32 @@ impl ShuffleReader {
                 compression_codec,
             ),
             batches,
+            expected_num_records,
         })
     }
 
     /// Streams records without an ordering guarantee. Dropping the stream cancels prefetch.
+    /// Exhausting the stream validates each partition's record count against upstream tasks.
     pub fn stream(self) -> ShuffleStream {
         Box::pin(
             futures::stream::once(async move {
                 let mut workers = JoinSet::new();
                 workers.spawn(self.fetcher.run());
+                let counts: HashMap<_, _> = self
+                    .expected_num_records
+                    .into_iter()
+                    .map(|(partition, expected)| (partition, (expected, 0_u64)))
+                    .collect();
                 futures::stream::try_unfold(
-                    (self.batches, workers, None::<ReadBatch>),
-                    |(mut batches, mut workers, mut current)| async move {
+                    (self.batches, workers, None::<ReadBatch>, counts),
+                    |(mut batches, mut workers, mut current, mut counts)| async move {
                         loop {
                             if let Some(batch) = &mut current {
                                 if let Some(record) = batch.next_record().await? {
-                                    return Ok(Some((record, (batches, workers, current))));
+                                    let (_, actual) = counts.get_mut(&record.partition_id)
+                                        .context("record belongs to an unrequested partition")?;
+                                    *actual += 1;
+                                    return Ok(Some((record, (batches, workers, current, counts))));
                                 }
                             }
                             match batches.recv().await {
@@ -146,6 +204,12 @@ impl ShuffleReader {
                                 None => {
                                     while let Some(result) = workers.join_next().await {
                                         result.context("shuffle fetch worker failed")??;
+                                    }
+                                    for (partition, (expected, actual)) in counts {
+                                        ensure!(
+                                            actual == expected,
+                                            "shuffle integrity validation failed for partition {partition}: expected {expected} records, read {actual}"
+                                        );
                                     }
                                     return Ok(None);
                                 }
@@ -186,4 +250,72 @@ fn collect_block_ids(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::{BufMut, Bytes, BytesMut};
+    use futures::TryStreamExt;
+    use riffle_server::ddashmap::DDashMap;
+    use riffle_server::util::get_crc;
+
+    use crate::{CompressionCodec, ShuffleAssignment, ShuffleHandle};
+
+    #[tokio::test]
+    async fn validates_record_counts_at_end_of_stream() -> Result<()> {
+        for expected in [0, 1, 2, 3] {
+            let (sender, batches) = mpsc::channel(1);
+            let mut batch = ReadBatch::new(0, CompressionCodec::Lz4);
+            let mut data = BytesMut::new();
+            // Empty bytes are still a record, followed by one nonempty record.
+            data.put_u32(0);
+            data.put_u32(1);
+            data.put_u8(42);
+            let uncompressed_len = data.len();
+            let compressed = Bytes::from(lz4_flex::block::compress(&data));
+            batch.push(
+                0,
+                compressed.clone(),
+                get_crc(&compressed),
+                uncompressed_len,
+            );
+            sender.send(batch).await.unwrap();
+            let reader = ShuffleReader {
+                fetcher: DataFetcher::new(
+                    ShuffleHandle {
+                        app_id: "integrity-test".into(),
+                        shuffle_id: 0,
+                        partition_count: 2,
+                        assignment: ShuffleAssignment::new(0, DDashMap::default()),
+                        configs: HashMap::new(),
+                    },
+                    BTreeMap::new(),
+                    sender,
+                    ServerCoonPool::new(),
+                    CompressionCodec::Lz4,
+                ),
+                batches,
+                expected_num_records: HashMap::from([(0, expected), (1, 0)]),
+            };
+            let mut stream = reader.stream();
+            assert!(stream.try_next().await?.unwrap().data.is_empty());
+            assert_eq!(stream.try_next().await?.unwrap().data.as_ref(), &[42]);
+            if expected == 2 {
+                assert!(stream.try_next().await?.is_none());
+            } else {
+                let error = stream
+                    .try_next()
+                    .await
+                    .err()
+                    .context("expected count mismatch")?;
+                assert_eq!(
+                    error.to_string(),
+                    format!("shuffle integrity validation failed for partition 0: expected {expected} records, read 2")
+                );
+                assert!(stream.try_next().await?.is_none());
+            }
+        }
+        Ok(())
+    }
 }
