@@ -1,6 +1,16 @@
 name: ReleaseBot
 
 on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Cargo build profile
+        type: choice
+        required: true
+        default: release
+        options:
+          - release
+          - profiling
   push:
     branches:
       - "master"
@@ -14,14 +24,17 @@ jobs:
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'build-artifacts')
     name: Build and Upload
     runs-on: ${{ matrix.os }}
+    env:
+      RIFFLE_BUILD_PROFILE: ${{ inputs.profile || 'release' }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: macos-arm64
             os: macos-latest
-            build_command: cargo build --release --bin riffle-ctl
-            artifact_path: target/release/riffle-ctl
+            build_command: cargo build --profile "$RIFFLE_BUILD_PROFILE" --bin riffle-ctl
+            artifact_root: target
+            binaries: riffle-ctl
             docker_compose: ""
             builder_variant: ""
             builder_context: ""
@@ -30,7 +43,8 @@ jobs:
           - name: linux-arm64-anolisos8
             os: ubuntu-22.04-arm
             build_command: docker compose -f dev/anolisos8/arm64/docker-compose.yml up --no-build
-            artifact_path: target-docker/release/riffle-server
+            artifact_root: target-docker
+            binaries: riffle-server
             docker_compose: dev/anolisos8/arm64/docker-compose.yml
             builder_variant: anolisos8-arm64
             builder_context: dev/anolisos8/arm64
@@ -39,7 +53,8 @@ jobs:
           - name: linux-amd64-centos7
             os: ubuntu-22.04
             build_command: docker compose -f dev/centos7/amd64/docker-compose.yml up --no-build
-            artifact_path: target-docker/release/riffle-server target-docker/release/riffle-ctl
+            artifact_root: target-docker
+            binaries: riffle-server riffle-ctl
             docker_compose: dev/centos7/amd64/docker-compose.yml
             builder_variant: centos7-amd64
             builder_context: dev/centos7/amd64
@@ -48,7 +63,8 @@ jobs:
           - name: linux-amd64-anolisos8
             os: ubuntu-22.04
             build_command: docker compose -f dev/anolisos8/amd64/docker-compose.yml up --no-build
-            artifact_path: target-docker/release/riffle-server
+            artifact_root: target-docker
+            binaries: riffle-server
             docker_compose: dev/anolisos8/amd64/docker-compose.yml
             builder_variant: anolisos8-amd64
             builder_context: dev/anolisos8/amd64
@@ -57,7 +73,8 @@ jobs:
           - name: linux-amd64-anolisos8-hdfs-native
             os: ubuntu-22.04
             build_command: RIFFLE_HDFS_FEATURE=hdfs docker compose -f dev/anolisos8/amd64/docker-compose.yml up --no-build
-            artifact_path: target-docker/release/riffle-server
+            artifact_root: target-docker
+            binaries: riffle-server
             docker_compose: dev/anolisos8/amd64/docker-compose.yml
             builder_variant: anolisos8-amd64
             builder_context: dev/anolisos8/amd64
@@ -113,6 +130,9 @@ jobs:
         run: |
           RAW_NAME="${{ github.ref_name || github.head_ref }}"
           SAFE_NAME="${RAW_NAME//\//-}"
+          if [ "$RIFFLE_BUILD_PROFILE" != "release" ]; then
+            SAFE_NAME="$SAFE_NAME-$RIFFLE_BUILD_PROFILE"
+          fi
           echo "name=$SAFE_NAME" >> $GITHUB_OUTPUT
 
       - name: Set up cache for Cargo (macOS only)
@@ -153,10 +173,10 @@ jobs:
         id: find_binaries
         shell: bash
         run: |
-          if [ -f "target-docker/release/riffle-server" ]; then
+          if [ -f "${{ matrix.artifact_root }}/$RIFFLE_BUILD_PROFILE/riffle-server" ]; then
             echo "server_exists=true" >> $GITHUB_OUTPUT
           fi
-          if [ -f "target-docker/release/riffle-ctl" ]; then
+          if [ -f "${{ matrix.artifact_root }}/$RIFFLE_BUILD_PROFILE/riffle-ctl" ]; then
             echo "ctl_exists=true" >> $GITHUB_OUTPUT
           fi
 
@@ -165,7 +185,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: riffle-server-${{ matrix.name }}-${{ steps.vars.outputs.name }}
-          path: target-docker/release/riffle-server
+          path: ${{ matrix.artifact_root }}/${{ env.RIFFLE_BUILD_PROFILE }}/riffle-server
           if-no-files-found: warn
       
       - name: Upload riffle-ctl
@@ -173,14 +193,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: riffle-ctl-${{ matrix.name }}-${{ steps.vars.outputs.name }}
-          path: target-docker/release/riffle-ctl
+          path: ${{ matrix.artifact_root }}/${{ env.RIFFLE_BUILD_PROFILE }}/riffle-ctl
           if-no-files-found: warn
 
       - name: Upload each binary to release
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
-          for path in ${{ matrix.artifact_path }}; do
+          for binary in ${{ matrix.binaries }}; do
+            path="${{ matrix.artifact_root }}/$RIFFLE_BUILD_PROFILE/$binary"
             asset_name="$(basename $path)-${{ matrix.name }}-${{ steps.vars.outputs.name }}"
             cp "$path" "./$asset_name"
             gh release upload "${{ github.ref_name }}" "./$asset_name" --repo "$GITHUB_REPOSITORY" --clobber
