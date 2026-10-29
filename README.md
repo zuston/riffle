@@ -112,6 +112,9 @@ cargo build --release -p riffle-coordinator
 cargo build --release -p riffle-ctl
 ```
 
+For optimized binaries with debug symbols, use `--profile profiling` instead of
+`--release`. These binaries are written to `target/profiling/`.
+
 `riffle-ctl` is built separately from `riffle-server` so ctl does not link `libhdfs`/`libjvm.so`.
 Use `hdrs` only when building `riffle-server`:
 
