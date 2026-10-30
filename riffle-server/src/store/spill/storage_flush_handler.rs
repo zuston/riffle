@@ -28,7 +28,7 @@ impl Subscriber for StorageFlushHandler {
         let message = event.get_data();
         let app_id = &message.ctx.uid.app_id;
 
-        let _ = FlushingMetricsMonitor::new(
+        let _monitor = FlushingMetricsMonitor::new(
             app_id,
             message.ctx.data_size as i64,
             message.get_candidate_storage_type(),
