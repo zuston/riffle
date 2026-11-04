@@ -317,7 +317,7 @@ impl LocalDiskDelegator {
             self.mark_space_sufficient()?;
             return Ok(true);
         }
-        Ok(true)
+        Ok(previous_status)
     }
 
     async fn write_read_check(&self) -> Result<(), WorkerError> {
@@ -488,7 +488,7 @@ mod test {
         let temp_path = temp_dir.path().to_str().unwrap().to_string();
 
         let mut config = LocalfileStoreConfig::new(vec![temp_path.clone()]);
-        config.disk_high_watermark = 0.8;
+        config.disk_high_watermark = 0.75;
         config.disk_low_watermark = 0.5;
 
         let runtime = create_runtime(1, "");
@@ -501,13 +501,31 @@ mod test {
         delegator.with_capacity(capacity.clone());
         delegator.with_available(available.clone());
 
-        assert_eq!(runtime.block_on(delegator.capacity_check())?, true);
+        for (free, expected_healthy) in [
+            (30, true),  // Healthy in the hysteresis band.
+            (25, true),  // Exactly at the high watermark does not change state.
+            (24, false), // Crossing the high watermark disables writes.
+            (24, false), // Repeated checks must not reopen writes.
+            (10, false),
+            (30, false), // The hysteresis band preserves the unhealthy state.
+            (50, false), // Recovery requires strictly below the low watermark.
+            (51, true),
+            (30, true),  // After recovery, the band preserves the healthy state.
+            (24, false), // A second pressure/recovery cycle works as well.
+            (51, true),
+        ] {
+            available.store(free, Ordering::SeqCst);
+            let healthy = runtime.block_on(delegator.capacity_check())?;
+            assert_eq!(healthy, expected_healthy, "available capacity: {free}");
 
-        available.store(15, Ordering::SeqCst); // 85 used, 85/100 = 0.85
-        assert_eq!(runtime.block_on(delegator.capacity_check())?, false);
-
-        available.store(60, Ordering::SeqCst); // 40 used, 40/100 = 0.4
-        assert_eq!(runtime.block_on(delegator.capacity_check())?, true);
+            // Apply each result just as schedule_check does before the next check.
+            if healthy {
+                delegator.mark_space_sufficient()?;
+            } else {
+                delegator.mark_space_insufficient()?;
+            }
+            assert_eq!(delegator.is_healthy()?, expected_healthy);
+        }
 
         Ok(())
     }
