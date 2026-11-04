@@ -116,6 +116,23 @@ pub enum WorkerError {
     RAW_IO_ERR(i32),
 }
 
+impl WorkerError {
+    /// Recognize ENOSPC even when IO layers add anyhow context around the cause.
+    pub(crate) fn is_no_space(&self) -> bool {
+        match self {
+            // io_uring completions report negative errno values.
+            Self::RAW_IO_ERR(code) => *code == -libc::ENOSPC || *code == libc::ENOSPC,
+            Self::Other(error) => error.chain().any(|cause| {
+                cause
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|error| error.raw_os_error() == Some(libc::ENOSPC))
+                    || cause.downcast_ref::<Self>().is_some_and(Self::is_no_space)
+            }),
+            _ => false,
+        }
+    }
+}
+
 impl From<AcquireError> for WorkerError {
     fn from(error: AcquireError) -> Self {
         WorkerError::Other(Error::new(error))
@@ -163,6 +180,26 @@ mod tests {
     use crate::error::WorkerError::HDFS_IO_ERROR;
     use anyhow::{Error, Result};
     use std::time::Duration;
+
+    #[test]
+    fn no_space_classification() {
+        for (mut error, expected) in [
+            (WorkerError::RAW_IO_ERR(-libc::ENOSPC), true),
+            (WorkerError::RAW_IO_ERR(libc::ENOSPC), true),
+            (std::io::Error::from_raw_os_error(libc::ENOSPC).into(), true),
+            (WorkerError::RAW_IO_ERR(-libc::EIO), false),
+            (std::io::Error::from_raw_os_error(libc::EIO).into(), false),
+            (WorkerError::Other(anyhow::anyhow!("Other error")), false),
+        ] {
+            // Check bare and nested errors; context text must not affect errno classification.
+            for depth in 0..3 {
+                assert_eq!(error.is_no_space(), expected, "depth {depth}: {error:?}");
+                error = WorkerError::Other(
+                    Error::new(error).context("failed to write /data/ENOSPC/Storage full"),
+                );
+            }
+        }
+    }
 
     #[test]
     pub fn error_test() -> Result<()> {
