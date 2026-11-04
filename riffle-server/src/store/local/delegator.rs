@@ -244,7 +244,8 @@ impl LocalDiskDelegator {
                         let error_msg = error.to_string();
                         let is_enospc = error_msg.contains("No space left on device")
                             || error_msg.contains("ENOSPC")
-                            || error_msg.contains("Storage full");
+                            || error_msg.contains("Storage full")
+                            || error.is_no_space();
 
                         if is_enospc {
                             warn!(
