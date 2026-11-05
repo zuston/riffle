@@ -281,23 +281,15 @@ impl LocalFileStore {
             LocalFileStore::gen_relative_path_for_partition(&uid);
 
         let mut parent_dir_is_created = true;
-        // Existing partitions only need a shared lookup. Release the map guard
-        // before taking any partition/I/O locks or entering the insertion path.
-        let existing = self
-            .partition_coordinators
-            .get(&data_file_path)
-            .map(|entry| Arc::clone(entry.value()));
-        let partition_coordinator = match existing {
-            Some(coordinator) => coordinator,
-            None => match self.partition_coordinators.entry(data_file_path.clone()) {
-                Entry::Vacant(e) => {
-                    parent_dir_is_created = false;
-                    let disk = self.select_disk(&uid)?;
-                    let obj = e.insert_entry(Arc::new(PartitionDataInfo::from(disk)));
-                    obj.get().clone()
-                }
-                Entry::Occupied(v) => v.get().clone(),
-            },
+        let partition_coordinator = match self.partition_coordinators.entry(data_file_path.clone())
+        {
+            Entry::Vacant(e) => {
+                parent_dir_is_created = false;
+                let disk = self.select_disk(&uid)?;
+                let obj = e.insert_entry(Arc::new(PartitionDataInfo::from(disk)));
+                obj.get().clone()
+            }
+            Entry::Occupied(v) => v.get().clone(),
         };
 
         let partition_write_lock = {
