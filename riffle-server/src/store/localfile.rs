@@ -503,7 +503,12 @@ impl Store for LocalFileStore {
         }
 
         let (data_file_path, _) = LocalFileStore::gen_relative_path_for_partition(&uid);
-        match self.partition_coordinators.get(&data_file_path) {
+        // Own the coordinator so asynchronous reads never retain a shard lock.
+        let coordinator = self
+            .partition_coordinators
+            .get(&data_file_path)
+            .map(|entry| Arc::clone(entry.value()));
+        match coordinator {
             None => {
                 warn!(
                     "There is no cached data in localfile store for [{:?}]",
@@ -585,7 +590,11 @@ impl Store for LocalFileStore {
         let (data_file_path, index_file_path) =
             LocalFileStore::gen_relative_path_for_partition(&uid);
 
-        match self.partition_coordinators.get(&data_file_path) {
+        let coordinator = self
+            .partition_coordinators
+            .get(&data_file_path)
+            .map(|entry| Arc::clone(entry.value()));
+        match coordinator {
             None => {
                 warn!(
                     "There is no cached data in localfile store for [{:?}]",
