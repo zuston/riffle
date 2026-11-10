@@ -1,8 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["riffle-server", "riffle-ctl", "riffle-coordinator", "riffle-client"]
+members = ["riffle-server", "riffle-ctl", "riffle-coordinator", "riffle-client", "riffle-proto",]
 
 [workspace.dependencies]
+riffle-proto = { path = "riffle-proto" }
 tokio = { version = "1.45.0", features = ["full"] }
 clap = { version = "4.5.31", features = ["derive"] }
 anyhow = "1"

@@ -10,7 +10,7 @@ use riffle_client::{
     CompressionCodec, Endpoint, ManagerRpcService, MiniCluster, MiniClusterConfig, ReadTaskInfo,
     ShuffleManagerServiceServer, ShuffleReader, ShuffleWriter, WriteTaskInfo,
 };
-use riffle_server::grpc::protobuf::uniffle::{
+use riffle_proto::uniffle::{
     PartitionStats, ReportShuffleResultRequest, StatusCode, TaskAttemptIdToRecords,
 };
 use tokio::net::TcpListener;

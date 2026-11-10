@@ -9,12 +9,12 @@ use std::time::Duration;
 use anyhow::{ensure, Context, Result};
 use futures::future::join_all;
 use log::{info, warn};
-use riffle_server::client_configs::ClientRssConf;
-use riffle_server::ddashmap::DDashMap;
-use riffle_server::grpc::protobuf::uniffle::{
+use riffle_proto::uniffle::{
     AppHeartBeatRequest, ShuffleRegisterRequest, ShuffleUnregisterByAppIdRequest,
     ShuffleUnregisterRequest,
 };
+use riffle_server::client_configs::ClientRssConf;
+use riffle_server::ddashmap::DDashMap;
 use riffle_server::scheduled_task::ScheduledTask;
 use tokio::sync::Mutex as AsyncMutex;
 use tonic::{Request, Response, Status};

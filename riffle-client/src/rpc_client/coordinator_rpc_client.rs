@@ -7,11 +7,9 @@ use anyhow::Result;
 use anyhow::{anyhow, ensure, Context};
 use futures::future::join_all;
 use log::warn;
+use riffle_proto::uniffle::coordinator_server_client::CoordinatorServerClient;
+use riffle_proto::uniffle::{AppHeartBeatRequest, ApplicationInfoRequest, GetShuffleServerRequest};
 use riffle_server::ddashmap::DDashMap;
-use riffle_server::grpc::protobuf::uniffle::coordinator_server_client::CoordinatorServerClient;
-use riffle_server::grpc::protobuf::uniffle::{
-    AppHeartBeatRequest, ApplicationInfoRequest, GetShuffleServerRequest,
-};
 use std::collections::HashSet;
 use tonic::transport::Channel;
 

@@ -48,6 +48,7 @@ parking_lot = { workspace = true }
 
 # Reuse riffle-server's gRPC generated code
 riffle-server = { workspace = true }
+riffle-proto = { workspace = true }
 
 uuid = { version = "1.7", features = ["v4"] }
 

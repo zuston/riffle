@@ -67,6 +67,7 @@ deadlock-detection = ["parking_lot/deadlock_detection"]
 io-uring = ["dep:io-uring"]
 
 [dependencies]
+riffle-proto = { workspace = true}
 anyhow = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true, features = ["sync", "net"] }

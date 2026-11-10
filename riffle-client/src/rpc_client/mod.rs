@@ -9,9 +9,9 @@ use std::time::Duration;
 use crate::{Endpoint, MAX_MESSAGE_BYTES, RPC_TIMEOUT};
 use anyhow::{anyhow, Result};
 use log::warn;
+use riffle_proto::uniffle::shuffle_server_client::ShuffleServerClient;
+use riffle_proto::uniffle::StatusCode;
 use riffle_server::ddashmap::DDashMap;
-use riffle_server::grpc::protobuf::uniffle::shuffle_server_client::ShuffleServerClient;
-use riffle_server::grpc::protobuf::uniffle::StatusCode;
 use tonic::transport::Channel;
 use tonic::{Code, Request, Response, Status};
 

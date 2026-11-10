@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::grpc::protobuf::uniffle::AccessClusterRequest;
+use riffle_proto::uniffle::AccessClusterRequest;
 
 const DEFAULT_ACCESS_SCRIPT: &str = r#"
 export function access(_request) {

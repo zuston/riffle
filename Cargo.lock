@@ -5173,6 +5173,7 @@ dependencies = [
  "prost 0.14.4",
  "rand 0.8.5",
  "riffle-coordinator",
+ "riffle-proto",
  "riffle-server",
  "serde",
  "tempfile",
@@ -5198,6 +5199,7 @@ dependencies = [
  "parking_lot 0.12.3",
  "poem",
  "rand 0.8.5",
+ "riffle-proto",
  "riffle-server",
  "serde",
  "serde_json",
@@ -5238,6 +5240,17 @@ dependencies = [
  "tokio",
  "toml",
  "url",
+]
+
+[[package]]
+name = "riffle-proto"
+version = "0.1.0"
+dependencies = [
+ "prost 0.14.4",
+ "prost-build",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
 ]
 
 [[package]]
@@ -5293,6 +5306,7 @@ dependencies = [
  "prost 0.14.4",
  "prost-build",
  "rand 0.8.5",
+ "riffle-proto",
  "serde",
  "serde_json",
  "sled",

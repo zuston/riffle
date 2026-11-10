@@ -16,6 +16,3 @@
 // under the License.
 
 pub mod service;
-
-// Re-export protobuf types from riffle-server
-pub use riffle_server::grpc::protobuf;

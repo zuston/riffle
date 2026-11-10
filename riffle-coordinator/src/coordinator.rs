@@ -18,11 +18,11 @@
 use crate::application::ApplicationManager;
 use crate::cluster::{ClusterManager, ClusterManagerRef};
 use crate::config::Config;
-use crate::grpc::protobuf::uniffle::coordinator_server_server::CoordinatorServerServer;
 use crate::grpc::service::DefaultCoordinatorServer;
 use crate::http;
 use anyhow::{Context, Result};
 use log::info;
+use riffle_proto::uniffle::coordinator_server_server::CoordinatorServerServer;
 use std::net::{Ipv4Addr, SocketAddr};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
