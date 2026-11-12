@@ -24,11 +24,11 @@ use crate::application::ApplicationManager;
 use crate::cluster::cluster_manager::{AssignmentRequest, NodeHeartbeatInfo};
 use crate::cluster::server_node::ShuffleServerNode;
 use crate::cluster::ClusterManagerRef;
-use crate::grpc::protobuf::uniffle::coordinator_server_server::CoordinatorServer;
-use crate::grpc::protobuf::uniffle::*;
+use riffle_proto::uniffle::coordinator_server_server::CoordinatorServer;
+use riffle_proto::uniffle::*;
 
 /// Type alias for StatusCode from protobuf
-type StatusCode = crate::grpc::protobuf::uniffle::StatusCode;
+type StatusCode = riffle_proto::uniffle::StatusCode;
 
 /// Default implementation of CoordinatorServer
 #[derive(Clone)]

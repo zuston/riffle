@@ -22,8 +22,9 @@ pub use manager::shuffle_id_manager::ShuffleKey;
 pub use manager::{ApplicationOptions, ManagerRpcService, ShuffleManager, ShuffleManagerRef};
 pub use mini_cluster::{MiniCluster, MiniClusterConfig};
 pub use reader::ShuffleReader;
+
+use riffle_proto::uniffle::StatusCode;
 use riffle_server::ddashmap::DDashMap;
-use riffle_server::grpc::protobuf::uniffle::StatusCode;
 pub use rpc::shuffle_manager_service_server::ShuffleManagerServiceServer;
 pub use writer::ShuffleWriter;
 

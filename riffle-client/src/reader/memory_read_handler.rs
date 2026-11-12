@@ -4,9 +4,7 @@ use anyhow::{ensure, Context, Result};
 use bytes::Bytes;
 use croaring::{JvmLegacy, Treemap};
 use prost::Message;
-use riffle_server::grpc::protobuf::uniffle::{
-    GetMemoryShuffleDataRequest, GetMemoryShuffleDataResponse,
-};
+use riffle_proto::uniffle::{GetMemoryShuffleDataRequest, GetMemoryShuffleDataResponse};
 use riffle_server::util::now_timestamp_as_millis;
 
 use super::buffer::ReadBatch;

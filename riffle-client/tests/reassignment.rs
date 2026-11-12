@@ -10,11 +10,11 @@ use riffle_client::{
     CompressionCodec, Endpoint, ManagerRpcService, MiniCluster, MiniClusterConfig, ReadTaskInfo,
     ShuffleManagerServiceServer, ShuffleReader, ShuffleWriter, WriteTaskInfo,
 };
-use riffle_server::app_manager::application_identifier::ApplicationId;
-use riffle_server::grpc::protobuf::uniffle::{
+use riffle_proto::uniffle::{
     PartitionStats, ReportShuffleResultRequest, RequireBufferRequest, StatusCode,
     TaskAttemptIdToRecords,
 };
+use riffle_server::app_manager::application_identifier::ApplicationId;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::TcpListenerStream;

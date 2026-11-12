@@ -52,12 +52,10 @@ mod tests {
     use super::*;
     use crate::cluster::ClusterManager;
     use crate::config::Config;
-    use crate::grpc::protobuf::uniffle::coordinator_server_server::CoordinatorServer;
     use crate::grpc::service::DefaultCoordinatorServer;
     use poem::{Endpoint, Request};
-    use riffle_server::grpc::protobuf::uniffle::{
-        ApplicationInfo, ShuffleServerHeartBeatRequest, ShuffleServerId,
-    };
+    use riffle_proto::uniffle::coordinator_server_server::CoordinatorServer;
+    use riffle_proto::uniffle::{ApplicationInfo, ShuffleServerHeartBeatRequest, ShuffleServerId};
     use serde_json::json;
 
     #[tokio::test]

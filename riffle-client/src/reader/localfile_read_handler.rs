@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use anyhow::{ensure, Context, Result};
 use bytes::{Buf, Bytes};
-use riffle_server::grpc::protobuf::uniffle::{
+use riffle_proto::uniffle::{
     GetLocalShuffleDataRequest, GetLocalShuffleIndexRequest, GetLocalShuffleIndexResponse,
 };
 use riffle_server::store::index_codec::{IndexBlock, IndexCodec, INDEX_BLOCK_SIZE};

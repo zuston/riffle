@@ -19,7 +19,6 @@ use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use log::info;
 use riffle_server::app_manager::app_stats::{AppStats, AppStatsSnapshot};
-use riffle_server::grpc::protobuf::uniffle;
 use serde::Serialize;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -146,7 +145,11 @@ impl ApplicationManager {
         *last_check = Instant::now();
     }
 
-    pub fn update_app_stats(&self, app_infos: Vec<uniffle::ApplicationInfo>, server_id: &ServerId) {
+    pub fn update_app_stats(
+        &self,
+        app_infos: Vec<riffle_proto::uniffle::ApplicationInfo>,
+        server_id: &ServerId,
+    ) {
         for app_info in app_infos {
             if let Some(app) = self.apps.get(&app_info.app_id) {
                 app.stats

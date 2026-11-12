@@ -15,6 +15,4 @@
 // specific language governing permissions and limitations
 // under the License.
 
-pub mod uniffle {
-    include!(concat!(env!("OUT_DIR"), "/rss.common.rs"));
-}
+pub use riffle_proto::uniffle;

@@ -3,11 +3,11 @@ use std::collections::{BTreeMap, HashMap};
 use anyhow::{ensure, Context, Result};
 use futures::{stream, StreamExt, TryStreamExt};
 use prost::Message;
-use riffle_server::ddashmap::DDashMap;
-use riffle_server::grpc::protobuf::uniffle::{
+use riffle_proto::uniffle::{
     PartitionStats, PartitionToBlockIds, ReportShuffleResultRequest, RequireBufferRequest,
     SendShuffleDataRequest, ShuffleBlock, ShuffleData, TaskAttemptIdToRecords,
 };
+use riffle_server::ddashmap::DDashMap;
 use riffle_server::id_layout::DEFAULT_BLOCK_ID_LAYOUT;
 use riffle_server::util::now_timestamp_as_millis;
 

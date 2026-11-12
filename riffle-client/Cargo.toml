@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 riffle-server = { workspace = true }
 riffle-coordinator = { path = "../riffle-coordinator", default-features = false }
+riffle-proto = { workspace = true}
 anyhow = { workspace = true }
 bytes = { workspace = true }
 croaring = { workspace = true }

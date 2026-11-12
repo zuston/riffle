@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, ensure, Context, Result};
 use futures::future::{join_all, BoxFuture};
 use log::info;
-use riffle_server::grpc::protobuf::uniffle::ShuffleBlock;
+use riffle_proto::uniffle::ShuffleBlock;
 use riffle_server::util::get_crc;
 use tokio::sync::{mpsc, watch, Mutex, Semaphore};
 use tokio::task::JoinSet;

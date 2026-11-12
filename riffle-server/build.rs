@@ -35,13 +35,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .to_string();
     println!("cargo:rustc-env=GIT_COMMIT_HASH={}", git_hash);
 
-    // generate the uniffle code for service server
-    let mut config = prost_build::Config::new();
-    config.bytes(&["."]);
-
-    tonic_prost_build::configure()
-        .build_server(true)
-        .compile_with_config(config, &["src/grpc/protobuf/uniffle.proto"], &["."])?;
-
     Ok(())
 }
