@@ -1,7 +1,3 @@
-pub mod rss {
-    pub mod common {
-        tonic::include_proto!("rss.common");
-    }
+pub mod uniffle {
+    tonic::include_proto!("rss.common");
 }
-
-pub use rss::common as uniffle;
