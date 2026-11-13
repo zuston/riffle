@@ -1013,9 +1013,10 @@ mod test {
         let reading_ctx = ReadingIndexViewContext {
             partition_id: uid_2.clone(),
         };
-        let reading_result = runtime.wait(local_store.get_index(reading_ctx)).expect("");
-        if let ResponseDataIndex::Local(index) = reading_result {
-            assert!(index.data_file_len > 0);
+        match runtime.wait(local_store.get_index(reading_ctx)).expect("") {
+            ResponseDataIndex::Local(index) => {
+                assert!(index.data_file_len > 0);
+            }
         }
 
         // app level purge
@@ -1076,7 +1077,7 @@ mod test {
             panic!()
         }
 
-        async fn get_and_check_partitial_data(
+        async fn get_and_check_partial_data(
             local_store: &mut LocalFileStore,
             uid: PartitionUId,
             size: i64,
@@ -1103,7 +1104,7 @@ mod test {
         }
 
         // case1: read the one partition block data
-        runtime.wait(get_and_check_partitial_data(
+        runtime.wait(get_and_check_partial_data(
             &mut local_store,
             uid.clone(),
             size as i64,
@@ -1114,7 +1115,7 @@ mod test {
         let mut expected = BytesMut::with_capacity(size * 2);
         expected.extend_from_slice(data);
         expected.extend_from_slice(data);
-        runtime.wait(get_and_check_partitial_data(
+        runtime.wait(get_and_check_partial_data(
             &mut local_store,
             uid.clone(),
             size as i64 * 2,
