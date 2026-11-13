@@ -65,7 +65,7 @@ impl ReadRange {
     }
 }
 
-#[derive(Clone, Debug, Display)]
+#[derive(Clone, Debug, Display, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum IoMode {
     // only valid for read in linux
@@ -78,12 +78,11 @@ pub enum IoMode {
 
 impl IoMode {
     pub(crate) fn fallback(self, exclusive: Vec<IoMode>, to: IoMode) -> Self {
-        for mode in exclusive {
-            if matches!(&self, mode) {
-                return to;
-            }
+        if exclusive.contains(&self) {
+            to
+        } else {
+            self
         }
-        self
     }
 }
 
@@ -152,6 +151,26 @@ impl ReadOptions {
 #[cfg(test)]
 mod test {
     use crate::store::local::read_options::{AheadOptions, IoMode, ReadOptions, ReadRange};
+
+    #[test]
+    fn test_io_mode_fallback() {
+        for mode in [IoMode::SPLICE, IoMode::SENDFILE] {
+            assert_eq!(
+                mode.fallback(vec![IoMode::SPLICE, IoMode::SENDFILE], IoMode::BUFFER_IO),
+                IoMode::BUFFER_IO,
+            );
+        }
+
+        assert_eq!(
+            IoMode::DIRECT_IO.fallback(vec![IoMode::SPLICE, IoMode::SENDFILE], IoMode::BUFFER_IO),
+            IoMode::DIRECT_IO,
+        );
+
+        assert_eq!(
+            IoMode::SENDFILE.fallback(vec![], IoMode::BUFFER_IO),
+            IoMode::SENDFILE,
+        );
+    }
 
     fn create_read_options() -> ReadOptions {
         let opts = ReadOptions {
