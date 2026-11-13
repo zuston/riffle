@@ -4,7 +4,7 @@ use crate::store::mem::buffer::{BufferOptions, BufferSpillResult, MemBlockBatch,
 use crate::store::{Block, DataBytes, DataSegment, PartitionedMemoryData};
 use croaring::Treemap;
 use parking_lot::Mutex;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::mem;
 use std::sync::Arc;
 
@@ -27,7 +27,8 @@ pub struct IndexedBufferInternal {
     // Number of leading staging batches already covered by the index.
     pub indexed_batches: usize,
 
-    pub flight: HashMap<u64, Arc<MemBlockBatch>>,
+    // Keep spill order stable so new flights cannot move before a read cursor.
+    pub flight: BTreeMap<u64, Arc<MemBlockBatch>>,
     pub flight_counter: u64,
 }
 
