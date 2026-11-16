@@ -45,6 +45,18 @@ pub(crate) fn create_handler_runtime(core: CoreId) -> Result<Arc<Runtime>> {
     Ok(Arc::new(runtime))
 }
 
+/// Shared by every io_uring engine when RPC CPU affinity is disabled.
+pub(crate) fn create_shared_handler_runtime(worker_threads: usize) -> Result<Arc<Runtime>> {
+    anyhow::ensure!(worker_threads > 0, "handler worker count must be positive");
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(worker_threads)
+        .thread_name("urpc-handler")
+        .enable_all()
+        .build()
+        .map(Arc::new)
+        .context("failed to create shared urpc handler runtime")
+}
+
 pub struct AppCommandBridgeHandler {
     app_manager: AppManagerRef,
     runtime: Arc<Runtime>,
