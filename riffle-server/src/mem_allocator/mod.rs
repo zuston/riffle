@@ -27,11 +27,12 @@ mod imp;
 #[cfg(all(unix, feature = "allocator-analysis"))]
 use cap::Cap;
 
-#[global_allocator]
 #[cfg(all(unix, feature = "allocator-analysis"))]
-pub static ALLOCATOR: Cap<imp::Allocator> = Cap::new(imp::allocator(), usize::max_value());
 #[global_allocator]
+pub static ALLOCATOR: Cap<imp::Allocator> = Cap::new(imp::allocator(), usize::max_value());
+
 #[cfg(not(all(unix, feature = "allocator-analysis")))]
+#[global_allocator]
 pub static ALLOCATOR: imp::Allocator = imp::allocator();
 
 pub mod error;
