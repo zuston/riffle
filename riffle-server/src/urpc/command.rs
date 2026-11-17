@@ -735,6 +735,7 @@ impl SendDataRequestCommand {
         let application_id = ApplicationId::from(app_id);
 
         let now = util::now_timestamp_as_millis();
+        // Skip samples where the potential client timestamp exceeds the riffle timestamp to avoid underflow.
         if let Some(elapsed_ms) = now.checked_sub(timestamp as u128) {
             URPC_SEND_DATA_TRANSPORT_TIME.observe(elapsed_ms as f64 / 1000.0);
         }
