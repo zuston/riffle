@@ -87,8 +87,7 @@ impl DefaultRpcService {
         info!("Starting urpc server with port:[{}] ......", urpc_port);
 
         let mut completions = Vec::new();
-        #[cfg(target_arch = "aarch64")]
-        {
+        if cfg!(target_arch = "aarch64") || !config.rpc_cpu_affinity_enabled {
             let rx = shutdown_rx.resubscribe();
             let app_manager = app_manager_ref.clone();
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port);
@@ -98,10 +97,7 @@ impl DefaultRpcService {
                 URPC_PARALLELISM.get(),
                 async move { urpc_serve(listener, rx, app_manager).await },
             )?);
-        }
-
-        #[cfg(not(target_arch = "aarch64"))]
-        {
+        } else {
             let core_ids = core_affinity::get_core_ids()
                 .filter(|cores| !cores.is_empty())
                 .context("no logical CPU available for RPC threads")?;
@@ -121,40 +117,59 @@ impl DefaultRpcService {
     }
 
     /// Serves urpc with the pluggable io_uring net engine: per-core engine
-    /// threads own all socket I/O, while command processing runs on a
-    /// single-worker tokio runtime pinned to the same logical CPU.
+    /// threads own all socket I/O. With CPU affinity enabled, each engine
+    /// uses a single-worker handler runtime pinned to the same logical CPU.
+    /// Otherwise, all engines share one unbound multi-thread handler runtime.
     #[cfg(all(feature = "io-uring", target_os = "linux"))]
     fn _start_urpc_uring(
         config: &Config,
         mut shutdown_rx: Receiver<()>,
         app_manager_ref: AppManagerRef,
     ) -> Result<Vec<RpcCompletion>> {
-        use crate::urpc::uring::bridge::create_handler_runtime;
+        use crate::urpc::uring::bridge::{create_handler_runtime, create_shared_handler_runtime};
         use crate::urpc::uring::{AppCommandBridgeHandler, UringServerConfig, UringUrpcServer};
         use anyhow::anyhow;
 
         let urpc_port = config.urpc_port.unwrap();
         let threads = URPC_PARALLELISM.get();
         info!(
-            "Starting urpc server with the io_uring net engine. port:[{}], threads:[{}] ......",
-            urpc_port, threads
+            "Starting urpc server with the io_uring net engine. port:[{}], threads:[{}], handler runtime:[{}] ......",
+            urpc_port,
+            threads,
+            if config.rpc_cpu_affinity_enabled {
+                "per-core single-worker, CPU affinity requested"
+            } else {
+                "shared multi-thread, no CPU pinning"
+            }
         );
 
-        let bound_cores = core_affinity::get_core_ids()
-            .ok_or_else(|| anyhow!("failed to discover logical CPUs for the urpc uring server"))?;
-        if bound_cores.is_empty() {
-            return Err(anyhow!(
-                "no logical CPU is available for the urpc uring server"
-            ));
-        }
-        let bound_cores: Vec<_> = bound_cores.into_iter().take(threads).collect();
-        let handler_runtimes = bound_cores
-            .iter()
-            .map(|core| create_handler_runtime(*core))
-            .collect::<Result<Vec<_>>>()?;
+        let (handler_runtimes, engine_config) = if config.rpc_cpu_affinity_enabled {
+            let bound_cores = core_affinity::get_core_ids().ok_or_else(|| {
+                anyhow!("failed to discover logical CPUs for the urpc uring server")
+            })?;
+            if bound_cores.is_empty() {
+                return Err(anyhow!(
+                    "no logical CPU is available for the urpc uring server"
+                ));
+            }
+            let bound_cores: Vec<_> = bound_cores.into_iter().take(threads).collect();
+            let handler_runtimes = bound_cores
+                .iter()
+                .map(|core| create_handler_runtime(*core))
+                .collect::<Result<Vec<_>>>()?;
 
-        let mut engine_config = UringServerConfig::default();
-        engine_config.bind_cores = Some(bound_cores.iter().map(|core| core.id as u32).collect());
+            let mut engine_config = UringServerConfig::default();
+            engine_config.bind_cores =
+                Some(bound_cores.iter().map(|core| core.id as u32).collect());
+            (handler_runtimes, engine_config)
+        } else {
+            // Every engine clones this same runtime; tasks can be scheduled
+            // across all handler workers instead of being confined to a shard.
+            (
+                vec![create_shared_handler_runtime(threads)?],
+                UringServerConfig::default(),
+            )
+        };
 
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), urpc_port);
         let app_manager = app_manager_ref.clone();
@@ -189,8 +204,7 @@ impl DefaultRpcService {
         info!("grpc service with parallelism: [{}]", &parallelism);
         let mut completions = Vec::new();
 
-        #[cfg(not(target_arch = "aarch64"))]
-        {
+        if !cfg!(target_arch = "aarch64") && config.rpc_cpu_affinity_enabled {
             let core_ids = core_affinity::get_core_ids()
                 .filter(|cores| !cores.is_empty())
                 .context("no logical CPU available for RPC threads")?;
@@ -216,10 +230,7 @@ impl DefaultRpcService {
                     grpc_serve(service, internal_service, listener, service_rx).await
                 })?);
             }
-        }
-
-        #[cfg(target_arch = "aarch64")]
-        {
+        } else {
             let shuffle_server =
                 DefaultShuffleServer::from(app_manager_ref.clone(), server_state_manager);
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), grpc_port);
@@ -259,6 +270,10 @@ impl DefaultRpcService {
         server_state_manager: &ServerStateManager,
         shutdown_rx: Receiver<()>,
     ) -> Result<RpcServiceHandle> {
+        info!(
+            "RPC CPU affinity enabled: {}",
+            config.rpc_cpu_affinity_enabled
+        );
         for port in [Some(config.grpc_port), config.urpc_port]
             .into_iter()
             .flatten()

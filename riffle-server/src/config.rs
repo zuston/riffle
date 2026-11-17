@@ -498,6 +498,9 @@ pub struct Config {
     #[serde(default = "as_default_grpc_port")]
     pub grpc_port: u16,
     pub urpc_port: Option<u16>,
+    /// Enable CPU affinity for gRPC and both uRPC engines.
+    #[serde(default = "as_default_rpc_cpu_affinity_enabled")]
+    pub rpc_cpu_affinity_enabled: bool,
     #[serde(default = "as_default_http_port")]
     pub http_port: u16,
 
@@ -632,6 +635,10 @@ fn as_default_storage_type() -> StorageType {
 
 fn as_default_grpc_port() -> u16 {
     19999
+}
+
+fn as_default_rpc_cpu_affinity_enabled() -> bool {
+    true
 }
 
 // ===========
@@ -1101,6 +1108,12 @@ mod test {
             .as_object()
             .unwrap()
             .contains_key("memory_spill_to_localfile_concurrency"));
+    }
+
+    #[test]
+    fn rpc_cpu_affinity_defaults_to_enabled_when_loading_config() {
+        let config: Config = toml::from_str("coordinator_quorum = []").unwrap();
+        assert!(config.rpc_cpu_affinity_enabled);
     }
 
     #[test]
