@@ -8,7 +8,7 @@ use anyhow::Result;
 use croaring::Treemap;
 use fastrace::trace;
 use parking_lot::Mutex;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::hash::Hash;
 use std::mem;
 use std::ops::{Deref, DerefMut};
@@ -26,7 +26,8 @@ struct Inner {
 
     pub staging: MemBlockBatch,
 
-    pub flight: HashMap<u64, Arc<MemBlockBatch>>,
+    // Keep spill order stable so new flights cannot move before a read cursor.
+    pub flight: BTreeMap<u64, Arc<MemBlockBatch>>,
     pub flight_counter: u64,
 }
 

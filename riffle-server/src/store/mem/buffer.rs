@@ -291,6 +291,48 @@ mod test {
         Ok(())
     }
 
+    fn run_test_spill_between_reads<B: MemoryBuffer + Send + Sync>() -> anyhow::Result<()> {
+        // Exercise independent layouts: an unordered flight map can place a new
+        // spill before the cursor, even though its blocks have not been read.
+        for _ in 0..64 {
+            for clear_cursor_flight in [false, true] {
+                let buffer = B::new(Default::default());
+                buffer.direct_push(create_blocks(0, 2, 5))?;
+                let first_flight = buffer.spill()?.unwrap();
+                buffer.direct_push(create_blocks(2, 2, 5))?;
+
+                let first = buffer.get(-1, 10, None)?;
+                let cursor = first.shuffle_data_block_segments.last().unwrap().block_id;
+                assert_eq!(cursor, 1);
+                assert!(!first.is_end);
+
+                // All blocks were written before reading. Only their placement
+                // changes between requests, while the new spill is still pending.
+                buffer.spill()?.unwrap();
+                if clear_cursor_flight {
+                    buffer.clear(first_flight.flight_id, first_flight.flight_len)?;
+                }
+                let next = buffer.get(cursor, 15, None)?;
+                let ids: Vec<_> = next
+                    .shuffle_data_block_segments
+                    .iter()
+                    .map(|segment| segment.block_id)
+                    .collect();
+                assert_eq!(ids, vec![2, 3]);
+                assert_eq!(next.data.len(), 10);
+                assert!(next.is_end);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_spill_between_reads() -> anyhow::Result<()> {
+        run_test_spill_between_reads::<DefaultMemoryBuffer>()?;
+        run_test_spill_between_reads::<IndexedMemoryBuffer>()?;
+        Ok(())
+    }
+
     fn run_test_get_v2_is_end_with_only_staging<B: MemoryBuffer + Send + Sync + 'static>(
     ) -> anyhow::Result<()> {
         let buffer = B::new(Default::default());
