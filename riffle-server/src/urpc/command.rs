@@ -734,8 +734,10 @@ impl SendDataRequestCommand {
         let timestamp = self.timestamp;
         let application_id = ApplicationId::from(app_id);
 
-        URPC_SEND_DATA_TRANSPORT_TIME
-            .observe(((util::now_timestamp_as_millis() - timestamp as u128) / 1000) as f64);
+        let now = util::now_timestamp_as_millis();
+        if let Some(elapsed_ms) = now.checked_sub(timestamp as u128) {
+            URPC_SEND_DATA_TRANSPORT_TIME.observe(elapsed_ms as f64 / 1000.0);
+        }
         let app = app_manager_ref.get_app(&application_id);
         if app.is_none() {
             return Ok(Frame::RpcResponse(RpcResponseCommand {
